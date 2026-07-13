@@ -2,24 +2,30 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { roundUsdUpToStep } from '../lib/currency.mjs'
 
 export async function handleWallet(req, res, url, context) {
   if (url.pathname === '/api/wallet') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
-    const wallet = await db().wallet.findUnique({
-      where: { userId_currency: { userId: context.user.id, currency: 'SYP' } },
+    // A guest can hold more than one currency's wallet (SYP is the default, USD is opened
+    // lazily the first time a USD gift/payment is received — see recordWalletEntry's upsert).
+    // Previously this only ever queried the SYP wallet, so a real USD balance/gift history was
+    // silently invisible on this page.
+    const wallets = await db().wallet.findMany({
+      where: { userId: context.user.id },
       include: { entries: { orderBy: { createdAt: 'desc' }, take: 25 } },
+      orderBy: { currency: 'asc' },
     })
-    return json(res, 200, { ok: true, wallet })
+    return json(res, 200, { ok: true, wallets })
   }
 
   if (url.pathname === '/api/wallet/gifts') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context)
     const body = await readJson(req)
-    const amountMinor = Number(body.amountMinor || 0)
-    if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+    const rawAmountMinor = Number(body.amountMinor || 0)
+    if (!Number.isFinite(rawAmountMinor) || rawAmountMinor <= 0) {
       const error = new Error('Gift amount must be greater than zero.')
       error.statusCode = 400
       error.code = 'GIFT_AMOUNT_INVALID'
@@ -27,12 +33,17 @@ export async function handleWallet(req, res, url, context) {
       throw error
     }
 
+    const currency = body.currency === 'USD' ? 'USD' : 'SYP'
+    // Enforced server-side, not just in the UI: a USD gift always rounds up to the nearest $5 so
+    // neither side needs to make change, regardless of what a client actually submitted.
+    const amountMinor = currency === 'USD' ? roundUsdUpToStep(rawAmountMinor) : rawAmountMinor
+
     const gift = await db().walletGift.create({
       data: {
         senderUserId: context.user.id,
         recipientPhoneHash: hashPhone(body.recipientPhone),
         amountMinor,
-        currency: body.currency || 'SYP',
+        currency,
         message: body.message || undefined,
         status: amountMinor >= 100000 ? 'CLAIM_PENDING' : 'SENT',
         expiresAt: body.expiresAt ? new Date(body.expiresAt) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
@@ -94,6 +105,14 @@ export async function handleWallet(req, res, url, context) {
     })
 
     if (!gift || gift.status !== 'SENT') throw giftClaimError()
+    // Lazily expired on access, same pattern as completeExpiredBookings()/expireOldListings()
+    // elsewhere in this codebase -- a gift's expiresAt was always shown to the sender/admin and
+    // the frontend even has a dedicated "expired" error state, but nothing server-side ever
+    // checked it: a gift could be claimed indefinitely past its displayed expiration date.
+    if (gift.expiresAt < new Date()) {
+      await db().walletGift.updateMany({ where: { id: gift.id, status: 'SENT' }, data: { status: 'EXPIRED' } })
+      throw giftClaimError('This gift has expired.', 'GIFT_EXPIRED')
+    }
     if (gift.recipientPhoneHash !== phoneHash) {
       await registerFailedGiftClaim(gift)
       throw giftClaimError()

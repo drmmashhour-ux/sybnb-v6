@@ -5,6 +5,7 @@ type ApiUser = {
   email: string | null
   displayName: string
   roles: string[]
+  referralCode?: string
 }
 
 type AuthResponse = {
@@ -31,9 +32,14 @@ export type PlatformListing = {
   owner?: {
     id: string
     displayName: string
+    idDocumentStatus?: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null
   }
   media?: Array<Record<string, unknown>>
   location?: Record<string, unknown> | null
+  accommodation?: { id: string; titleAr: string; titleEn: string | null } | null
+  hasActiveOffer?: boolean
+  offerNightsCount?: number
+  cheapestOfferMinor?: number | null
 }
 
 export type PlatformPaymentProof = {
@@ -417,6 +423,17 @@ export type PlatformOverview = {
     sent: Array<Record<string, unknown>>
     claimed: Array<Record<string, unknown>>
   }
+  referrals: {
+    made: Array<{
+      id: string
+      status: 'PENDING' | 'REWARDED'
+      createdAt: string
+      rewardedAt: string | null
+      referee: { id: string; displayName: string }
+    }>
+    rewardedCount: number
+    pendingCount: number
+  }
 }
 
 export type PlatformHostOverview = {
@@ -437,15 +454,18 @@ export type PlatformHostOverview = {
       payments?: PlatformPaymentProof[]
     }
   >
+  insightSignal?: { listingsNeedingAttention: number }
 }
 
 export type PlatformDriverOverview = {
-  driver: ApiUser
+  driver: ApiUser & { idDocumentStatus: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null }
   totals: {
     assigned: number
     active: number
     completed: number
     earningsMinor: number
+    todayCompletedCount: number
+    todayEarningsMinor: number
   }
   rides: PlatformRideRequest[]
 }
@@ -533,6 +553,82 @@ export async function createAndSubmitPrototypeListing(input: CreateListingInput)
   return submitted.listing
 }
 
+export type PlatformAccommodation = {
+  id: string
+  ownerId: string
+  titleAr: string
+  titleEn: string | null
+  description: string | null
+  governorate: string
+  city: string
+  area: string | null
+  address: string | null
+  status: string
+  metadata: Record<string, unknown>
+  listings?: PlatformListing[]
+  offerSummary?: { listingsWithOfferCount: number; totalListingsCount: number }
+}
+
+type CreateAccommodationInput = {
+  titleAr: string
+  titleEn?: string
+  description?: string
+  governorate: string
+  city: string
+  area?: string
+  address?: string
+  metadata?: Record<string, unknown>
+}
+
+type AddAccommodationRoomTypeInput = {
+  titleAr: string
+  titleEn?: string
+  description?: string
+  priceMinor: number
+  currency?: string
+  instantBookEnabled?: boolean
+  metadata: Record<string, unknown>
+}
+
+export async function createAccommodation(input: CreateAccommodationInput) {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const response = await apiRequest<{ ok: true; accommodation: PlatformAccommodation }>('/api/accommodations', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return response.accommodation
+}
+
+export async function addAccommodationRoomType(accommodationId: string, input: AddAccommodationRoomTypeInput) {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(
+    `/api/accommodations/${accommodationId}/room-types`,
+    {
+      method: 'POST',
+      token: session.token,
+      body: input,
+    },
+  )
+  return response.listing
+}
+
+export async function submitAccommodation(accommodationId: string) {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const response = await apiRequest<{ ok: true; accommodation: PlatformAccommodation }>(
+    `/api/accommodations/${accommodationId}/submit`,
+    {
+      method: 'PATCH',
+      token: session.token,
+    },
+  )
+  return response.accommodation
+}
+
+export async function fetchAccommodation(accommodationId: string) {
+  return apiRequest<{ ok: true; accommodation: PlatformAccommodation }>(`/api/accommodations/${accommodationId}`)
+}
+
 export async function createSellerAccountSession(input: {
   displayName: string
   email: string
@@ -565,36 +661,73 @@ export async function createSellerAccountSession(input: {
   return storedSession
 }
 
+// Email is now the real account identifier (was previously a synthetic guest-<phone>@sybnb.local
+// address) — the guest-signup gate verifies email ownership via a real code before this call ever
+// succeeds server-side (see sendEmailVerificationCode / verifyEmailVerificationCode below).
 export async function createGuestAccountSession(input: {
   firstName?: string
   lastName?: string
-  email?: string
+  email: string
   phone: string
   password: string
+  referralCode?: string
 }) {
-  const normalizedPhone = input.phone.replace(/\D/g, '')
-  const loginEmail = normalizedPhone
-    ? `guest-${normalizedPhone}@sybnb.local`
-    : input.email || `guest-${Date.now()}@sybnb.local`
   const displayName = [input.firstName, input.lastName].filter(Boolean).join(' ').trim() || 'SYBNB Guest'
+  const trimmedReferralCode = input.referralCode?.trim()
   const account = {
-    email: loginEmail,
+    email: input.email,
     password: input.password,
     displayName,
     role: 'GUEST',
     phone: input.phone,
+    ...(trimmedReferralCode ? { referralCode: trimmedReferralCode } : {}),
   }
 
   let session: PlatformAuthSession
   try {
     session = await register(account)
   } catch {
-    session = await login(loginEmail, input.password)
+    session = await login(input.email, input.password)
   }
 
   sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
   sessionStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  // App.tsx's needsGuestAccountGate check re-renders on this event. Without it, gated routes
+  // whose returnPath equals the current path (e.g. /ride, /ride-preview, /dashboard) never
+  // re-render after signup: the caller's `window.location.hash = returnPath` is a same-value
+  // no-op, so no hashchange event fires either, leaving the account gate stuck on screen despite
+  // a valid session now existing.
+  window.dispatchEvent(new Event('sybnb-session-changed'))
   return session
+}
+
+// Real email OTP for the guest-signup gate. Chosen over SMS: no per-message carrier cost, no
+// SMS-gateway account needed. devCode is only ever populated outside production (SMTP is rarely
+// configured in local/dev environments) — never trust it as a UI-visible "success", it's a
+// dev-only convenience so testing keeps working without a real mailbox.
+export type EmailCodePurpose = 'guest-signup' | 'staff-login' | 'password-reset'
+
+export async function sendEmailVerificationCode(email: string, purpose: EmailCodePurpose = 'guest-signup') {
+  return apiRequest<{ ok: true; emailSent: boolean; emailError?: string; devCode?: string }>('/api/auth/email-code/send', {
+    method: 'POST',
+    body: { email, purpose },
+  })
+}
+
+export async function verifyEmailVerificationCode(email: string, code: string, purpose: EmailCodePurpose = 'guest-signup') {
+  return apiRequest<{ ok: true }>('/api/auth/email-code/verify', {
+    method: 'POST',
+    body: { email, code, purpose },
+  })
+}
+
+// Real forgot-password flow. Caller must send + verify an email code with purpose='password-reset'
+// (the two functions above) before this will succeed server-side.
+export async function resetPasswordWithEmailCode(email: string, newPassword: string) {
+  return apiRequest<{ ok: true }>('/api/auth/password-reset', {
+    method: 'POST',
+    body: { email, newPassword },
+  })
 }
 
 function readFileAsBase64(file: File): Promise<string> {
@@ -640,7 +773,18 @@ export function getStoredGuestSession(): PlatformAuthSession | null {
   }
 }
 
+// Best-effort real server-side logout (F-02): tells the server to bump this user's sessionVersion
+// so the token being discarded here can't be replayed even if someone else has a copy of it. The
+// local session is cleared regardless of whether this call succeeds -- a network failure here
+// must never block the user from leaving their session, it just means server-side revocation
+// happens a little late (or not at all, until the token's own 7-day expiry) for that one call.
+function requestServerLogout(token: string | null) {
+  if (!token) return
+  void apiRequest<{ ok: true }>('/api/auth/logout', { method: 'POST', token }).catch(() => {})
+}
+
 export function clearGuestSession() {
+  requestServerLogout(sessionStorage.getItem(GUEST_SESSION_TOKEN_KEY))
   sessionStorage.removeItem(GUEST_SESSION_KEY)
   sessionStorage.removeItem(GUEST_SESSION_TOKEN_KEY)
   window.dispatchEvent(new Event('sybnb-session-changed'))
@@ -688,6 +832,7 @@ export async function createStaffAccountSession(
 }
 
 export function clearStoredStaffSession() {
+  requestServerLogout(sessionStorage.getItem(STAFF_SESSION_TOKEN_KEY))
   sessionStorage.removeItem(STAFF_SESSION_KEY)
   sessionStorage.removeItem(STAFF_SESSION_TOKEN_KEY)
 }
@@ -733,11 +878,42 @@ export async function createAndApprovePrototypeListing(input: CreateListingInput
   return approved as PlatformListing
 }
 
-export async function fetchApprovedListings(division = 'STAYS') {
+export type ListingSearchFilters = {
+  governorate?: string
+  city?: string
+  area?: string
+  propertyType?: string
+  roomType?: string
+  bedType?: string
+  minPrice?: number
+  maxPrice?: number
+  bedrooms?: number
+  bathrooms?: number
+  amenities?: string[]
+  checkIn?: string
+  checkOut?: string
+  sort?: 'priceAsc' | 'priceDesc' | 'newest'
+}
+
+export async function fetchApprovedListings(division = 'STAYS', filters: ListingSearchFilters = {}) {
   const params = new URLSearchParams({ division })
+  if (filters.governorate) params.set('governorate', filters.governorate)
+  if (filters.city) params.set('city', filters.city)
+  if (filters.area) params.set('area', filters.area)
+  if (filters.propertyType) params.set('propertyType', filters.propertyType)
+  if (filters.roomType) params.set('roomType', filters.roomType)
+  if (filters.bedType) params.set('bedType', filters.bedType)
+  if (filters.minPrice !== undefined) params.set('minPrice', String(filters.minPrice))
+  if (filters.maxPrice !== undefined) params.set('maxPrice', String(filters.maxPrice))
+  if (filters.bedrooms !== undefined) params.set('bedrooms', String(filters.bedrooms))
+  if (filters.bathrooms !== undefined) params.set('bathrooms', String(filters.bathrooms))
+  if (filters.amenities?.length) params.set('amenities', filters.amenities.join(','))
+  if (filters.checkIn) params.set('checkIn', filters.checkIn)
+  if (filters.checkOut) params.set('checkOut', filters.checkOut)
+  if (filters.sort) params.set('sort', filters.sort)
   try {
     const response = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings?${params.toString()}`)
-    return response.listings.length ? response.listings : fallbackApprovedListings(division)
+    return response.listings
   } catch {
     return fallbackApprovedListings(division)
   }
@@ -760,14 +936,16 @@ export async function fetchListingAvailability(listingId: string, from: string, 
       blockedDates: string[]
       priceOverrides: Array<{ date: string; priceMinor: number }>
       bookedRanges: Array<{ checkIn: string; checkOut: string }>
+      offerNightsCount: number
+      cheapestOfferMinor: number | null
     }>(`/api/listings/${listingId}/availability?${params.toString()}`)
   } catch {
-    return { ok: true as const, blockedDates: [], priceOverrides: [], bookedRanges: [] }
+    return { ok: true as const, blockedDates: [], priceOverrides: [], bookedRanges: [], offerNightsCount: 0, cheapestOfferMinor: null }
   }
 }
 
-export async function fetchListingQuote(listingId: string, checkIn: string, checkOut: string) {
-  const params = new URLSearchParams({ checkIn, checkOut })
+export async function fetchListingQuote(listingId: string, checkIn: string, checkOut: string, currency?: 'USD') {
+  const params = new URLSearchParams({ checkIn, checkOut, ...(currency ? { currency } : {}) })
   return apiRequest<{ ok: true; totalMinor: number; nights: number; perNight: Array<{ date: string; priceMinor: number }>; currency: string }>(
     `/api/listings/${listingId}/quote?${params.toString()}`,
   )
@@ -808,6 +986,20 @@ export async function hideAdminReview(reviewId: string) {
     token: session.token,
   })
   return response.review
+}
+
+export type PlatformAdminHostInsight = PlatformHostInsight & {
+  host?: { id: string; displayName: string; email: string | null }
+  listing?: { id: string; titleAr: string; titleEn: string | null }
+}
+
+export async function fetchAdminHostInsights() {
+  const session = await ensurePrototypeAdminSession()
+  return apiRequest<{
+    ok: true
+    insights: PlatformAdminHostInsight[]
+    totals: { generated: number; emailed: number; read: number }
+  }>('/api/admin/host-insights', { token: session.token })
 }
 
 export type PlatformMessage = {
@@ -1060,6 +1252,35 @@ export async function fetchPrototypeAdminMetrics() {
   return response.metrics
 }
 
+export type PlatformRevenueByCurrency = {
+  currency: string
+  totalRevenueMinor: number
+  sampleSize: number
+  history: Array<{ day: string; amountMinor: number }>
+  projection: {
+    elapsedDays: number
+    dailyAverageMinor: number
+    next30DaysMinor: number
+    next90DaysMinor: number
+  }
+}
+
+export type PlatformRevenueSummary = {
+  // Seller-plan fees and booking commission are collected in different currencies (USD vs SYP by
+  // default) — kept as separate per-currency totals rather than summed together, since adding
+  // different currencies' minor units as one number would silently misreport the total.
+  byCurrency: PlatformRevenueByCurrency[]
+  srRidesCompletedCount: number
+  srRidesFareVolumeMinor: number
+}
+
+export async function fetchAdminRevenueSummary() {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; revenue: PlatformRevenueSummary }>('/api/admin/revenue-summary', {
+    token,
+  }))
+  return response.revenue
+}
+
 export type AdminPayout = {
   bookingId: string
   listingTitle: string | null
@@ -1150,6 +1371,7 @@ export async function uploadIdDocumentForUser(userId: string, file: File) {
 
 export type PlatformSrQuote = {
   fareMinor: number
+  currency: string
   distanceKm: number
   estimated: boolean
   pickupCoords: { lat: number; lng: number } | null
@@ -1160,6 +1382,7 @@ export async function fetchSrQuote(input: {
   pickup: string
   dropoff: string
   category: string
+  currency: string
   lowDataMode: boolean
   pickupCoords?: { lat: number; lng: number }
 }) {
@@ -1367,6 +1590,46 @@ export async function fetchPrototypeHostEarnings(mode: HostDashboardMode = 'host
   return response.earnings
 }
 
+export type PlatformHostInsight = {
+  id: string
+  hostId: string
+  listingId: string | null
+  kind: string
+  facts: Record<string, unknown>
+  messageAr: string
+  messageEn: string | null
+  aiProvider: string | null
+  aiModel: string | null
+  readAt: string | null
+  emailSentAt: string | null
+  emailError: string | null
+  createdAt: string
+}
+
+export async function fetchHostInsights(mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  return apiRequest<{ ok: true; insights: PlatformHostInsight[]; unreadCount: number }>('/api/host/insights', {
+    token: session.token,
+  })
+}
+
+export async function generateHostInsight(mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  return apiRequest<{ ok: true; generated: number }>('/api/host/insights/generate', {
+    method: 'POST',
+    token: session.token,
+  })
+}
+
+export async function markHostInsightRead(insightId: string, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; insight: PlatformHostInsight }>(`/api/host/insights/${insightId}/read`, {
+    method: 'PATCH',
+    token: session.token,
+  })
+  return response.insight
+}
+
 export async function decidePrototypeHostRequest(
   bookingId: string,
   decision: 'CONFIRM' | 'CANCEL',
@@ -1476,10 +1739,10 @@ export async function fetchPrototypeWalletGift(giftId: string) {
 
 export async function fetchPrototypeWallet() {
   const session = await ensurePrototypeGuestSession()
-  const response = await apiRequest<{ ok: true; wallet: PlatformWallet | null }>('/api/wallet', {
+  const response = await apiRequest<{ ok: true; wallets: PlatformWallet[] }>('/api/wallet', {
     token: session.token,
   })
-  return response.wallet
+  return response.wallets
 }
 
 async function ensurePrototypeHostSession() {
@@ -1584,6 +1847,7 @@ async function register(body: {
   displayName: string
   role: string
   phone?: string
+  referralCode?: string
 }) {
   return apiRequest<AuthResponse>('/api/auth/register', {
     method: 'POST',

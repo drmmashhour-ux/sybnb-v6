@@ -56,16 +56,14 @@ const copy = {
     claiming: 'جار القبول...',
     claimError: 'تعذر قبول الرحلة، ربما قبلها سائق آخر للتو.',
     distance: 'المسافة',
-    smartRoute: 'تحليل المسار الذكي',
-    nextDriverAdvice: 'توجيه القائد التالي',
-    highDemand: 'الطلب في المنطقة الحرة الآن مرتفع جداً وتوقعات دخل مرتفعة.',
     docsStatus: 'حالة الأمان والوثائق',
     verifiedIdentity: 'الهوية الموثقة',
-    license: 'رخصة القيادة',
-    carInsurance: 'تأمين المركبة',
-    renewInsurance: 'تنبيه: أجدد التأمين خلال ١٤ يوم لتجنب إيقاف الحساب.',
+    idApproved: 'موثقة',
+    idPendingReview: 'قيد المراجعة',
+    idRejected: 'مرفوضة',
+    idNotSubmitted: 'لم تُرفع بعد',
     todayEarnings: 'أرباح اليوم',
-    nextBatch: 'الدفعة القادمة',
+    todayRidesCount: 'رحلة مكتملة اليوم',
     reportIssue: 'إبلاغ عن مشكلة',
     sos: 'طوارئ SOS',
   },
@@ -109,16 +107,14 @@ const copy = {
     claiming: 'Claiming...',
     claimError: 'Could not claim this ride, another driver may have just accepted it.',
     distance: 'Distance',
-    smartRoute: 'Smart route analysis',
-    nextDriverAdvice: 'Next driver guidance',
-    highDemand: 'Demand in the free zone is very high now with elevated income expectations.',
     docsStatus: 'Safety and document status',
     verifiedIdentity: 'Verified identity',
-    license: 'Driver license',
-    carInsurance: 'Vehicle insurance',
-    renewInsurance: 'Warning: renew insurance within 14 days to avoid account pause.',
+    idApproved: 'Verified',
+    idPendingReview: 'Pending review',
+    idRejected: 'Rejected',
+    idNotSubmitted: 'Not submitted yet',
     todayEarnings: 'Today earnings',
-    nextBatch: 'Next batch',
+    todayRidesCount: 'completed rides today',
     reportIssue: 'Report issue',
     sos: 'SOS emergency',
   },
@@ -268,37 +264,15 @@ export function DriverDashboardPage({ lang }: Props) {
       </section>
 
       <section style={styles.driverIntelligence}>
-        <article style={styles.routePanel}>
-          <h2>{t.smartRoute}</h2>
-          <div style={styles.mapMock}>
-            <strong>91%</strong>
-          </div>
-          <div style={styles.routeAdvice}>
-            <strong>{t.nextDriverAdvice}</strong>
-            <span>{t.highDemand}</span>
-          </div>
-        </article>
         <article style={styles.docsPanel}>
           <h2>{t.docsStatus}</h2>
-          <Info label={t.verifiedIdentity} value={isAr ? 'موثق' : 'Verified'} dir={isAr ? 'rtl' : 'ltr'} />
-          <Info label={t.license} value={isAr ? 'سارية' : 'Valid'} dir={isAr ? 'rtl' : 'ltr'} />
-          <Info label={t.carInsurance} value={isAr ? 'ينتهي قريباً' : 'Expiring soon'} dir={isAr ? 'rtl' : 'ltr'} />
-          <p style={styles.insuranceWarning}>{t.renewInsurance}</p>
+          <Info label={t.verifiedIdentity} value={idDocumentStatusText(overview?.driver.idDocumentStatus, t)} dir={isAr ? 'rtl' : 'ltr'} />
         </article>
-      </section>
-
-      <section style={styles.earningsPanel}>
-        <div style={styles.bars}>{[38, 52, 28, 88, 62, 42, 78].map((bar, index) => <span key={bar} style={{ height: bar, background: index === 3 ? '#d5a915' : '#1e2230' }} />)}</div>
-        <div>
-          <span>{t.nextBatch}</span>
-          <strong>{isAr ? '١٥ مايو ٢٠٢٤' : 'May 15, 2024'}</strong>
-          <small>{isAr ? 'قيد المعالجة: ١٤:٠٤' : 'Processing: 14:04'}</small>
-        </div>
-        <div>
-          <span>{t.todayEarnings}</span>
-          <strong>AED 540.00</strong>
-          <small>{isAr ? '١٤ رحلة مكتملة' : '14 completed rides'}</small>
-        </div>
+        <article style={styles.docsPanel}>
+          <h2>{t.todayEarnings}</h2>
+          <Info label={t.todayEarnings} value={moneyText(overview?.totals.todayEarningsMinor || 0, 'SYP', lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
+          <Info label={t.todayRidesCount} value={String(overview?.totals.todayCompletedCount || 0)} />
+        </article>
       </section>
 
       <section style={styles.driverCtas}>
@@ -379,6 +353,13 @@ function RideCard({
   )
 }
 
+function idDocumentStatusText(status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null | undefined, t: typeof copy.ar) {
+  if (status === 'APPROVED') return t.idApproved
+  if (status === 'PENDING_REVIEW') return t.idPendingReview
+  if (status === 'REJECTED') return t.idRejected
+  return t.idNotSubmitted
+}
+
 function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir?: 'ltr' | 'rtl' }) {
   return (
     <div style={styles.info}>
@@ -418,13 +399,8 @@ const styles: Record<string, CSSProperties> = {
   offerCard: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
   suggestedOffer: { border: '2px solid #d5a915', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
   driverIntelligence: { display: 'grid', gap: 34, gridTemplateColumns: '1fr 1fr' },
-  routePanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 16 },
   docsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 12 },
-  mapMock: { minHeight: 180, borderRadius: 12, background: 'radial-gradient(circle at 50% 50%, rgba(25,215,255,.35), transparent 24%), #020304', display: 'grid', placeItems: 'center' },
-  routeAdvice: { borderRadius: 10, background: 'rgba(82,108,255,.14)', padding: 16, display: 'grid', gap: 8, color: '#cfd6ff' },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },
-  earningsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 22, gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center' },
-  bars: { display: 'flex', gap: 8, alignItems: 'end', minHeight: 110 },
   driverCtas: { display: 'grid', gap: 28, gridTemplateColumns: '1fr 1fr 1fr' },
   sosButton: { border: 0, borderRadius: 12, background: '#ff5274', color: '#06070c', fontWeight: 950, minHeight: 72, fontSize: 22 },
   reportButton: { border: '1px solid #30384d', borderRadius: 12, background: '#0b0d14', color: '#fff', fontWeight: 950, minHeight: 72, fontSize: 22 },

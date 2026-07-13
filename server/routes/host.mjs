@@ -11,6 +11,7 @@ import {
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { computeInsightSignal, generateHostInsights } from '../lib/host-insights.mjs'
 
 export async function handleHost(req, res, url, context) {
   if (url.pathname === '/api/host/earnings') {
@@ -131,6 +132,10 @@ export async function handleHost(req, res, url, context) {
         .reduce((sum, booking) => sum + booking.amountMinor, 0),
     }
 
+    // Free, zero external-cost fact computation — safe to run on every dashboard load, unlike the
+    // paid AI call itself (see POST /api/host/insights/generate below).
+    const insightSignal = await computeInsightSignal(context.user.id)
+
     return json(res, 200, {
       ok: true,
       overview: {
@@ -144,8 +149,51 @@ export async function handleHost(req, res, url, context) {
         totals,
         listings,
         requests,
+        insightSignal,
       },
     })
+  }
+
+  if (url.pathname === '/api/host/insights') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const insights = await db().hostInsight.findMany({
+      where: { hostId: context.user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+    const unreadCount = insights.filter((insight) => !insight.readAt).length
+    return json(res, 200, { ok: true, insights, unreadCount })
+  }
+
+  if (url.pathname === '/api/host/insights/generate') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    // This is the only path that ever spends real AI money — surfaces AI_NOT_CONFIGURED honestly
+    // to the host who explicitly clicked the button, unlike the free opportunistic signal above.
+    const result = await generateHostInsights(context.user.id)
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  const insightReadMatch = url.pathname.match(/^\/api\/host\/insights\/([^/]+)\/read$/)
+  if (insightReadMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const existing = await db().hostInsight.findFirst({
+      where: { id: insightReadMatch[1], hostId: context.user.id },
+    })
+    if (!existing) {
+      const error = new Error('Insight not found for this host account.')
+      error.statusCode = 404
+      error.code = 'HOST_INSIGHT_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const insight = await db().hostInsight.update({
+      where: { id: existing.id },
+      data: { readAt: new Date() },
+    })
+    return json(res, 200, { ok: true, insight })
   }
 
   const requestMatch = url.pathname.match(/^\/api\/host\/requests\/([^/]+)$/)

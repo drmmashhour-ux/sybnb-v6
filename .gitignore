@@ -1,8 +1,14 @@
 node_modules/
 dist/
+.vercel/
 .env
 .env.*
 !.env.example
+!.env.test.example
 server/uploads/
+test-results/
+playwright-report/
+blob-report/
 *.log
 .DS_Store
+.vercel

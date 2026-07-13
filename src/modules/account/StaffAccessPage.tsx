@@ -2,11 +2,11 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
-  createVerificationCodeDraft,
-  verifyCodeDraft,
-  type VerificationCodeDraft,
-} from '../../engines/security/verificationCodeEngine'
-import { createStaffAccountSession } from '../../shared/api/platformApi'
+  createStaffAccountSession,
+  resetPasswordWithEmailCode,
+  sendEmailVerificationCode,
+  verifyEmailVerificationCode,
+} from '../../shared/api/platformApi'
 
 type StaffRole = 'ADMIN' | 'HOST' | 'DRIVER'
 
@@ -22,89 +22,190 @@ const labels = {
     subtitle: 'هذه الصفحة مخصصة للفريق الداخلي فقط. سجّل الدخول أو أنشئ جلسة اختبار قبل متابعة لوحة التحكم.',
     signIn: 'تسجيل الدخول',
     signUp: 'إنشاء حساب',
+    forgotPassword: 'نسيت كلمة المرور',
+    resetPasswordCta: 'تحديث كلمة المرور',
+    backToSignIn: 'العودة لتسجيل الدخول',
     admin: 'دخول الإدارة',
     host: 'دخول المضيف',
     driver: 'دخول السائق',
     email: 'البريد الإلكتروني',
     password: 'كلمة المرور',
+    newPassword: 'كلمة المرور الجديدة',
     phone: 'رقم الهاتف',
-    code: 'رمز الدخول',
+    code: 'رمز التحقق عبر البريد',
     sendCode: 'إرسال الرمز',
-    codeSent: 'تم إرسال الرمز إلى رقم الهاتف. أدخل الرمز ثم تابع.',
-    codeInvalid: 'رمز الدخول غير صحيح. اطلب الرمز وأدخله قبل المتابعة.',
-    demoCode: 'رمز الدخول المرسل',
+    resendCode: 'إعادة الإرسال',
+    confirmCode: 'تأكيد الرمز',
+    confirmingCode: 'جار التأكيد...',
+    sendingCode: 'جار الإرسال...',
+    codeSentReal: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني.',
+    codeSentDev: 'تم إنشاء رمز تحقق (بيئة تطوير — لا يوجد بريد فعلي).',
+    codeConfirmed: 'تم تأكيد البريد الإلكتروني.',
+    codeInvalid: 'رمز التحقق غير صحيح أو منتهي الصلاحية.',
+    demoCode: 'رمز التحقق (تطوير فقط)',
     opening: 'جار فتح الجلسة...',
+    resetting: 'جار تحديث كلمة المرور...',
     note: 'العميل لا يرى هذه اللوحات أثناء رحلة الحجز.',
     error: 'تعذر فتح الجلسة الداخلية.',
-    required: 'أدخل البريد الإلكتروني ورقم الهاتف وكلمة المرور قبل طلب الدخول.',
+    required: 'أدخل البريد الإلكتروني ورقم الهاتف وكلمة المرور، ثم أكّد رمز البريد قبل طلب الدخول.',
+    resetRequired: 'أدخل البريد الإلكتروني وكلمة المرور الجديدة، ثم أكّد رمز البريد.',
+    resetSuccess: 'تم تحديث كلمة المرور. سجّل الدخول بكلمة المرور الجديدة.',
   },
   en: {
     title: 'Internal Access Gate',
     subtitle: 'This page is for internal team access only. Sign in or create a test session before continuing to the dashboard.',
     signIn: 'Sign in',
     signUp: 'Sign up',
+    forgotPassword: 'Forgot password',
+    resetPasswordCta: 'Update password',
+    backToSignIn: 'Back to sign in',
     admin: 'Open admin',
     host: 'Open host',
     driver: 'Open driver',
     email: 'Email address',
     password: 'Password',
+    newPassword: 'New password',
     phone: 'Phone number',
-    code: 'Access code',
+    code: 'Email verification code',
     sendCode: 'Send code',
-    codeSent: 'Code sent to the phone number. Enter the code, then continue.',
-    codeInvalid: 'Incorrect access code. Send the code and enter it before continuing.',
-    demoCode: 'Sent access code',
+    resendCode: 'Resend code',
+    confirmCode: 'Confirm code',
+    confirmingCode: 'Confirming...',
+    sendingCode: 'Sending...',
+    codeSentReal: 'A verification code was sent to your email.',
+    codeSentDev: 'A verification code was generated (dev environment — no real email sent).',
+    codeConfirmed: 'Email confirmed.',
+    codeInvalid: 'Incorrect or expired verification code.',
+    demoCode: 'Verification code (dev only)',
     opening: 'Opening session...',
+    resetting: 'Updating password...',
     note: 'Guests do not see these dashboards during the booking trip.',
     error: 'Could not open internal session.',
-    required: 'Enter email, phone, and password before requesting access.',
+    required: 'Enter email, phone, and password, then confirm the email code before requesting access.',
+    resetRequired: 'Enter your email and a new password, then confirm the email code.',
+    resetSuccess: 'Password updated. Sign in with the new password.',
   },
 }
 
 export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const t = labels[lang]
   const isAr = lang === 'ar'
-  const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn')
-  const [status, setStatus] = useState<'idle' | 'codeSent' | 'loading' | 'error'>('idle')
+  const [mode, setMode] = useState<'signIn' | 'signUp' | 'forgotPassword'>('signIn')
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [email, setEmail] = useState(defaultEmail(role))
   const [password, setPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
   const [phone, setPhone] = useState(defaultPhone(role))
   const [code, setCode] = useState('')
-  const [draft, setDraft] = useState<VerificationCodeDraft | null>(null)
-  const [codeError, setCodeError] = useState('')
+  const [codeSent, setCodeSent] = useState(false)
+  const [codeConfirmed, setCodeConfirmed] = useState(false)
+  const [codeBusy, setCodeBusy] = useState<'idle' | 'sending' | 'confirming'>('idle')
+  const [devCode, setDevCode] = useState('')
+  const [message, setMessage] = useState('')
+  const [isErrorMessage, setIsErrorMessage] = useState(false)
 
   const actionLabel = role === 'ADMIN' ? t.admin : role === 'DRIVER' ? t.driver : t.host
+  const otpPurpose = mode === 'forgotPassword' ? 'password-reset' : 'staff-login'
+
+  function resetCodeState() {
+    setCodeSent(false)
+    setCodeConfirmed(false)
+    setCode('')
+    setDevCode('')
+    setMessage('')
+    setIsErrorMessage(false)
+  }
+
+  function switchMode(next: 'signIn' | 'signUp' | 'forgotPassword') {
+    setMode(next)
+    resetCodeState()
+  }
+
+  async function sendCode() {
+    if (!email.trim()) return
+    setCodeBusy('sending')
+    setCode('')
+    setCodeConfirmed(false)
+    setDevCode('')
+    try {
+      const result = await sendEmailVerificationCode(email.trim(), otpPurpose)
+      setCodeSent(true)
+      setIsErrorMessage(false)
+      if (result.devCode) {
+        setDevCode(result.devCode)
+        setMessage(t.codeSentDev)
+      } else {
+        setMessage(t.codeSentReal)
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t.error)
+      setIsErrorMessage(true)
+    } finally {
+      setCodeBusy('idle')
+    }
+  }
+
+  async function confirmCode() {
+    setCodeBusy('confirming')
+    try {
+      await verifyEmailVerificationCode(email.trim(), code.trim(), otpPurpose)
+      setCodeConfirmed(true)
+      setMessage(t.codeConfirmed)
+      setIsErrorMessage(false)
+    } catch {
+      setCodeConfirmed(false)
+      setMessage(t.codeInvalid)
+      setIsErrorMessage(true)
+    } finally {
+      setCodeBusy('idle')
+    }
+  }
 
   async function openSession() {
-    if (!email.trim() || !phone.trim() || !password.trim()) {
-      setCodeError(t.required)
-      return
-    }
-    if (!verifyCodeDraft(draft, code)) {
-      setCodeError(t.codeInvalid)
+    if (mode === 'forgotPassword') return
+    if (!email.trim() || !phone.trim() || !password.trim() || !codeConfirmed) {
+      setIsErrorMessage(true)
+      setMessage(t.required)
       return
     }
 
     setStatus('loading')
     try {
       await createStaffAccountSession(role, {
-        email,
+        email: email.trim(),
         password,
-        phone,
+        phone: phone.trim(),
         mode,
       })
       window.dispatchEvent(new Event('sybnb-session-changed'))
       window.location.hash = returnPath
-    } catch {
+    } catch (error) {
       setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+      setIsErrorMessage(true)
     }
   }
 
-  function sendCode() {
-    const nextDraft = createVerificationCodeDraft({ phone, purpose: 'staff-login' })
-    setDraft(nextDraft)
-    setCodeError('')
-    setStatus('codeSent')
+  async function submitPasswordReset() {
+    if (!email.trim() || !newPassword.trim() || !codeConfirmed) {
+      setIsErrorMessage(true)
+      setMessage(t.resetRequired)
+      return
+    }
+
+    setStatus('loading')
+    try {
+      await resetPasswordWithEmailCode(email.trim(), newPassword)
+      setStatus('idle')
+      setNewPassword('')
+      setIsErrorMessage(false)
+      setMessage(t.resetSuccess)
+      switchMode('signIn')
+    } catch (error) {
+      setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+      setIsErrorMessage(true)
+    }
   }
 
   return (
@@ -113,57 +214,89 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
         <span style={styles.badge}>{role}</span>
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
-        <div style={styles.segmented}>
-          <button style={mode === 'signIn' ? styles.segmentActive : styles.segment} onClick={() => setMode('signIn')}>
-            {t.signIn}
-          </button>
-          <button style={mode === 'signUp' ? styles.segmentActive : styles.segment} onClick={() => setMode('signUp')}>
-            {t.signUp}
-          </button>
-        </div>
+        {mode !== 'forgotPassword' && (
+          <div style={styles.segmented}>
+            <button style={mode === 'signIn' ? styles.segmentActive : styles.segment} onClick={() => switchMode('signIn')}>
+              {t.signIn}
+            </button>
+            <button style={mode === 'signUp' ? styles.segmentActive : styles.segment} onClick={() => switchMode('signUp')}>
+              {t.signUp}
+            </button>
+          </div>
+        )}
         <div style={styles.formGrid}>
           <label style={styles.label}>
             {t.email}
-            <input style={styles.input} value={email} onChange={(event) => setEmail(event.target.value)} dir="ltr" />
-          </label>
-          <label style={styles.label}>
-            {t.password}
             <input
               style={styles.input}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value)
+                resetCodeState()
+              }}
               dir="ltr"
             />
           </label>
-          <label style={styles.label}>
-            {t.phone}
-            <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
-          </label>
+          {mode === 'forgotPassword' ? (
+            <label style={styles.label}>
+              {t.newPassword}
+              <input style={styles.input} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" dir="ltr" />
+            </label>
+          ) : (
+            <>
+              <label style={styles.label}>
+                {t.password}
+                <input
+                  style={styles.input}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  type="password"
+                  dir="ltr"
+                />
+              </label>
+              <label style={styles.label}>
+                {t.phone}
+                <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
+              </label>
+            </>
+          )}
           <label style={styles.label}>
             {t.code}
             <div style={styles.codeRow}>
-              <input style={styles.input} value={code} onChange={(event) => setCode(event.target.value)} dir="ltr" />
-              <button style={styles.codeButton} onClick={sendCode}>
-                {t.sendCode}
+              <input style={styles.input} value={code} onChange={(event) => { setCode(event.target.value); setCodeConfirmed(false) }} dir="ltr" />
+              <button style={styles.codeButton} onClick={() => void sendCode()} disabled={!email.includes('@') || codeBusy !== 'idle'}>
+                {codeBusy === 'sending' ? t.sendingCode : codeSent ? t.resendCode : t.sendCode}
+              </button>
+              <button
+                style={styles.codeButton}
+                onClick={() => void confirmCode()}
+                disabled={!codeSent || code.trim().length < 4 || codeBusy !== 'idle'}
+              >
+                {codeConfirmed ? '✓' : codeBusy === 'confirming' ? t.confirmingCode : t.confirmCode}
               </button>
             </div>
           </label>
         </div>
-        {draft && (
+        {devCode && (
           <div style={styles.smsBox}>
-            <p>{lang === 'ar' ? draft.messageAr : draft.messageEn}</p>
             <small>
-              {t.demoCode}: <b dir="ltr">{draft.code}</b>
+              {t.demoCode}: <b dir="ltr">{devCode}</b>
             </small>
           </div>
         )}
-        {status === 'codeSent' && <p style={styles.note}>{t.codeSent} <b dir="ltr">{phone}</b></p>}
-        {codeError && <p style={styles.error}>{codeError}</p>}
-        <button style={styles.primary} onClick={openSession} disabled={status === 'loading'}>
-          {status === 'loading' ? t.opening : actionLabel}
+        {message && <p style={isErrorMessage ? styles.error : styles.note}>{message}</p>}
+        {mode === 'forgotPassword' ? (
+          <button style={styles.primary} onClick={() => void submitPasswordReset()} disabled={status === 'loading'}>
+            {status === 'loading' ? t.resetting : t.resetPasswordCta}
+          </button>
+        ) : (
+          <button style={styles.primary} onClick={() => void openSession()} disabled={status === 'loading'}>
+            {status === 'loading' ? t.opening : actionLabel}
+          </button>
+        )}
+        <button style={styles.linkButton} onClick={() => switchMode(mode === 'forgotPassword' ? 'signIn' : 'forgotPassword')}>
+          {mode === 'forgotPassword' ? t.backToSignIn : t.forgotPassword}
         </button>
-        {status === 'error' && <p style={styles.error}>{t.error}</p>}
         <p style={styles.note}>{t.note}</p>
       </section>
     </main>
@@ -223,12 +356,21 @@ const styles: Record<string, CSSProperties> = {
     minHeight: 56,
     border: 0,
     borderRadius: 12,
-    background: '#5268ff',
+    background: '#4760ff',
     color: '#fff',
     fontWeight: 900,
     fontSize: 18,
     cursor: 'pointer',
     marginTop: 18,
+  },
+  linkButton: {
+    background: 'transparent',
+    border: 0,
+    color: '#8fa2ff',
+    fontWeight: 800,
+    cursor: 'pointer',
+    marginTop: 12,
+    padding: 0,
   },
   segmented: {
     display: 'grid',
@@ -247,7 +389,7 @@ const styles: Record<string, CSSProperties> = {
   },
   segmentActive: {
     minHeight: 48,
-    border: '1px solid #5268ff',
+    border: '1px solid #4760ff',
     borderRadius: 12,
     background: '#18224a',
     color: '#fff',
@@ -275,7 +417,7 @@ const styles: Record<string, CSSProperties> = {
   },
   codeRow: {
     display: 'grid',
-    gridTemplateColumns: '1fr auto',
+    gridTemplateColumns: '1fr auto auto',
     gap: 8,
   },
   codeButton: {
@@ -287,6 +429,7 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 900,
     padding: '0 16px',
     cursor: 'pointer',
+    whiteSpace: 'nowrap',
   },
   note: {
     marginTop: 18,
@@ -294,6 +437,7 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 700,
   },
   error: {
+    marginTop: 18,
     color: '#ff4d73',
     fontWeight: 800,
   },

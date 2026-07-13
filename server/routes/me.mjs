@@ -74,7 +74,7 @@ export async function handleMe(req, res, url, context) {
 
   await completeExpiredBookings({ guestId: context.user.id })
 
-  const [bookings, listings, payments, rides, wallet, sentGifts, claimedGifts, sellerProfile] = await Promise.all([
+  const [bookings, listings, payments, rides, wallet, sentGifts, claimedGifts, sellerProfile, referralsMade] = await Promise.all([
     db().booking.findMany({
       where: { guestId: context.user.id },
       include: { listing: true, payments: true },
@@ -111,6 +111,12 @@ export async function handleMe(req, res, url, context) {
       take: 25,
     }),
     db().sellerProfile.findUnique({ where: { userId: context.user.id } }),
+    db().referral.findMany({
+      where: { referrerUserId: context.user.id },
+      include: { referee: { select: { id: true, displayName: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    }),
   ])
 
   return json(res, 200, {
@@ -124,6 +130,7 @@ export async function handleMe(req, res, url, context) {
         idDocumentRef: context.user.idDocumentRef,
         idDocumentSubmittedAt: context.user.idDocumentSubmittedAt,
         idDocumentStatus: context.user.idDocumentStatus,
+        referralCode: context.user.referralCode,
       },
       bookings,
       listings,
@@ -134,6 +141,11 @@ export async function handleMe(req, res, url, context) {
       gifts: {
         sent: sentGifts,
         claimed: claimedGifts,
+      },
+      referrals: {
+        made: referralsMade,
+        rewardedCount: referralsMade.filter((r) => r.status === 'REWARDED').length,
+        pendingCount: referralsMade.filter((r) => r.status === 'PENDING').length,
       },
     },
   })

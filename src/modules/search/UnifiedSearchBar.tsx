@@ -150,9 +150,9 @@ const T = {
     priceHigh: 'السعر من الأعلى',
     customPlace: 'اسم منطقة أو شارع غير موجود',
     customPlacePlaceholder: 'اكتب الاسم إذا لم تجده في القائمة...',
-    aiLearnHint: 'سيحفظه SYBNB Brain كملاحظة تعلم ويراجعه قبل إضافته رسمياً.',
-    learnedSaved: 'تم حفظ الاسم لمراجعة SYBNB Brain.',
-    learnedPending: 'بانتظار مراجعة AI Brain',
+    aiLearnHint: 'سيُحفظ على هذا الجهاز فقط، ويمكنك استخدامه في عمليات البحث القادمة.',
+    learnedSaved: 'تم حفظ الاسم على هذا الجهاز.',
+    learnedPending: 'محفوظ على هذا الجهاز',
     search: 'بحث',
     resultPreview: 'معاينة الطلب',
     locationDepth: 'المحافظة ← المدينة ← المنطقة',
@@ -219,9 +219,9 @@ const T = {
     priceHigh: 'Highest price',
     customPlace: 'New area or street name',
     customPlacePlaceholder: 'Type it here if it is not in the list...',
-    aiLearnHint: 'SYBNB Brain will save it as a learning note and review it before official addition.',
-    learnedSaved: 'Saved for SYBNB Brain review.',
-    learnedPending: 'Pending AI Brain review',
+    aiLearnHint: 'This will be saved on this device only, so you can reuse it in future searches.',
+    learnedSaved: 'Saved on this device.',
+    learnedPending: 'Saved on this device',
     search: 'Search',
     resultPreview: 'Request preview',
     locationDepth: 'Governorate → City → Area',
@@ -580,7 +580,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
         <div style={{ ...styles.aiLearnBox, ...(value.customPlaceName.trim() ? styles.aiLearnBoxActive : {}) }}>
           <span>🧠</span>
           <div>
-            <b>{value.customPlaceName.trim() ? t.learnedPending : 'SYBNB Brain'}</b>
+            <b>{value.customPlaceName.trim() ? t.learnedPending : (isAr ? 'مكان مخصص' : 'Custom place')}</b>
             <p style={styles.aiLearnText}>{learnedMessage || t.aiLearnHint}</p>
           </div>
         </div>

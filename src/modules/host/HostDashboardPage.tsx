@@ -88,8 +88,8 @@ const copy = {
     notVerifiedYet: 'غير موثق بعد',
     healthDegree: 'درجة الصحة',
     excellentMonth: 'أداء ممتاز هذا الشهر',
-    lessThanTwoHours: 'أقل من ساعتين',
-    lastPayment: 'الدفعة القادمة ١٥ مايو',
+    steadyMonth: 'أداء مستقر هذا الشهر',
+    needsAttentionMonth: 'الأداء يحتاج إلى تحسين',
     viewEarningsReport: 'عرض تقرير الأرباح',
     views: 'ظهور إعلانك',
     bookingsImpact: 'زيادة الحجوزات',
@@ -131,10 +131,11 @@ const copy = {
     rulesVerified: 'شروط المضيف مقبولة',
     payoutProtected: 'الصرف محمي',
     currentListings: '٣ إعلانات حاليا',
-    addPhotos: 'أضف ٤ صور إضافية لتحسين ظهور إعلانك',
-    updatePolicy: 'حدث سياسة الإلغاء لزيادة الثقة',
-    replyFaster: 'أجب على الاستفسارات بشكل أسرع للحفاظ على SLA',
     apply: 'تطبيق',
+    insightPanelTitle: 'توصيات التسعير',
+    insightPanelBody: (count: number) => `${count} من إعلاناتك فيها ليالٍ فارغة بدون سعر خاص — قد تستفيد من توصية تسعير.`,
+    insightPanelEmpty: 'كل إعلاناتك تبدو جيدة الآن.',
+    insightPanelCta: 'عرض التوصيات',
   },
   en: {
     back: 'Back to landing',
@@ -198,8 +199,8 @@ const copy = {
     notVerifiedYet: 'Not verified yet',
     healthDegree: 'Health score',
     excellentMonth: 'Excellent performance this month',
-    lessThanTwoHours: 'Less than 2 hours',
-    lastPayment: 'Next payment May 15',
+    steadyMonth: 'Steady performance this month',
+    needsAttentionMonth: 'Performance needs attention',
     viewEarningsReport: 'View earnings report',
     views: 'Listing visibility',
     bookingsImpact: 'More bookings',
@@ -241,10 +242,11 @@ const copy = {
     rulesVerified: 'Host rules accepted',
     payoutProtected: 'Payout protected',
     currentListings: '3 active listings',
-    addPhotos: 'Add 4 more photos to improve listing visibility',
-    updatePolicy: 'Update cancellation policy to increase trust',
-    replyFaster: 'Reply faster to keep SLA healthy',
     apply: 'Apply',
+    insightPanelTitle: 'Pricing insights',
+    insightPanelBody: (count: number) => `${count} of your listings have open nights with no special price set — a pricing insight could help.`,
+    insightPanelEmpty: 'All your listings look good right now.',
+    insightPanelCta: 'View recommendations',
   },
 }
 
@@ -450,7 +452,6 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         <article style={styles.healthHero}>
           <span>SYBNB · {verificationStatusText}</span>
           <strong>{trustScore}%</strong>
-          <small>{t.lessThanTwoHours}</small>
         </article>
         <div style={styles.hostMetric}>
           <span>{t.payoutReady}</span>
@@ -468,7 +469,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <span>{t.healthDegree}</span>
           <strong>{healthScore}</strong>
           <small>/100</small>
-          <em>{t.excellentMonth}</em>
+          <em>{healthScore >= 80 ? t.excellentMonth : healthScore >= 50 ? t.steadyMonth : t.needsAttentionMonth}</em>
         </div>
       </section>
 
@@ -476,22 +477,17 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
 
       <section style={styles.aiPanel}>
         <div style={styles.aiTitle}>
-          <strong>AI Brain / {isAr ? 'يقترح' : 'Suggests'}</strong>
+          <strong>{t.insightPanelTitle}</strong>
           <span>✣</span>
         </div>
-        {[
-          [t.addPhotos, '+24% views'],
-          [t.updatePolicy, '+12% bookings'],
-          [t.replyFaster, t.slaMaintenance],
-        ].map(([title, impact]) => (
-          <article key={title} style={styles.aiSuggestion}>
-            <button style={styles.goldButton} onClick={() => (window.location.hash = '/ai-brain')}>{t.apply}</button>
-            <div>
-              <span>{title}</span>
-              <small>{impact}</small>
-            </div>
-          </article>
-        ))}
+        <p>
+          {(overview?.insightSignal?.listingsNeedingAttention ?? 0) > 0
+            ? t.insightPanelBody(overview!.insightSignal!.listingsNeedingAttention)
+            : t.insightPanelEmpty}
+        </p>
+        <button style={styles.goldButton} onClick={() => (window.location.hash = '/host/insights')}>
+          {t.insightPanelCta}
+        </button>
       </section>
 
       <section style={styles.activeListings}>
@@ -737,7 +733,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         ))}
       </section>
 
-      <div style={styles.hostFinalStamp}>{t.finalStamp} · 3055</div>
+      <div style={styles.hostFinalStamp}>{t.finalStamp}</div>
     </main>
   )
 }

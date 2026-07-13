@@ -6,6 +6,7 @@ import {
   type PlatformOverview,
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText } from '../../shared/i18n/display'
+import { ReferralPanel } from '../referrals/ReferralPanel'
 
 type Props = {
   lang: Lang
@@ -186,7 +187,7 @@ export function DashboardPage({ lang }: Props) {
   const activeTripDates = activeBooking?.checkIn && activeBooking?.checkOut ? tripDateRange(activeBooking.checkIn, activeBooking.checkOut, lang) : ''
   const displayName = overview?.user?.displayName || (isAr ? 'ضيف' : 'Guest')
   const avatarLetter = displayName.trim().charAt(0).toUpperCase() || (isAr ? 'ض' : 'G')
-  const activeStep = Math.max(2, activeTripStep(overview))
+  const activeStep = activeBooking ? activeTripStep(overview) : -1
   const pastTrips = overview?.bookings.slice(1, 3).map((booking) => normalizePastTrip(booking, lang)) || []
   const walletRows = normalizeWalletRows(overview, lang)
   const protectedFunds = overview?.payments
@@ -250,8 +251,8 @@ export function DashboardPage({ lang }: Props) {
               <small>{t.wallet}</small>
             </button>
             <button style={styles.trustTile} onClick={() => (window.location.hash = '/trust-center')}>
-              <span>{t.trustScore}</span>
-              <strong>94</strong>
+              <span>{isAr ? 'الحماية والأمان' : 'Protection & safety'}</span>
+              <strong>↗</strong>
               <small>{isAr ? 'مركز الثقة' : 'Trust Center'}</small>
             </button>
           </section>
@@ -304,6 +305,13 @@ export function DashboardPage({ lang }: Props) {
           )) : <p style={styles.mutedText}>{t.noTransactions}</p>}
         </div>
       </section>
+
+      <ReferralPanel
+        lang={lang}
+        referralCode={overview?.user?.referralCode}
+        rewardedCount={overview?.referrals?.rewardedCount || 0}
+        pendingCount={overview?.referrals?.pendingCount || 0}
+      />
 
       <section style={styles.privacyPanel}>
         <button style={styles.secondaryButton} onClick={savePersonalCopy}>{t.saveTrip}</button>
@@ -431,7 +439,7 @@ const styles: Record<string, CSSProperties> = {
   tripActions: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 },
   sosButton: { minHeight: 64, borderRadius: 14, border: '2px solid #ff4c73', background: 'transparent', color: '#ff4c73', fontWeight: 950, fontSize: 17 },
   goldButton: { minHeight: 64, border: 0, borderRadius: 14, background: '#e5b80b', color: '#fff', fontWeight: 950, fontSize: 17 },
-  blueButton: { minHeight: 64, border: 0, borderRadius: 14, background: '#5268ff', color: '#fff', fontWeight: 950, fontSize: 17 },
+  blueButton: { minHeight: 64, border: 0, borderRadius: 14, background: '#4760ff', color: '#fff', fontWeight: 950, fontSize: 17 },
   progressWrap: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, position: 'relative', border: '1px solid #1f2739', borderRadius: 18, background: '#101522', padding: 16 },
   progressItem: { display: 'grid', justifyItems: 'center', gap: 7 },
   progressDot: { width: 36, height: 36, borderRadius: 999, background: '#242532', color: '#a0a6b8', display: 'grid', placeItems: 'center', fontWeight: 950 },

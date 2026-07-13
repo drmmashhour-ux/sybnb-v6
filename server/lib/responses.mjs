@@ -57,11 +57,16 @@ export function handleRouteError(res, error) {
     console.error('[api:error]', error)
   }
 
+  // Only error.expose === true gates whether the client sees the real message. A statusCode
+  // alone used to be enough to leak error.message (see the security audit, finding F-15) — that
+  // let any code path that set a statusCode without deliberately opting into exposure leak
+  // internal details (e.g. a raw Prisma error message revealing column names) by accident rather
+  // than by design.
   json(res, error.statusCode || 500, {
     ok: false,
     error: {
       code: error.code || 'INTERNAL_ERROR',
-      message: error.expose ? error.message : error.statusCode ? error.message : 'Unexpected V6 API error.',
+      message: error.expose === true ? error.message : 'Unexpected V6 API error.',
     },
   })
 }

@@ -8,20 +8,31 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "api:dev": "node server/index.mjs",
-    "preflight": "node scripts/preflight-v6.mjs",
-    "audit:touch": "node scripts/audit-touch-v6.mjs",
-    "smoke": "npm run smoke:api && npm run smoke:routes",
+    "test": "npm run test:unit && npm run test:api && npm run test:security",
+    "test:guard": "vitest run --config vitest.unit.config.ts test/unit/test-db-guard.test.mjs test/security/test-db-guard-integration.test.mjs",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:api": "vitest run --config vitest.config.ts test/api",
+    "test:security": "vitest run --config vitest.config.ts test/security",
+    "test:smoke": "npm run smoke:api && npm run smoke:routes",
+    "test:browser": "node scripts/require-test-env.mjs && playwright test",
+    "test:e2e": "npm run test:browser",
+    "test:ci": "npm run test:guard && npm run test:unit && npm run test:api && npm run test:security && npm run test:smoke && npm run test:browser",
+    "smoke": "npm run test:smoke",
     "smoke:api": "node scripts/smoke-v6.mjs",
     "smoke:routes": "node scripts/smoke-routes-v6.mjs",
     "db:validate": "prisma validate",
     "db:migrate:dev": "prisma migrate dev",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "db:test:push": "node scripts/db-test-push.mjs",
+    "db:audit-test-role": "node scripts/audit-test-role-privileges.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "nodemailer": "^9.0.3",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -30,7 +41,11 @@
     "vite": "^6.0.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@prisma/client": "^6.19.3",
-    "prisma": "^6.19.3"
+    "@types/supertest": "^7.2.0",
+    "prisma": "^6.19.3",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.10"
   }
 }

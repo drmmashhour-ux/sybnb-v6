@@ -117,13 +117,11 @@ function TrustSos({ lang }: { lang: Lang }) {
       <p>{isAr ? 'هل تشعر بعدم الأمان؟ نحن هنا للمساعدة.' : 'Feeling unsafe? We are here to help.'}</p>
       <button className="sos-pulse" onClick={() => (window.location.hash = '/immocontact')}>SOS</button>
       <strong>{isAr ? 'اضغط مطولاً لمدة 3 ثوان' : 'Hold for 3 seconds'}</strong>
-      <span>{isAr ? 'سيتم التواصل مع السلطات المحلية فوراً' : 'Local authorities/support will be contacted.'}</span>
+      <span>{isAr ? 'سيتواصل فريق دعم SYBNB معك في أقرب وقت ممكن' : 'The SYBNB support team will reach out to you as soon as possible.'}</span>
       <div className="trust-sos-actions">
-        <button onClick={() => (window.location.hash = '/operations')}>{isAr ? 'مشاركة الموقع مع جهات الاتصال' : 'Share location with contacts'} <b>⌯</b></button>
         <button onClick={() => (window.location.hash = '/immocontact')}>{isAr ? 'تقديم بلاغ صامت' : 'Submit silent report'} <b>⌁</b></button>
         <button onClick={() => (window.location.hash = '/immocontact')}>{isAr ? 'تحدث مع الدعم الفني' : 'Talk to support'} <b>○</b></button>
       </div>
-      <small>{isAr ? 'سيتم إرسال موقعك بدقة إلى عقل الذكاء الاصطناعي تلقائياً لتوفير الحماية.' : 'Your precise location will be sent to AI Brain automatically for protection.'}</small>
     </main>
   )
 }
@@ -221,7 +219,7 @@ function DisputeFlow({ lang, bookingId }: { lang: Lang; bookingId: string }) {
         <textarea placeholder={isAr ? 'اشرح ما حدث بوضوح...' : 'Explain clearly what happened...'} />
       </label>
       <button className="trust-upload active" onClick={() => (window.location.hash = '/immocontact')}>＋<span>{isAr ? 'إضافة صورة أو إثبات' : 'Add photo or evidence'}</span></button>
-      <p className="trust-note">AI Brain: {isAr ? 'مراجعة أولية خلال 30 دقيقة.' : 'Initial review within 30 minutes.'}</p>
+      <p className="trust-note">{isAr ? 'يراجع فريق SYBNB النزاع في أقرب وقت ممكن.' : 'The SYBNB team reviews the dispute as soon as possible.'}</p>
       <button className="trust-danger" onClick={() => (window.location.hash = '/trust-center/sos')}>{isAr ? 'تصعيد فوري' : 'Emergency escalation'}</button>
       <button className="trust-primary" onClick={() => (window.location.hash = `/booking/dispute-closed/${bookingId}`)}>{isAr ? 'إرسال النزاع' : 'Submit dispute'}</button>
     </main>

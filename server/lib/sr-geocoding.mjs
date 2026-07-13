@@ -1,3 +1,5 @@
+import { sypMinorToRoundedUsdMinor } from './currency.mjs'
+
 // Approximate reference coordinates for well-known Damascus-area places. There is no live
 // geocoding provider configured for this prototype (no Google/Mapbox key), so free-text
 // pickup/dropoff is matched against this local gazetteer instead of resolving arbitrary
@@ -94,7 +96,7 @@ function isValidCoords(value) {
 
 // pickupCoordsOverride comes from the rider's device GPS (navigator.geolocation), which is more
 // accurate than gazetteer text-matching and should win whenever it's available.
-export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoordsOverride, dropoffCoordsOverride }) {
+export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoordsOverride, dropoffCoordsOverride, currency }) {
   const rates = CATEGORY_RATES[category] || CATEGORY_RATES['SR Economy']
   const pickupCoords = isValidCoords(pickupCoordsOverride) ? pickupCoordsOverride : resolvePlaceText(pickup)
   const dropoffCoords = isValidCoords(dropoffCoordsOverride) ? dropoffCoordsOverride : resolvePlaceText(dropoff)
@@ -107,10 +109,17 @@ export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoor
   }
 
   const rawFareMinor = rates.baseMinor + rates.perKmMinor * distanceKm + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_MINOR)
-  const fareMinor = Math.round(rawFareMinor / 500) * 500
+  const fareSypMinor = Math.round(rawFareMinor / 500) * 500
+
+  // The rate table above is SYP-denominated. A rider who chooses to pay in USD gets that SYP
+  // fare converted at the platform's fixed rate and rounded up to the nearest $5 — riders and
+  // drivers dealing in cash or card shouldn't need to make change for a fractional dollar fare.
+  const resolvedCurrency = currency === 'USD' ? 'USD' : 'SYP'
+  const fareMinor = resolvedCurrency === 'USD' ? sypMinorToRoundedUsdMinor(fareSypMinor) : fareSypMinor
 
   return {
     fareMinor,
+    currency: resolvedCurrency,
     distanceKm: Math.round(distanceKm * 10) / 10,
     estimated,
     pickupCoords,

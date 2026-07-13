@@ -556,28 +556,34 @@ function ShortRentAdminCommandDashboard({
   const [payoutDecisions, setPayoutDecisions] = useState<Record<string, 'RELEASE_STAGED' | 'HELD'>>({})
   const [heldPaymentIds, setHeldPaymentIds] = useState<Record<string, boolean>>({})
   const [adminOutbox, setAdminOutbox] = useState<Array<{ id: string; target: 'guest' | 'host'; bookingRef: string; message: string }>>([])
-  const [manualShamCashMinor, setManualShamCashMinor] = useState<number | null>(() => readStoredMinor(SHAM_CASH_ACCOUNT_BALANCE_KEY))
-  const displayPayments = payments.length ? payments : createFallbackPayments(lang)
+  const [manualShamCashByPayment, setManualShamCashByPayment] = useState<Record<string, number>>(() => readStoredShamCashMap(SHAM_CASH_ACCOUNT_BALANCE_KEY))
+  const [reconcileDraft, setReconcileDraft] = useState('')
+  // No synthetic fallback payments: when the real queue is empty, every stat below should honestly
+  // read 0/empty rather than silently substituting fabricated placeholder payments -- an admin
+  // reviewing an empty queue (e.g. right after launch, before any real bookings exist) must see
+  // "no pending payments," not fake money and a fake payment to approve/reject.
+  const displayPayments = payments
   const primaryPayment = payments.find((payment) => payment.id === selectedPaymentId) || payments[0]
   const previewPayment = primaryPayment || displayPayments.find((payment) => payment.id === selectedPaymentId) || displayPayments[0]
   const selectedBooking = bookings.find((booking) => booking.id === selectedBookingId) || bookings.find((booking) => booking.id === previewPayment?.bookingId)
-  const activeListings = (queue?.listings.length || listings.length || 112)
+  const activeListings = queue ? queue.listings.length : listings.length
   const todayBookings = bookings
   const bookingNeedsApproval = bookings.filter(isBookingAwaitingApproval)
   const confirmedBookingRows = bookings.filter(isBookingConfirmed)
   const disputeBookingRows = bookings.filter(isBookingDisputed)
-  const confirmedBookings = Math.max(18, confirmedBookingRows.length)
+  const confirmedBookings = confirmedBookingRows.length
   const pendingPayments = payments.filter((payment) => payment.status !== 'APPROVED' && payment.status !== 'REJECTED').length
-  const heldTotal = Math.max(124000000, displayPayments.reduce((sum, payment) => sum + payment.amountMinor, 0))
-  const activeLedger = createShortRentLedger(previewPayment?.amountMinor || 23540000)
+  const heldTotal = displayPayments.reduce((sum, payment) => sum + payment.amountMinor, 0)
+  const activeLedger = createShortRentLedger(previewPayment?.amountMinor || 0)
   const readyPayout = Math.round(displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor).hostPayoutMinor, 0))
   const adminCommission = activeLedger.adminCommissionMinor
   const totalAdminCommission = displayPayments.reduce((sum, payment) => sum + createShortRentLedger(payment.amountMinor).adminCommissionMinor, 0)
-  const shamCashReconciliation = createShamCashReconciliation(payments, displayPayments, lang, manualShamCashMinor)
+  const shamCashReconciliation = createShamCashReconciliation(payments, displayPayments, lang, manualShamCashByPayment)
   const bookingRef = bookingReference(previewPayment)
   const listingTitle = paymentListingTitle(previewPayment, lang)
   const hostName = paymentHostName(previewPayment, lang)
-  const amountMinor = previewPayment?.amountMinor || 23540000
+  const hostIdVerified = previewPayment?.booking?.listing?.owner?.idDocumentStatus === 'APPROVED'
+  const amountMinor = previewPayment?.amountMinor || 0
   const currency = previewPayment?.currency || 'SYP'
   const selectedPaymentNeedsCashMatch = primaryPayment ? isShamCashProvider(primaryPayment.provider) : false
   const selectedPaymentHeld = primaryPayment ? Boolean(heldPaymentIds[primaryPayment.id]) : false
@@ -594,31 +600,33 @@ function ShortRentAdminCommandDashboard({
     const linkedPayment = payments.find((payment) => payment.bookingId === booking.id)
     if (linkedPayment) setSelectedPaymentId(linkedPayment.id)
   }
+  const isPaymentReconciled = (payment?: PlatformPaymentProof) => {
+    if (!payment || !isShamCashProvider(payment.provider)) return true
+    return manualShamCashByPayment[payment.id] === payment.amountMinor
+  }
   const reconciliationForPayment = (payment?: PlatformPaymentProof): ShamCashApprovalPayload | undefined => {
     if (!payment || !isShamCashProvider(payment.provider)) return undefined
+    const accountMinor = manualShamCashByPayment[payment.id] ?? null
     return {
-      accountMinor: shamCashReconciliation.accountMinor,
-      expectedMinor: shamCashReconciliation.expectedMinor,
-      differenceMinor: shamCashReconciliation.differenceMinor,
+      accountMinor,
+      expectedMinor: payment.amountMinor,
+      differenceMinor: (accountMinor ?? 0) - payment.amountMinor,
       source: 'admin-ui-manual-sham-cash-match',
     }
   }
-  const updateManualShamCashAccount = () => {
-    const value = window.prompt(
-      isAr
-        ? 'أدخل الرصيد الحقيقي الموجود في حساب شام كاش بالليرة السورية للمطابقة.'
-        : 'Enter the real Sham Cash account balance in SYP for reconciliation.',
-      String(Math.round(manualShamCashMinor || shamCashReconciliation.expectedMinor)),
-    )
-    if (value == null) return
-    const normalized = Number(value.replace(/[^\d.]/g, ''))
-    if (!Number.isFinite(normalized)) {
+  // Reconciles the currently previewed payment only (its own amount, not the aggregate across all
+  // pending Sham Cash payments) via a controlled input instead of window.prompt, which can't be
+  // driven by automated tests/tools and blocks the render thread with a native dialog.
+  const saveReconciliationForPayment = (paymentId: string, valueText: string) => {
+    const normalized = Number(valueText.replace(/[^\d.]/g, ''))
+    if (!Number.isFinite(normalized) || !valueText.trim()) {
       setCommandNotice(isAr ? 'لم يتم قبول الرصيد. أدخل رقما صحيحا.' : 'Balance was not accepted. Enter a valid number.')
       return
     }
     const nextMinor = Math.round(normalized)
-    window.localStorage.setItem(SHAM_CASH_ACCOUNT_BALANCE_KEY, String(nextMinor))
-    setManualShamCashMinor(nextMinor)
+    const nextMap = { ...manualShamCashByPayment, [paymentId]: nextMinor }
+    window.localStorage.setItem(SHAM_CASH_ACCOUNT_BALANCE_KEY, JSON.stringify(nextMap))
+    setManualShamCashByPayment(nextMap)
     setCommandNotice(isAr ? 'تم تحديث رصيد شام كاش للمطابقة اليدوية.' : 'Sham Cash balance updated for manual reconciliation.')
   }
   const selectedBookingRef = selectedBooking ? shortBookingReference(selectedBooking) : bookingRef
@@ -720,10 +728,10 @@ function ShortRentAdminCommandDashboard({
   }
 
   const stats = [
-    { label: isAr ? 'حجوزات اليوم' : 'Today bookings', value: '24', tone: 'blue' },
+    { label: isAr ? 'حجوزات اليوم' : 'Today bookings', value: String(todayBookings.length), tone: 'blue' },
     { label: isAr ? 'بانتظار مراجعة الدفع' : 'Payment review', value: String(pendingPayments), tone: 'gold' },
     { label: isAr ? 'حجوزات مؤكدة' : 'Confirmed bookings', value: String(confirmedBookings), tone: 'green' },
-    { label: isAr ? 'حالات نزاع' : 'Disputes', value: '3', tone: 'red' },
+    { label: isAr ? 'حالات نزاع' : 'Disputes', value: String(disputeBookingRows.length), tone: 'red' },
     { label: isAr ? 'مبالغ محجوزة' : 'Held funds', value: moneyText(heldTotal, 'SYP', lang), tone: 'gold' },
     { label: isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout', value: moneyText(readyPayout, 'SYP', lang), tone: 'green' },
     { label: isAr ? 'عمولة المنصة' : 'Platform commission', value: moneyText(totalAdminCommission, 'SYP', lang), tone: 'blue' },
@@ -747,14 +755,14 @@ function ShortRentAdminCommandDashboard({
     },
   ]
   const proofCards = payments.slice(0, 3)
-  const baseAiReview = createAiPaymentReview(previewPayment, isAr)
-  const aiReview = selectedPaymentNeedsCashMatch && !shamCashReconciliation.canApprove
-    ? createAiCashMatchReview(isAr, shamCashReconciliation.accountMinor == null)
-    : baseAiReview
+  const baseReviewChecklist = createPaymentReviewChecklist(previewPayment, isAr)
+  const aiReview = selectedPaymentNeedsCashMatch && !isPaymentReconciled(primaryPayment)
+    ? createCashMatchChecklist(isAr, manualShamCashByPayment[primaryPayment?.id || ''] == null)
+    : baseReviewChecklist
   const commandViews: Array<{ id: AdminCommandView; label: string; count: number; tone: string }> = [
     { id: 'general', label: isAr ? 'الرصد العام' : 'General watch', count: todayBookings.length, tone: 'blue' },
     { id: 'audit', label: isAr ? 'التدقيق' : 'Audit', count: auditLog.length, tone: 'white' },
-    { id: 'aiBrain', label: 'AI Brain', count: aiReview.reasons.length, tone: 'gold' },
+    { id: 'aiBrain', label: isAr ? 'قائمة المراجعة' : 'Review checklist', count: aiReview.reasons.length, tone: 'gold' },
     { id: 'disputes', label: isAr ? 'النزاعات' : 'Disputes', count: disputeBookingRows.length, tone: 'red' },
     { id: 'hosts', label: isAr ? 'المضيفين' : 'Hosts', count: listings.length || activeListings, tone: 'green' },
     { id: 'customers', label: isAr ? 'العملاء' : 'Customers', count: bookings.length, tone: 'blue' },
@@ -776,8 +784,8 @@ function ShortRentAdminCommandDashboard({
     },
     {
       id: 'monitoring',
-      label: isAr ? 'المراقبة والذكاء' : 'Monitoring & AI',
-      subtitle: isAr ? 'الرصد العام، التدقيق، وAI Brain' : 'General watch, audit log, and AI Brain',
+      label: isAr ? 'المراقبة والمراجعة' : 'Monitoring & review',
+      subtitle: isAr ? 'الرصد العام، التدقيق، وقائمة المراجعة' : 'General watch, audit log, and review checklist',
       viewIds: ['general', 'audit', 'aiBrain'],
     },
   ]
@@ -802,14 +810,6 @@ function ShortRentAdminCommandDashboard({
     isAr ? 'تقييم العميل' : 'Guest review',
     isAr ? 'صرف مستحقات المضيف' : 'Host payout',
     isAr ? 'إغلاق المعاملة' : 'Transaction closed',
-  ]
-
-  const hostChecks = [
-    isAr ? 'صحة الإعلان' : 'Listing health',
-    isAr ? 'جاهزية العقار' : 'Property ready',
-    isAr ? 'قبول شروط SYBNB' : 'SYBNB terms accepted',
-    isAr ? 'عدم طلب دفع خارجي' : 'No outside payment',
-    isAr ? 'سياسة الإلغاء' : 'Cancellation policy',
   ]
 
   return (
@@ -903,7 +903,7 @@ function ShortRentAdminCommandDashboard({
               ? `تنبيه: يوجد عدم مطابقة في Sham Cash بقيمة ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'SYP', lang)} للحجز ${bookingRef}.`
               : `Warning: Sham Cash mismatch of ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'SYP', lang)} for booking ${bookingRef}.`}
           </span>
-          <button style={commandStyles.outlineGold} onClick={updateManualShamCashAccount}>{isAr ? 'مراجعة الفروقات' : 'Review mismatch'}</button>
+          <button style={commandStyles.outlineGold} onClick={() => setActiveCommandView('finance')}>{isAr ? 'مراجعة الفروقات' : 'Review mismatch'}</button>
         </section>
       )}
 
@@ -918,16 +918,16 @@ function ShortRentAdminCommandDashboard({
         <aside style={commandStyles.leftRail}>
           <article style={commandStyles.sideCard}>
             <div style={commandStyles.hostRow}>
-              <span style={commandStyles.hostAvatar}>A</span>
+              <span style={commandStyles.hostAvatar}>{(hostName.trim()[0] || (isAr ? 'م' : 'H')).toUpperCase()}</span>
               <div>
                 <h2>{hostName}</h2>
-                <small>{isAr ? 'مضيف موثوق' : 'Verified host'}</small>
+                <small>
+                  {hostIdVerified
+                    ? (isAr ? 'الهوية موثّقة' : 'ID verified')
+                    : (isAr ? 'لم تُوثَّق الهوية بعد' : 'ID not yet verified')}
+                </small>
               </div>
-              <strong style={commandTone('green')}>88</strong>
             </div>
-            {hostChecks.map((check) => (
-              <p key={check} style={commandStyles.checkLine}><span>✓</span>{check}</p>
-            ))}
             <span style={commandStyles.payoutState}>{isAr ? 'بانتظار إطلاق الدفعة' : 'Waiting payout release'}</span>
             <button style={{ ...commandStyles.acceptButton, opacity: selectedPayoutState === 'RELEASE_STAGED' ? 1 : 0.38 }} onClick={() => stagePayoutDecision('RELEASE_STAGED')}>
               {isAr ? 'إطلاق المستحقات' : 'Release earnings'}
@@ -947,16 +947,15 @@ function ShortRentAdminCommandDashboard({
 
           <section style={{ ...commandStyles.aiDecisionCard, borderColor: aiReview.borderColor }}>
             <div style={commandStyles.aiDecisionHeader}>
-              <span style={{ ...commandStyles.aiDecisionBadge, background: aiReview.badgeColor }}>{aiReview.confidence}%</span>
+              <span style={{ ...commandStyles.aiDecisionBadge, background: aiReview.borderColor }}>{aiReview.label}</span>
               <div>
-                <small>AI Brain Advisory Only</small>
+                <small>{isAr ? 'قائمة مراجعة آلية — ليست ذكاءً اصطناعياً' : 'Automated checklist — not AI-generated'}</small>
                 <h2>{aiReview.title}</h2>
               </div>
             </div>
             <div style={commandStyles.aiPills}>
               {aiReview.reasons.slice(0, 3).map((reason) => <span key={reason}>{reason}</span>)}
             </div>
-            <button style={commandStyles.linkButton} onClick={() => (window.location.hash = '/ai-brain')}>{isAr ? 'فتح AI Brain' : 'Open AI Brain'}</button>
           </section>
         </aside>
 
@@ -973,14 +972,14 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.pipelineList}>
             {flowSteps.map((step, index) => (
               <div key={step} style={{ ...commandStyles.pipelineStep, ...(index === 6 ? commandStyles.pipelineActive : {}) }}>
-                <small>{index < 6 ? sampleTimes[index] : index === 6 ? (isAr ? 'الآن' : 'Now') : '—'}</small>
+                <small>{flowStepTime(index, isAr, previewPayment, selectedBooking)}</small>
                 <span>{step}</span>
                 <strong>{index + 1}</strong>
               </div>
             ))}
           </div>
           {!shamCashReconciliation.isMatched && (
-            <ShamCashReconciliationPanel data={shamCashReconciliation} isAr={isAr} lang={lang} onUpdateAccount={updateManualShamCashAccount} />
+            <ShamCashReconciliationPanel data={shamCashReconciliation} isAr={isAr} lang={lang} targetPayment={previewPayment} inputValue={reconcileDraft} onChangeInputValue={setReconcileDraft} onSave={saveReconciliationForPayment} />
           )}
           {commandNotice && <span style={commandStyles.commandNotice}>{commandNotice}</span>}
           {adminOutbox.length > 0 && (
@@ -1016,9 +1015,9 @@ function ShortRentAdminCommandDashboard({
                 </div>
                 <b>{paymentListingTitle(payment, lang)}</b>
                 <strong>{moneyText(payment.amountMinor, payment.currency, lang)}</strong>
-                <small>{isAr ? 'ثقة الذكاء الاصطناعي' : 'AI confidence'} {createAiPaymentReview(payment, isAr).confidence}%</small>
+                <small>{createPaymentReviewChecklist(payment, isAr).label}</small>
                 <div style={commandStyles.proofActions}>
-                  <button disabled={disabled || heldPaymentIds[payment.id] || (isShamCashProvider(payment.provider) && !shamCashReconciliation.canApprove)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'قبول' : 'Approve'}</button>
+                  <button disabled={disabled || heldPaymentIds[payment.id] || !isPaymentReconciled(payment)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'قبول' : 'Approve'}</button>
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
@@ -1048,7 +1047,7 @@ function ShortRentAdminCommandDashboard({
             {payments.length === 0 ? (
               <AdminEmptyLine text={isAr ? 'لا توجد دفعات حقيقية بانتظار موافقة الإدارة.' : 'No real payment proofs are waiting for admin approval.'} />
             ) : payments.map((payment) => (
-              <AdminPaymentLine key={payment.id} disabled={disabled || heldPaymentIds[payment.id] || (isShamCashProvider(payment.provider) && !shamCashReconciliation.canApprove)} isAr={isAr} lang={lang} payment={payment} selected={payment.id === previewPayment?.id} onApprove={() => onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment))} onReject={() => onPaymentDecision(payment.id, 'REJECT')} onSelect={() => selectPayment(payment)} />
+              <AdminPaymentLine key={payment.id} disabled={disabled || heldPaymentIds[payment.id] || !isPaymentReconciled(payment)} isAr={isAr} lang={lang} payment={payment} selected={payment.id === previewPayment?.id} onApprove={() => onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment))} onReject={() => onPaymentDecision(payment.id, 'REJECT')} onSelect={() => selectPayment(payment)} />
             ))}
           </div>
         )}
@@ -1103,7 +1102,7 @@ function ShortRentAdminCommandDashboard({
           </div>
         )}
         {activeCommandView === 'finance' && (
-          <ShamCashReconciliationPanel data={shamCashReconciliation} isAr={isAr} lang={lang} expanded onUpdateAccount={updateManualShamCashAccount} />
+          <ShamCashReconciliationPanel data={shamCashReconciliation} isAr={isAr} lang={lang} expanded targetPayment={previewPayment} inputValue={reconcileDraft} onChangeInputValue={setReconcileDraft} onSave={saveReconciliationForPayment} />
         )}
         {activeCommandView === 'finance' && (
           <div style={commandStyles.managementList}>
@@ -1203,9 +1202,8 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.managementList}>
             <article style={commandStyles.aiDecisionCard}>
               <h3>{aiReview.title}</h3>
-              <strong style={{ color: aiReview.borderColor }}>{aiReview.label} · {aiReview.confidence}%</strong>
+              <strong style={{ color: aiReview.borderColor }}>{aiReview.label}</strong>
               {aiReview.reasons.map((reason) => <p key={reason}>{reason}</p>)}
-              <button style={commandStyles.blueButton} onClick={() => (window.location.hash = '/ai-brain')}>{isAr ? 'فتح AI Brain' : 'Open AI Brain'}</button>
             </article>
           </div>
         )}
@@ -1243,14 +1241,14 @@ function ShortRentAdminCommandDashboard({
                 </div>
                 <div style={commandStyles.proofMoney}>
                   <strong>{moneyText(payment.amountMinor, payment.currency, lang)}</strong>
-                  <span>94% AI Confidence</span>
+                  <span>{createPaymentReviewChecklist(payment, isAr).label}</span>
                 </div>
                 <div style={commandStyles.aiMiniDecision}>
-                  <b>{createAiPaymentReview(payment, isAr).title}</b>
-                  <small>{createAiPaymentReview(payment, isAr).reasons[0]}</small>
+                  <b>{createPaymentReviewChecklist(payment, isAr).title}</b>
+                  <small>{createPaymentReviewChecklist(payment, isAr).reasons[0]}</small>
                 </div>
                 <div style={commandStyles.proofActions}>
-                  <button disabled={disabled || heldPaymentIds[payment.id] || (isShamCashProvider(payment.provider) && !shamCashReconciliation.canApprove)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'قبول' : 'Approve'}</button>
+                  <button disabled={disabled || heldPaymentIds[payment.id] || !isPaymentReconciled(payment)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'قبول' : 'Approve'}</button>
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
@@ -1266,7 +1264,7 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.pipelineList}>
             {flowSteps.map((step, index) => (
               <div key={step} style={{ ...commandStyles.pipelineStep, ...(index === 6 ? commandStyles.pipelineActive : {}) }}>
-                <small>{index < 6 ? sampleTimes[index] : index === 6 ? (isAr ? 'الآن' : 'Now') : '—'}</small>
+                <small>{flowStepTime(index, isAr, previewPayment, selectedBooking)}</small>
                 <span>{step}</span>
                 <strong>{index + 1}</strong>
               </div>
@@ -1277,19 +1275,18 @@ function ShortRentAdminCommandDashboard({
         <aside style={commandStyles.sidePanels}>
           <article style={commandStyles.sideCard}>
             <div style={commandStyles.cardTitleRow}>
-              <span style={commandStyles.confirmedPill}>{isAr ? 'مؤكد' : 'Confirmed'}</span>
+              <span style={hostIdVerified ? commandStyles.confirmedPill : commandStyles.warningPill}>
+                {hostIdVerified ? (isAr ? 'موثّق' : 'Verified') : (isAr ? 'غير موثّق' : 'Unverified')}
+              </span>
               <h2>{isAr ? 'حالة المضيف' : 'Host status'}</h2>
             </div>
             <div style={commandStyles.hostRow}>
               <div>
                 <strong>{hostName}</strong>
-                <small>Verified Host</small>
+                <small>{hostIdVerified ? (isAr ? 'الهوية موثّقة' : 'ID verified') : (isAr ? 'لم تُوثَّق الهوية بعد' : 'ID not yet verified')}</small>
               </div>
-              <span style={commandStyles.hostAvatar}>A</span>
+              <span style={commandStyles.hostAvatar}>{(hostName.trim()[0] || (isAr ? 'م' : 'H')).toUpperCase()}</span>
             </div>
-            {hostChecks.map((check) => (
-              <p key={check} style={commandStyles.checkLine}><span>✓</span>{check}</p>
-            ))}
           </article>
 
           <article style={commandStyles.sideCard}>
@@ -1330,22 +1327,18 @@ function ShortRentAdminCommandDashboard({
           <button style={commandStyles.outlineGold} onClick={() => stagePayoutDecision('HELD')}>{isAr ? 'تعليق الدفعة' : 'Hold payout'}</button>
         </article>
         <article style={commandStyles.drawerCard}>
-          <h2>{isAr ? 'إشارات AI Brain' : 'AI Brain signals'} <small>ADVISORY ONLY</small></h2>
-          {['إثبات الدفع: ثقة 94%', 'لا يوجد تكرار', 'الإعلان يطابق الحجز', 'قيمة المعاملة أعلى من المتوسط', 'لا مخاطر على الانتهاء من الرحلة'].map((signal, index) => (
-            <p key={signal} style={commandStyles.signalLine}>
-              <span>{index === 3 ? '⚠' : '✓'}</span>
-              {isAr ? signal : signal.replace('إثبات الدفع: ثقة', 'Payment proof confidence').replace('لا يوجد تكرار', 'No duplicate detected').replace('الإعلان يطابق الحجز', 'Listing matches booking').replace('قيمة المعاملة أعلى من المتوسط', 'Above-average transaction value').replace('لا مخاطر على الانتهاء من الرحلة', 'Low trip completion risk')}
+          <h2>{isAr ? 'قائمة المراجعة' : 'Review checklist'} <small>{isAr ? 'مساعدة فقط، ليست ذكاءً اصطناعياً' : 'ADVISORY ONLY — not AI-generated'}</small></h2>
+          {aiReview.reasons.map((reason) => (
+            <p key={reason} style={commandStyles.signalLine}>
+              <span>✓</span>
+              {reason}
             </p>
           ))}
-          <div style={commandStyles.riskPair}>
-            <strong>Risk Score <b>LOW</b></strong>
-            <strong>Patterns <b>NORMAL</b></strong>
-          </div>
         </article>
       </section>
 
       <nav style={commandStyles.actionBar} aria-label={isAr ? 'إجراءات الإدارة' : 'Admin actions'}>
-        <button style={commandStyles.acceptButton} disabled={!primaryPayment || disabled || selectedPaymentHeld || (selectedPaymentNeedsCashMatch && !shamCashReconciliation.canApprove)} onClick={() => primaryPayment ? onPaymentDecision(primaryPayment.id, 'APPROVE', reconciliationForPayment(primaryPayment)) : setActiveCommandView('finance')}>{isAr ? 'قبول الدفع' : 'Approve payment'}</button>
+        <button style={commandStyles.acceptButton} disabled={!primaryPayment || disabled || selectedPaymentHeld || !isPaymentReconciled(primaryPayment)} onClick={() => primaryPayment ? onPaymentDecision(primaryPayment.id, 'APPROVE', reconciliationForPayment(primaryPayment)) : setActiveCommandView('finance')}>{isAr ? 'قبول الدفع' : 'Approve payment'}</button>
         <button style={commandStyles.rejectButton} disabled={!primaryPayment || disabled || selectedPaymentHeld} onClick={() => primaryPayment ? onPaymentDecision(primaryPayment.id, 'REJECT') : setActiveCommandView('finance')}>{isAr ? 'رفض الدفع' : 'Reject payment'}</button>
         <button style={commandStyles.blueButton} disabled={disabled} onClick={() => {
           setActiveCommandView('bookings')
@@ -1402,7 +1395,7 @@ function AdminPaymentLine({
   onReject: () => void
   onSelect: () => void
 }) {
-  const aiReview = createAiPaymentReview(payment, isAr)
+  const aiReview = createPaymentReviewChecklist(payment, isAr)
   return (
     <article style={{ ...commandStyles.managementRow, ...(selected ? commandStyles.selectedCard : {}) }} onClick={onSelect}>
       <div>
@@ -1412,7 +1405,7 @@ function AdminPaymentLine({
       <span>{providerText(payment.provider, lang)}</span>
       <div style={commandStyles.aiRowDecision}>
         <b>{moneyText(payment.amountMinor, payment.currency, lang)}</b>
-        <small style={{ color: aiReview.borderColor }}>{aiReview.label} · {aiReview.confidence}%</small>
+        <small style={{ color: aiReview.borderColor }}>{aiReview.label}</small>
       </div>
       <div style={commandStyles.managementRowActions}>
         <button disabled={disabled} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); onApprove() }}>{isAr ? 'قبول' : 'Approve'}</button>
@@ -1582,14 +1575,22 @@ function ShamCashReconciliationPanel({
   expanded,
   isAr,
   lang,
-  onUpdateAccount,
+  targetPayment,
+  inputValue,
+  onChangeInputValue,
+  onSave,
 }: {
   data: ReturnType<typeof createShamCashReconciliation>
   expanded?: boolean
   isAr: boolean
   lang: Lang
-  onUpdateAccount?: () => void
+  targetPayment?: PlatformPaymentProof
+  inputValue: string
+  onChangeInputValue: (value: string) => void
+  onSave: (paymentId: string, value: string) => void
 }) {
+  const targetReference = targetPayment ? (targetPayment.providerRef || targetPayment.id.slice(0, 10).toUpperCase()) : null
+  const effectiveValue = inputValue || (targetPayment ? String(targetPayment.amountMinor) : '')
   return (
     <section style={commandStyles.shamCashPanel}>
       <div style={commandStyles.shamCashHeader}>
@@ -1615,9 +1616,24 @@ function ShamCashReconciliationPanel({
           <strong style={commandTone(data.isMatched ? 'green' : 'red')}>{moneyText(data.differenceMinor, 'SYP', lang)}</strong>
         </div>
       </div>
-      <button style={commandStyles.outlineGold} onClick={onUpdateAccount}>
-        {isAr ? 'تحديث رصيد شام كاش' : 'Update Sham Cash balance'}
-      </button>
+      <div style={commandStyles.shamCashReconcileRow}>
+        <div>
+          <small>{isAr ? 'مطابقة دفعة محددة' : 'Reconcile a specific payment'}</small>
+          <strong>{targetReference || (isAr ? 'اختر دفعة من القائمة' : 'Select a payment from the list')}</strong>
+        </div>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={effectiveValue}
+          onChange={(event) => onChangeInputValue(event.target.value)}
+          disabled={!targetPayment}
+          aria-label={isAr ? 'رصيد شام كاش الحقيقي لهذه الدفعة' : 'Real Sham Cash balance for this payment'}
+          style={{ minWidth: 140, padding: '8px 10px', borderRadius: 8, border: '1px solid #ccc' }}
+        />
+        <button style={commandStyles.outlineGold} disabled={!targetPayment} onClick={() => targetPayment && onSave(targetPayment.id, effectiveValue)}>
+          {isAr ? 'تحديث رصيد شام كاش' : 'Update Sham Cash balance'}
+        </button>
+      </div>
       <p style={commandStyles.aiFinalNote}>{data.controlNote}</p>
       <div style={commandStyles.outcomeGrid}>
         <article style={commandStyles.outcomeCard}>
@@ -1703,31 +1719,14 @@ function paymentHostName(payment: PlatformPaymentProof | undefined, lang: Lang) 
 }
 
 function bookingReference(payment: PlatformPaymentProof | undefined) {
-  const id = payment?.bookingId || payment?.booking?.id || payment?.id || '97cd8153'
+  const id = payment?.bookingId || payment?.booking?.id || payment?.id
+  if (!id) return '—'
   return `BK-${id.slice(0, 4).toUpperCase()}-${id.slice(4, 8).toUpperCase()}`
 }
 
 function shortBookingReference(booking: PlatformReviewBooking | undefined) {
-  const id = booking?.id || '97cd8153'
-  return `BK-${id.slice(0, 4).toUpperCase()}-${id.slice(4, 8).toUpperCase()}`
-}
-
-function createFallbackPayments(lang: Lang): PlatformPaymentProof[] {
-  return [0, 1, 2].map((index) => ({
-    id: `STR-FALLBACK-${index}`,
-    bookingId: `97cd8153-${index}`,
-    userId: `guest-${index}`,
-    provider: 'LOCAL_WALLET',
-    status: 'PENDING',
-    amountMinor: 23540000,
-    currency: 'SYP',
-    proofAssetUrl: null,
-    providerRef: `792C79D${index}`,
-    adminNote: null,
-    reviewedById: null,
-    reviewedAt: null,
-    user: { id: `guest-${index}`, displayName: lang === 'ar' ? 'عميل SYBNB' : 'SYBNB Guest', email: null },
-  }))
+  if (!booking?.id) return '—'
+  return `BK-${booking.id.slice(0, 4).toUpperCase()}-${booking.id.slice(4, 8).toUpperCase()}`
 }
 
 function createShortRentLedger(totalMinor: number) {
@@ -1747,21 +1746,34 @@ function createShortRentLedger(totalMinor: number) {
   }
 }
 
-function readStoredMinor(key: string) {
-  if (typeof window === 'undefined') return null
+function readStoredShamCashMap(key: string): Record<string, number> {
+  if (typeof window === 'undefined') return {}
   const raw = window.localStorage.getItem(key)
-  if (!raw) return null
-  const value = Number(raw)
-  return Number.isFinite(value) ? value : null
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return {}
+    const entries = Object.entries(parsed).filter(([, value]) => Number.isFinite(Number(value)))
+    return Object.fromEntries(entries.map(([id, value]) => [id, Math.round(Number(value))]))
+  } catch {
+    return {}
+  }
 }
 
-function createShamCashReconciliation(realPayments: PlatformPaymentProof[], displayPayments: PlatformPaymentProof[], lang: Lang, accountMinor: number | null) {
+// Reconciliation is per Sham Cash payment, not a single global balance. Each pending payment's own
+// amountMinor is what must be matched — summing every pending payment into one aggregate balance
+// (the previous design) let reconciling the total silently "cover" whichever payment got approved
+// first, leaving unrelated bookings falsely marked matched or mismatched.
+function createShamCashReconciliation(realPayments: PlatformPaymentProof[], displayPayments: PlatformPaymentProof[], lang: Lang, accountByPayment: Record<string, number>) {
   const shamCashPayments = realPayments.filter((payment) => isShamCashProvider(payment.provider))
   const sourcePayments = shamCashPayments.length ? shamCashPayments : displayPayments.filter((payment) => isShamCashProvider(payment.provider) || payment.provider === 'LOCAL_WALLET')
   const expectedMinor = sourcePayments.reduce((sum, payment) => sum + payment.amountMinor, 0)
+  const reconciledPayments = sourcePayments.filter((payment) => accountByPayment[payment.id] === payment.amountMinor)
+  const hasAnyEntry = sourcePayments.some((payment) => accountByPayment[payment.id] != null)
+  const accountMinor = hasAnyEntry ? reconciledPayments.reduce((sum, payment) => sum + payment.amountMinor, 0) : null
   const hasExternalAccount = accountMinor != null
   const differenceMinor = hasExternalAccount ? accountMinor - expectedMinor : expectedMinor
-  const isMatched = hasExternalAccount && differenceMinor === 0
+  const isMatched = sourcePayments.length > 0 && reconciledPayments.length === sourcePayments.length
   const isAr = lang === 'ar'
   return {
     accountMinor,
@@ -1777,15 +1789,18 @@ function createShamCashReconciliation(realPayments: PlatformPaymentProof[], disp
     statusLabel: hasExternalAccount
       ? (isMatched ? (isAr ? 'الأرقام متطابقة' : 'Numbers match') : (isAr ? 'يوجد فرق' : 'Mismatch'))
       : (isAr ? 'ينتظر الربط' : 'Awaiting link'),
-    items: sourcePayments.slice(0, 6).map((payment) => ({
-      id: payment.id,
-      amountMinor: payment.amountMinor,
-      reference: payment.providerRef || payment.id.slice(0, 10).toUpperCase(),
-      status: statusText(payment.status, lang),
-      note: lang === 'ar'
-        ? (isMatched ? 'مطابق مع حساب شام كاش' : 'يحتاج مراجعة شام كاش')
-        : (isMatched ? 'Matched with Sham Cash account' : 'Needs Sham Cash review'),
-    })),
+    items: sourcePayments.slice(0, 6).map((payment) => {
+      const itemMatched = accountByPayment[payment.id] === payment.amountMinor
+      return {
+        id: payment.id,
+        amountMinor: payment.amountMinor,
+        reference: payment.providerRef || payment.id.slice(0, 10).toUpperCase(),
+        status: statusText(payment.status, lang),
+        note: lang === 'ar'
+          ? (itemMatched ? 'مطابق مع حساب شام كاش' : 'يحتاج مراجعة شام كاش')
+          : (itemMatched ? 'Matched with Sham Cash account' : 'Needs Sham Cash review'),
+      }
+    }),
   }
 }
 
@@ -1805,20 +1820,32 @@ function commandTone(tone: string): CSSProperties {
   return { color: colors[tone] || colors.white }
 }
 
-function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: boolean) {
-  const provider = payment?.provider || 'LOCAL_WALLET'
-  const amount = payment?.amountMinor || 23540000
-  const hasProof = Boolean(payment?.proofAssetUrl || payment?.providerRef)
+// Deterministic checklist derived from real payment fields (status, proof presence, amount
+// threshold) -- previously branded as "AI Brain" with a fabricated confidence percentage attached
+// to each branch (88/74/82/94), none of which were computed from anything. No AI/ML is involved
+// here or anywhere else in the payment-review flow; this is a plain rule-based checklist to help
+// an admin spot things worth double-checking before approving/rejecting a real payment.
+function createPaymentReviewChecklist(payment: PlatformPaymentProof | undefined, isAr: boolean) {
+  if (!payment) {
+    return {
+      label: isAr ? 'لا يوجد دفع محدد' : 'No payment selected',
+      title: isAr ? 'اختر دفعة لعرض قائمة المراجعة' : 'Select a payment to see its review checklist',
+      borderColor: '#8e93a3',
+      reasons: [],
+    }
+  }
+
+  const provider = payment.provider || 'LOCAL_WALLET'
+  const amount = payment.amountMinor || 0
+  const hasProof = Boolean(payment.proofAssetUrl || payment.providerRef)
   const isLarge = amount >= 50000000
-  const isRejected = payment?.status === 'REJECTED'
-  const isApproved = payment?.status === 'APPROVED'
+  const isRejected = payment.status === 'REJECTED'
+  const isApproved = payment.status === 'APPROVED'
 
   if (isRejected) {
     return {
       label: isAr ? 'سبب رفض' : 'Reject reason',
-      title: isAr ? 'AI Brain يقترح الرفض' : 'AI Brain suggests rejection',
-      confidence: 88,
-      badgeColor: '#ff4d73',
+      title: isAr ? 'دفعة مرفوضة' : 'Payment already rejected',
       borderColor: '#ff4d73',
       reasons: [
         isAr ? 'حالة إثبات الدفع مرفوضة في السجل.' : 'Payment proof is already rejected in the ledger.',
@@ -1830,9 +1857,7 @@ function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: 
   if (!hasProof) {
     return {
       label: isAr ? 'مراجعة مطلوبة' : 'Review needed',
-      title: isAr ? 'AI Brain يطلب مراجعة قبل القرار' : 'AI Brain asks for review before decision',
-      confidence: 74,
-      badgeColor: '#e6b80d',
+      title: isAr ? 'لا يوجد إثبات دفع مرفق' : 'No payment proof attached',
       borderColor: '#e6b80d',
       reasons: [
         isAr ? 'لا يوجد مستند دفع أو رمز مراجعة واضح.' : 'No clear payment document or review code is attached.',
@@ -1844,9 +1869,7 @@ function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: 
   if (isLarge) {
     return {
       label: isAr ? 'تدقيق إضافي' : 'Extra audit',
-      title: isAr ? 'AI Brain يطلب تدقيق مبلغ مرتفع' : 'AI Brain requests high-value audit',
-      confidence: 82,
-      badgeColor: '#e6b80d',
+      title: isAr ? 'مبلغ مرتفع يستحق تدقيقاً إضافياً' : 'High-value amount worth an extra check',
       borderColor: '#e6b80d',
       reasons: [
         isAr ? 'قيمة المعاملة أعلى من المتوسط.' : 'Transaction value is above the normal average.',
@@ -1856,10 +1879,8 @@ function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: 
   }
 
   return {
-    label: isAr ? 'مقترح قبول' : 'Approve suggested',
-    title: isApproved ? (isAr ? 'الدفع مؤكد في السجل' : 'Payment is confirmed in ledger') : (isAr ? 'AI Brain يقترح القبول' : 'AI Brain suggests approval'),
-    confidence: 94,
-    badgeColor: '#20d29b',
+    label: isAr ? 'يبدو جاهزاً' : 'Looks ready',
+    title: isApproved ? (isAr ? 'الدفع مؤكد في السجل' : 'Payment is confirmed in ledger') : (isAr ? 'لا مشاكل ظاهرة في هذه الدفعة' : 'No issues found with this payment'),
     borderColor: '#20d29b',
     reasons: [
       provider === 'LOCAL_WALLET'
@@ -1871,12 +1892,10 @@ function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: 
   }
 }
 
-function createAiCashMatchReview(isAr: boolean, missingAccount: boolean) {
+function createCashMatchChecklist(isAr: boolean, missingAccount: boolean) {
   return {
     label: isAr ? 'إيقاف قبل القرار' : 'Hold before decision',
-    title: isAr ? 'AI Brain يطلب مطابقة شام كاش' : 'AI Brain requires Sham Cash match',
-    confidence: 91,
-    badgeColor: '#e6b80d',
+    title: isAr ? 'يتطلب مطابقة شام كاش' : 'Requires a Sham Cash match',
     borderColor: '#e6b80d',
     reasons: [
       missingAccount
@@ -1903,7 +1922,24 @@ function isBookingDisputed(booking: PlatformReviewBooking) {
   return status.includes('DISPUT') || status.includes('CONFLICT') || status.includes('ESCALAT')
 }
 
-const sampleTimes = ['10:02 AM', '10:05 AM', '10:07 AM', '10:10 AM', '10:15 AM', '10:18 AM']
+// Real timestamps where the schema actually tracks one for this step; '—' everywhere else
+// (previously a fixed ['10:02 AM', '10:05 AM', ...] array shown identically for every booking
+// regardless of its actual history). Booking.createdAt/guestCheckedInAt/guestCheckedOutAt and
+// PaymentProof.reviewedAt cover about half of the 13 pipeline steps -- the rest (client search,
+// account opened, terms accepted, host confirmation, guest review, host payout, transaction
+// closed) have no backing timestamp field anywhere in the schema, so they honestly show '—'.
+function flowStepTime(index: number, isAr: boolean, payment: PlatformPaymentProof | undefined, booking: PlatformReviewBooking | undefined) {
+  const formatTime = (value: string | null | undefined) =>
+    value ? new Date(value).toLocaleTimeString(isAr ? 'ar-SY' : 'en-US', { hour: 'numeric', minute: '2-digit' }) : undefined
+
+  const timeByIndex: Record<number, string | undefined> = {
+    3: formatTime(booking?.createdAt || payment?.booking?.createdAt),
+    6: formatTime(payment?.reviewedAt),
+    8: formatTime(booking?.guestCheckedInAt || payment?.booking?.guestCheckedInAt),
+    9: formatTime(booking?.guestCheckedOutAt || payment?.booking?.guestCheckedOutAt),
+  }
+  return timeByIndex[index] || '—'
+}
 
 const commandStyles: Record<string, CSSProperties> = {
   page: { minHeight: '100vh', background: '#07080d', color: '#f7f7fb', padding: '18px 24px 88px', display: 'grid', gap: 18, fontFamily: 'inherit' },
@@ -1914,7 +1950,7 @@ const commandStyles: Record<string, CSSProperties> = {
   circleButton: { alignItems: 'center', background: '#181926', border: '1px solid rgba(255,255,255,.08)', borderRadius: 999, color: '#fff', display: 'grid', fontSize: 22, fontWeight: 950, height: 48, placeItems: 'center', width: 48 },
   breadcrumb: { color: '#8e93a3', display: 'flex', gap: 10, justifyContent: 'center' },
   adminIdentity: { alignItems: 'center', display: 'flex', gap: 14 },
-  logoBlock: { background: '#5268ff', borderRadius: 6, color: '#fff', display: 'grid', fontWeight: 950, height: 34, placeItems: 'center', width: 34 },
+  logoBlock: { background: '#4760ff', borderRadius: 6, color: '#fff', display: 'grid', fontWeight: 950, height: 34, placeItems: 'center', width: 34 },
   avatar: { background: 'linear-gradient(135deg,#d7c4ab,#23324b)', border: '1px solid rgba(255,255,255,.2)', borderRadius: 999, color: '#fff', display: 'grid', fontWeight: 950, height: 34, placeItems: 'center', width: 34 },
   notify: { color: '#ff4d73', fontSize: 16 },
   departmentGroups: { display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 },
@@ -1956,6 +1992,7 @@ const commandStyles: Record<string, CSSProperties> = {
   shamCashPanel: { background: '#0d0e14', border: '1px solid rgba(230,184,13,.35)', borderRadius: 8, display: 'grid', gap: 14, padding: 16 },
   shamCashHeader: { alignItems: 'center', display: 'flex', gap: 12, justifyContent: 'space-between' },
   shamCashGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
+  shamCashReconcileRow: { alignItems: 'center', background: '#11131d', border: '1px solid rgba(255,255,255,.09)', borderRadius: 8, display: 'flex', flexWrap: 'wrap', gap: 10, padding: 12 },
   outcomeGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' },
   outcomeCard: { background: '#10121b', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, display: 'grid', gap: 8, padding: 12 },
   aiRail: { alignItems: 'center', display: 'flex', gap: 14, justifyContent: 'space-between' },
@@ -2005,7 +2042,7 @@ const commandStyles: Record<string, CSSProperties> = {
   acceptButton: { background: '#20c987', border: 0, borderRadius: 8, color: '#fff', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   rejectButton: { background: '#ff4d73', border: 0, borderRadius: 8, color: '#fff', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   goldButton: { background: '#e6b80d', border: 0, borderRadius: 8, color: '#111', fontWeight: 950, minHeight: 44, padding: '0 14px' },
-  blueButton: { background: '#5268ff', border: 0, borderRadius: 8, color: '#fff', fontWeight: 950, minHeight: 44, padding: '0 14px' },
+  blueButton: { background: '#4760ff', border: 0, borderRadius: 8, color: '#fff', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   disputeButton: { background: 'transparent', border: '1px solid #ff744d', borderRadius: 8, color: '#ff744d', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   outlineGold: { background: 'transparent', border: '1px solid #e6b80d', borderRadius: 8, color: '#e6b80d', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   secondaryCommand: { background: 'transparent', border: '1px solid rgba(255,255,255,.3)', borderRadius: 8, color: '#d9deea', fontWeight: 950, minHeight: 44, padding: '0 14px' },

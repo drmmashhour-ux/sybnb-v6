@@ -2,14 +2,30 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
+import { sypMinorToRoundedUsdMinor } from '../lib/currency.mjs'
 import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
+import { isOfferPrice, summarizeOffers } from '../lib/offers.mjs'
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
 // Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
 // paid-plan divisions gated behind an admin-approved SellerProfile.
 const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
 
+// Listing ids are UUID columns in Postgres — a non-UUID id (e.g. the frontend's
+// 'fallback-*' sample-listing ids) makes Prisma throw P2023 instead of returning null,
+// which would otherwise surface as an uncaught 500. Reject those up front as a clean 404.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export async function handleListings(req, res, url, context) {
+  const idSegmentMatch = url.pathname.match(/^\/api\/listings\/([^/]+)(?:\/(?:quote|availability|reviews|submit))?$/)
+  if (idSegmentMatch && !UUID_RE.test(idSegmentMatch[1])) {
+    const error = new Error('Listing not found.')
+    error.statusCode = 404
+    error.code = 'LISTING_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
+
   const quoteMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/quote$/)
   if (quoteMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
@@ -31,31 +47,141 @@ export async function handleListings(req, res, url, context) {
       throw error
     }
     const quote = await computeStayTotalMinor(listing, checkIn, checkOut)
+    // The listing's own price is SYP; a guest who chooses to pay in USD instead gets that SYP
+    // total (and each night's own price) converted at the platform's fixed rate and rounded up to
+    // the nearest $5 — same change-avoidance rule applied to SR fares and wallet gifts.
+    const wantsUsd = url.searchParams.get('currency') === 'USD'
+    const totalMinor = wantsUsd ? sypMinorToRoundedUsdMinor(quote.totalMinor) : quote.totalMinor
+    const perNight = wantsUsd
+      ? quote.perNight.map((night) => ({ ...night, priceMinor: sypMinorToRoundedUsdMinor(night.priceMinor) }))
+      : quote.perNight
     return json(res, 200, {
       ok: true,
-      totalMinor: quote.totalMinor,
+      totalMinor,
       nights: quote.nights,
-      perNight: quote.perNight,
-      currency: listing.currency,
+      perNight,
+      currency: wantsUsd ? 'USD' : listing.currency,
     })
   }
 
   if (url.pathname === '/api/listings') {
     if (req.method === 'GET') {
       await expireOldListings()
-      const division = url.searchParams.get('division') || undefined
-      const city = url.searchParams.get('city') || undefined
-      const listings = await db().listing.findMany({
+      const params = url.searchParams
+      const division = params.get('division') || undefined
+      // Listings created through the wizard never populate the `location` relation — governorate/
+      // city/area/bedrooms/bathrooms/propertyType/amenities all live in `metadata` instead, so those
+      // filters are applied in-memory below rather than as a Prisma `where` clause.
+      const governorate = params.get('governorate') || undefined
+      const city = params.get('city') || undefined
+      const area = params.get('area') || undefined
+      const propertyType = params.get('propertyType') || undefined
+      const roomType = params.get('roomType') || undefined
+      const bedType = params.get('bedType') || undefined
+      const minPrice = parsePositiveInt(params.get('minPrice'))
+      const maxPrice = parsePositiveInt(params.get('maxPrice'))
+      const minBedrooms = parsePositiveInt(params.get('bedrooms'))
+      const minBathrooms = parsePositiveInt(params.get('bathrooms'))
+      const amenities = (params.get('amenities') || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+      const checkIn = parseDateOnly(params.get('checkIn'))
+      const checkOut = parseDateOnly(params.get('checkOut'))
+      const sort = params.get('sort') || undefined
+
+      const priceMinor = {}
+      if (minPrice !== undefined) priceMinor.gte = minPrice
+      if (maxPrice !== undefined) priceMinor.lte = maxPrice
+
+      const orderBy =
+        sort === 'priceAsc' ? { priceMinor: 'asc' } : sort === 'priceDesc' ? { priceMinor: 'desc' } : { createdAt: 'desc' }
+
+      const candidates = await db().listing.findMany({
         where: {
           status: 'APPROVED',
           division,
-          location: city ? { city } : undefined,
+          ...(Object.keys(priceMinor).length ? { priceMinor } : {}),
         },
         include: { location: true, media: true },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
+        orderBy,
+        take: 200,
       })
-      return json(res, 200, { ok: true, listings })
+
+      let listings = candidates.filter((listing) => {
+        const meta = listing.metadata || {}
+        const visual = meta.visualFilters || {}
+        if (governorate && meta.governorate !== governorate) return false
+        if (city && meta.city !== city) return false
+        if (area && meta.area !== area) return false
+        // The wizard writes propertyType twice under two different vocabularies (a capitalized
+        // English label from the basic step, and a lowercase id from the visual filter chips) —
+        // match either, case-insensitively, against the search page's lowercase chip id.
+        if (propertyType) {
+          const metaTypes = [meta.propertyType, visual.propertyType].filter(Boolean).map((value) => String(value).toLowerCase())
+          if (!metaTypes.includes(propertyType.toLowerCase())) return false
+        }
+        if (roomType && visual.roomType !== roomType) return false
+        if (bedType && visual.bedType !== bedType) return false
+        // Bedrooms/bathrooms steppers default to 1 on every search (not an explicit "must have"
+        // gesture), so a listing that never declared these fields is treated as "unknown" and kept
+        // rather than excluded — only a declared, too-low value filters it out.
+        if (minBedrooms !== undefined && meta.bedrooms !== undefined && meta.bedrooms !== null) {
+          if (!(Number(meta.bedrooms) >= minBedrooms)) return false
+        }
+        if (minBathrooms !== undefined && meta.bathrooms !== undefined && meta.bathrooms !== null) {
+          if (!(Number(meta.bathrooms) >= minBathrooms)) return false
+        }
+        if (amenities.length) {
+          const have = new Set(visual.amenities || [])
+          if (!amenities.every((amenity) => have.has(amenity))) return false
+        }
+        return true
+      })
+
+      if (checkIn && checkOut && checkOut > checkIn && listings.length) {
+        const ids = listings.map((listing) => listing.id)
+        const [blockedRows, overlappingBookings] = await Promise.all([
+          db().listingAvailability.findMany({
+            where: { listingId: { in: ids }, status: 'BLOCKED', date: { gte: checkIn, lt: checkOut } },
+            select: { listingId: true },
+          }),
+          db().booking.findMany({
+            where: {
+              listingId: { in: ids },
+              status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] },
+              checkIn: { lt: checkOut },
+              checkOut: { gt: checkIn },
+            },
+            select: { listingId: true },
+          }),
+        ])
+        const unavailable = new Set([
+          ...blockedRows.map((row) => row.listingId),
+          ...overlappingBookings.map((booking) => booking.listingId),
+        ])
+        listings = listings.filter((listing) => !unavailable.has(listing.id))
+      }
+
+      if (listings.length) {
+        const ids = listings.map((listing) => listing.id)
+        const ninetyDaysOut = new Date(Date.now() + 1000 * 60 * 60 * 24 * 90)
+        const offerRows = await db().listingAvailability.findMany({
+          where: { listingId: { in: ids }, priceOverrideMinor: { not: null }, date: { gte: new Date(), lte: ninetyDaysOut } },
+          select: { listingId: true, priceOverrideMinor: true },
+        })
+        const offersByListing = new Map()
+        for (const row of offerRows) {
+          if (!offersByListing.has(row.listingId)) offersByListing.set(row.listingId, [])
+          offersByListing.get(row.listingId).push(row)
+        }
+        listings = listings.map((listing) => ({
+          ...listing,
+          hasActiveOffer: (offersByListing.get(listing.id) || []).some((row) => isOfferPrice(row.priceOverrideMinor, listing.priceMinor)),
+        }))
+      }
+
+      return json(res, 200, { ok: true, listings: listings.slice(0, 50) })
     }
 
     if (req.method === 'POST') {
@@ -124,7 +250,11 @@ export async function handleListings(req, res, url, context) {
           select: {
             id: true,
             displayName: true,
+            idDocumentStatus: true,
           },
+        },
+        accommodation: {
+          select: { id: true, titleAr: true, titleEn: true },
         },
       },
     })
@@ -146,7 +276,8 @@ export async function handleListings(req, res, url, context) {
     const toRaw = parseDateOnly(url.searchParams.get('to'))
     const to = toRaw || new Date(from.getTime() + 1000 * 60 * 60 * 24 * 90)
 
-    const [blockedRows, priceRows, activeBookings] = await Promise.all([
+    const [listing, blockedRows, priceRows, activeBookings] = await Promise.all([
+      db().listing.findFirst({ where: { id: listingId }, select: { priceMinor: true } }),
       db().listingAvailability.findMany({
         where: { listingId, status: 'BLOCKED', date: { gte: from, lte: to } },
         select: { date: true },
@@ -174,8 +305,11 @@ export async function handleListings(req, res, url, context) {
       checkIn: isoDate(booking.checkIn),
       checkOut: isoDate(booking.checkOut),
     }))
+    const { offerNightsCount, cheapestOfferMinor } = listing
+      ? summarizeOffers(priceRows, listing.priceMinor)
+      : { offerNightsCount: 0, cheapestOfferMinor: null }
 
-    return json(res, 200, { ok: true, blockedDates, priceOverrides, bookedRanges })
+    return json(res, 200, { ok: true, blockedDates, priceOverrides, bookedRanges, offerNightsCount, cheapestOfferMinor })
   }
 
   const reviewsMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/reviews$/)
@@ -221,6 +355,12 @@ export async function handleListings(req, res, url, context) {
   }
 
   return false
+}
+
+function parsePositiveInt(value) {
+  if (!value) return undefined
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
 }
 
 function parseDateOnly(value) {

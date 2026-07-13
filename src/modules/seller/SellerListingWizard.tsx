@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
-import { createAndSubmitPrototypeListing } from '../../shared/api/platformApi'
+import {
+  addAccommodationRoomType,
+  createAccommodation,
+  createAndSubmitPrototypeListing,
+  submitAccommodation,
+} from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
@@ -92,6 +97,10 @@ const STEPS: WizardStep[] = [
     helper: { ar: 'تأكد من البيانات قبل إرسالها لفريق SYBNB.', en: 'Confirm details before sending to the SYBNB team.' },
   },
 ]
+
+// Reused for every room type after the first one under the same Accommodation: skips
+// 'location' and 'media' since those are inherited from the accommodation shell.
+const ROOM_TYPE_STEPS: WizardStep[] = STEPS.filter((step) => ['basics', 'price', 'review'].includes(step.id))
 
 const AD_STEPS: WizardStep[] = [
   {
@@ -190,6 +199,11 @@ export function SellerListingWizard({ lang }: Props) {
   )
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle')
   const [submitError, setSubmitError] = useState('')
+  // Set once the accommodation shell + first STAYS room type are created; every following room
+  // type in the same session reuses it instead of re-collecting location/documents/photos.
+  const [accommodationId, setAccommodationId] = useState<string | null>(null)
+  const [roomTypeStage, setRoomTypeStage] = useState<'idle' | 'prompt'>('idle')
+  const isMultiRoomFlow = division === 'STAYS' && !isAdvertisingFlow
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -211,7 +225,7 @@ export function SellerListingWizard({ lang }: Props) {
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
   }, [division, selectedType, title, description, governorate, city, area, address, price, size, bedrooms, bathrooms, instantBookEnabled, visualFilters])
-  const steps = isAdvertisingFlow ? AD_STEPS : STEPS
+  const steps = isAdvertisingFlow ? AD_STEPS : accommodationId ? ROOM_TYPE_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
   const isLast = stepIndex === steps.length - 1
@@ -252,7 +266,53 @@ export function SellerListingWizard({ lang }: Props) {
       setSubmitState('submitting')
       setSubmitError('')
 
+      const roomTypeMetadata = {
+        propertyType: selectedType,
+        sizeSqm: toNumber(size),
+        bedrooms: toNumber(bedrooms),
+        bathrooms: toNumber(bathrooms),
+        visualFilters,
+      }
+
       try {
+        if (isMultiRoomFlow) {
+          if (!accommodationId) {
+            const accommodation = await createAccommodation({
+              titleAr: title || (isAr ? 'عقار SYBNB جديد' : 'New SYBNB property'),
+              titleEn: title,
+              description,
+              governorate,
+              city,
+              area,
+              address,
+              metadata: { uploadedDocumentFiles, governorateLabel: selectedGovernorateLabel, cityLabel: selectedCityLabel, areaLabel: selectedAreaLabel },
+            })
+            await addAccommodationRoomType(accommodation.id, {
+              titleAr: title || (isAr ? 'نوع غرفة جديد' : 'New room type'),
+              titleEn: title,
+              description,
+              priceMinor: toMinor(price),
+              currency: 'SYP',
+              instantBookEnabled,
+              metadata: roomTypeMetadata,
+            })
+            setAccommodationId(accommodation.id)
+          } else {
+            await addAccommodationRoomType(accommodationId, {
+              titleAr: title || (isAr ? 'نوع غرفة جديد' : 'New room type'),
+              titleEn: title,
+              description,
+              priceMinor: toMinor(price),
+              currency: 'SYP',
+              instantBookEnabled,
+              metadata: roomTypeMetadata,
+            })
+          }
+          setSubmitState('idle')
+          setRoomTypeStage('prompt')
+          return
+        }
+
         await createAndSubmitPrototypeListing({
           division,
           titleAr: title || 'إعلان SYBNB جديد',
@@ -294,6 +354,33 @@ export function SellerListingWizard({ lang }: Props) {
     setStepIndex((current) => Math.min(current + 1, steps.length - 1))
   }
 
+  function startAnotherRoomType() {
+    setTitle(isAr ? '' : '')
+    setDescription('')
+    setPrice('150000')
+    setSize('40')
+    setBedrooms('1')
+    setBathrooms('1')
+    setSelectedType(PROPERTY_TYPES[0].en)
+    setVisualFilters({ propertyType: 'apartment', roomType: 'doubleRoom', bedType: 'queenBed', amenities: ['wifi', 'kitchen'] })
+    setRoomTypeStage('idle')
+    setStepIndex(0)
+  }
+
+  async function finishAccommodation() {
+    if (!accommodationId) return
+    setSubmitState('submitting')
+    setSubmitError('')
+    try {
+      await submitAccommodation(accommodationId)
+      clearDraft()
+      navigate('/sell/submitted')
+    } catch (error) {
+      setSubmitState('error')
+      setSubmitError(error instanceof Error ? error.message : 'Unable to submit accommodation.')
+    }
+  }
+
   function addListingDocumentFiles(fileList: FileList | null) {
     const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
     if (!names.length) return
@@ -309,6 +396,46 @@ export function SellerListingWizard({ lang }: Props) {
     }
 
     setStepIndex((current) => Math.max(current - 1, 0))
+  }
+
+  if (roomTypeStage === 'prompt') {
+    return (
+      <main className="seller-page seller-wizard-page" dir={isAr ? 'rtl' : 'ltr'}>
+        <section className="seller-account-head">
+          <BrandLogo logo="plus" size="nav" />
+        </section>
+
+        <section className="seller-wizard-shell">
+          <div className="seller-wizard-header">
+            <p className="eyebrow">{isAr ? 'نفس العقار' : 'Same property'}</p>
+            <h1>{isAr ? 'أضف نوع غرفة آخر لنفس العقار؟' : 'Add another room type for the same property?'}</h1>
+            <p>
+              {isAr
+                ? 'الموقع والمستندات والصور محفوظة مسبقاً — لن تحتاج لإعادة رفعها لأي غرفة إضافية.'
+                : 'Location, documents, and photos are already saved — you will not need to re-upload them for another room type.'}
+            </p>
+          </div>
+          <div className="seller-wizard-body">
+            <div className="seller-wizard-section">
+              {submitState === 'error' && (
+                <div className="seller-inline-alert">
+                  <strong>{isAr ? 'تعذر الإرسال' : 'Submission failed'}</strong>
+                  <span>{submitError}</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="seller-wizard-actions">
+            <button className="seller-secondary-button" disabled={submitState === 'submitting'} onClick={finishAccommodation}>
+              {isAr ? 'لا، أرسل للمراجعة' : 'No, submit for review'}
+            </button>
+            <button className="seller-primary-button" disabled={submitState === 'submitting'} onClick={startAnotherRoomType}>
+              {isAr ? 'نعم، أضف غرفة أخرى' : 'Yes, add another room type'}
+            </button>
+          </div>
+        </section>
+      </main>
+    )
   }
 
   return (
@@ -661,9 +788,13 @@ export function SellerListingWizard({ lang }: Props) {
                 ? 'جار الإرسال'
                 : 'Submitting'
               : isLast
-                ? isAr
-                  ? 'إرسال للمراجعة'
-                  : 'Submit for review'
+                ? isMultiRoomFlow
+                  ? isAr
+                    ? 'حفظ هذه الغرفة'
+                    : 'Save this room type'
+                  : isAr
+                    ? 'إرسال للمراجعة'
+                    : 'Submit for review'
                 : isAr
                   ? 'متابعة'
                   : 'Continue'}

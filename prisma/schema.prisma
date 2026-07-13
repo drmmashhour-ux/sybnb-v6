@@ -143,6 +143,15 @@ model User {
   idDocumentStatus IdDocumentStatus? @map("id_document_status")
   idDocumentReviewedById String? @map("id_document_reviewed_by_id")
   idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
+  // Bumped on logout and on password reset; embedded as a claim in every session token and
+  // checked on every request (server/lib/auth-context.mjs). A stateless HMAC-signed token has no
+  // other way to be revoked before its 7-day expiry -- this is the whole mechanism (security audit
+  // finding F-02).
+  sessionVersion Int         @default(0) @map("session_version")
+  // Shareable referral code, generated once at account creation (server/lib/referrals.mjs). Every
+  // user has one, whether or not they ever refer anyone -- generated lazily would need a
+  // read-then-write race guard for no benefit, since it's nearly free to always have one.
+  referralCode String        @unique @map("referral_code")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
@@ -161,8 +170,41 @@ model User {
   sentMessages      Message[]         @relation("MessageSender")
   paymentProofs     PaymentProof[]    @relation("PaymentPayer")
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
+  accommodations    Accommodation[]   @relation("AccommodationOwner")
+  hostInsights      HostInsight[]     @relation("HostInsightOwner")
+  referralsMade     Referral[]        @relation("ReferralReferrer")
+  referredAs        Referral?         @relation("ReferralReferee")
 
   @@map("users")
+}
+
+enum ReferralStatus {
+  PENDING
+  REWARDED
+
+  @@map("referral_status")
+}
+
+// Double-sided referral program (riders/hosts/drivers bring new users, both sides get rewarded --
+// same "give X, get Y" shape as Lyft/Uber's referral programs). The referee's signup bonus is
+// credited immediately at registration (server/routes/auth.mjs); the referrer's reward is only
+// credited once the referee completes their first *paid* STR booking (server/lib/referrals.mjs),
+// not merely on signup -- otherwise this would be trivially farmable with throwaway accounts that
+// never generate any real revenue.
+model Referral {
+  id                  String         @id @default(uuid())
+  referrerUserId      String         @map("referrer_user_id")
+  refereeUserId       String         @unique @map("referee_user_id")
+  status              ReferralStatus @default(PENDING)
+  qualifyingBookingId String?        @map("qualifying_booking_id")
+  rewardedAt          DateTime?      @map("rewarded_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  referrer User @relation("ReferralReferrer", fields: [referrerUserId], references: [id])
+  referee  User @relation("ReferralReferee", fields: [refereeUserId], references: [id], onDelete: Cascade)
+
+  @@index([referrerUserId, status])
+  @@map("referrals")
 }
 
 model UserRole {
@@ -233,6 +275,7 @@ model Listing {
   id          String          @id @default(uuid())
   ownerId     String          @map("owner_id")
   locationId  String?         @map("location_id")
+  accommodationId String?     @map("accommodation_id")
   division    ListingDivision
   titleAr     String          @map("title_ar")
   titleEn     String?         @map("title_en")
@@ -248,15 +291,101 @@ model Listing {
 
   owner          User                  @relation("ListingOwner", fields: [ownerId], references: [id])
   location       Location?             @relation(fields: [locationId], references: [id])
+  accommodation  Accommodation?        @relation(fields: [accommodationId], references: [id])
   media          ListingMedia[]
   bookings       Booking[]
   availability   ListingAvailability[]
   reviews        ListingReview[]
   inquiryThreads MessageThread[]
+  hostInsights   HostInsight[]
 
   @@index([division, status])
   @@index([ownerId])
+  @@index([accommodationId])
   @@map("listings")
+}
+
+// Groups multiple STAYS room-type Listings under one physical property (a hotel-like host's
+// Studio/Suite/Double-Queen etc.), so shared location/documents/photos aren't re-collected per
+// room type. Each child Listing keeps its own independent price, availability, and bookings.
+model Accommodation {
+  id          String        @id @default(uuid())
+  ownerId     String        @map("owner_id")
+  titleAr     String        @map("title_ar")
+  titleEn     String?       @map("title_en")
+  description String?
+  governorate String
+  city        String
+  area        String?
+  address     String?
+  status      ListingStatus @default(DRAFT)
+  metadata    Json          @default("{}")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  owner    User                 @relation("AccommodationOwner", fields: [ownerId], references: [id])
+  listings Listing[]
+  media    AccommodationMedia[]
+
+  @@index([ownerId])
+  @@map("accommodations")
+}
+
+model AccommodationMedia {
+  id              String   @id @default(uuid())
+  accommodationId String   @map("accommodation_id")
+  url             String
+  kind            String
+  sortOrder       Int      @default(0) @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  accommodation Accommodation @relation(fields: [accommodationId], references: [id], onDelete: Cascade)
+
+  @@index([accommodationId])
+  @@map("accommodation_media")
+}
+
+// AI-generated pricing/availability insight for a host, e.g. "you have N open nights next month
+// with no discount set." Generation is a manual, host-triggered action (real per-call AI cost),
+// not opportunistic — see server/lib/host-insights.mjs.
+model HostInsight {
+  id           String    @id @default(uuid())
+  hostId       String    @map("host_id")
+  listingId    String?   @map("listing_id")
+  kind         String    @default("PRICING_GAP")
+  facts        Json      @default("{}")
+  messageAr    String    @map("message_ar")
+  messageEn    String?   @map("message_en")
+  aiProvider   String?   @map("ai_provider")
+  aiModel      String?   @map("ai_model")
+  readAt       DateTime? @map("read_at")
+  emailSentAt  DateTime? @map("email_sent_at")
+  emailError   String?   @map("email_error")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  host    User     @relation("HostInsightOwner", fields: [hostId], references: [id])
+  listing Listing? @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([hostId, createdAt])
+  @@index([listingId])
+  @@map("host_insights")
+}
+
+// Real, server-verified email one-time codes for pre-registration guest identity checks (replaces
+// the old client-only phone-code simulation in GuestAccountPage). code_hash is a fast HMAC, not a
+// slow KDF — matching the 6-digit/short-TTL/attempt-limited nature of an OTP, not a password.
+model EmailVerificationCode {
+  id         String    @id @default(uuid())
+  email      String
+  codeHash   String    @map("code_hash")
+  purpose    String    @default("guest-signup")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([email, purpose])
+  @@map("email_verification_codes")
 }
 
 model ListingAvailability {

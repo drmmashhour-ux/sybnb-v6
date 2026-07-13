@@ -8,6 +8,7 @@ import {
   type PlatformWalletGift,
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
+import { roundUsdUpToStep } from '../../shared/currency'
 
 type Props = {
   lang: Lang
@@ -26,7 +27,8 @@ const copy = {
     available: 'متاح للاستخدام',
     held: 'مبالغ محجوزة',
     refunds: 'قناة الاسترداد',
-    prepaid: 'أكواد وهدايا',
+    prepaid: 'هدايا مستلمة',
+    usdWalletBalance: 'رصيد الدولار',
     safety: 'أمان المحفظة',
     safetyRows: ['سجل حركات غير قابل للتعديل', 'إثبات الدفع مرتبط بالحجز', 'منع الدفع خارج SYBNB', 'مراجعة الإدارة للحركات الحساسة'],
     topup: 'شحن المحفظة',
@@ -40,12 +42,6 @@ const copy = {
     refunded: 'مسترجعة',
     inReview: 'قيد المراجعة',
     heldShort: 'محجوزة',
-    adminAudit: 'التدقيق الإداري',
-    adminAuditEn: 'ADMIN AUDIT',
-    lastAudit: 'آخر تدقيق',
-    pendingActions: 'إجراءات معلقة',
-    ledgerStatus: 'حالة السجل',
-    auditLog: 'سجل التدقيق',
     refundLane: 'استرداد / نزاع',
     giftLane: 'هدايا وأكواد مسبقة',
     adminLane: 'تدقيق الإدارة',
@@ -53,6 +49,9 @@ const copy = {
     entries: 'حركات المحفظة',
     recipientPhone: 'هاتف المستلم',
     amount: 'قيمة الهدية',
+    currencySyp: 'ليرة سورية',
+    currencyUsd: 'دولار أمريكي',
+    roundedAmount: 'المبلغ بعد التقريب (لأقرب ٥$)',
     message: 'رسالة الهدية',
     send: 'إرسال الهدية',
     claimFlow: 'فتح رابط الاستلام',
@@ -76,7 +75,8 @@ const copy = {
     available: 'Available to use',
     held: 'Held funds',
     refunds: 'Refund lane',
-    prepaid: 'Codes and gifts',
+    prepaid: 'Gifts received',
+    usdWalletBalance: 'USD wallet balance',
     safety: 'Wallet safety',
     safetyRows: ['Immutable ledger trail', 'Payment proof connected to booking', 'Outside-SYBNB payment warning', 'Admin review for sensitive moves'],
     topup: 'Top up wallet',
@@ -90,12 +90,6 @@ const copy = {
     refunded: 'Refunded',
     inReview: 'In Review',
     heldShort: 'Held',
-    adminAudit: 'Admin Audit',
-    adminAuditEn: 'ADMIN AUDIT',
-    lastAudit: 'Last audit',
-    pendingActions: 'Pending actions',
-    ledgerStatus: 'Ledger status',
-    auditLog: 'View audit log',
     refundLane: 'Refund / dispute',
     giftLane: 'Gifts and prepaid codes',
     adminLane: 'Admin audit',
@@ -103,6 +97,9 @@ const copy = {
     entries: 'Wallet entries',
     recipientPhone: 'Recipient phone',
     amount: 'Gift amount',
+    currencySyp: 'Syrian Pound',
+    currencyUsd: 'US Dollar',
+    roundedAmount: 'Amount after rounding (nearest $5)',
     message: 'Gift message',
     send: 'Send gift',
     claimFlow: 'Open claim link',
@@ -119,21 +116,39 @@ const copy = {
 export function WalletPage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
-  const [wallet, setWallet] = useState<PlatformWallet | null>(null)
+  const [wallets, setWallets] = useState<PlatformWallet[]>([])
   const [gift, setGift] = useState<PlatformWalletGift | null>(null)
   const [recipientPhone, setRecipientPhone] = useState('+963900000001')
   const [amountMinor, setAmountMinor] = useState('50000')
+  const [giftCurrency, setGiftCurrency] = useState<'SYP' | 'USD'>('SYP')
   const [message, setMessage] = useState(isAr ? 'هدية من محفظة SYBNB' : 'Gift from SYBNB Wallet')
   const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [notice, setNotice] = useState('')
-  const entries = wallet?.entries || []
-  const balanceMinor = wallet?.cachedBalanceMinor || 0
-  const displayAvailableMinor = balanceMinor || 124500
-  const heldMinor = balanceMinor ? Math.round(balanceMinor * 0.28) : 48000
-  const availableMinor = Math.max(displayAvailableMinor - (balanceMinor ? heldMinor : 0), 0)
+  // The primary (SYP) wallet drives the main balance hero and stats grid, matching the existing
+  // layout; a USD wallet (opened lazily the first time a USD gift/payment lands — see
+  // recordWalletEntry) gets its own small summary card below instead of being added into these
+  // SYP-labeled totals, which would silently mix two currencies into one number.
+  const sypWallet = wallets.find((entry) => entry.currency === 'SYP') || null
+  const usdWallet = wallets.find((entry) => entry.currency === 'USD') || null
+  const entries = sypWallet?.entries || []
+  const allEntries = wallets.flatMap((entry) => entry.entries || [])
+  const availableMinor = sypWallet?.cachedBalanceMinor || 0
+  // Real net still-held amount (HOLD entries not yet reversed by a matching RELEASE) — for a
+  // guest wallet this is normally 0, since payout holds apply to host wallets, not guest ones.
+  // Previously this was a fabricated 28%-of-balance guess shown even on a genuine $0 wallet.
+  const heldMinor = entries.reduce((sum, entry) => {
+    const type = String(entry.type || '')
+    const amount = Number(entry.amountMinor || entry.amount || 0)
+    if (type === 'HOLD') return sum + amount
+    if (type === 'RELEASE') return sum - amount
+    return sum
+  }, 0)
   const refundMinor = entries.reduce((sum, entry) => {
     const type = String(entry.type || '')
     return type.includes('REFUND') ? sum + Number(entry.amountMinor || entry.amount || 0) : sum
+  }, 0)
+  const giftsReceivedMinor = entries.reduce((sum, entry) => {
+    return entry.referenceType === 'wallet_gift' ? sum + Number(entry.amountMinor || entry.amount || 0) : sum
   }, 0)
 
   useEffect(() => {
@@ -143,7 +158,7 @@ export function WalletPage({ lang }: Props) {
   async function refreshWallet() {
     setNotice('')
     try {
-      setWallet(await fetchPrototypeWallet())
+      setWallets(await fetchPrototypeWallet())
       setStatus('idle')
     } catch (error) {
       setStatus('error')
@@ -156,10 +171,13 @@ export function WalletPage({ lang }: Props) {
     setNotice('')
 
     try {
+      const rawAmount = Math.max(0, Math.round(Number(amountMinor) || 0))
       const nextGift = await createPrototypeWalletGift({
         recipientPhone,
-        amountMinor: Math.max(0, Math.round(Number(amountMinor) || 0)),
-        currency: 'SYP',
+        // Cash/card USD amounts are rounded up to the nearest $5 so neither side needs to make
+        // change; SYP amounts are sent exactly as entered.
+        amountMinor: giftCurrency === 'USD' ? roundUsdUpToStep(rawAmount) : rawAmount,
+        currency: giftCurrency,
         message,
       })
       setGift(nextGift)
@@ -193,11 +211,11 @@ export function WalletPage({ lang }: Props) {
         <div style={styles.balanceColumns}>
           <article>
             <span>{t.available} / Available Balance</span>
-            <strong style={styles.availableValue} dir={isAr ? 'rtl' : 'ltr'}>{moneyText(availableMinor, wallet?.currency || 'SYP', lang)}</strong>
+            <strong style={styles.availableValue} dir={isAr ? 'rtl' : 'ltr'}>{moneyText(availableMinor, 'SYP', lang)}</strong>
           </article>
           <article>
             <span>{t.protectedFundsShort} / Protected Funds</span>
-            <strong style={styles.protectedValue} dir={isAr ? 'rtl' : 'ltr'}>{moneyText(heldMinor, wallet?.currency || 'SYP', lang)}</strong>
+            <strong style={styles.protectedValue} dir={isAr ? 'rtl' : 'ltr'}>{moneyText(heldMinor, 'SYP', lang)}</strong>
           </article>
         </div>
         <div style={styles.statusPills}>
@@ -214,15 +232,23 @@ export function WalletPage({ lang }: Props) {
           [t.available, availableMinor, '#20d29b'],
           [t.held, heldMinor, '#e5b80b'],
           [t.refunds, refundMinor, '#5268ff'],
-          [t.prepaid, gift ? gift.amountMinor : Number(amountMinor || 0), '#ff5f7d'],
+          [t.prepaid, giftsReceivedMinor, '#ff5f7d'],
         ].map(([label, value, color]) => (
           <article key={String(label)} style={{ ...styles.statCard, borderColor: `${color}55` }}>
             <span style={styles.statDot}>{String(label)}</span>
             <strong style={{ color: String(color) }} dir={isAr ? 'rtl' : 'ltr'}>
-              {moneyText(Number(value), wallet?.currency || 'SYP', lang)}
+              {moneyText(Number(value), 'SYP', lang)}
             </strong>
           </article>
         ))}
+        {usdWallet && (
+          <article style={{ ...styles.statCard, borderColor: '#20d29b55' }}>
+            <span style={styles.statDot}>{t.usdWalletBalance}</span>
+            <strong style={{ color: '#20d29b' }} dir="ltr">
+              {moneyText(usdWallet.cachedBalanceMinor, 'USD', lang)}
+            </strong>
+          </article>
+        )}
       </section>
 
       <section style={styles.iconActions}>
@@ -238,23 +264,6 @@ export function WalletPage({ lang }: Props) {
             <strong>{label}</strong>
           </button>
         ))}
-      </section>
-
-      <section style={styles.auditPanel}>
-        <div>
-          <span style={styles.auditIcon}>▣</span>
-          <strong>2026/01/28</strong>
-          <b>0</b>
-          <small>{isAr ? 'تم التحقق' : 'Verified'}</small>
-        </div>
-        <div>
-          <h2>{t.adminAudit}</h2>
-          <small>{t.adminAuditEn}</small>
-          <p>{t.lastAudit}</p>
-          <p>{t.pendingActions}</p>
-          <p>{t.ledgerStatus}</p>
-        </div>
-        <button style={styles.auditButton} onClick={() => (window.location.hash = '/finance')}>{t.auditLog}</button>
       </section>
 
       <section style={styles.grid}>
@@ -301,6 +310,28 @@ export function WalletPage({ lang }: Props) {
             {t.amount}
             <input dir="ltr" style={styles.input} value={amountMinor} onChange={(event) => setAmountMinor(event.target.value)} />
           </label>
+          <div style={styles.actions}>
+            <button
+              style={giftCurrency === 'SYP' ? styles.primaryButton : styles.secondaryButton}
+              onClick={() => setGiftCurrency('SYP')}
+              type="button"
+            >
+              {t.currencySyp}
+            </button>
+            <button
+              style={giftCurrency === 'USD' ? styles.primaryButton : styles.secondaryButton}
+              onClick={() => setGiftCurrency('USD')}
+              type="button"
+            >
+              {t.currencyUsd}
+            </button>
+          </div>
+          {giftCurrency === 'USD' && (
+            <div style={styles.meta}>
+              <span>{t.roundedAmount}</span>
+              <strong dir="ltr">{moneyText(roundUsdUpToStep(Number(amountMinor) || 0), 'USD', lang)}</strong>
+            </div>
+          )}
           <label style={styles.label}>
             {t.message}
             <input style={styles.input} value={message} onChange={(event) => setMessage(event.target.value)} />
@@ -330,9 +361,9 @@ export function WalletPage({ lang }: Props) {
 
         <article style={styles.card}>
           <h2 style={styles.cardTitle}>{t.entries}</h2>
-          {entries.length ? (
+          {allEntries.length ? (
             <div style={styles.stack}>
-              {entries.map((entry, index) => (
+              {allEntries.map((entry, index) => (
                 <div key={String(entry.id || index)} style={styles.entry}>
                   <strong>{statusText(String(entry.type || '-'), lang)}</strong>
                   <span dir={isAr ? 'rtl' : 'ltr'}>
@@ -371,9 +402,6 @@ const styles: Record<string, CSSProperties> = {
   statusPills: { display: 'flex', gap: 10, justifyContent: 'end', flexWrap: 'wrap' },
   iconActions: { display: 'grid', gap: 18, gridTemplateColumns: 'repeat(5, minmax(120px, 1fr))' },
   iconButton: { minHeight: 90, border: 0, background: 'transparent', color: '#fff', display: 'grid', gap: 10, justifyItems: 'center', fontWeight: 900 },
-  auditPanel: { border: '1px solid #1e1e2a', borderLeft: '5px solid #5268ff', borderRadius: 8, background: '#111118', padding: 20, display: 'grid', gap: 16, gridTemplateColumns: 'minmax(180px, .7fr) minmax(0, 1fr)', alignItems: 'center', boxShadow: '0 16px 40px rgba(0,0,0,.32)' },
-  auditIcon: { color: '#5268ff', fontSize: 26 },
-  auditButton: { gridColumn: '1 / -1', minHeight: 46, border: 0, borderRadius: 8, background: '#20202c', color: '#fff', fontWeight: 950 },
   protectedCard: { border: '1px solid rgba(32,210,155,.4)', borderRadius: 8, background: 'rgba(32,210,155,.08)', padding: 16, display: 'grid', gap: 10, alignContent: 'center' },
   protectedBadge: { width: 'fit-content', border: '1px solid rgba(32,210,155,.45)', borderRadius: 999, color: '#20d29b', padding: '6px 10px', fontSize: 12, fontWeight: 950 },
   balance: { border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', display: 'flex', justifyContent: 'space-between', gap: 12, padding: 14, color: '#9aa6ba' },

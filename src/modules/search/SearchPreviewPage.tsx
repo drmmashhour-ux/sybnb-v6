@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { fetchApprovedListings, isSampleListing, type PlatformListing } from '../../shared/api/platformApi'
+import { fetchApprovedListings, isSampleListing, type ListingSearchFilters, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { SearchStateCard } from './SearchStates'
 import { UnifiedSearchBar } from './UnifiedSearchBar'
@@ -166,7 +166,10 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
     setLastSearch(value || null)
 
     try {
-      const results = await fetchApprovedListings(toApiDivision(value?.division || effectiveInitialDivision))
+      const results = await fetchApprovedListings(
+        toApiDivision(value?.division || effectiveInitialDivision),
+        value ? toListingSearchFilters(value) : {},
+      )
       setListings(results)
       setState('empty')
     } catch {
@@ -233,6 +236,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
                 <img src={listingImage(listing)} alt="" loading="lazy" />
                 <div className="search-result-body">
                   <span className="search-result-status">{statusText(listing.status, lang)}</span>
+                  {listing.hasActiveOffer && (
+                    <span className="search-result-offer-badge">{lang === 'ar' ? '🔥 عرض خاص' : '🔥 Special offer'}</span>
+                  )}
                   <h2>{listingTitleText(listing, lang)}</h2>
                   <p>{listingDescriptionText(listing, lang) || t.pendingOnly}</p>
                   <div className="search-result-meta">
@@ -294,6 +300,34 @@ function searchSummary(value: UnifiedSearchValue, lang: Lang) {
     value.checkOut,
     value.keyword,
   ].filter(Boolean).join(' · ')
+}
+
+// Nightly-rate bands in SYP for the "price" quick filter chip (any/low/mid/high). These are a
+// product-level judgment call, not derived from data — adjust here if the bands feel off.
+const PRICE_BANDS: Record<string, { minPrice?: number; maxPrice?: number }> = {
+  low: { maxPrice: 150000 },
+  mid: { minPrice: 150000, maxPrice: 300000 },
+  high: { minPrice: 300000 },
+}
+
+function toListingSearchFilters(value: UnifiedSearchValue): ListingSearchFilters {
+  const band = value.priceBand && value.priceBand !== 'any' ? PRICE_BANDS[value.priceBand] : undefined
+  const isStaysSearch = value.division === 'stays'
+  return {
+    governorate: value.governorate || undefined,
+    city: value.city || undefined,
+    area: value.area || undefined,
+    propertyType: value.propertyType && value.propertyType !== 'any' ? value.propertyType : undefined,
+    roomType: isStaysSearch && value.roomType && value.roomType !== 'any' ? value.roomType : undefined,
+    bedType: isStaysSearch && value.bedType && value.bedType !== 'any' ? value.bedType : undefined,
+    bedrooms: isStaysSearch && value.bedroomsCount > 0 ? value.bedroomsCount : undefined,
+    bathrooms: isStaysSearch && value.bathrooms > 0 ? value.bathrooms : undefined,
+    amenities: value.amenities?.length ? value.amenities : undefined,
+    checkIn: isStaysSearch && value.checkIn ? value.checkIn : undefined,
+    checkOut: isStaysSearch && value.checkOut ? value.checkOut : undefined,
+    sort: value.sort === 'priceLow' ? 'priceAsc' : value.sort === 'priceHigh' ? 'priceDesc' : undefined,
+    ...band,
+  }
 }
 
 function toApiDivision(division: UnifiedSearchValue['division']) {

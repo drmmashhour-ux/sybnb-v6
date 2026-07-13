@@ -2,14 +2,21 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
+  fetchAdminPayouts,
+  fetchAdminRevenueSummary,
   fetchPrototypeAdminAuditLog,
   fetchPrototypeReviewQueue,
+  releaseAdminPayout,
+  type AdminPayout,
   type PlatformAdminAuditLog,
   type PlatformPaymentProof,
   type PlatformReviewBooking,
   type PlatformReviewQueue,
+  type PlatformRevenueSummary,
 } from '../../shared/api/platformApi'
 import { moneyText, providerText, statusText } from '../../shared/i18n/display'
+import { cancellationProtectionFeeMinor, strAdminShareMinor } from '../../shared/financeModel'
+import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 
 type Props = {
   lang: Lang
@@ -19,33 +26,23 @@ const copy = {
   ar: {
     back: 'العودة للإدارة',
     title: 'مصالحة المال',
-    subtitle: 'لوحة واحدة لمراجعة الأموال المحمية، إثباتات الدفع، الاسترداد، وتحويلات المالك.',
+    subtitle: 'لوحة واحدة لمراجعة الأموال المحمية، إثباتات الدفع، وتحويلات المالك — كلها بيانات حقيقية من قاعدة البيانات.',
     protectedFunds: 'أموال محمية',
     pendingProofs: 'إثباتات بانتظار القرار',
-    payoutHold: 'تحويلات مالك معلقة',
-    refundReserve: 'احتياطي الاسترداد',
+    payoutHold: 'تحويلات مضيف بانتظار الصرف',
     officialOnly: 'الدفع الرسمي فقط',
     officialCopy: 'أي دفع خارج SYBNB لا يدخل الحماية ولا يظهر في سجل المصالحة.',
     proofQueue: 'طابور إثباتات الدفع',
     adminReviewTitle: 'مراجعة الدفعات - الإدارة',
-    approve: 'موافقة',
-    reject: 'رفض',
-    aiConfidence: 'ثقة الذكاء',
-    riskFlags: 'إشارات المخاطر',
-    highTransaction: 'مبلغ غير معتاد',
-    multipleFailures: 'محاولات رفض متعددة',
-    ledgerStatus: 'حالة السجل المالي',
-    released: 'تم صرفه',
-    heldLedger: 'معلق',
-    rejected: 'مرفوض',
-    approved: 'موافق عليه',
     hostPayoutReview: 'مراجعة صرف المضيفين',
     payoutQueue: 'مسار تحويل المالك',
-    refundQueue: 'مسار الاسترداد والنزاع',
-    ledger: 'سجل المصالحة',
-    risk: 'تنبيه المخاطر',
+    payoutHoldNote: 'يبقى الصرف معلقاً حتى {days} يوماً بعد انتهاء الإقامة، ولا يظهر إلا بعد اكتمال الحجز بلا نزاع مفتوح.',
+    readyToRelease: 'جاهز للصرف',
+    waitingHold: 'ينتظر انتهاء فترة الاحتجاز',
+    releasing: 'جار التحرير...',
+    releaseError: 'تعذر تحرير هذا التحويل.',
+    ledger: 'سجل التدقيق',
     release: 'تحرير التحويل',
-    hold: 'إبقاء معلق',
     review: 'مراجعة',
     receipt: 'الإيصال',
     booking: 'الحجز',
@@ -56,38 +53,49 @@ const copy = {
     loading: 'جار التحميل',
     error: 'تعذر تحميل بيانات المصالحة',
     lanes: ['استلام الإثبات', 'مراجعة الإدارة', 'تأكيد الحجز', 'تحرير المالك'],
-    refundLanes: ['فتح النزاع', 'تجميع الأدلة', 'قرار الإدارة', 'إرجاع للمحفظة'],
+    incomeProjection: 'توقع الإيراد',
+    incomeProjectionNote: 'إيراد SYBNB الفعلي المحصّل: عمولة حجوزات الاستضافة، رسوم حماية الإلغاء (غير مستردة)، ورسوم خطط البائعين/الوكلاء/المطورين.',
+    totalCollected: 'إجمالي العمولة المحصّلة',
+    dailyAverage: 'متوسط يومي',
+    next30Days: 'توقع ٣٠ يوماً القادمة',
+    next90Days: 'توقع ٩٠ يوماً القادمة',
+    basedOnDays: 'بناءً على {days} يوماً من بيانات حقيقية',
+    noRevenueYet: 'لا توجد عمولة محصّلة بعد — التوقع سيظهر بعد أول دفعة يوافق عليها المدير.',
+    srNote: 'رحلات SR: {count} رحلة مكتملة بقيمة أجرة إجمالية {fare} — هذه أرباح السائقين، والمنصة لا تُحصّل عمولة من رحلات SR حالياً.',
+    projectionCaveat: 'هذا امتداد خطي بسيط لمتوسط حقيقي، وليس تنبؤاً بالذكاء الاصطناعي — كلما زادت بيانات الحجوزات الحقيقية، زادت دقته.',
+    whatIf: 'حاسبة افتراضية (ماذا لو)',
+    whatIfNote: 'أدخل افتراضاتك الخاصة — هذه ليست بيانات حقيقية، لكن الحساب يستخدم نفس صيغة عمولة SYBNB الفعلية (تنظيف ٥٪ + ضريبة ٢٪ + عمولة استضافة ١٠٪ من الإيجار الصافي).',
+    strBookingsPerMonth: 'حجوزات استضافة شهرياً',
+    strAvgPriceSyp: 'متوسط سعر الحجز (ل.س)',
+    strUsdSharePercent: 'نسبة الدفع بالدولار (٪)',
+    strProtectionPercent: 'نسبة شراء حماية الإلغاء (٪)',
+    srRidesPerMonth: 'رحلات SR شهرياً',
+    srAvgFareSyp: 'متوسط أجرة الرحلة (ل.س)',
+    srUsdSharePercent: 'نسبة الدفع بالدولار (٪)',
+    monthlyRevenue: 'الإيراد الشهري المتوقع',
+    annualRevenue: 'الإيراد السنوي المتوقع',
+    srDriverVolumeNote: 'أجرة رحلات SR الشهرية المفترضة: {fare} — أرباح سائقين، ليست إيراد منصة (لا عمولة على SR حالياً).',
   },
   en: {
     back: 'Back to admin',
     title: 'Finance Reconciliation',
-    subtitle: 'One control room for protected funds, payment proofs, refunds, and owner payout release.',
+    subtitle: 'One control room for protected funds, payment proofs, and owner payout release — all real, database-backed figures.',
     protectedFunds: 'Protected funds',
     pendingProofs: 'Proofs waiting decision',
-    payoutHold: 'Owner payout holds',
-    refundReserve: 'Refund reserve',
+    payoutHold: 'Host payouts awaiting release',
     officialOnly: 'Official payments only',
     officialCopy: 'Payments outside SYBNB are not protected and do not appear in reconciliation.',
     proofQueue: 'Payment proof queue',
     adminReviewTitle: 'Admin Payment Review',
-    approve: 'Approve',
-    reject: 'Reject',
-    aiConfidence: 'AI Confidence',
-    riskFlags: 'Risk Flags',
-    highTransaction: 'High single transaction volume',
-    multipleFailures: 'Multiple card failure',
-    ledgerStatus: 'Ledger Status',
-    released: 'Released',
-    heldLedger: 'Held',
-    rejected: 'Rejected',
-    approved: 'Approved',
-    hostPayoutReview: 'Host Payout Review',
+    hostPayoutReview: 'Host payout review',
     payoutQueue: 'Owner payout lane',
-    refundQueue: 'Refund and dispute lane',
-    ledger: 'Reconciliation ledger',
-    risk: 'Risk alert',
+    payoutHoldNote: 'Payout stays held for {days} days after the stay ends, and only appears once the booking is completed with no open dispute.',
+    readyToRelease: 'Ready to release',
+    waitingHold: 'Waiting out the hold period',
+    releasing: 'Releasing...',
+    releaseError: 'Could not release this payout.',
+    ledger: 'Audit log',
     release: 'Release payout',
-    hold: 'Keep held',
     review: 'Review',
     receipt: 'Receipt',
     booking: 'Booking',
@@ -98,28 +106,105 @@ const copy = {
     loading: 'Loading',
     error: 'Could not load reconciliation data',
     lanes: ['Proof received', 'Admin review', 'Booking confirmed', 'Owner released'],
-    refundLanes: ['Dispute opened', 'Evidence collected', 'Admin decision', 'Wallet refund'],
+    incomeProjection: 'Income projection',
+    incomeProjectionNote: 'Real SYBNB revenue collected: booking host commission, non-refundable cancellation-protection fees, and seller/dealer/developer plan fees.',
+    totalCollected: 'Total commission collected',
+    dailyAverage: 'Daily average',
+    next30Days: 'Next 30 days (projected)',
+    next90Days: 'Next 90 days (projected)',
+    basedOnDays: 'Based on {days} days of real data',
+    noRevenueYet: 'No commission collected yet — a projection will appear after the first admin-approved payment.',
+    srNote: '{count} completed SR rides worth {fare} in total fares — that\'s driver earnings; the platform currently collects no commission on SR rides.',
+    projectionCaveat: 'This is a simple linear extrapolation of a real average, not an AI forecast — accuracy improves as more real booking data accumulates.',
+    whatIf: 'What-if calculator',
+    whatIfNote: 'Enter your own assumptions — this is not real data, but the math uses the real SYBNB commission formula (5% cleaning + 2% tax + 10% host commission on net rent).',
+    strBookingsPerMonth: 'STR bookings per month',
+    strAvgPriceSyp: 'Average booking price (SYP)',
+    strUsdSharePercent: 'Share paid in USD (%)',
+    strProtectionPercent: 'Share buying cancellation protection (%)',
+    srRidesPerMonth: 'SR rides per month',
+    srAvgFareSyp: 'Average ride fare (SYP)',
+    srUsdSharePercent: 'Share paid in USD (%)',
+    monthlyRevenue: 'Projected monthly revenue',
+    annualRevenue: 'Projected annual revenue',
+    srDriverVolumeNote: 'Assumed monthly SR fare volume: {fare} — driver earnings, not platform revenue (no SR commission today).',
   },
 }
-
-const payoutSamples = [
-  { id: 'PO-2026-1004', ownerAr: 'مالك فيلا النخيل', ownerEn: 'Palm Villa owner', amountMinor: 187500000, statusAr: 'معلق للحماية', statusEn: 'Held for protection', risk: 'gold' },
-  { id: 'PO-2026-1005', ownerAr: 'مضيف شقة المزة', ownerEn: 'Mezzeh apartment host', amountMinor: 82500000, statusAr: 'جاهز للتحرير', statusEn: 'Ready to release', risk: 'green' },
-  { id: 'PO-2026-1006', ownerAr: 'مالك مشروع سكني', ownerEn: 'New project owner', amountMinor: 312000000, statusAr: 'نزاع مفتوح', statusEn: 'Open dispute', risk: 'red' },
-]
-
-const refundSamples = [
-  { id: 'RF-2026-421', titleAr: 'اختلاف وصف الشقة', titleEn: 'Listing description mismatch', amountMinor: 45000000, statusAr: 'تجميع الأدلة', statusEn: 'Evidence review', risk: 'gold' },
-  { id: 'RF-2026-422', titleAr: 'إلغاء من المضيف', titleEn: 'Host cancellation', amountMinor: 19900000, statusAr: 'جاهز للمحفظة', statusEn: 'Ready to wallet', risk: 'green' },
-]
 
 export function FinanceReconciliationPage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
   const [auditLog, setAuditLog] = useState<PlatformAdminAuditLog[]>([])
+  const [payouts, setPayouts] = useState<AdminPayout[]>([])
+  const [payoutHoldDays, setPayoutHoldDays] = useState(14)
+  const [releasingId, setReleasingId] = useState('')
+  const [releaseError, setReleaseError] = useState('')
+  const [revenue, setRevenue] = useState<PlatformRevenueSummary | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
+
+  const [whatIfStrBookings, setWhatIfStrBookings] = useState('40')
+  const [whatIfStrAvgPrice, setWhatIfStrAvgPrice] = useState('300000')
+  const [whatIfStrUsdPercent, setWhatIfStrUsdPercent] = useState('30')
+  const [whatIfStrProtectionPercent, setWhatIfStrProtectionPercent] = useState('20')
+  const [whatIfSrRides, setWhatIfSrRides] = useState('90')
+  const [whatIfSrAvgFare, setWhatIfSrAvgFare] = useState('35000')
+  const [whatIfSrUsdPercent, setWhatIfSrUsdPercent] = useState('30')
+
+  const whatIf = useMemo(() => {
+    const strBookings = Math.max(0, Number(whatIfStrBookings) || 0)
+    const strAvgPriceSyp = Math.max(0, Number(whatIfStrAvgPrice) || 0)
+    const strUsdPercent = Math.min(100, Math.max(0, Number(whatIfStrUsdPercent) || 0))
+    const strProtectionPercent = Math.min(100, Math.max(0, Number(whatIfStrProtectionPercent) || 0))
+    const srRides = Math.max(0, Number(whatIfSrRides) || 0)
+    const srAvgFareSyp = Math.max(0, Number(whatIfSrAvgFare) || 0)
+    const srUsdPercent = Math.min(100, Math.max(0, Number(whatIfSrUsdPercent) || 0))
+
+    const strUsdBookings = Math.round(strBookings * (strUsdPercent / 100))
+    const strSypBookings = strBookings - strUsdBookings
+    const strAvgPriceUsd = sypMinorToRoundedUsdMinor(strAvgPriceSyp)
+
+    const sypCommissionPerBooking = strAdminShareMinor(strAvgPriceSyp)
+    const usdCommissionPerBooking = strAdminShareMinor(strAvgPriceUsd)
+    const sypProtectionPerBooking = cancellationProtectionFeeMinor(strAvgPriceSyp)
+    const usdProtectionPerBooking = cancellationProtectionFeeMinor(strAvgPriceUsd)
+
+    const monthlySypRevenue =
+      strSypBookings * sypCommissionPerBooking +
+      strSypBookings * (strProtectionPercent / 100) * sypProtectionPerBooking
+    const monthlyUsdRevenue =
+      strUsdBookings * usdCommissionPerBooking +
+      strUsdBookings * (strProtectionPercent / 100) * usdProtectionPerBooking
+
+    const srUsdRides = Math.round(srRides * (srUsdPercent / 100))
+    const srSypRides = srRides - srUsdRides
+    const srAvgFareUsd = sypMinorToRoundedUsdMinor(srAvgFareSyp)
+    const srSypFareVolume = srSypRides * srAvgFareSyp
+    const srUsdFareVolume = srUsdRides * srAvgFareUsd
+
+    // Annual is derived from the same rounded monthly figure shown on screen (not the unrounded
+    // intermediate), so it always reads as exactly 12x the displayed monthly number.
+    const roundedMonthlySyp = Math.round(monthlySypRevenue)
+    const roundedMonthlyUsd = Math.round(monthlyUsdRevenue)
+
+    return {
+      monthlySypRevenue: roundedMonthlySyp,
+      monthlyUsdRevenue: roundedMonthlyUsd,
+      annualSypRevenue: roundedMonthlySyp * 12,
+      annualUsdRevenue: roundedMonthlyUsd * 12,
+      srSypFareVolume,
+      srUsdFareVolume,
+    }
+  }, [
+    whatIfStrBookings,
+    whatIfStrAvgPrice,
+    whatIfStrUsdPercent,
+    whatIfStrProtectionPercent,
+    whatIfSrRides,
+    whatIfSrAvgFare,
+    whatIfSrUsdPercent,
+  ])
 
   useEffect(() => {
     void loadFinance()
@@ -129,16 +214,35 @@ export function FinanceReconciliationPage({ lang }: Props) {
     setStatus('loading')
     setMessage('')
     try {
-      const [nextQueue, nextAuditLog] = await Promise.all([
+      const [nextQueue, nextAuditLog, nextPayouts, nextRevenue] = await Promise.all([
         fetchPrototypeReviewQueue(),
         fetchPrototypeAdminAuditLog(10),
+        fetchAdminPayouts(),
+        fetchAdminRevenueSummary(),
       ])
       setQueue(nextQueue)
       setAuditLog(nextAuditLog)
+      setPayouts(nextPayouts.payouts)
+      setPayoutHoldDays(nextPayouts.holdDays)
+      setRevenue(nextRevenue)
       setStatus('ready')
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function releasePayout(bookingId: string) {
+    setReleasingId(bookingId)
+    setReleaseError('')
+    try {
+      await releaseAdminPayout(bookingId)
+      const nextPayouts = await fetchAdminPayouts()
+      setPayouts(nextPayouts.payouts)
+    } catch (error) {
+      setReleaseError(error instanceof Error ? error.message : t.releaseError)
+    } finally {
+      setReleasingId('')
     }
   }
 
@@ -149,8 +253,7 @@ export function FinanceReconciliationPage({ lang }: Props) {
     const bookingTotal = bookings.reduce((sum, booking) => sum + booking.amountMinor, 0)
     return paymentTotal + bookingTotal
   }, [bookings, payments])
-  const payoutHoldMinor = payoutSamples.reduce((sum, item) => sum + item.amountMinor, 0)
-  const refundReserveMinor = refundSamples.reduce((sum, item) => sum + item.amountMinor, 0)
+  const payoutHoldMinor = useMemo(() => payouts.reduce((sum, payout) => sum + payout.hostPayoutMinor, 0), [payouts])
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -181,104 +284,18 @@ export function FinanceReconciliationPage({ lang }: Props) {
         <FinanceStat label={t.protectedFunds} value={moneyText(protectedMinor, 'SYP', lang)} tone="#20d29b" />
         <FinanceStat label={t.pendingProofs} value={String(payments.length)} tone="#5268ff" />
         <FinanceStat label={t.payoutHold} value={moneyText(payoutHoldMinor, 'SYP', lang)} tone="#e5b80b" />
-        <FinanceStat label={t.refundReserve} value={moneyText(refundReserveMinor, 'SYP', lang)} tone="#ff5f7d" />
       </section>
 
       <section style={styles.grid}>
         <article style={styles.card}>
           <div style={styles.reviewHeader}>
-            <span style={styles.pendingPill}>{payments.length || 24} Pending</span>
+            <span style={styles.pendingPill}>{payments.length} {isAr ? 'بانتظار المراجعة' : 'Pending'}</span>
             <h2 style={styles.cardTitle}>{t.adminReviewTitle}</h2>
           </div>
           {status === 'loading' && <p style={styles.empty}>{t.loading}</p>}
           {payments.length ? payments.slice(0, 4).map((payment) => (
             <PaymentProofRow key={payment.id} payment={payment} lang={lang} labels={t} />
-          )) : status !== 'loading' && [12400, 3200, 1500, 45000].map((amount, index) => (
-            <PaymentProofRow
-              key={amount}
-              payment={{
-                id: `USR-${index + 7700}`,
-                bookingId: `BK-${index + 42}`,
-                userId: `USR-${index}`,
-                provider: index % 2 === 0 ? 'SHAM_CASH' : 'BANK_TRANSFER',
-                status: 'PENDING_ADMIN_REVIEW',
-                amountMinor: amount,
-                currency: 'SAR',
-                proofAssetUrl: null,
-                providerRef: `USR-${index + 7700}`,
-                adminNote: null,
-                reviewedById: null,
-                reviewedAt: null,
-              }}
-              lang={lang}
-              labels={t}
-            />
-          ))}
-        </article>
-
-        <article style={styles.card}>
-          <h2 style={styles.cardTitle}>{t.riskFlags}</h2>
-          <section style={styles.riskGrid}>
-            <article style={styles.riskCard}>
-              <strong>94%</strong>
-              <span>{t.highTransaction}</span>
-              <button onClick={() => (window.location.hash = '/operations')}>{t.review}</button>
-            </article>
-            <article style={styles.riskCard}>
-              <strong>88%</strong>
-              <span>{t.multipleFailures}</span>
-              <button onClick={() => (window.location.hash = '/admin/review')}>{t.review}</button>
-            </article>
-          </section>
-          <h2 style={styles.cardTitle}>{t.ledgerStatus}</h2>
-          <section style={styles.ledgerStats}>
-            <FinanceStat label={t.released} value="14,200" tone="#5268ff" />
-            <FinanceStat label={t.heldLedger} value="8,940" tone="#e5b80b" />
-            <FinanceStat label={t.rejected} value="2,100" tone="#ff5f7d" />
-            <FinanceStat label={t.approved} value="42,500" tone="#20d29b" />
-          </section>
-        </article>
-      </section>
-
-      <section style={styles.card}>
-        <h2 style={styles.cardTitle}>{t.hostPayoutReview}</h2>
-        <div style={styles.payoutTable}>
-          {payoutSamples.map((payout) => (
-            <article key={payout.id} style={styles.financeRow}>
-              <span style={{ ...styles.riskDot, background: riskColor(payout.risk) }} />
-              <div>
-                <strong>{isAr ? payout.ownerAr : payout.ownerEn}</strong>
-                <small dir="ltr">{payout.id}</small>
-              </div>
-              <b>{moneyText(payout.amountMinor, 'SYP', lang)}</b>
-              <div style={styles.rowActions}>
-                <button onClick={() => (window.location.hash = '/admin/review')}>{payout.risk === 'green' ? t.release : t.hold}</button>
-                <button onClick={() => (window.location.hash = '/operations')}>{t.review}</button>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section style={styles.grid}>
-        <article style={styles.card}>
-          <h2 style={styles.cardTitle}>{t.refundQueue}</h2>
-          <div style={styles.timeline}>
-            {t.refundLanes.map((lane, index) => (
-              <span key={lane} style={index <= 1 ? styles.timelineActive : undefined}>{lane}</span>
-            ))}
-          </div>
-          {refundSamples.map((refund) => (
-            <article key={refund.id} style={styles.financeRow}>
-              <span style={{ ...styles.riskDot, background: riskColor(refund.risk) }} />
-              <div>
-                <strong>{isAr ? refund.titleAr : refund.titleEn}</strong>
-                <small dir="ltr">{refund.id}</small>
-              </div>
-              <b>{moneyText(refund.amountMinor, 'SYP', lang)}</b>
-              <button onClick={() => (window.location.hash = `/booking/dispute/${refund.id}`)}>{t.review}</button>
-            </article>
-          ))}
+          )) : status !== 'loading' && <p style={styles.empty}>{t.empty}</p>}
         </article>
 
         <article style={styles.card}>
@@ -297,6 +314,122 @@ export function FinanceReconciliationPage({ lang }: Props) {
             )) : <p style={styles.empty}>{t.empty}</p>}
           </div>
         </article>
+      </section>
+
+      <section style={styles.card}>
+        <h2 style={styles.cardTitle}>{t.hostPayoutReview}</h2>
+        <p style={styles.empty}>{t.payoutHoldNote.replace('{days}', String(payoutHoldDays))}</p>
+        {releaseError && <p style={{ ...styles.empty, color: '#ff8aa0' }}>{releaseError}</p>}
+        <div style={styles.payoutTable}>
+          {payouts.length ? payouts.map((payout) => (
+            <article key={payout.bookingId} style={styles.financeRow}>
+              <span style={{ ...styles.riskDot, background: payout.eligibleNow ? '#20d29b' : '#e5b80b' }} />
+              <div>
+                <strong>{payout.listingTitle || payout.bookingId.slice(0, 8).toUpperCase()}</strong>
+                <small dir="ltr">{payout.hostName || payout.hostId?.slice(0, 8).toUpperCase()}</small>
+              </div>
+              <b>{moneyText(payout.hostPayoutMinor, payout.currency, lang)}</b>
+              <span>{payout.eligibleNow ? t.readyToRelease : t.waitingHold}</span>
+              <button
+                disabled={!payout.eligibleNow || releasingId === payout.bookingId}
+                onClick={() => void releasePayout(payout.bookingId)}
+              >
+                {releasingId === payout.bookingId ? t.releasing : t.release}
+              </button>
+            </article>
+          )) : <p style={styles.empty}>{t.empty}</p>}
+        </div>
+      </section>
+
+      <section style={styles.card}>
+        <h2 style={styles.cardTitle}>{t.incomeProjection}</h2>
+        <p style={styles.empty}>{t.incomeProjectionNote}</p>
+        {revenue && revenue.byCurrency.length ? (
+          revenue.byCurrency.map((entry) => (
+            <div key={entry.currency}>
+              <p style={styles.empty}>
+                <b dir="ltr">{entry.currency}</b>
+              </p>
+              <section style={styles.stats}>
+                <FinanceStat label={t.totalCollected} value={moneyText(entry.totalRevenueMinor, entry.currency, lang)} tone="#20d29b" />
+                <FinanceStat label={t.dailyAverage} value={moneyText(entry.projection.dailyAverageMinor, entry.currency, lang)} tone="#5268ff" />
+                <FinanceStat label={t.next30Days} value={moneyText(entry.projection.next30DaysMinor, entry.currency, lang)} tone="#e5b80b" />
+                <FinanceStat label={t.next90Days} value={moneyText(entry.projection.next90DaysMinor, entry.currency, lang)} tone="#ff5f7d" />
+              </section>
+              <p style={styles.empty}>{t.basedOnDays.replace('{days}', String(entry.projection.elapsedDays))}</p>
+            </div>
+          ))
+        ) : (
+          <p style={styles.empty}>{t.noRevenueYet}</p>
+        )}
+        {revenue && (
+          <p style={styles.empty}>
+            {t.srNote
+              .replace('{count}', String(revenue.srRidesCompletedCount))
+              .replace('{fare}', moneyText(revenue.srRidesFareVolumeMinor, 'SYP', lang))}
+          </p>
+        )}
+        <p style={styles.empty}>{t.projectionCaveat}</p>
+      </section>
+
+      <section style={styles.card}>
+        <h2 style={styles.cardTitle}>{t.whatIf}</h2>
+        <p style={styles.empty}>{t.whatIfNote}</p>
+        <div style={styles.grid}>
+          <div style={styles.payoutTable}>
+            <label style={styles.label}>
+              {t.strBookingsPerMonth}
+              <input style={styles.numberInput} dir="ltr" value={whatIfStrBookings} onChange={(event) => setWhatIfStrBookings(event.target.value)} />
+            </label>
+            <label style={styles.label}>
+              {t.strAvgPriceSyp}
+              <input style={styles.numberInput} dir="ltr" value={whatIfStrAvgPrice} onChange={(event) => setWhatIfStrAvgPrice(event.target.value)} />
+            </label>
+            <label style={styles.label}>
+              {t.strUsdSharePercent}
+              <input style={styles.numberInput} dir="ltr" value={whatIfStrUsdPercent} onChange={(event) => setWhatIfStrUsdPercent(event.target.value)} />
+            </label>
+            <label style={styles.label}>
+              {t.strProtectionPercent}
+              <input style={styles.numberInput} dir="ltr" value={whatIfStrProtectionPercent} onChange={(event) => setWhatIfStrProtectionPercent(event.target.value)} />
+            </label>
+          </div>
+          <div style={styles.payoutTable}>
+            <label style={styles.label}>
+              {t.srRidesPerMonth}
+              <input style={styles.numberInput} dir="ltr" value={whatIfSrRides} onChange={(event) => setWhatIfSrRides(event.target.value)} />
+            </label>
+            <label style={styles.label}>
+              {t.srAvgFareSyp}
+              <input style={styles.numberInput} dir="ltr" value={whatIfSrAvgFare} onChange={(event) => setWhatIfSrAvgFare(event.target.value)} />
+            </label>
+            <label style={styles.label}>
+              {t.srUsdSharePercent}
+              <input style={styles.numberInput} dir="ltr" value={whatIfSrUsdPercent} onChange={(event) => setWhatIfSrUsdPercent(event.target.value)} />
+            </label>
+          </div>
+        </div>
+
+        <p style={styles.empty}>
+          <b>{t.monthlyRevenue}</b>
+        </p>
+        <section style={styles.stats}>
+          <FinanceStat label="SYP" value={moneyText(whatIf.monthlySypRevenue, 'SYP', lang)} tone="#20d29b" />
+          <FinanceStat label="USD" value={moneyText(whatIf.monthlyUsdRevenue, 'USD', lang)} tone="#20d29b" />
+        </section>
+        <p style={styles.empty}>
+          <b>{t.annualRevenue}</b>
+        </p>
+        <section style={styles.stats}>
+          <FinanceStat label="SYP" value={moneyText(whatIf.annualSypRevenue, 'SYP', lang)} tone="#5268ff" />
+          <FinanceStat label="USD" value={moneyText(whatIf.annualUsdRevenue, 'USD', lang)} tone="#5268ff" />
+        </section>
+        <p style={styles.empty}>
+          {t.srDriverVolumeNote.replace(
+            '{fare}',
+            `${moneyText(whatIf.srSypFareVolume, 'SYP', lang)} + ${moneyText(whatIf.srUsdFareVolume, 'USD', lang)}`,
+          )}
+        </p>
       </section>
 
       <section style={styles.card}>
@@ -322,23 +455,15 @@ function FinanceStat({ label, value, tone }: { label: string; value: string; ton
 }
 
 function PaymentProofRow({ payment, lang, labels }: { payment: PlatformPaymentProof; lang: Lang; labels: typeof copy.ar }) {
-  const confidence = Math.min(96, Math.max(38, payment.amountMinor % 100))
   return (
     <article style={styles.financeRow}>
       <span style={{ ...styles.riskDot, background: payment.status === 'PENDING_REVIEW' ? '#e5b80b' : '#20d29b' }} />
-      <div style={styles.rowActions}>
-        <button style={styles.approveButton} onClick={() => (window.location.hash = '/admin/review')}>{labels.approve}</button>
-        <button style={styles.rejectButton} onClick={() => (window.location.hash = '/admin/review')}>{labels.reject}</button>
-      </div>
       <div>
         <strong>{payment.providerRef || payment.id.slice(0, 8).toUpperCase()}</strong>
         <small>{labels.provider}: {providerText(payment.provider, lang)}</small>
       </div>
-      <div style={styles.confidence}>
-        <small>{labels.aiConfidence}</small>
-        <span style={styles.confidenceTrack}><b style={{ ...styles.confidenceFill, width: `${confidence}%` }} /></span>
-      </div>
       <b>{moneyText(payment.amountMinor, payment.currency, lang)}</b>
+      <button onClick={() => (window.location.hash = '/admin/review')}>{labels.review}</button>
       <button onClick={() => (window.location.hash = `/payment/receipt/${payment.id}`)}>{labels.receipt}</button>
     </article>
   )
@@ -358,12 +483,6 @@ function BookingFinanceCard({ booking, lang, labels }: { booking: PlatformReview
   )
 }
 
-function riskColor(risk: string) {
-  if (risk === 'green') return '#20d29b'
-  if (risk === 'red') return '#ff5f7d'
-  return '#e5b80b'
-}
-
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: '100vh', background: '#08090f', color: '#fff', padding: '24px 16px 90px', display: 'grid', gap: 16, maxWidth: 1180, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 44, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
@@ -379,19 +498,10 @@ const styles: Record<string, CSSProperties> = {
   card: { border: '1px solid #1e2942', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 12 },
   cardTitle: { margin: 0, fontSize: 22 },
   empty: { margin: 0, color: '#9aa6ba' },
-  financeRow: { border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', padding: 12, display: 'grid', gap: 10, gridTemplateColumns: '14px auto minmax(0, 1fr) minmax(90px, 140px) auto auto', alignItems: 'center' },
+  financeRow: { border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', padding: 12, display: 'grid', gap: 10, gridTemplateColumns: '14px minmax(0, 1fr) minmax(90px, 140px) auto auto', alignItems: 'center' },
   riskDot: { width: 10, height: 44, borderRadius: 999 },
-  rowActions: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
-  approveButton: { minHeight: 38, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 12px' },
-  rejectButton: { minHeight: 38, border: 0, borderRadius: 8, background: '#ff5f7d', color: '#fff', fontWeight: 950, padding: '0 12px' },
-  confidence: { display: 'grid', gap: 6, color: '#697386' },
-  confidenceTrack: { height: 6, borderRadius: 999, background: '#202333', overflow: 'hidden' },
-  confidenceFill: { display: 'block', height: '100%', borderRadius: 999, background: '#ff5f7d' },
   reviewHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   pendingPill: { border: '1px solid rgba(229,184,11,.55)', borderRadius: 999, color: '#e5b80b', padding: '6px 10px', fontWeight: 950, fontSize: 12 },
-  riskGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' },
-  riskCard: { border: '1px solid rgba(255,95,125,.35)', borderRadius: 8, background: 'rgba(255,95,125,.06)', padding: 14, display: 'grid', gap: 12 },
-  ledgerStats: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(4, minmax(100px, 1fr))' },
   payoutTable: { display: 'grid', gap: 10 },
   timeline: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))' },
   timelineActive: { borderColor: 'rgba(32,210,155,.5)', background: 'rgba(32,210,155,.12)', color: '#20d29b' },
@@ -400,4 +510,6 @@ const styles: Record<string, CSSProperties> = {
   bookingGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' },
   bookingCard: { border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', padding: 12, display: 'grid', gap: 10 },
   meta: { display: 'flex', justifyContent: 'space-between', gap: 12, color: '#9aa6ba' },
+  label: { display: 'grid', gap: 7, color: '#9aa6ba', fontSize: 12, fontWeight: 900 },
+  numberInput: { minHeight: 44, border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#fff', padding: '0 14px', fontWeight: 900 },
 }

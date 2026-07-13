@@ -81,6 +81,24 @@ a {
     #0a0f1d;
 }
 
+.skip-link {
+  position: absolute;
+  top: -999px;
+  left: 0;
+  z-index: 1000;
+  background: #12142a;
+  color: #f7f8ff;
+  padding: 12px 20px;
+  border-radius: 0 0 8px 0;
+  border: 1px solid rgba(82, 104, 255, 0.6);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
 .final-isolated-watermark {
   background: rgba(213, 169, 21, 0.14);
   border: 1px solid rgba(213, 169, 21, 0.42);
@@ -158,6 +176,10 @@ a {
 
 .top-nav-logo {
   border-radius: 8px;
+  /* The scaled logo image below visually bleeds past this box by design (it fills more space
+     than its source asset's native box) — clip that bleed to the box edge so it never
+     contributes to the page's scrollWidth (found causing horizontal overflow at 320px). */
+  overflow: hidden;
 }
 
 .top-nav-logo img {
@@ -179,6 +201,11 @@ a {
 .nav-actions {
   align-items: center;
   display: flex;
+  /* Without wrap, a narrow viewport (found overflowing at 320px) squeezes .language-switch down
+     to a couple of px instead of letting it drop to its own row — its buttons keep their
+     min-width and bleed out of that squeezed box instead. flex-wrap only changes anything once
+     children stop fitting on one row, so this is a no-op at wider widths. */
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -3588,17 +3615,13 @@ a {
 }
 
 .landing-hero-mark {
-  align-items: center;
-  border: 2px solid #d9b800;
-  border-radius: 50%;
-  color: #d9b800;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 1px solid #d9b800;
+  border-radius: 16px;
   display: none;
-  font-size: 58px;
-  font-weight: 200;
-  height: 112px;
-  justify-content: center;
-  line-height: 1;
-  width: 112px;
+  object-fit: cover;
+  width: 100%;
 }
 
 .landing-hero h1 {
@@ -4283,7 +4306,7 @@ a {
   }
 
   .landing-hero-mark {
-    display: inline-flex;
+    display: block;
   }
 
   .landing-hero h1 {
@@ -4420,6 +4443,22 @@ a {
 
   .landing-stats {
     display: none;
+  }
+}
+
+/* Genuinely narrow phones (iPhone SE class, ~320-375px): at the max-width:760px breakpoint above,
+   .top-nav is a 3-column grid (logo | language switch | login+signup) with .nav-actions flattened
+   via display:contents. The language switch (~108px) and login+signup (~188px) together need more
+   width than the logo's column can give up at 320px, causing real horizontal page overflow (found
+   via automated testing — test/browser/smoke.spec.ts). Nothing here hides functionality; it moves
+   the language switch + auth actions to their own full-width row below the logo, wrapping within
+   that row if they still don't both fit, instead of overflowing the page. */
+@media (max-width: 400px) {
+  .nav-actions {
+    display: flex;
+    flex-wrap: wrap;
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 }
 
@@ -5175,6 +5214,17 @@ a {
   font-size: 12px;
   font-weight: 950;
   text-transform: uppercase;
+}
+
+.search-result-offer-badge {
+  background: rgba(213, 169, 21, 0.16);
+  border-radius: 999px;
+  color: #d5a915;
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 3px 10px;
+  width: fit-content;
 }
 
 .search-result-body h2 {
@@ -6611,6 +6661,15 @@ a {
   gap: 20px;
   grid-template-columns: minmax(260px, 1fr) auto minmax(160px, 1fr);
   min-height: 64px;
+}
+
+.ai-brain-alert {
+  background: rgba(255, 96, 96, 0.1);
+  border: 1px solid rgba(255, 96, 96, 0.45);
+  border-radius: 8px;
+  color: #ffd1d1;
+  margin: 16px 24px;
+  padding: 14px;
 }
 
 .ai-brain-top > div {

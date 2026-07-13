@@ -40,6 +40,14 @@ export async function handleDriver(req, res, url, context) {
       orderBy: { requestedAt: 'desc' },
       take: 50,
     })
+    const completedRides = rides.filter((ride) => ride.status === 'COMPLETED')
+    // updatedAt is Prisma's @updatedAt column, last written on the COMPLETED transition itself
+    // (that status is terminal — see assertDriverRideTransition — so no later write can move it
+    // again), which makes it a reliable stand-in for "completed at" without a dedicated column.
+    const todayStart = new Date()
+    todayStart.setUTCHours(0, 0, 0, 0)
+    const completedToday = completedRides.filter((ride) => ride.updatedAt >= todayStart)
+
     return json(res, 200, {
       ok: true,
       overview: {
@@ -48,14 +56,15 @@ export async function handleDriver(req, res, url, context) {
           email: context.user.email,
           displayName: context.user.displayName,
           roles: context.roles,
+          idDocumentStatus: context.user.idDocumentStatus,
         },
         totals: {
           assigned: rides.length,
           active: rides.filter((ride) => ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(ride.status)).length,
-          completed: rides.filter((ride) => ride.status === 'COMPLETED').length,
-          earningsMinor: rides
-            .filter((ride) => ride.status === 'COMPLETED')
-            .reduce((sum, ride) => sum + (ride.fareMinor || 0), 0),
+          completed: completedRides.length,
+          earningsMinor: completedRides.reduce((sum, ride) => sum + (ride.fareMinor || 0), 0),
+          todayCompletedCount: completedToday.length,
+          todayEarningsMinor: completedToday.reduce((sum, ride) => sum + (ride.fareMinor || 0), 0),
         },
         rides,
       },

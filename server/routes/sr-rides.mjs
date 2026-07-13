@@ -15,6 +15,7 @@ export async function handleSrRides(req, res, url, context) {
       lowDataMode: Boolean(body.lowDataMode),
       pickupCoordsOverride: body.pickupCoords,
       dropoffCoordsOverride: body.dropoffCoords,
+      currency: body.currency,
     })
     return json(res, 200, { ok: true, quote })
   }
@@ -33,6 +34,7 @@ export async function handleSrRides(req, res, url, context) {
       lowDataMode: Boolean(body.lowDataMode),
       pickupCoordsOverride: body.pickupCoords,
       dropoffCoordsOverride: body.dropoffCoords,
+      currency: body.currency,
     })
 
     const ride = await db().rideRequest.create({
@@ -42,7 +44,7 @@ export async function handleSrRides(req, res, url, context) {
         dropoffLocationId: body.dropoffLocationId || undefined,
         status: 'REQUESTED',
         fareMinor: quote.fareMinor,
-        currency: body.currency || 'SYP',
+        currency: quote.currency,
         metadata: {
           ...(body.metadata || {}),
           pickup,
@@ -60,7 +62,7 @@ export async function handleSrRides(req, res, url, context) {
         SET
           pickup_geo = ${quote.pickupCoords ? `SRID=4326;POINT(${quote.pickupCoords.lng} ${quote.pickupCoords.lat})` : null}::geometry,
           dropoff_geo = ${quote.dropoffCoords ? `SRID=4326;POINT(${quote.dropoffCoords.lng} ${quote.dropoffCoords.lat})` : null}::geometry
-        WHERE id = ${ride.id}::uuid
+        WHERE id::text = ${ride.id}
       `
     }
 

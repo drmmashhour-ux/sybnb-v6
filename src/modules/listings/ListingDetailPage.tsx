@@ -2,13 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
-  createPrototypeBooking,
+  fetchAccommodation,
   fetchListingAvailability,
   fetchListingQuote,
   fetchListingReviews,
   fetchPrototypeListing,
   sendListingInquiryMessage,
-  type PlatformBooking,
   type PlatformListing,
   type PlatformListingReview,
 } from '../../shared/api/platformApi'
@@ -17,15 +16,13 @@ import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSn
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
+import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 
 type Props = {
   listingId: string
   lang: Lang
 }
 
-
-const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
-const GUEST_SESSION_TOKEN_KEY = 'sybnb-v6-guest-token'
 
 const copy = {
   ar: {
@@ -36,19 +33,14 @@ const copy = {
     owner: 'المالك',
     division: 'القسم',
     status: 'الحالة',
-    request: 'إرسال الطلب',
     saving: 'جار الإرسال',
-    requestStatus: 'حالة الطلب',
     dashboard: 'فتح الحساب / تسجيل الدخول',
-    payment: 'متابعة الحجز',
     reference: 'رقم الإعلان',
     syrianPound: 'ل.س',
     protected: 'محمي عبر SYBNB',
-    trustScore: 'درجة الثقة',
     verifiedOwner: 'مالك موثق',
-    fastResponse: 'رد سريع',
+    verificationPending: 'التحقق قيد المراجعة',
     paymentProtected: 'الدفع محمي',
-    aiFit: 'مطابقة البحث',
     nextSteps: 'خطوات العميل',
     accountGate: 'سجّل الدخول أو أنشئ حساباً للمتابعة',
     accountGateCopy: 'مثل Airbnb و Booking، يستطيع العميل التصفح أولاً ثم يحتاج حساباً عند إرسال الحجز والدفع.',
@@ -64,6 +56,10 @@ const copy = {
     accountReady: 'تم تجهيز حساب العميل',
     stepRows: ['راجع تفاصيل الغرفة', 'سجّل الدخول أو أنشئ حساباً', 'أرسل الحجز', 'ادفع داخل SYBNB', 'استلم رقم التأكيد'],
     contact: 'فتح التواصل',
+    payCurrency: 'عملة الدفع',
+    payCash: 'ليرة سورية',
+    payUsd: 'دولار أمريكي',
+    usdRoundingNote: 'يُقرّب السعر بالدولار للأعلى لأقرب ٥$ لتفادي الحاجة لفكة.',
     protectionChoice: 'اختيار الحماية',
     standardRate: 'السعر العادي',
     standardCopy: 'سعر أقل، وتطبق رسوم الإلغاء حسب السياسة.',
@@ -71,15 +67,12 @@ const copy = {
     protectedCopy: 'أضف حماية الإلغاء المفاجئ واسترد قيمة الحجز بدون رسوم إلغاء.',
     protectionFee: 'رسوم الحماية',
     totalDue: 'الإجمالي المستحق',
-    agreementTitle: 'اتفاقية الإيجار اليومي',
-    agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي. أعلم أن SYBNB تخصم عمولة خدمة (10% من قيمة الإيجار) من مستحقات المضيف مقابل إدارة الحجز والدفع والحماية.',
-    agreementRequired: 'يجب قبول اتفاقية الإيجار اليومي قبل إرسال طلب الحجز.',
     datesTitle: 'اختر تاريخ الإقامة',
     datesRequired: 'اختر تاريخ الدخول والخروج قبل إرسال طلب الحجز.',
+    specialOfferBadge: (count: number, days: number) => `🔥 ${count} ليالٍ بسعر خاص خلال ${days} يوماً القادمة`,
+    specialOfferNight: 'سعر خاص',
     editDates: 'تعديل التواريخ',
     quoteLoading: 'جار حساب السعر...',
-    agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
-    agreementVersionLabel: 'الإصدار 1',
     mapTitle: 'موقع الاستضافة',
     mapCopy: 'موقع الاستضافة المختارة يظهر هنا. افتح خرائط Google لمراجعة المكان قبل إرسال طلب الحجز.',
     mapPin: 'موقع الاستضافة',
@@ -95,6 +88,8 @@ const copy = {
     reviews: 'التقييمات',
     noReviewsYet: 'لا توجد تقييمات بعد',
     reviewsCount: (count: number) => `${count} ${count === 1 ? 'تقييم' : 'تقييمات'}`,
+    otherRoomsTitle: 'غرف أخرى في هذا العقار',
+    openRoom: 'عرض هذه الغرفة',
     protectedTitle: 'محمي بواسطة SYBNB',
     rating: 'تقييم الثقة',
     howToBook: 'كيفية الحجز',
@@ -102,7 +97,6 @@ const copy = {
     instantBookExplain: 'هذه الاستضافة تفعّل الحجز الفوري: يتأكد حجزك تلقائياً فور نجاح الدفع، دون انتظار موافقة المضيف.',
     share: 'مشاركة',
     requestOnlyAfterAccount: 'افتح حسابك أو سجّل الدخول أولاً، ثم أرسل طلب الحجز.',
-    bottomContact: 'تواصل',
     inquirySentTitle: 'تم إرسال طلبك',
     inquirySentCopy: 'وصل طلبك إلى البائع/المضيف عبر صندوق الرسائل داخل SYBNB. لا حاجة للدفع الآن — سيتواصل معك الطرف الآخر من خلال المنصة.',
     openInbox: 'فتح صندوق الرسائل',
@@ -115,19 +109,14 @@ const copy = {
     owner: 'Owner',
     division: 'Division',
     status: 'Status',
-    request: 'Send request',
     saving: 'Sending',
-    requestStatus: 'Request status',
     dashboard: 'Open account / sign in',
-    payment: 'Continue booking',
     reference: 'Listing ref',
     syrianPound: 'SYP',
     protected: 'Protected by SYBNB',
-    trustScore: 'Trust score',
     verifiedOwner: 'Verified owner',
-    fastResponse: 'Fast response',
+    verificationPending: 'Verification pending',
     paymentProtected: 'Payment protected',
-    aiFit: 'Search fit',
     nextSteps: 'Customer steps',
     accountGate: 'Sign in or create an account to continue',
     accountGateCopy: 'Like Airbnb and Booking, guests can browse first and need an account when they reserve and pay.',
@@ -143,6 +132,10 @@ const copy = {
     accountReady: 'Guest account ready',
     stepRows: ['Review room details', 'Sign in or create account', 'Send booking', 'Pay inside SYBNB', 'Receive confirmation number'],
     contact: 'Open contact',
+    payCurrency: 'Payment currency',
+    payCash: 'Syrian Pound',
+    payUsd: 'US Dollar',
+    usdRoundingNote: 'USD prices round up to the nearest $5 so no one needs to make change.',
     protectionChoice: 'Protection choice',
     standardRate: 'Standard rate',
     standardCopy: 'Lower price; cancellation fees apply by policy.',
@@ -150,15 +143,12 @@ const copy = {
     protectedCopy: 'Add sudden-cancellation protection and recover the booking amount without cancellation fee.',
     protectionFee: 'Protection fee',
     totalDue: 'Total due',
-    agreementTitle: 'Short-Term Rental Agreement',
-    agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action. I understand SYBNB deducts a service commission (10% of the rent amount) from the host payout for managing the booking, payment, and protection.',
-    agreementRequired: 'You must accept the short-term rental agreement before sending the booking request.',
     datesTitle: 'Choose your stay dates',
     datesRequired: 'Choose check-in and check-out dates before sending the booking request.',
+    specialOfferBadge: (count: number, days: number) => `🔥 ${count} nights at a special price in the next ${days} days`,
+    specialOfferNight: 'Special price',
     editDates: 'Edit dates',
     quoteLoading: 'Calculating price...',
-    agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
-    agreementVersionLabel: 'Version 1',
     mapTitle: 'Stay location',
     mapCopy: 'The selected stay location appears here. Open Google Maps to review the place before sending the booking request.',
     mapPin: 'Stay location',
@@ -174,6 +164,8 @@ const copy = {
     reviews: 'Reviews',
     noReviewsYet: 'No reviews yet',
     reviewsCount: (count: number) => `${count} ${count === 1 ? 'review' : 'reviews'}`,
+    otherRoomsTitle: 'Other rooms at this property',
+    openRoom: 'View this room',
     protectedTitle: 'SYBNB Protected',
     rating: 'Trust rating',
     howToBook: 'How booking works',
@@ -181,7 +173,6 @@ const copy = {
     instantBookExplain: 'This stay has Instant Book enabled: your booking confirms automatically once payment succeeds, no host approval wait.',
     share: 'Share',
     requestOnlyAfterAccount: 'Open an account or sign in first, then send the booking request.',
-    bottomContact: 'Contact',
     inquirySentTitle: 'Your request was sent',
     inquirySentCopy: "Your request reached the seller/host through SYBNB's inbox. No payment needed now — they'll follow up with you through the platform.",
     openInbox: 'Open inbox',
@@ -203,14 +194,13 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [listing, setListing] = useState<PlatformListing | null>(null)
-  const [booking, setBooking] = useState<PlatformBooking | null>(null)
   const [inquirySent, setInquirySent] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')
   const [message, setMessage] = useState('')
   const messageRef = useRef<HTMLElement | null>(null)
+  const actionBarRef = useRef<HTMLElement | null>(null)
   const bookingDraft = useMemo(() => loadBookingDraft(listingId), [listingId])
   const [cancellationProtection, setCancellationProtection] = useState(bookingDraft.cancellationProtection ?? false)
-  const [acceptedGuestAgreement, setAcceptedGuestAgreement] = useState(bookingDraft.acceptedGuestAgreement ?? false)
   const [customerReady, setCustomerReady] = useState(false)
   const [offlineMapReady, setOfflineMapReady] = useState(false)
   const [activeTab, setActiveTab] = useState<'terms' | 'host' | 'location' | 'reviews'>('terms')
@@ -219,8 +209,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   )
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [disabledDates, setDisabledDates] = useState<Set<string>>(new Set())
-  const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number } | null>(null)
+  const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number; perNight: Array<{ date: string; priceMinor: number }> } | null>(null)
+  const [payCurrency, setPayCurrency] = useState<'SYP' | 'USD'>(bookingDraft.payCurrency ?? 'SYP')
+  const [offerSummary, setOfferSummary] = useState<{ count: number; cheapestMinor: number | null }>({ count: 0, cheapestMinor: null })
   const [quoteLoading, setQuoteLoading] = useState(false)
+  const [siblingRooms, setSiblingRooms] = useState<PlatformListing[]>([])
+  const [accommodationOfferSummary, setAccommodationOfferSummary] = useState<{ listingsWithOfferCount: number; totalListingsCount: number } | null>(null)
   const [reviewSummary, setReviewSummary] = useState<{ reviews: PlatformListingReview[]; average: number | null; count: number }>({
     reviews: [],
     average: null,
@@ -231,7 +225,13 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const actionLabel = useMemo(() => actionForDivision(listing?.division || 'STAYS', lang), [lang, listing?.division])
   const detailCopy = useMemo(() => detailCopyForDivision(listing?.division || 'STAYS', lang, t), [lang, listing?.division, t])
   const returnPath = useMemo(() => readListingReturnPath(), [])
-  const displayedTotalMinor = stayQuote?.totalMinor ?? listing?.priceMinor ?? 0
+  // Before dates are picked there's no server-computed stayQuote yet, so this falls back to the
+  // listing's own (always-SYP) base price — that fallback must go through the same USD
+  // conversion+rounding as the real quote does, or a guest who already switched to USD would
+  // briefly see a raw SYP number mislabeled as dollars (e.g. "300,000 USD" instead of "$20").
+  const displayedTotalMinor = stayQuote?.totalMinor ?? (
+    payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(listing?.priceMinor ?? 0) : listing?.priceMinor ?? 0
+  )
   const protectionFeeMinor = Math.round(displayedTotalMinor * 0.03)
   const protectedTotalMinor = displayedTotalMinor + protectionFeeMinor
   const mapTarget = listing ? listingMapTarget(listing, title, lang) : null
@@ -286,6 +286,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       }
     })
     setDisabledDates(blocked)
+    setOfferSummary({ count: response.offerNightsCount, cheapestMinor: response.cheapestOfferMinor })
   }
 
   async function loadReviews() {
@@ -298,15 +299,38 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   }
 
   useEffect(() => {
+    if (!listing?.accommodation?.id) {
+      setSiblingRooms([])
+      return
+    }
+    let cancelled = false
+    fetchAccommodation(listing.accommodation.id)
+      .then((response) => {
+        if (cancelled) return
+        setSiblingRooms(response.accommodation.listings?.filter((room) => room.id !== listing.id) || [])
+        setAccommodationOfferSummary(response.accommodation.offerSummary || null)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSiblingRooms([])
+          setAccommodationOfferSummary(null)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [listing?.accommodation?.id, listing?.id])
+
+  useEffect(() => {
     if (listing?.division !== 'STAYS' || !isValidDate(dateRange.checkIn) || !isValidDate(dateRange.checkOut)) {
       setStayQuote(null)
       return
     }
     let cancelled = false
     setQuoteLoading(true)
-    fetchListingQuote(listingId, dateRange.checkIn, dateRange.checkOut)
+    fetchListingQuote(listingId, dateRange.checkIn, dateRange.checkOut, payCurrency === 'USD' ? 'USD' : undefined)
       .then((response) => {
-        if (!cancelled) setStayQuote({ totalMinor: response.totalMinor, nights: response.nights })
+        if (!cancelled) setStayQuote({ totalMinor: response.totalMinor, nights: response.nights, perNight: response.perNight })
       })
       .catch(() => {
         if (!cancelled) setStayQuote(null)
@@ -317,7 +341,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     return () => {
       cancelled = true
     }
-  }, [listingId, listing?.division, dateRange.checkIn, dateRange.checkOut])
+  }, [listingId, listing?.division, dateRange.checkIn, dateRange.checkOut, payCurrency])
 
   useEffect(() => {
     if (message) messageRef.current?.scrollIntoView({ behavior: 'instant', block: 'center' })
@@ -325,9 +349,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const draft: BookingDraft = { dateRange, cancellationProtection, acceptedGuestAgreement }
+    const draft: BookingDraft = { dateRange, cancellationProtection, payCurrency }
     sessionStorage.setItem(bookingDraftKey(listingId), JSON.stringify(draft))
-  }, [listingId, dateRange, cancellationProtection, acceptedGuestAgreement])
+  }, [listingId, dateRange, cancellationProtection, payCurrency])
 
   async function loadListing() {
     setStatus('loading')
@@ -357,62 +381,34 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       window.location.hash = `/account/open/${listing.id}`
       return
     }
-    if (listing.division === 'STAYS' && !acceptedGuestAgreement) {
-      setMessage(t.agreementRequired)
+
+    // STAYS is a real paid booking — matching Airbnb/Booking.com's architecture, browsing and
+    // date/currency/protection selection stay on THIS page, but the actual reservation is only
+    // ever created on a dedicated review/checkout step (BookingReviewPage), never directly from
+    // here. This is what keeps "just looking around" and "committing to pay" clearly separate.
+    if (listing.division === 'STAYS') {
+      window.location.hash = `/booking/review/${listing.id}`
       return
     }
+
     setStatus('saving')
     setMessage('')
 
-    // Only STAYS is a real paid booking. Every other division ("Contact seller" / "Request
-    // item" / "Book visit") is a lightweight inquiry — it must never create a PAYMENT_PENDING
-    // booking for the full listing price. Route it through the same message-thread inquiry
-    // used by Rentals/Buy instead (see sendListingInquiryMessage / RentalsPage.tsx).
-    if (listing.division !== 'STAYS') {
-      try {
-        const introBody = isAr
-          ? `طلب تواصل جديد بخصوص "${title}".`
-          : `New inquiry about "${title}".`
-        await sendListingInquiryMessage(listing.id, introBody)
-        setInquirySent(true)
-        setStatus('ready')
-      } catch (error) {
-        setStatus('error')
-        setMessage(error instanceof Error ? error.message : t.error)
-      }
-      return
-    }
-
+    // Every other division ("Contact seller" / "Request item" / "Book visit") is a lightweight
+    // inquiry — it must never create a PAYMENT_PENDING booking for the full listing price. Route
+    // it through the same message-thread inquiry used by Rentals/Buy instead (see
+    // sendListingInquiryMessage / RentalsPage.tsx).
     try {
-      const nextBooking = await createPrototypeBooking({
-        listingId: listing.id,
-        amountMinor: displayedTotalMinor,
-        currency: listing.currency,
-        checkIn: dateRange.checkIn,
-        checkOut: dateRange.checkOut,
-        cancellationProtectionPurchased: cancellationProtection,
-        cancellationProtectionFeeMinor: cancellationProtection ? protectionFeeMinor : undefined,
-        acceptedTerms: true,
-        termsVersion: t.agreementVersion,
-      })
-      setBooking(nextBooking)
+      const introBody = isAr
+        ? `طلب تواصل جديد بخصوص "${title}".`
+        : `New inquiry about "${title}".`
+      await sendListingInquiryMessage(listing.id, introBody)
+      setInquirySent(true)
       setStatus('ready')
-      clearBookingDraft(listing.id)
-      window.location.hash = `/booking/${nextBooking.id}`
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
     }
-  }
-
-  function openContactTunnel() {
-    if (!listing || typeof window === 'undefined') return
-    if (!sessionStorage.getItem(GUEST_SESSION_TOKEN_KEY)) {
-      sessionStorage.setItem(GUEST_RETURN_PATH_KEY, '/immocontact')
-      window.location.hash = '/account/open'
-      return
-    }
-    window.location.hash = '/immocontact'
   }
 
   function saveOfflineMap() {
@@ -442,7 +438,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
         <button style={styles.arrowButton} onClick={() => (window.location.hash = returnPath)} aria-label={isAr ? 'السابق' : 'Back'}>
           ‹
         </button>
-        <button style={styles.arrowButton} disabled={!listing || status === 'saving'} onClick={() => void requestListing()} aria-label={isAr ? 'التالي' : 'Next'}>
+        <button
+          style={styles.arrowButton}
+          disabled={!listing || status === 'saving'}
+          onClick={() => actionBarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          aria-label={isAr ? 'الانتقال لإرسال الطلب' : 'Go to send request'}
+        >
           ›
         </button>
       </section>
@@ -457,7 +458,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <button style={styles.heroIconButton} onClick={shareListing} aria-label={t.share}>
               ↗
             </button>
-            <button style={styles.heroNextButton} disabled={status === 'saving'} onClick={() => void requestListing()} aria-label={isAr ? 'التالي' : 'Next'}>
+            <button
+              style={styles.heroNextButton}
+              disabled={status === 'saving'}
+              onClick={() => actionBarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+              aria-label={isAr ? 'الانتقال لإرسال الطلب' : 'Go to send request'}
+            >
               →
             </button>
             <div style={styles.media}>
@@ -491,10 +497,11 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
             <section style={styles.figmaTrustCard}>
               <strong>{t.protectedTitle}</strong>
-              <div style={styles.trustPills}>
-                <span>{t.verifiedOwner}</span>
-                <span>{t.fastResponse}</span>
-              </div>
+              {listing.owner?.idDocumentStatus === 'APPROVED' && (
+                <div style={styles.trustPills}>
+                  <span>{t.verifiedOwner}</span>
+                </div>
+              )}
               <small>
                 {reviewSummary.count > 0
                   ? `${t.rating} ${reviewSummary.average} ★ (${reviewSummary.count})`
@@ -520,6 +527,14 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               {!customerReady && <div style={styles.accountHint}>{t.requestOnlyAfterAccount}</div>}
               {listing.division === 'STAYS' && (
                 <>
+                  {!dateRange.checkIn && offerSummary.count > 0 && (
+                    <section style={styles.panel}>
+                      <strong>{t.specialOfferBadge(offerSummary.count, 180)}</strong>
+                      {offerSummary.cheapestMinor != null && (
+                        <span>{moneyText(offerSummary.cheapestMinor, listing.currency, lang)} / {isAr ? 'ليلة' : 'night'}</span>
+                      )}
+                    </section>
+                  )}
                   <section style={styles.protectionChoice}>
                     <strong>{t.datesTitle}</strong>
                     {showDatePicker ? (
@@ -550,6 +565,25 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                   </section>
 
                   <section style={styles.protectionChoice}>
+                    <strong>{t.payCurrency}</strong>
+                    <div style={styles.protectionOptions}>
+                      <button
+                        style={payCurrency === 'SYP' ? styles.protectionOptionActive : styles.protectionOption}
+                        onClick={() => setPayCurrency('SYP')}
+                      >
+                        <b>{t.payCash}</b>
+                      </button>
+                      <button
+                        style={payCurrency === 'USD' ? styles.protectionOptionActive : styles.protectionOption}
+                        onClick={() => setPayCurrency('USD')}
+                      >
+                        <b>{t.payUsd}</b>
+                        <span>{t.usdRoundingNote}</span>
+                      </button>
+                    </div>
+                  </section>
+
+                  <section style={styles.protectionChoice}>
                     <strong>{t.protectionChoice}</strong>
                     <div style={styles.protectionOptions}>
                       <button
@@ -563,8 +597,8 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                           {quoteLoading
                             ? t.quoteLoading
                             : stayQuote
-                              ? `${moneyText(stayQuote.totalMinor, listing.currency, lang)} · ${stayQuote.nights} ${isAr ? 'ليالٍ' : 'nights'}`
-                              : moneyText(listing.priceMinor, listing.currency, lang)}
+                              ? `${moneyText(stayQuote.totalMinor, payCurrency, lang)} · ${stayQuote.nights} ${isAr ? 'ليالٍ' : 'nights'}`
+                              : moneyText(listing.priceMinor, payCurrency, lang)}
                         </small>
                       </button>
                       <button
@@ -574,11 +608,28 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                         <b>{t.protectedRate}</b>
                         <span>{t.protectedCopy}</span>
                         <em style={styles.cancellationCutoff}>{freeCancellationLabel(dateRange.checkIn, true, lang)}</em>
-                        <small>{t.protectionFee}: {moneyText(protectionFeeMinor, listing.currency, lang)}</small>
-                        <small>{t.totalDue}: {moneyText(protectedTotalMinor, listing.currency, lang)}</small>
+                        <small>{t.protectionFee}: {moneyText(protectionFeeMinor, payCurrency, lang)}</small>
+                        <small>{t.totalDue}: {moneyText(protectedTotalMinor, payCurrency, lang)}</small>
                       </button>
                     </div>
                   </section>
+
+                  {payCurrency === 'SYP' && stayQuote && stayQuote.perNight.some((night) => night.priceMinor < listing.priceMinor) && (
+                    <section style={styles.grid}>
+                      {stayQuote.perNight.map((night) => (
+                        <Info
+                          key={night.date}
+                          label={night.date}
+                          value={
+                            night.priceMinor < listing.priceMinor
+                              ? `${moneyText(night.priceMinor, payCurrency, lang)} · ${t.specialOfferNight}`
+                              : moneyText(night.priceMinor, payCurrency, lang)
+                          }
+                          dir={isAr ? 'rtl' : 'ltr'}
+                        />
+                      ))}
+                    </section>
+                  )}
                 </>
               )}
             </section>
@@ -626,19 +677,15 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <section style={styles.trustGrid}>
               <article style={styles.trustCard}>
                 <strong>{t.verifiedOwner}</strong>
-                <span>✓ {listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}</span>
-              </article>
-              <article style={styles.trustCard}>
-                <strong>{t.fastResponse}</strong>
-                <span>{isAr ? '١٨ دقيقة' : '18 minutes'}</span>
+                <span>
+                  {listing.owner?.idDocumentStatus === 'APPROVED'
+                    ? `✓ ${listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}`
+                    : `${listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()} (${t.verificationPending})`}
+                </span>
               </article>
               <article style={styles.trustCard}>
                 <strong>{t.paymentProtected}</strong>
                 <span>{t.protected}</span>
-              </article>
-              <article style={styles.trustCard}>
-                <strong>{t.aiFit}</strong>
-                <span>91%</span>
               </article>
             </section>
           )}
@@ -646,7 +693,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           {activeTab === 'reviews' && (
             <>
               <section style={styles.grid}>
-                <Info label={t.trustScore} value="94/100" />
                 <Info
                   label={t.rating}
                   value={reviewSummary.count > 0 ? `${reviewSummary.average} ★ (${t.reviewsCount(reviewSummary.count)})` : t.noReviewsYet}
@@ -667,22 +713,39 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             </>
           )}
 
+          {siblingRooms.length > 0 && (
+            <section style={styles.panel}>
+              <strong>{t.otherRoomsTitle}</strong>
+              {accommodationOfferSummary && accommodationOfferSummary.listingsWithOfferCount > 0 && (
+                <span>
+                  {isAr
+                    ? `${accommodationOfferSummary.listingsWithOfferCount} من ${accommodationOfferSummary.totalListingsCount} أنواع الغرف لديها عرض خاص الآن`
+                    : `${accommodationOfferSummary.listingsWithOfferCount} of ${accommodationOfferSummary.totalListingsCount} room types have a special offer right now`}
+                </span>
+              )}
+              <section style={styles.grid}>
+                {siblingRooms.map((room) => (
+                  <article key={room.id} style={styles.info}>
+                    <span dir={isAr ? 'rtl' : 'ltr'}>
+                      {listingTitleText(room, lang)}
+                      {room.hasActiveOffer ? ` · ${t.specialOfferNight}` : ''}
+                    </span>
+                    <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(room.priceMinor, room.currency, lang)}</strong>
+                    <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${room.id}`)}>
+                      {t.openRoom}
+                    </button>
+                  </article>
+                ))}
+              </section>
+            </section>
+          )}
+
           <section style={styles.grid}>
-            <Info label={t.price} value={moneyText(displayedTotalMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+            <Info label={t.price} value={moneyText(listing.priceMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
             <Info label={t.owner} value={listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()} />
             <Info label={t.division} value={divisionText(listing.division, lang)} dir={isAr ? 'rtl' : 'ltr'} />
             {customerReady ? <Info label={t.accountReady} value="✓" dir={isAr ? 'rtl' : 'ltr'} /> : null}
-            {booking ? <Info label={t.requestStatus} value={statusText(booking.status, lang)} dir={isAr ? 'rtl' : 'ltr'} /> : null}
           </section>
-
-          {booking && (
-            <section style={styles.panel}>
-              <strong>{t.requestStatus}: {statusText(booking.status, lang)}</strong>
-              <button style={styles.primaryButton} onClick={() => (window.location.hash = `/booking/${booking.id}`)}>
-                {t.payment}
-              </button>
-            </section>
-          )}
 
           {inquirySent && (
             <section style={styles.panel}>
@@ -694,28 +757,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             </section>
           )}
 
-          <section style={styles.bottomActionBar}>
-            {listing.division === 'STAYS' && !booking && (
-              <label style={{ ...styles.agreementBox, gridColumn: '1 / -1' }}>
-                <input
-                  checked={acceptedGuestAgreement}
-                  onChange={(event) => {
-                    setAcceptedGuestAgreement(event.target.checked)
-                    if (event.target.checked && message === t.agreementRequired) setMessage('')
-                  }}
-                  style={styles.agreementInput}
-                  type="checkbox"
-                />
-                <span>
-                  <strong>{detailCopy.agreementTitle}</strong>
-                  <small>{detailCopy.agreementCopy}</small>
-                  <em>{t.agreementVersionLabel}</em>
-                </span>
-              </label>
-            )}
-            <button style={styles.secondaryButton} onClick={openContactTunnel}>
-              {t.bottomContact}
-            </button>
+          <section ref={actionBarRef} style={styles.bottomActionBar}>
             {!inquirySent && (
               <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
                 {status === 'saving' ? t.saving : customerReady ? actionLabel : t.dashboard}
@@ -752,7 +794,7 @@ function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir
 
 function actionForDivision(division: string, lang: Lang) {
   const actions: Record<string, Record<Lang, string>> = {
-    STAYS: { ar: 'إرسال طلب الحجز', en: 'Send booking request' },
+    STAYS: { ar: 'متابعة الحجز', en: 'Continue to review' },
     RENTALS: { ar: 'طلب تواصل', en: 'Request contact' },
     BUY: { ar: 'طلب زيارة', en: 'Request visit' },
     CARS: { ar: 'تواصل مع البائع', en: 'Contact seller' },
@@ -825,7 +867,7 @@ function bookingDraftKey(listingId: string) {
 type BookingDraft = {
   dateRange: DateRange
   cancellationProtection: boolean
-  acceptedGuestAgreement: boolean
+  payCurrency: 'SYP' | 'USD'
 }
 
 function loadBookingDraft(listingId: string): Partial<BookingDraft> {
@@ -836,11 +878,6 @@ function loadBookingDraft(listingId: string): Partial<BookingDraft> {
   } catch {
     return {}
   }
-}
-
-function clearBookingDraft(listingId: string) {
-  if (typeof window === 'undefined') return
-  sessionStorage.removeItem(bookingDraftKey(listingId))
 }
 
 function readListingReturnPath() {
@@ -869,7 +906,7 @@ const styles: Record<string, CSSProperties> = {
   locationLine: { color: '#9aa6ba', fontWeight: 800 },
   tabRow: { display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' },
   tab: { minHeight: 42, border: 0, borderRadius: 999, background: '#20212b', color: '#c8cede', padding: '0 18px', fontWeight: 900 },
-  tabActive: { minHeight: 42, border: '1px solid #5268ff', borderRadius: 999, background: '#5268ff', color: '#fff', padding: '0 18px', fontWeight: 950 },
+  tabActive: { minHeight: 42, border: '1px solid #4760ff', borderRadius: 999, background: '#4760ff', color: '#fff', padding: '0 18px', fontWeight: 950 },
   tabPanel: { display: 'grid', gap: 14 },
   figmaTrustCard: { border: '1px solid #232635', borderRadius: 18, background: '#151620', padding: 18, display: 'grid', gap: 14 },
   trustPills: { display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' },
@@ -898,7 +935,7 @@ const styles: Record<string, CSSProperties> = {
   mapPanel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 12 },
   mapCanvas: { minHeight: 260, border: '1px solid rgba(82,104,255,.4)', borderRadius: 8, background: '#0c1220', display: 'grid', placeItems: 'center', color: '#fff', overflow: 'hidden', position: 'relative' },
   mapFrame: { border: 0, filter: 'saturate(.86) contrast(.9)', height: '100%', inset: 0, minHeight: 260, opacity: .74, position: 'absolute', width: '100%' },
-  mapPin: { borderRadius: 999, background: '#5268ff', color: '#fff', padding: '10px 14px', fontWeight: 950, boxShadow: '0 0 0 10px rgba(82,104,255,.16)' },
+  mapPin: { borderRadius: 999, background: '#4760ff', color: '#fff', padding: '10px 14px', fontWeight: 950, boxShadow: '0 0 0 10px rgba(82,104,255,.16)' },
   mapLocationCard: { borderRadius: 8, background: 'rgba(6,10,18,.88)', border: '1px solid rgba(255,255,255,.16)', padding: 18, display: 'grid', gap: 12, placeItems: 'center', textAlign: 'center', minWidth: 260, maxWidth: '88%', position: 'relative', zIndex: 1 },
   offlineMapCard: { alignItems: 'center', border: '1px solid rgba(229,184,11,.45)', borderRadius: 8, background: 'rgba(229,184,11,.08)', color: '#f7d45f', display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr) auto', padding: 14 },
   offlineMapReady: { alignItems: 'center', border: '1px solid rgba(32,210,155,.5)', borderRadius: 8, background: 'rgba(32,210,155,.1)', color: '#9fffe1', display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr) auto', padding: 14 },
@@ -908,8 +945,6 @@ const styles: Record<string, CSSProperties> = {
   protectionOption: { minHeight: 118, border: '1px solid #30384d', borderRadius: 8, background: '#0d1320', color: '#fff', padding: 14, textAlign: 'start', display: 'grid', gap: 8 },
   protectionOptionActive: { minHeight: 118, border: '1px solid #20d29b', borderRadius: 8, background: 'rgba(32,210,155,.12)', color: '#fff', padding: 14, textAlign: 'start', display: 'grid', gap: 8 },
   cancellationCutoff: { color: '#20d29b', fontStyle: 'normal', fontWeight: 800, fontSize: 13 },
-  agreementBox: { border: '1px solid rgba(229,184,11,.58)', borderRadius: 8, background: 'rgba(229,184,11,.08)', color: '#f7d45f', padding: 14, display: 'grid', gap: 12, gridTemplateColumns: '34px minmax(0, 1fr)', alignItems: 'start', lineHeight: 1.5 },
-  agreementInput: { width: 28, height: 28, accentColor: '#20d29b', margin: 0 },
   info: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 6, color: '#9aa6ba' },
   panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#fff', padding: 14, display: 'grid', gap: 12 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },

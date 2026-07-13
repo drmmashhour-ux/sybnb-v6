@@ -11,6 +11,7 @@ import { getCurrentPath } from './routes'
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
 const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrainPage')
 const BookingDetailPage = lazyNamed(() => import('../modules/bookings/BookingDetailPage'), 'BookingDetailPage')
+const BookingReviewPage = lazyNamed(() => import('../modules/bookings/BookingReviewPage'), 'BookingReviewPage')
 const CompetitorsPage = lazyNamed(() => import('../modules/competitors/CompetitorsPage'), 'CompetitorsPage')
 const DashboardPage = lazyNamed(() => import('../modules/dashboard/DashboardPage'), 'DashboardPage')
 const DivisionLivePage = lazyNamed(() => import('../modules/divisions/DivisionLivePage'), 'DivisionLivePage')
@@ -20,6 +21,7 @@ const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'
 const GuestAccountPage = lazyNamed(() => import('../modules/account/GuestAccountPage'), 'GuestAccountPage')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
+const HostInsightsPanel = lazyNamed(() => import('../modules/host/HostInsightsPanel'), 'HostInsightsPanel')
 const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesPage'), 'HostInquiriesPage')
 const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/ImmocontactPage'), 'ImmocontactPage')
 const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'LandingPage')
@@ -69,11 +71,12 @@ export function App() {
 
   const division = findDivisionByRoute(path)
   const bookingMatch = path.match(/^\/booking\/([^/]+)$/)
+  const bookingReviewMatch = path.match(/^\/booking\/review\/([^/]+)$/)
   const listingMatch = path.match(/^\/listing\/([^/]+)$/)
   const paymentReceiptMatch = path.match(/^\/payment\/receipt\/([^/]+)$/)
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
-  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
+  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || Boolean(bookingMatch || bookingReviewMatch || bookingPaymentMatch || paymentReceiptMatch)
   const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/dashboard' || path === '/account' || path === '/wallet' ? 'generic' : 'stays'
   const hasGuestSession = typeof window !== 'undefined' && Boolean(sessionStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
@@ -98,7 +101,13 @@ export function App() {
         ) : isTrustProtectionRoute(path) ? (
           <TrustProtectionRoutes lang={lang} path={path} />
         ) : guestAccountMatch ? (
-          <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : '/stays'} />
+          // No hardcoded '/stays' fallback here: when there's no listing id in the URL (e.g. the
+          // Rentals/Buy in-page capsule search's "open account" button, which navigates to plain
+          // /account/open), GuestAccountPage's own returnPath fallback chain reads the specific
+          // return path those pages already write to sessionStorage (sybnb.v6.guestReturnPath)
+          // before the account gate. Hardcoding '/stays' here overrode that and silently sent
+          // every non-listing-scoped signup back to the Stays search page.
+          <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : undefined} />
         ) : path === '/dashboard' || path === '/account' ? (
           <DashboardPage lang={lang} />
         ) : path === '/host' ||
@@ -114,6 +123,8 @@ export function App() {
           />
         ) : path === '/host/earnings' ? (
           <HostEarningsPage lang={lang} />
+        ) : path === '/host/insights' ? (
+          <HostInsightsPanel lang={lang} />
         ) : path === '/host/inquiries' ? (
           <HostInquiriesPage lang={lang} />
         ) : path === '/driver' ? (
@@ -136,6 +147,8 @@ export function App() {
           <LegalPlaceholderPage lang={lang} page="terms" />
         ) : path === '/privacy' ? (
           <LegalPlaceholderPage lang={lang} page="privacy" />
+        ) : bookingReviewMatch ? (
+          <BookingReviewPage listingId={bookingReviewMatch[1]} lang={lang} />
         ) : bookingMatch ? (
           <BookingDetailPage bookingId={bookingMatch[1]} lang={lang} />
         ) : listingMatch ? (

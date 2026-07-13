@@ -11,6 +11,7 @@ import {
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
+import { sypMinorToRoundedUsdMinor } from '../../shared/currency'
 
 type Props = {
   lang: Lang
@@ -26,6 +27,10 @@ const copy = {
     dropoff: 'الوجهة',
     category: 'الفئة',
     fare: 'الأجرة التقديرية',
+    payCurrency: 'عملة الدفع',
+    payCash: 'نقداً (ل.س)',
+    payUsd: 'دولار أمريكي',
+    usdRoundingNote: 'الأجرة بالدولار تُقرّب للأعلى لأقرب ٥$ لتفادي الحاجة لفكة.',
     distance: 'المسافة التقديرية',
     distanceApprox: '(تقريبية بحسب العنوان)',
     request: 'طلب الرحلة',
@@ -52,6 +57,10 @@ const copy = {
     dropoff: 'Dropoff',
     category: 'Category',
     fare: 'Estimated fare',
+    payCurrency: 'Payment currency',
+    payCash: 'Cash (SYP)',
+    payUsd: 'US Dollar',
+    usdRoundingNote: 'USD fares round up to the nearest $5 so no one needs to make change.',
     distance: 'Estimated distance',
     distanceApprox: '(approximate, from address text)',
     request: 'Request ride',
@@ -71,6 +80,8 @@ const copy = {
   },
 }
 
+const ACTIVE_RIDE_ID_KEY = 'sybnb.v6.activeSrRideId'
+
 const categories = ['SR Economy', 'SR Comfort', 'SR SUV']
 
 const rideCategoryByFilter: Record<string, string> = {
@@ -86,6 +97,7 @@ export function SrRidePage({ lang }: Props) {
   const [pickup, setPickup] = useState(isAr ? 'دمشق، المالكي' : 'Damascus, Malki')
   const [dropoff, setDropoff] = useState(isAr ? 'دمشق، المزة' : 'Damascus, Mezzeh')
   const [category, setCategory] = useState(categories[0])
+  const [payCurrency, setPayCurrency] = useState<'SYP' | 'USD'>('SYP')
   const [lowDataMode, setLowDataMode] = useState(true)
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>()
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | undefined>()
@@ -101,23 +113,42 @@ export function SrRidePage({ lang }: Props) {
   const [message, setMessage] = useState('')
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
-  const fallbackFareMinor = useMemo(() => {
+  const fallbackFareSypMinor = useMemo(() => {
     const base = category === 'SR SUV' ? 58000 : category === 'SR Comfort' ? 46000 : 35000
     return lowDataMode ? base : base + 2500
   }, [category, lowDataMode])
+  const fallbackFareMinor = payCurrency === 'USD' ? sypMinorToRoundedUsdMinor(fallbackFareSypMinor) : fallbackFareSypMinor
 
   const fareMinor = quote?.fareMinor ?? fallbackFareMinor
 
   useEffect(() => {
     if (ride) return
     const timer = window.setTimeout(() => {
-      fetchSrQuote({ pickup, dropoff, category, lowDataMode, pickupCoords }).then(setQuote).catch(() => setQuote(null))
+      fetchSrQuote({ pickup, dropoff, category, currency: payCurrency, lowDataMode, pickupCoords }).then(setQuote).catch(() => setQuote(null))
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [pickup, dropoff, category, lowDataMode, pickupCoords, ride])
+  }, [pickup, dropoff, category, payCurrency, lowDataMode, pickupCoords, ride])
+
+  // The active ride otherwise lives only in this component's state — reloading the page or
+  // navigating away and back loses all track of it even though it's fully real and persisted
+  // server-side. Restore it from the last-known id on mount so the rider can still see live
+  // driver-assignment/status updates after leaving and returning to this page.
+  useEffect(() => {
+    const storedRideId = sessionStorage.getItem(ACTIVE_RIDE_ID_KEY)
+    if (!storedRideId) return
+    fetchPrototypeSrRide(storedRideId)
+      .then(setRide)
+      .catch(() => sessionStorage.removeItem(ACTIVE_RIDE_ID_KEY))
+    // Mount-only restore; requestRide() below is the sole subsequent writer of `ride`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
-    if (!ride || !['REQUESTED', 'MATCHING'].includes(ride.status)) return
+    // Poll through every non-terminal state, not just REQUESTED/MATCHING — this previously
+    // stopped the instant a driver was assigned, so the rider never saw DRIVER_ARRIVING,
+    // IN_PROGRESS, or COMPLETED without manually clicking refresh (confirmed live: the ride sat
+    // on "driver assigned" through the driver's entire arrive/start/complete sequence).
+    if (!ride || ['COMPLETED', 'CANCELLED'].includes(ride.status)) return
     const interval = window.setInterval(() => {
       fetchPrototypeSrRide(ride.id).then(setRide).catch(() => {})
     }, 4000)
@@ -155,12 +186,13 @@ export function SrRidePage({ lang }: Props) {
         pickup,
         dropoff,
         category,
-        currency: 'SYP',
+        currency: payCurrency,
         lowDataMode,
         accuracyMeters,
         pickupCoords,
       })
       setRide(nextRide)
+      sessionStorage.setItem(ACTIVE_RIDE_ID_KEY, nextRide.id)
       setStatus('idle')
       setMessage(t.saved)
     } catch (error) {
@@ -258,6 +290,27 @@ export function SrRidePage({ lang }: Props) {
             <span>{t.mode}</span>
           </label>
 
+          <section style={styles.categoryCapsule}>
+            <span style={styles.categoryTitle}>{t.payCurrency}</span>
+            <div style={styles.categoryStrip}>
+              <button
+                style={payCurrency === 'SYP' ? styles.categoryActive : styles.categoryButton}
+                onClick={() => setPayCurrency('SYP')}
+                type="button"
+              >
+                {t.payCash}
+              </button>
+              <button
+                style={payCurrency === 'USD' ? styles.categoryActive : styles.categoryButton}
+                onClick={() => setPayCurrency('USD')}
+                type="button"
+              >
+                {t.payUsd}
+              </button>
+            </div>
+            {payCurrency === 'USD' && <small>{t.usdRoundingNote}</small>}
+          </section>
+
           <div style={styles.stat}>
             <span>{t.distance}</span>
             <strong dir="ltr">
@@ -267,7 +320,7 @@ export function SrRidePage({ lang }: Props) {
 
           <div style={styles.stat}>
             <span>{t.fare}</span>
-            <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinor, 'SYP', lang)}</strong>
+            <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinor, payCurrency, lang)}</strong>
           </div>
 
           <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestRide()}>

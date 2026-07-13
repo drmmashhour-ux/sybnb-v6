@@ -17,6 +17,22 @@ function requireStripe() {
   return stripe
 }
 
+// Mirrors the client-side gate in BookingDetailPage.tsx (`hasIdDocument =
+// Boolean(booking?.guest?.idDocumentRef)`) -- that gate only hid the payment buttons in the UI,
+// it was never actually checked here, so any authenticated guest could pay for a booking via a
+// direct API call without ever uploading an ID document. Only requires the document to have been
+// uploaded (idDocumentRef set), not yet reviewed/approved -- review happens asynchronously via the
+// admin queue, same as the client-side condition.
+function requireIdDocumentUploaded(user) {
+  if (!user.idDocumentRef) {
+    const error = new Error('Upload an ID document before paying for this booking.')
+    error.statusCode = 403
+    error.code = 'ID_VERIFICATION_REQUIRED'
+    error.expose = true
+    throw error
+  }
+}
+
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
@@ -125,6 +141,7 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
+    requireIdDocumentUploaded(context.user)
 
     const totalMinor = expectedTotalMinor(booking)
     const { currency, unitAmount } = stripeChargeAmount(totalMinor)
@@ -324,6 +341,7 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
+    if (booking) requireIdDocumentUploaded(context.user)
 
     const amountMinor = Number(body.amountMinor || booking?.amountMinor || 0)
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {

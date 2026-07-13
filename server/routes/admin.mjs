@@ -39,6 +39,25 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, review })
   }
 
+  if (url.pathname === '/api/admin/host-insights') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN'])
+    const insights = await db().hostInsight.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: {
+        host: { select: { id: true, displayName: true, email: true } },
+        listing: { select: { id: true, titleAr: true, titleEn: true } },
+      },
+    })
+    const totals = {
+      generated: insights.length,
+      emailed: insights.filter((insight) => insight.emailSentAt).length,
+      read: insights.filter((insight) => insight.readAt).length,
+    }
+    return json(res, 200, { ok: true, insights, totals })
+  }
+
   if (url.pathname === '/api/admin/payouts') {
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     await completeExpiredBookings()
@@ -164,7 +183,7 @@ export async function handleAdmin(req, res, url, context) {
             include: {
               listing: {
                 include: {
-                  owner: { select: { id: true, displayName: true, email: true } },
+                  owner: { select: { id: true, displayName: true, email: true, idDocumentStatus: true } },
                 },
               },
             },
@@ -369,6 +388,134 @@ export async function handleAdmin(req, res, url, context) {
         approvedPaymentVolumeMinor: approvedPaymentVolume._sum.amountMinor || 0,
       },
     })
+  }
+
+  if (url.pathname === '/api/admin/revenue-summary') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+
+    // Platform revenue today is exactly three real wallet-entry kinds: the STR admin commission
+    // share, the (non-refundable) cancellation-protection fee, and the seller/dealer/developer
+    // plan fee — all recorded as CREDIT entries by approvePaymentProof() in finance-ledger.mjs.
+    // SR rides currently record zero platform commission (the full fare is a driver-side figure
+    // only, never credited to an admin wallet) — that's surfaced explicitly below rather than
+    // silently folded into "revenue".
+    const [commissionEntries, completedSrRides] = await Promise.all([
+      db().walletEntry.findMany({
+        where: { type: 'CREDIT', referenceType: { in: ['booking_admin_share', 'booking_protection_fee', 'seller_plan_fee'] } },
+        select: { amountMinor: true, currency: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      db().rideRequest.aggregate({
+        where: { status: 'COMPLETED' },
+        _count: { _all: true },
+        _sum: { fareMinor: true },
+      }),
+    ])
+
+    // Seller-plan fees default to USD while booking commission is SYP (see payments.mjs /
+    // bookingFinanceSplit) — summing different currencies' minor units together as one number
+    // would silently misreport the total, so each currency gets its own totals/history/projection
+    // instead of being flattened into a single (wrongly-labeled) figure.
+    const entriesByCurrency = new Map()
+    for (const entry of commissionEntries) {
+      if (!entriesByCurrency.has(entry.currency)) entriesByCurrency.set(entry.currency, [])
+      entriesByCurrency.get(entry.currency).push(entry)
+    }
+
+    const byCurrency = Array.from(entriesByCurrency.entries())
+      .map(([currency, entries]) => {
+        const totalRevenueMinor = entries.reduce((sum, entry) => sum + entry.amountMinor, 0)
+
+        const dailyTotals = new Map()
+        for (const entry of entries) {
+          const day = entry.createdAt.toISOString().slice(0, 10)
+          dailyTotals.set(day, (dailyTotals.get(day) || 0) + entry.amountMinor)
+        }
+        const history = Array.from(dailyTotals.entries())
+          .map(([day, amountMinor]) => ({ day, amountMinor }))
+          .sort((a, b) => a.day.localeCompare(b.day))
+
+        const firstDay = new Date(entries[0].createdAt)
+        const lastDay = new Date(entries[entries.length - 1].createdAt)
+        // +1 so a single day of data still divides by 1, not 0.
+        const elapsedDays = Math.max(1, Math.ceil((lastDay.getTime() - firstDay.getTime()) / 86400000) + 1)
+        const dailyAverageMinor = totalRevenueMinor / elapsedDays
+
+        return {
+          currency,
+          totalRevenueMinor,
+          sampleSize: entries.length,
+          history,
+          projection: {
+            elapsedDays,
+            dailyAverageMinor: Math.round(dailyAverageMinor),
+            next30DaysMinor: Math.round(dailyAverageMinor * 30),
+            next90DaysMinor: Math.round(dailyAverageMinor * 90),
+          },
+        }
+      })
+      .sort((a, b) => b.sampleSize - a.sampleSize)
+
+    return json(res, 200, {
+      ok: true,
+      revenue: {
+        byCurrency,
+        srRidesCompletedCount: completedSrRides._count._all,
+        srRidesFareVolumeMinor: completedSrRides._sum.fareMinor || 0,
+      },
+    })
+  }
+
+  const approveAllMatch = url.pathname.match(/^\/api\/admin\/accommodations\/([^/]+)\/approve-all$/)
+  if (approveAllMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const accommodationId = approveAllMatch[1]
+
+    const result = await db().$transaction(async (tx) => {
+      const accommodation = await tx.accommodation.findUnique({ where: { id: accommodationId } })
+      if (!accommodation) {
+        const error = new Error('Accommodation not found.')
+        error.statusCode = 404
+        error.code = 'ACCOMMODATION_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+
+      const pendingListings = await tx.listing.findMany({
+        where: { accommodationId, status: 'PENDING_REVIEW' },
+        select: { id: true },
+      })
+      // Same TOCTOU-safe re-check-in-WHERE pattern as the single-listing review-queue approval
+      // below — each room type is updated individually so a concurrent decision on one room type
+      // can't silently double-apply.
+      for (const pending of pendingListings) {
+        await tx.listing.updateMany({ where: { id: pending.id, status: 'PENDING_REVIEW' }, data: { status: 'APPROVED' } })
+      }
+
+      const accommodationUpdate =
+        accommodation.status === 'PENDING_REVIEW' ? { status: 'APPROVED' } : {}
+      const updatedAccommodation = await tx.accommodation.update({
+        where: { id: accommodationId },
+        data: accommodationUpdate,
+      })
+
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'REVIEW_APPROVED',
+          entityType: 'accommodation',
+          entityId: accommodationId,
+          before: { pendingListingIds: pendingListings.map((listing) => listing.id) },
+          after: { approvedListingIds: pendingListings.map((listing) => listing.id) },
+        },
+      })
+
+      return { accommodation: updatedAccommodation, approvedListingIds: pendingListings.map((listing) => listing.id) }
+    })
+
+    return json(res, 200, { ok: true, ...result })
   }
 
   const reviewMatch = url.pathname.match(/^\/api\/admin\/review-queue\/([^/]+)\/([^/]+)$/)
@@ -631,11 +778,14 @@ function minorValue(value) {
 function requireShamCashReconciliation(paymentProof, body) {
   const packet = body.shamCashReconciliation || body.shamCash || {}
   const accountMinor = minorValue(packet.accountMinor ?? body.shamCashAccountMinor)
-  const expectedMinor = minorValue(packet.expectedMinor ?? body.shamCashExpectedMinor)
-  const differenceMinor = minorValue(packet.differenceMinor ?? body.shamCashDifferenceMinor)
   const source = String(packet.source || body.shamCashSource || 'admin-ui')
+  // expectedMinor is recomputed from this payment's own row rather than trusted from the client.
+  // The admin UI used to send one aggregate figure summed across every pending Sham Cash payment,
+  // so reconciling the total let a single balance entry silently "cover" unrelated bookings too —
+  // approving one payment could flip another, unreconciled payment's mismatch banner to matched.
+  const expectedMinor = Math.round(paymentProof.amountMinor || 0)
 
-  if (accountMinor == null || expectedMinor == null || differenceMinor == null) {
+  if (accountMinor == null) {
     throwShamCashError(
       'SHAM_CASH_RECONCILIATION_REQUIRED',
       'Sham Cash reconciliation is required before approving this payment.',
@@ -643,8 +793,8 @@ function requireShamCashReconciliation(paymentProof, body) {
     )
   }
 
-  const computedDifference = accountMinor - expectedMinor
-  if (computedDifference !== differenceMinor || differenceMinor !== 0 || expectedMinor < Math.round(paymentProof.amountMinor || 0)) {
+  const differenceMinor = accountMinor - expectedMinor
+  if (differenceMinor !== 0) {
     throwShamCashError(
       'SHAM_CASH_RECONCILIATION_MISMATCH',
       'Sham Cash account balance does not match the expected SYBNB payment amount.',

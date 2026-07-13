@@ -1,5 +1,6 @@
 import { idempotencyKey } from './security.mjs'
 import { isPayoutEligible, payoutEligibleAt } from './booking-lifecycle.mjs'
+import { rewardReferralIfQualifying } from './referrals.mjs'
 
 export const CANCELLATION_ADMIN_FEE_MINOR = 1000
 export const CANCELLATION_ADMIN_FEE_CURRENCY = 'USD'
@@ -213,6 +214,12 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
         })
       }
     }
+
+    // Referral reward (double-sided referral program, server/lib/referrals.mjs): only pays the
+    // referrer once this guest's first-ever approved payment lands, so a referral can't be
+    // farmed with a signup that never generates real revenue. No-ops instantly if this guest was
+    // never referred, already rewarded their referrer, or this isn't their first approved payment.
+    await rewardReferralIfQualifying(tx, { guestUserId: proof.userId, qualifyingReferenceId: proof.bookingId })
   } else if (proof.provider === 'seller_plan') {
     // No booking involved: this is a seller/dealer/developer plan payment. Approving it is
     // what actually unlocks paid-plan listing creation (CARS/MARKETPLACE/NEW_CONSTRUCTION),
@@ -221,6 +228,28 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       where: { userId: proof.userId },
       data: { documentStatus: 'APPROVED' },
     })
+    // The full plan fee is 100% platform revenue (there's no host/counterparty to split with,
+    // unlike a booking) — previously this approval never recorded any wallet entry at all, so
+    // real, collected seller-plan revenue was invisible everywhere: admin finance totals, the
+    // income projection, all of it. Recorded the same way booking commission is: a CREDIT to the
+    // approving admin's own wallet, which is what the revenue-summary rollup reads from.
+    if (actorUserId) {
+      await recordWalletEntry(tx, {
+        userId: actorUserId,
+        type: 'CREDIT',
+        amountMinor: proof.amountMinor,
+        currency: proof.currency,
+        referenceType: 'seller_plan_fee',
+        referenceId: proof.id,
+        keyParts: ['seller-plan-fee', proof.id, actorUserId],
+        note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
+      })
+    }
+
+    // A referee who converts as a paying seller/dealer/developer is exactly as real a referral
+    // outcome as one who converts as a paying guest -- see the booking branch above for the full
+    // farming-prevention rationale, identical here.
+    await rewardReferralIfQualifying(tx, { guestUserId: proof.userId, qualifyingReferenceId: proof.id })
   }
 
   return proof

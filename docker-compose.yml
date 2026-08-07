@@ -1,0 +1,31 @@
+# Local / single-node staging bring-up: PostGIS + the V6 API.
+# Copy .env.example to .env and fill secrets first. Frontend is deployed
+# separately as a static Vite build (see docs/DEPLOY_STAGING.md).
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-sybnb}
+    ports:
+      - "5432:5432"
+    volumes:
+      - sybnb_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: .
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3051:3051"
+    restart: unless-stopped
+
+volumes:
+  sybnb_db:

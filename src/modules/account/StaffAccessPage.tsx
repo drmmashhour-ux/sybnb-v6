@@ -1,12 +1,8 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import {
-  createVerificationCodeDraft,
-  verifyCodeDraft,
-  type VerificationCodeDraft,
-} from '../../engines/security/verificationCodeEngine'
 import { createStaffAccountSession } from '../../shared/api/platformApi'
+import { EmailOtpCapsule } from '../../shared/capsules/EmailOtpCapsule'
 
 type StaffRole = 'ADMIN' | 'HOST' | 'DRIVER'
 
@@ -69,8 +65,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [email, setEmail] = useState(defaultEmail(role))
   const [password, setPassword] = useState('')
   const [phone, setPhone] = useState(defaultPhone(role))
-  const [code, setCode] = useState('')
-  const [draft, setDraft] = useState<VerificationCodeDraft | null>(null)
+  const [codeConfirmed, setCodeConfirmed] = useState(false)
   const [codeError, setCodeError] = useState('')
 
   const actionLabel = role === 'ADMIN' ? t.admin : role === 'DRIVER' ? t.driver : t.host
@@ -80,7 +75,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       setCodeError(t.required)
       return
     }
-    if (!verifyCodeDraft(draft, code)) {
+    if (!codeConfirmed) {
       setCodeError(t.codeInvalid)
       return
     }
@@ -100,12 +95,6 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     }
   }
 
-  function sendCode() {
-    const nextDraft = createVerificationCodeDraft({ phone, purpose: 'staff-login' })
-    setDraft(nextDraft)
-    setCodeError('')
-    setStatus('codeSent')
-  }
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -142,23 +131,17 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
           </label>
           <label style={styles.label}>
             {t.code}
-            <div style={styles.codeRow}>
-              <input style={styles.input} value={code} onChange={(event) => setCode(event.target.value)} dir="ltr" />
-              <button style={styles.codeButton} onClick={sendCode}>
-                {t.sendCode}
-              </button>
-            </div>
+            <EmailOtpCapsule
+              email={email}
+              lang={lang}
+              purpose="EMAIL_VERIFICATION"
+              onVerified={() => {
+                setCodeConfirmed(true)
+                setCodeError('')
+              }}
+            />
           </label>
         </div>
-        {draft && (
-          <div style={styles.smsBox}>
-            <p>{lang === 'ar' ? draft.messageAr : draft.messageEn}</p>
-            <small>
-              {t.demoCode}: <b dir="ltr">{draft.code}</b>
-            </small>
-          </div>
-        )}
-        {status === 'codeSent' && <p style={styles.note}>{t.codeSent} <b dir="ltr">{phone}</b></p>}
         {codeError && <p style={styles.error}>{codeError}</p>}
         <button style={styles.primary} onClick={openSession} disabled={status === 'loading'}>
           {status === 'loading' ? t.opening : actionLabel}

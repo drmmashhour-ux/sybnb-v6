@@ -18,7 +18,13 @@ export function clientIp(req) {
 }
 
 function limitForPath(pathname) {
-  if (pathname === '/api/auth/login' || pathname === '/api/auth/register') {
+  if (
+    pathname === '/api/auth/login' ||
+    pathname === '/api/auth/register' ||
+    pathname.startsWith('/api/otp/')
+  ) {
+    // OTP send/verify share the auth bucket: the engine already applies per-email
+    // lockout + resend caps; this adds a per-IP ceiling against send-spam.
     return { bucket: 'auth', max: AUTH_MAX }
   }
   if (pathname.startsWith('/api/payments/')) {

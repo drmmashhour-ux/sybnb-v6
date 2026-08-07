@@ -16,6 +16,7 @@ import { handlePayments } from './routes/payments.mjs'
 import { handleReviews } from './routes/reviews.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
 import { handleWallet } from './routes/wallet.mjs'
+import { enforceRateLimit } from './lib/rate-limit.mjs'
 
 loadEnv()
 
@@ -42,6 +43,8 @@ const server = createServer(async (req, res) => {
       res.writeHead(204)
       return res.end()
     }
+
+    if (enforceRateLimit(req, res, url)) return
 
     if (url.pathname === '/api/health') {
       const db = await databaseStatus()

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { createGuestAccountSession, submitGuestIdDocument } from '../../shared/api/platformApi'
+import { EmailOtpCapsule } from '../../shared/capsules/EmailOtpCapsule'
 import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 
@@ -148,8 +149,6 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
       signupMissing ||
       phone.trim().length < 8 ||
       password.length < 8 ||
-      !codeSent ||
-      code.trim().length < 4 ||
       !codeConfirmed
     ) {
       setMessage(t.error)
@@ -216,48 +215,64 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
           <input style={styles.input} type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t.password} />
           {mode === 'signup' ? <input style={styles.input} type="password" value={repeatPassword} onChange={(event) => setRepeatPassword(event.target.value)} placeholder={t.repeatPassword} /> : null}
         </div>
-        <div style={styles.codeRow}>
-          <button
-            style={styles.secondaryButton}
-            onClick={() => {
+        {mode === 'signup' ? (
+          // Real server-side email OTP (shared capsule). Signup collects an email.
+          <EmailOtpCapsule
+            email={email}
+            lang={lang}
+            purpose="EMAIL_VERIFICATION"
+            onVerified={() => {
               setCodeSent(true)
-              setCodeConfirmed(false)
-              setMessage(codeInstruction)
-            }}
-            disabled={phone.trim().length < 8}
-          >
-            {codeSent ? t.resendCode : t.sendCode}
-          </button>
-          <input
-            dir="ltr"
-            inputMode="numeric"
-            style={styles.input}
-            value={code}
-            onChange={(event) => {
-              setCode(event.target.value)
-              setCodeConfirmed(false)
-            }}
-            placeholder={t.code}
-          />
-          <button
-            style={styles.secondaryButton}
-            disabled={!codeSent || code.trim().length < 4}
-            onClick={() => {
               setCodeConfirmed(true)
               setMessage(readyMessage)
             }}
-          >
-            {codeConfirmed ? '✓' : t.confirmCode}
-          </button>
-        </div>
-        {codeSent ? (
-          <div style={styles.codeBoxes} dir="ltr" aria-label={t.code}>
-            {Array.from({ length: 6 }).map((_, index) => (
-              <span key={index} style={styles.codeBox}>{code[index] || ''}</span>
-            ))}
-          </div>
-        ) : null}
-        {codeSent ? <p style={styles.notice}>{codeInstruction}</p> : null}
+          />
+        ) : (
+          <>
+            <div style={styles.codeRow}>
+              <button
+                style={styles.secondaryButton}
+                onClick={() => {
+                  setCodeSent(true)
+                  setCodeConfirmed(false)
+                  setMessage(codeInstruction)
+                }}
+                disabled={phone.trim().length < 8}
+              >
+                {codeSent ? t.resendCode : t.sendCode}
+              </button>
+              <input
+                dir="ltr"
+                inputMode="numeric"
+                style={styles.input}
+                value={code}
+                onChange={(event) => {
+                  setCode(event.target.value)
+                  setCodeConfirmed(false)
+                }}
+                placeholder={t.code}
+              />
+              <button
+                style={styles.secondaryButton}
+                disabled={!codeSent || code.trim().length < 4}
+                onClick={() => {
+                  setCodeConfirmed(true)
+                  setMessage(readyMessage)
+                }}
+              >
+                {codeConfirmed ? '✓' : t.confirmCode}
+              </button>
+            </div>
+            {codeSent ? (
+              <div style={styles.codeBoxes} dir="ltr" aria-label={t.code}>
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <span key={index} style={styles.codeBox}>{code[index] || ''}</span>
+                ))}
+              </div>
+            ) : null}
+            {codeSent ? <p style={styles.notice}>{codeInstruction}</p> : null}
+          </>
+        )}
         {mode === 'signup' && (
           <PaymentProofUpload
             lang={lang}

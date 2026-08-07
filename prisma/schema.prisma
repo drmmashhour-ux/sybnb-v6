@@ -130,37 +130,37 @@ enum MessageSenderRole {
 }
 
 model User {
-  id           String        @id @default(uuid())
-  email        String?       @unique
-  phoneHash    String?       @unique @map("phone_hash")
-  passwordHash String?       @map("password_hash")
-  displayName  String        @map("display_name")
-  locale       String        @default("ar-SY")
-  status       AccountStatus @default(ACTIVE)
-  idDocumentRef String?      @map("id_document_ref")
-  idDocumentSubmittedAt DateTime? @map("id_document_submitted_at")
-  idDocumentMimeType String? @map("id_document_mime_type")
-  idDocumentStatus IdDocumentStatus? @map("id_document_status")
-  idDocumentReviewedById String? @map("id_document_reviewed_by_id")
-  idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
+  id                     String            @id @default(uuid())
+  email                  String?           @unique
+  phoneHash              String?           @unique @map("phone_hash")
+  passwordHash           String?           @map("password_hash")
+  displayName            String            @map("display_name")
+  locale                 String            @default("ar-SY")
+  status                 AccountStatus     @default(ACTIVE)
+  idDocumentRef          String?           @map("id_document_ref")
+  idDocumentSubmittedAt  DateTime?         @map("id_document_submitted_at")
+  idDocumentMimeType     String?           @map("id_document_mime_type")
+  idDocumentStatus       IdDocumentStatus? @map("id_document_status")
+  idDocumentReviewedById String?           @map("id_document_reviewed_by_id")
+  idDocumentReviewedAt   DateTime?         @map("id_document_reviewed_at")
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
 
   roles             UserRole[]
   sellerProfile     SellerProfile?
   driverProfile     DriverProfile?
-  listings          Listing[]         @relation("ListingOwner")
-  bookings          Booking[]         @relation("BookingGuest")
+  listings          Listing[]       @relation("ListingOwner")
+  bookings          Booking[]       @relation("BookingGuest")
   wallets           Wallet[]
-  sentGifts         WalletGift[]      @relation("GiftSender")
-  claimedGifts      WalletGift[]      @relation("GiftRecipient")
-  rideRequests      RideRequest[]     @relation("RideRider")
-  driverRideMatches RideRequest[]     @relation("RideDriver")
-  auditLogs         AdminAuditLog[]   @relation("AuditActor")
-  listingReviews    ListingReview[]   @relation("ReviewGuest")
-  sentMessages      Message[]         @relation("MessageSender")
-  paymentProofs     PaymentProof[]    @relation("PaymentPayer")
-  listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
+  sentGifts         WalletGift[]    @relation("GiftSender")
+  claimedGifts      WalletGift[]    @relation("GiftRecipient")
+  rideRequests      RideRequest[]   @relation("RideRider")
+  driverRideMatches RideRequest[]   @relation("RideDriver")
+  auditLogs         AdminAuditLog[] @relation("AuditActor")
+  listingReviews    ListingReview[] @relation("ReviewGuest")
+  sentMessages      Message[]       @relation("MessageSender")
+  paymentProofs     PaymentProof[]  @relation("PaymentPayer")
+  listingInquiries  MessageThread[] @relation("ListingInquiryGuest")
 
   @@map("users")
 }
@@ -194,16 +194,16 @@ model SellerProfile {
 }
 
 model DriverProfile {
-  id              String   @id @default(uuid())
-  userId          String   @unique @map("user_id")
-  licenseHash     String?  @map("license_hash")
-  vehicleMake     String?  @map("vehicle_make")
-  vehicleModel    String?  @map("vehicle_model")
-  vehiclePlate    String?  @map("vehicle_plate")
-  active          Boolean  @default(false)
+  id              String                               @id @default(uuid())
+  userId          String                               @unique @map("user_id")
+  licenseHash     String?                              @map("license_hash")
+  vehicleMake     String?                              @map("vehicle_make")
+  vehicleModel    String?                              @map("vehicle_model")
+  vehiclePlate    String?                              @map("vehicle_plate")
+  active          Boolean                              @default(false)
   lastLocationGeo Unsupported("geometry(Point,4326)")? @map("last_location_geo")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  createdAt       DateTime                             @default(now()) @map("created_at")
+  updatedAt       DateTime                             @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -211,40 +211,40 @@ model DriverProfile {
 }
 
 model Location {
-  id          String   @id @default(uuid())
-  country    String   @default("SY")
+  id          String                               @id @default(uuid())
+  country     String                               @default("SY")
   governorate String
   city        String
   area        String?
   street      String?
-  addressLine String?  @map("address_line")
+  addressLine String?                              @map("address_line")
   geo         Unsupported("geometry(Point,4326)")?
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime                             @default(now()) @map("created_at")
 
-  listings       Listing[]
-  pickupRides    RideRequest[] @relation("RidePickup")
-  dropoffRides   RideRequest[] @relation("RideDropoff")
+  listings     Listing[]
+  pickupRides  RideRequest[] @relation("RidePickup")
+  dropoffRides RideRequest[] @relation("RideDropoff")
 
   @@index([governorate, city])
   @@map("locations")
 }
 
 model Listing {
-  id          String          @id @default(uuid())
-  ownerId     String          @map("owner_id")
-  locationId  String?         @map("location_id")
-  division    ListingDivision
-  titleAr     String          @map("title_ar")
-  titleEn     String?         @map("title_en")
-  description String?
-  status      ListingStatus   @default(DRAFT)
-  priceMinor  Int             @map("price_minor")
-  currency    String          @default("SYP")
-  instantBookEnabled Boolean  @default(false) @map("instant_book_enabled")
-  expiresAt   DateTime?       @map("expires_at")
-  metadata    Json            @default("{}")
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
+  id                 String          @id @default(uuid())
+  ownerId            String          @map("owner_id")
+  locationId         String?         @map("location_id")
+  division           ListingDivision
+  titleAr            String          @map("title_ar")
+  titleEn            String?         @map("title_en")
+  description        String?
+  status             ListingStatus   @default(DRAFT)
+  priceMinor         Int             @map("price_minor")
+  currency           String          @default("SYP")
+  instantBookEnabled Boolean         @default(false) @map("instant_book_enabled")
+  expiresAt          DateTime?       @map("expires_at")
+  metadata           Json            @default("{}")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
 
   owner          User                  @relation("ListingOwner", fields: [ownerId], references: [id])
   location       Location?             @relation(fields: [locationId], references: [id])
@@ -260,14 +260,14 @@ model Listing {
 }
 
 model ListingAvailability {
-  id                 String              @id @default(uuid())
-  listingId          String              @map("listing_id")
-  date               DateTime            @db.Date
-  status             AvailabilityStatus  @default(BLOCKED)
-  priceOverrideMinor Int?                @map("price_override_minor")
+  id                 String             @id @default(uuid())
+  listingId          String             @map("listing_id")
+  date               DateTime           @db.Date
+  status             AvailabilityStatus @default(BLOCKED)
+  priceOverrideMinor Int?               @map("price_override_minor")
   note               String?
-  createdAt          DateTime            @default(now()) @map("created_at")
-  updatedAt          DateTime            @updatedAt @map("updated_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
 
   listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
@@ -291,24 +291,24 @@ model ListingMedia {
 }
 
 model Booking {
-  id          String        @id @default(uuid())
-  listingId   String        @map("listing_id")
-  guestId     String        @map("guest_id")
-  status      BookingStatus @default(REQUESTED)
-  checkIn     DateTime?     @map("check_in")
-  checkOut    DateTime?     @map("check_out")
-  amountMinor Int           @map("amount_minor")
-  currency    String        @default("SYP")
-  metadata    Json          @default("{}")
-  guestCheckedInAt  DateTime? @map("guest_checked_in_at")
-  guestCheckedOutAt DateTime? @map("guest_checked_out_at")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
+  id                String        @id @default(uuid())
+  listingId         String        @map("listing_id")
+  guestId           String        @map("guest_id")
+  status            BookingStatus @default(REQUESTED)
+  checkIn           DateTime?     @map("check_in")
+  checkOut          DateTime?     @map("check_out")
+  amountMinor       Int           @map("amount_minor")
+  currency          String        @default("SYP")
+  metadata          Json          @default("{}")
+  guestCheckedInAt  DateTime?     @map("guest_checked_in_at")
+  guestCheckedOutAt DateTime?     @map("guest_checked_out_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
 
-  listing  Listing       @relation(fields: [listingId], references: [id])
-  guest    User          @relation("BookingGuest", fields: [guestId], references: [id])
-  payments PaymentProof[]
-  review   ListingReview?
+  listing       Listing        @relation(fields: [listingId], references: [id])
+  guest         User           @relation("BookingGuest", fields: [guestId], references: [id])
+  payments      PaymentProof[]
+  review        ListingReview?
   messageThread MessageThread?
 
   @@index([guestId, status])
@@ -317,20 +317,20 @@ model Booking {
 }
 
 model PaymentProof {
-  id              String        @id @default(uuid())
-  bookingId       String?       @map("booking_id")
-  userId          String        @map("user_id")
-  provider        String
-  status          PaymentStatus @default(PENDING_PROOF)
-  amountMinor     Int           @map("amount_minor")
-  currency        String        @default("SYP")
-  proofAssetUrl   String?       @map("proof_asset_url")
-  providerRef     String?       @map("provider_ref")
-  adminNote       String?       @map("admin_note")
-  reviewedById    String?       @map("reviewed_by_id")
-  reviewedAt      DateTime?     @map("reviewed_at")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+  id            String        @id @default(uuid())
+  bookingId     String?       @map("booking_id")
+  userId        String        @map("user_id")
+  provider      String
+  status        PaymentStatus @default(PENDING_PROOF)
+  amountMinor   Int           @map("amount_minor")
+  currency      String        @default("SYP")
+  proofAssetUrl String?       @map("proof_asset_url")
+  providerRef   String?       @map("provider_ref")
+  adminNote     String?       @map("admin_note")
+  reviewedById  String?       @map("reviewed_by_id")
+  reviewedAt    DateTime?     @map("reviewed_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
 
   booking Booking? @relation(fields: [bookingId], references: [id])
   payer   User     @relation("PaymentPayer", fields: [userId], references: [id])
@@ -393,12 +393,12 @@ model Message {
 }
 
 model Wallet {
-  id                String   @id @default(uuid())
-  userId            String   @map("user_id")
-  currency          String   @default("SYP")
-  cachedBalanceMinor Int     @default(0) @map("cached_balance_minor")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  currency           String   @default("SYP")
+  cachedBalanceMinor Int      @default(0) @map("cached_balance_minor")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   entries WalletEntry[]
@@ -408,16 +408,16 @@ model Wallet {
 }
 
 model WalletEntry {
-  id              String          @id @default(uuid())
-  walletId        String          @map("wallet_id")
-  type            WalletEntryType
-  amountMinor     Int             @map("amount_minor")
-  currency        String          @default("SYP")
-  referenceType   String          @map("reference_type")
-  referenceId     String          @map("reference_id")
-  idempotencyKey  String          @unique @map("idempotency_key")
-  note            String?
-  createdAt       DateTime        @default(now()) @map("created_at")
+  id             String          @id @default(uuid())
+  walletId       String          @map("wallet_id")
+  type           WalletEntryType
+  amountMinor    Int             @map("amount_minor")
+  currency       String          @default("SYP")
+  referenceType  String          @map("reference_type")
+  referenceId    String          @map("reference_id")
+  idempotencyKey String          @unique @map("idempotency_key")
+  note           String?
+  createdAt      DateTime        @default(now()) @map("created_at")
 
   wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
 
@@ -427,19 +427,19 @@ model WalletEntry {
 }
 
 model WalletGift {
-  id                     String     @id @default(uuid())
-  senderUserId            String     @map("sender_user_id")
-  recipientUserId         String?    @map("recipient_user_id")
-  recipientPhoneHash      String     @map("recipient_phone_hash")
-  amountMinor             Int        @map("amount_minor")
-  currency                String     @default("SYP")
-  message                 String?
-  status                  GiftStatus @default(CREATED)
-  claimAttemptCount       Int        @default(0) @map("claim_attempt_count")
-  lockedUntil             DateTime?  @map("locked_until")
-  expiresAt               DateTime   @map("expires_at")
-  createdAt               DateTime   @default(now()) @map("created_at")
-  updatedAt               DateTime   @updatedAt @map("updated_at")
+  id                 String     @id @default(uuid())
+  senderUserId       String     @map("sender_user_id")
+  recipientUserId    String?    @map("recipient_user_id")
+  recipientPhoneHash String     @map("recipient_phone_hash")
+  amountMinor        Int        @map("amount_minor")
+  currency           String     @default("SYP")
+  message            String?
+  status             GiftStatus @default(CREATED)
+  claimAttemptCount  Int        @default(0) @map("claim_attempt_count")
+  lockedUntil        DateTime?  @map("locked_until")
+  expiresAt          DateTime   @map("expires_at")
+  createdAt          DateTime   @default(now()) @map("created_at")
+  updatedAt          DateTime   @updatedAt @map("updated_at")
 
   sender    User  @relation("GiftSender", fields: [senderUserId], references: [id])
   recipient User? @relation("GiftRecipient", fields: [recipientUserId], references: [id])
@@ -450,37 +450,37 @@ model WalletGift {
 }
 
 model OtpAttemptLock {
-  id             String   @id @default(uuid())
-  purpose        String
-  subjectHash    String   @map("subject_hash")
-  attemptCount   Int      @default(0) @map("attempt_count")
-  lockedUntil    DateTime? @map("locked_until")
-  lastAttemptAt  DateTime? @map("last_attempt_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id            String    @id @default(uuid())
+  purpose       String
+  subjectHash   String    @map("subject_hash")
+  attemptCount  Int       @default(0) @map("attempt_count")
+  lockedUntil   DateTime? @map("locked_until")
+  lastAttemptAt DateTime? @map("last_attempt_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   @@unique([purpose, subjectHash])
   @@map("otp_attempt_locks")
 }
 
 model RideRequest {
-  id              String     @id @default(uuid())
-  riderId          String     @map("rider_id")
-  driverId         String?    @map("driver_id")
-  pickupLocationId String?    @map("pickup_location_id")
-  dropoffLocationId String?   @map("dropoff_location_id")
-  status          RideStatus @default(REQUESTED)
-  requestedAt     DateTime   @default(now()) @map("requested_at")
-  fareMinor       Int?       @map("fare_minor")
-  currency        String     @default("SYP")
-  pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
-  dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")
-  metadata        Json       @default("{}")
-  updatedAt       DateTime   @updatedAt @map("updated_at")
+  id                String                               @id @default(uuid())
+  riderId           String                               @map("rider_id")
+  driverId          String?                              @map("driver_id")
+  pickupLocationId  String?                              @map("pickup_location_id")
+  dropoffLocationId String?                              @map("dropoff_location_id")
+  status            RideStatus                           @default(REQUESTED)
+  requestedAt       DateTime                             @default(now()) @map("requested_at")
+  fareMinor         Int?                                 @map("fare_minor")
+  currency          String                               @default("SYP")
+  pickupGeo         Unsupported("geometry(Point,4326)")? @map("pickup_geo")
+  dropoffGeo        Unsupported("geometry(Point,4326)")? @map("dropoff_geo")
+  metadata          Json                                 @default("{}")
+  updatedAt         DateTime                             @updatedAt @map("updated_at")
 
-  rider          User      @relation("RideRider", fields: [riderId], references: [id])
-  driver         User?     @relation("RideDriver", fields: [driverId], references: [id])
-  pickupLocation Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
+  rider           User      @relation("RideRider", fields: [riderId], references: [id])
+  driver          User?     @relation("RideDriver", fields: [driverId], references: [id])
+  pickupLocation  Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
   dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
 
   @@index([status, requestedAt])
@@ -504,4 +504,19 @@ model AdminAuditLog {
   @@index([entityType, entityId, createdAt])
   @@index([actorUserId, createdAt])
   @@map("admin_audit_logs")
+}
+
+model EmailOtpCode {
+  id              String    @id @default(uuid())
+  emailNormalized String    @map("email_normalized")
+  purpose         String
+  codeHash        String    @map("code_hash")
+  expiresAt       DateTime  @map("expires_at")
+  consumedAt      DateTime? @map("consumed_at")
+  attemptCount    Int       @default(0) @map("attempt_count")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([emailNormalized, purpose])
+  @@index([expiresAt])
+  @@map("email_otp_codes")
 }

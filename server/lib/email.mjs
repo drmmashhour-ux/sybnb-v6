@@ -13,11 +13,12 @@ export async function sendEmail({ to, subject, text }) {
   }
 
   const provider = (process.env.EMAIL_PROVIDER || 'log').toLowerCase()
+  const from = process.env.EMAIL_FROM || 'info@sybnb.app'
 
   if (provider === 'log') {
     // Staging/local: the code is visible in the server log only, never in the API response.
-    console.log(`[email:log] to=${to} subject="${subject}"\n${text}`)
-    return { provider: 'log', delivered: false }
+    console.log(`[email:log] from=${from} to=${to} subject="${subject}"\n${text}`)
+    return { provider: 'log', from, delivered: false }
   }
 
   // Real providers plug in here (e.g. smtp/sendgrid/ses). Intentionally unimplemented

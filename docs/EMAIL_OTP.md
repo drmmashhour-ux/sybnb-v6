@@ -34,9 +34,14 @@ Add to `.env`:
 
 ```bash
 EMAIL_PROVIDER=log
+EMAIL_FROM=info@sybnb.app
 ```
 
 ## Frontend
 
-The backend is ready to consume; the sign-in / verification UI should call
-request → verify (and offer a "resend" button wired to `/api/otp/email/resend`).
+`src/shared/api/platformApi.ts` exports `requestEmailOtp`, `resendEmailOtp`, and
+`verifyEmailOtp` — the real server-side replacement for the browser-side
+`src/engines/security/verificationCodeEngine.ts`. The existing sign-in/up resend
+capsule should call these instead of generating the code in the browser
+(`purpose: 'LOGIN'` returns a session token on verify; the "resend" button maps to
+`resendEmailOtp`).

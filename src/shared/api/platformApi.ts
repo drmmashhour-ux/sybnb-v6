@@ -1591,6 +1591,56 @@ async function register(body: {
   })
 }
 
+export type EmailOtpPurpose = 'LOGIN' | 'EMAIL_VERIFICATION'
+
+export type EmailOtpRequestResult = {
+  ok: true
+  purpose: EmailOtpPurpose
+  expiresAt: string
+  resendAvailableAt: string
+}
+
+// Real server-side email OTP. Replaces the client-side verificationCodeEngine
+// (which generated/verified the code in the browser) in the sign-in/up capsule.
+export async function requestEmailOtp(
+  email: string,
+  purpose: EmailOtpPurpose = 'EMAIL_VERIFICATION',
+) {
+  return apiRequest<EmailOtpRequestResult>('/api/otp/email/request', {
+    method: 'POST',
+    body: { email, purpose },
+  })
+}
+
+export async function resendEmailOtp(
+  email: string,
+  purpose: EmailOtpPurpose = 'EMAIL_VERIFICATION',
+) {
+  return apiRequest<EmailOtpRequestResult>('/api/otp/email/resend', {
+    method: 'POST',
+    body: { email, purpose },
+  })
+}
+
+// For purpose LOGIN a successful verify returns a session (user + token), same
+// shape as password login; for EMAIL_VERIFICATION it just confirms.
+export async function verifyEmailOtp(
+  email: string,
+  code: string,
+  purpose: EmailOtpPurpose = 'EMAIL_VERIFICATION',
+) {
+  return apiRequest<{
+    ok: true
+    verified: true
+    purpose?: EmailOtpPurpose
+    user?: ApiUser
+    token?: string
+  }>('/api/otp/email/verify', {
+    method: 'POST',
+    body: { email, code, purpose },
+  })
+}
+
 async function apiRequest<T>(
   path: string,
   options: {

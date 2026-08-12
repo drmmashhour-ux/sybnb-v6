@@ -45,11 +45,33 @@ export async function handleListings(req, res, url, context) {
       await expireOldListings()
       const division = url.searchParams.get('division') || undefined
       const city = url.searchParams.get('city') || undefined
+
+      // Attribute filters match against the listing's stored visual-filter selection
+      // (metadata.visualFilters.<key>). These keys are shared across divisions — the Cars
+      // browse uses carBrand/carBody/carFuel/carTransmission/condition — so this is one generic
+      // filter, not a per-division search system. 'any'/empty means "no constraint".
+      const attributeKeys = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition']
+      const attributeConditions = []
+      for (const key of attributeKeys) {
+        const value = url.searchParams.get(key)
+        if (value && value !== 'any') {
+          attributeConditions.push({ metadata: { path: ['visualFilters', key], equals: value } })
+        }
+      }
+
+      const priceMin = Number(url.searchParams.get('priceMin'))
+      const priceMax = Number(url.searchParams.get('priceMax'))
+      const priceFilter = {}
+      if (Number.isFinite(priceMin) && priceMin > 0) priceFilter.gte = priceMin
+      if (Number.isFinite(priceMax) && priceMax > 0) priceFilter.lte = priceMax
+
       const listings = await db().listing.findMany({
         where: {
           status: 'APPROVED',
           division,
           location: city ? { city } : undefined,
+          priceMinor: Object.keys(priceFilter).length ? priceFilter : undefined,
+          AND: attributeConditions.length ? attributeConditions : undefined,
         },
         include: { location: true, media: true },
         orderBy: { createdAt: 'desc' },

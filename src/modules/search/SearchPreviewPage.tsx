@@ -166,7 +166,20 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
     setLastSearch(value || null)
 
     try {
-      const results = await fetchApprovedListings(toApiDivision(value?.division || effectiveInitialDivision))
+      const filters = value
+        ? {
+            attributes: {
+              carBrand: value.carBrand,
+              carBody: value.carBody,
+              carFuel: value.carFuel,
+              carTransmission: value.carTransmission,
+              condition: value.condition,
+            },
+            priceMin: Number(value.minPrice) || undefined,
+            priceMax: Number(value.maxPrice) || undefined,
+          }
+        : undefined
+      const results = await fetchApprovedListings(toApiDivision(value?.division || effectiveInitialDivision), filters)
       setListings(results)
       setState('empty')
     } catch {

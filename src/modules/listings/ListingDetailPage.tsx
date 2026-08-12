@@ -13,6 +13,7 @@ import {
   type PlatformListingReview,
 } from '../../shared/api/platformApi'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
+import { sellerCarFilterGroupsFromConfig } from '../../engines/filters'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
@@ -517,6 +518,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           {activeTab === 'terms' && (
             <section style={styles.tabPanel}>
               <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
+              {listing.division === 'CARS' && <VehicleSpecs metadata={listing.metadata} lang={lang} />}
               {!customerReady && <div style={styles.accountHint}>{t.requestOnlyAfterAccount}</div>}
               {listing.division === 'STAYS' && (
                 <>
@@ -852,7 +854,50 @@ function readListingReturnPath() {
   }
 }
 
+// Renders the vehicle attributes a seller captured (metadata.visualFilters) as a labelled
+// spec list, localizing each stored value against the existing car filter option definitions.
+// Read-only: it surfaces already-persisted data, it does not add new vehicle schema.
+const CAR_SPEC_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition'] as const
+
+function VehicleSpecs({ metadata, lang }: { metadata: Record<string, unknown>; lang: Lang }) {
+  const groups = useMemo(() => sellerCarFilterGroupsFromConfig(), [])
+  const selection = (metadata?.visualFilters as Record<string, unknown> | undefined) || undefined
+  if (!selection) return null
+
+  const rows = CAR_SPEC_KEYS.map((key) => {
+    const raw = selection[key]
+    const value = typeof raw === 'string' ? raw : Array.isArray(raw) ? String(raw[0] || '') : ''
+    if (!value || value === 'any') return null
+    const group = groups.find((item) => item.id === key)
+    const option = group?.options.find((opt) => opt.id === value)
+    const label = group ? group.title[lang] : key
+    const display = option ? option.label[lang] : value
+    return { key, label, display }
+  }).filter(Boolean) as Array<{ key: string; label: string; display: string }>
+
+  if (rows.length === 0) return null
+
+  return (
+    <section style={styles.specGrid} aria-label={lang === 'ar' ? 'مواصفات المركبة' : 'Vehicle specifications'}>
+      <strong>{lang === 'ar' ? 'مواصفات المركبة' : 'Vehicle specifications'}</strong>
+      <dl style={styles.specList}>
+        {rows.map((row) => (
+          <div key={row.key} style={styles.specRow}>
+            <dt style={styles.specLabel}>{row.label}</dt>
+            <dd style={styles.specValue}>{row.display}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
 const styles: Record<string, CSSProperties> = {
+  specGrid: { border: '1px solid #e3e8f0', borderRadius: 10, padding: 14, marginTop: 12, display: 'grid', gap: 10 },
+  specList: { display: 'grid', gap: 8, margin: 0 },
+  specRow: { display: 'flex', justifyContent: 'space-between', gap: 12, borderBottom: '1px solid #f0f3f8', paddingBottom: 6 },
+  specLabel: { color: '#5b667a', fontWeight: 700, margin: 0 },
+  specValue: { color: '#0f1830', fontWeight: 800, margin: 0 },
   page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '24px 16px 112px', display: 'grid', gap: 16, maxWidth: 1080, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
   flowNav: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' },

@@ -13,7 +13,7 @@ import {
   type PlatformListingReview,
 } from '../../shared/api/platformApi'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
-import { sellerCarFilterGroupsFromConfig } from '../../engines/filters'
+import { propertyFilterGroup, sellerCarFilterGroupsFromConfig } from '../../engines/filters'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
@@ -519,6 +519,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <section style={styles.tabPanel}>
               <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
               {listing.division === 'CARS' && <VehicleSpecs metadata={listing.metadata} lang={lang} />}
+              {['BUY', 'RENTALS'].includes(listing.division) && <PropertySpecs metadata={listing.metadata} lang={lang} />}
               {!customerReady && <div style={styles.accountHint}>{t.requestOnlyAfterAccount}</div>}
               {listing.division === 'STAYS' && (
                 <>
@@ -880,6 +881,41 @@ function VehicleSpecs({ metadata, lang }: { metadata: Record<string, unknown>; l
   return (
     <section style={styles.specGrid} aria-label={lang === 'ar' ? 'مواصفات المركبة' : 'Vehicle specifications'}>
       <strong>{lang === 'ar' ? 'مواصفات المركبة' : 'Vehicle specifications'}</strong>
+      <dl style={styles.specList}>
+        {rows.map((row) => (
+          <div key={row.key} style={styles.specRow}>
+            <dt style={styles.specLabel}>{row.label}</dt>
+            <dd style={styles.specValue}>{row.display}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
+// Surfaces the property attributes a seller captured (metadata) as a labelled spec list for
+// BUY/RENTALS listings. Read-only over already-persisted data; adds no new property schema.
+function PropertySpecs({ metadata, lang }: { metadata: Record<string, unknown>; lang: Lang }) {
+  const isAr = lang === 'ar'
+  const md = metadata || {}
+  const vf = (md.visualFilters as Record<string, unknown> | undefined) || {}
+  const typeValue = typeof vf.propertyType === 'string' ? vf.propertyType : typeof md.propertyType === 'string' ? md.propertyType : ''
+  const typeOption = propertyFilterGroup.options.find((opt) => opt.id === typeValue)
+  const locationLabel = [md.governorateLabel, md.cityLabel, md.areaLabel].filter((part) => typeof part === 'string' && part).join(isAr ? '، ' : ', ')
+
+  const rows = [
+    typeValue && typeValue !== 'any' ? { key: 'type', label: isAr ? 'نوع العقار' : 'Property type', display: typeOption ? typeOption.label[lang] : typeValue } : null,
+    Number(md.bedrooms) > 0 ? { key: 'beds', label: isAr ? 'غرف النوم' : 'Bedrooms', display: String(md.bedrooms) } : null,
+    Number(md.bathrooms) > 0 ? { key: 'baths', label: isAr ? 'الحمامات' : 'Bathrooms', display: String(md.bathrooms) } : null,
+    Number(md.sizeSqm) > 0 ? { key: 'size', label: isAr ? 'المساحة (م²)' : 'Size (m²)', display: String(md.sizeSqm) } : null,
+    locationLabel ? { key: 'loc', label: isAr ? 'الموقع' : 'Location', display: locationLabel } : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; display: string }>
+
+  if (rows.length === 0) return null
+
+  return (
+    <section style={styles.specGrid} aria-label={isAr ? 'تفاصيل العقار' : 'Property details'}>
+      <strong>{isAr ? 'تفاصيل العقار' : 'Property details'}</strong>
       <dl style={styles.specList}>
         {rows.map((row) => (
           <div key={row.key} style={styles.specRow}>

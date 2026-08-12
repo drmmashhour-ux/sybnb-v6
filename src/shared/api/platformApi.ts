@@ -747,20 +747,29 @@ export async function createAndApprovePrototypeListing(input: CreateListingInput
 
 export async function fetchApprovedListings(
   division = 'STAYS',
-  filters?: { attributes?: Record<string, string | string[]>; priceMin?: number; priceMax?: number; city?: string },
+  filters?: {
+    attributes?: Record<string, string | string[]>
+    priceMin?: number
+    priceMax?: number
+    bedroomsMin?: number
+    bathroomsMin?: number
+    city?: string
+  },
 ) {
   const params = new URLSearchParams({ division })
-  // Attribute filters are single-select scalar values (e.g. carBrand, carFuel). Skip 'any',
-  // empty, and multi-select array values — only scalar constraints are pushed to the server.
-  const CAR_ATTRIBUTE_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition']
+  // Single-select scalar attributes only (Cars: carBrand/…; Buy/Rentals: propertyType). Skip
+  // 'any', empty, and multi-select array values — only scalar constraints reach the server.
+  const ATTRIBUTE_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType']
   if (filters?.attributes) {
-    for (const key of CAR_ATTRIBUTE_KEYS) {
+    for (const key of ATTRIBUTE_KEYS) {
       const value = filters.attributes[key]
       if (typeof value === 'string' && value && value !== 'any') params.set(key, value)
     }
   }
   if (filters?.priceMin && filters.priceMin > 0) params.set('priceMin', String(filters.priceMin))
   if (filters?.priceMax && filters.priceMax > 0) params.set('priceMax', String(filters.priceMax))
+  if (filters?.bedroomsMin && filters.bedroomsMin > 0) params.set('bedroomsMin', String(filters.bedroomsMin))
+  if (filters?.bathroomsMin && filters.bathroomsMin > 0) params.set('bathroomsMin', String(filters.bathroomsMin))
   if (filters?.city) params.set('city', filters.city)
   try {
     const response = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings?${params.toString()}`)

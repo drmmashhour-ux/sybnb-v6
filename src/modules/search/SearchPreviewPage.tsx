@@ -174,9 +174,12 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               carFuel: value.carFuel,
               carTransmission: value.carTransmission,
               condition: value.condition,
+              propertyType: value.propertyType,
             },
             priceMin: Number(value.minPrice) || undefined,
             priceMax: Number(value.maxPrice) || undefined,
+            bedroomsMin: value.bedroomsCount || undefined,
+            bathroomsMin: value.bathrooms || undefined,
           }
         : undefined
       const results = await fetchApprovedListings(toApiDivision(value?.division || effectiveInitialDivision), filters)

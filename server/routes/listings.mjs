@@ -50,13 +50,25 @@ export async function handleListings(req, res, url, context) {
       // (metadata.visualFilters.<key>). These keys are shared across divisions — the Cars
       // browse uses carBrand/carBody/carFuel/carTransmission/condition — so this is one generic
       // filter, not a per-division search system. 'any'/empty means "no constraint".
-      const attributeKeys = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition']
+      // Single-select attribute filters (Cars: carBrand/…; Buy/Rentals: propertyType).
+      const attributeKeys = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType']
       const attributeConditions = []
       for (const key of attributeKeys) {
         const value = url.searchParams.get(key)
         if (value && value !== 'any') {
           attributeConditions.push({ metadata: { path: ['visualFilters', key], equals: value } })
         }
+      }
+
+      // Numeric "at least N" property filters — the seller stores these as plain numbers under
+      // metadata.bedrooms / metadata.bathrooms (not visualFilters), so filter that path directly.
+      const bedroomsMin = Number(url.searchParams.get('bedroomsMin'))
+      if (Number.isFinite(bedroomsMin) && bedroomsMin > 0) {
+        attributeConditions.push({ metadata: { path: ['bedrooms'], gte: bedroomsMin } })
+      }
+      const bathroomsMin = Number(url.searchParams.get('bathroomsMin'))
+      if (Number.isFinite(bathroomsMin) && bathroomsMin > 0) {
+        attributeConditions.push({ metadata: { path: ['bathrooms'], gte: bathroomsMin } })
       }
 
       const priceMin = Number(url.searchParams.get('priceMin'))

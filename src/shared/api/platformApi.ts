@@ -492,6 +492,7 @@ type CreateListingInput = {
   currency: string
   instantBookEnabled?: boolean
   metadata: Record<string, unknown>
+  media?: Array<{ url: string; kind?: string; sortOrder?: number }>
 }
 
 export const LAST_SUBMITTED_LISTING_KEY = 'sybnb.v6.lastSubmittedListing'
@@ -512,14 +513,25 @@ export async function fetchPrototypeContracts() {
 
 export async function createAndSubmitPrototypeListing(input: CreateListingInput) {
   const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const { media, ...listingBody } = input
   const created = await apiRequest<{ ok: true; listing: PlatformListing }>('/api/listings', {
     method: 'POST',
     token: session.token,
     body: {
       division: 'STAYS',
-      ...input,
+      ...listingBody,
     },
   })
+
+  // Attach media (if provided) while the listing is still a draft, before it is submitted for
+  // review — the media endpoint locks once the listing leaves DRAFT/REJECTED.
+  if (media && media.length > 0) {
+    await apiRequest<{ ok: true }>(`/api/listings/${created.listing.id}/media`, {
+      method: 'POST',
+      token: session.token,
+      body: { media },
+    })
+  }
 
   const submitted = await apiRequest<{ ok: true; listing: PlatformListing }>(
     `/api/listings/${created.listing.id}/submit`,

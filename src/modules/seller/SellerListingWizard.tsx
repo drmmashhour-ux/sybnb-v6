@@ -27,6 +27,15 @@ const DIVISION_OPTIONS: Array<{ value: ListingDivision; ar: string; en: string }
   { value: 'NEW_CONSTRUCTION', ar: 'مشروع جديد', en: 'New project' },
 ]
 
+const DIVISION_MEDIA: Record<ListingDivision, string> = {
+  STAYS: '/assets/divisions/daily-rental.webp',
+  RENTALS: '/assets/divisions/monthly-rental.webp',
+  BUY: '/assets/divisions/buy-property.webp',
+  CARS: '/assets/divisions/cars.webp',
+  MARKETPLACE: '/assets/divisions/marketplace.webp',
+  NEW_CONSTRUCTION: '/assets/divisions/new-construction.webp',
+}
+
 type WizardDraft = {
   division: ListingDivision
   selectedType: string
@@ -253,6 +262,10 @@ export function SellerListingWizard({ lang }: Props) {
       setSubmitError('')
 
       try {
+        // Attach a real, viewable gallery image so buyer browse/detail shows the listing with a
+        // photo (matching the division assets sample listings use). Uploaded document filenames
+        // stay in metadata; hosted binary upload is a production-hardening item, out of scope here.
+        const listingMedia = [{ url: DIVISION_MEDIA[division], kind: 'image', sortOrder: 0 }]
         await createAndSubmitPrototypeListing({
           division,
           titleAr: title || 'إعلان SYBNB جديد',
@@ -261,6 +274,7 @@ export function SellerListingWizard({ lang }: Props) {
           priceMinor: toMinor(price),
           currency: 'SYP',
           instantBookEnabled: division === 'STAYS' ? instantBookEnabled : false,
+          media: listingMedia,
           metadata: {
             advertising: isAdvertisingFlow,
             adPlan,

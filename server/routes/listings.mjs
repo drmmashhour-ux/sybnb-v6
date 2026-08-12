@@ -192,6 +192,75 @@ export async function handleListings(req, res, url, context) {
     return json(res, 200, { ok: true, reviews, average, count })
   }
 
+  const mediaMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/media$/)
+  if (mediaMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['SELLER', 'HOST'])
+    const existing = await db().listing.findFirst({
+      where: { id: mediaMatch[1], ownerId: context.user.id },
+    })
+    if (!existing) {
+      const error = new Error('Listing not found for this account.')
+      error.statusCode = 404
+      error.code = 'LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // Media can only be attached while the listing is still being prepared. Once it is under
+    // review or live, its media set is frozen (re-submitting a rejected listing reopens it).
+    if (!['DRAFT', 'REJECTED'].includes(existing.status)) {
+      const error = new Error('Media can only be added to draft or rejected listings.')
+      error.statusCode = 400
+      error.code = 'LISTING_MEDIA_LOCKED'
+      error.expose = true
+      throw error
+    }
+
+    const body = await readJson(req)
+    const items = Array.isArray(body.media) ? body.media : body.url ? [body] : []
+    if (items.length === 0) {
+      const error = new Error('At least one media item is required.')
+      error.statusCode = 400
+      error.code = 'LISTING_MEDIA_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    if (items.length > 20) {
+      const error = new Error('A listing can carry at most 20 media items.')
+      error.statusCode = 400
+      error.code = 'LISTING_MEDIA_TOO_MANY'
+      error.expose = true
+      throw error
+    }
+
+    // Staging accepts URL references only (same shape as payment-proof asset URLs). Binary upload
+    // and production object storage are intentionally out of scope — see production-hardening notes.
+    const existingCount = await db().listingMedia.count({ where: { listingId: existing.id } })
+    const rows = items.map((item, index) => {
+      const mediaUrl = typeof item.url === 'string' ? item.url.trim() : ''
+      if (!mediaUrl || mediaUrl.length > 2000) {
+        const error = new Error('Each media item needs a valid url.')
+        error.statusCode = 400
+        error.code = 'LISTING_MEDIA_URL_INVALID'
+        error.expose = true
+        throw error
+      }
+      return {
+        listingId: existing.id,
+        url: mediaUrl,
+        kind: typeof item.kind === 'string' && item.kind.trim() ? item.kind.trim() : 'image',
+        sortOrder: Number.isFinite(item.sortOrder) ? Number(item.sortOrder) : existingCount + index,
+      }
+    })
+
+    await db().listingMedia.createMany({ data: rows })
+    const media = await db().listingMedia.findMany({
+      where: { listingId: existing.id },
+      orderBy: { sortOrder: 'asc' },
+    })
+    return json(res, 201, { ok: true, media })
+  }
+
   const submitMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/submit$/)
   if (submitMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])

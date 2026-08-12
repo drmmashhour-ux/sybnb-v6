@@ -89,6 +89,62 @@ export async function handleSrRides(req, res, url, context) {
     return json(res, 200, { ok: true, ride })
   }
 
+  const cancelMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/cancel$/)
+  if (cancelMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['GUEST'])
+
+    const existing = await db().rideRequest.findUnique({ where: { id: cancelMatch[1] } })
+    if (!existing || existing.riderId !== context.user.id) {
+      const error = new Error('Ride request not found for this account.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    // A rider may cancel only before the trip is under way. Once IN_PROGRESS the driver
+    // controls the lifecycle, and terminal states cannot be re-cancelled.
+    const riderCancellable = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING']
+    if (!riderCancellable.includes(existing.status)) {
+      const error = new Error('This ride can no longer be cancelled by the rider.')
+      error.statusCode = 400
+      error.code = 'RIDE_NOT_CANCELLABLE'
+      error.expose = true
+      throw error
+    }
+
+    // Optimistic-concurrency guard: re-check the status we read so a driver claim/arrival
+    // landing at the same moment cannot be silently overwritten by this cancel.
+    const cancelResult = await db().rideRequest.updateMany({
+      where: { id: existing.id, status: existing.status },
+      data: { status: 'CANCELLED' },
+    })
+
+    if (cancelResult.count === 0) {
+      const error = new Error('Ride status changed before the cancellation could apply. Reload and try again.')
+      error.statusCode = 409
+      error.code = 'RIDE_CANCEL_CONFLICT'
+      error.expose = true
+      throw error
+    }
+
+    const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'SR_RIDER_CANCELLED',
+        entityType: 'ride_requests',
+        entityId: ride.id,
+        before: existing,
+        after: ride,
+      },
+    })
+
+    return json(res, 200, { ok: true, ride })
+  }
+
   const assignMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/assign-driver$/)
   if (assignMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])

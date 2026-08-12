@@ -1209,6 +1209,15 @@ export async function fetchPrototypeSrRide(rideId: string) {
   return response.ride
 }
 
+export async function cancelPrototypeSrRide(rideId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>(`/api/sr/rides/${rideId}/cancel`, {
+    method: 'PATCH',
+    token: session.token,
+  })
+  return response.ride
+}
+
 export async function fetchPrototypeDriverOverview() {
   const session = await ensurePrototypeDriverSession()
   const response = await apiRequest<{ ok: true; overview: PlatformDriverOverview }>('/api/driver/rides', {

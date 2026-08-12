@@ -3,12 +3,16 @@ import type { CSSProperties } from 'react'
 import { srRideFilterGroupsFromConfig, type VisualFilterSelection } from '../../engines/filters'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
+  cancelPrototypeSrRide,
   createPrototypeSrRide,
   fetchPrototypeSrRide,
   fetchSrQuote,
   type PlatformRideRequest,
   type PlatformSrQuote,
 } from '../../shared/api/platformApi'
+
+const ACTIVE_RIDE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+const RIDER_CANCELLABLE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING']
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 
@@ -42,6 +46,13 @@ const copy = {
     manualHint: 'يمكن متابعة الطلب حتى بدون GPS عبر العناوين اليدوية.',
     waitingForDriver: 'بانتظار قبول أحد السائقين القريبين للرحلة...',
     driverAssigned: 'تم تعيين سائق لرحلتك.',
+    driverArriving: 'السائق في طريقه إليك الآن.',
+    inProgress: 'الرحلة جارية الآن.',
+    completed: 'اكتملت الرحلة. شكراً لاستخدامك سير.',
+    cancelled: 'تم إلغاء الرحلة.',
+    cancel: 'إلغاء الرحلة',
+    cancelling: 'جار الإلغاء',
+    newRide: 'طلب رحلة جديدة',
   },
   en: {
     back: 'Back to landing',
@@ -68,6 +79,13 @@ const copy = {
     manualHint: 'The request can continue without GPS through manual addresses.',
     waitingForDriver: 'Waiting for a nearby driver to accept the ride...',
     driverAssigned: 'A driver has been assigned to your ride.',
+    driverArriving: 'Your driver is on the way to you.',
+    inProgress: 'Your ride is now in progress.',
+    completed: 'Ride completed. Thanks for riding with SR.',
+    cancelled: 'This ride was cancelled.',
+    cancel: 'Cancel ride',
+    cancelling: 'Cancelling',
+    newRide: 'Request a new ride',
   },
 }
 
@@ -117,7 +135,9 @@ export function SrRidePage({ lang }: Props) {
   }, [pickup, dropoff, category, lowDataMode, pickupCoords, ride])
 
   useEffect(() => {
-    if (!ride || !['REQUESTED', 'MATCHING'].includes(ride.status)) return
+    // Keep tracking through the whole live lifecycle (assigned → arriving → in progress),
+    // not just while waiting for a driver, so the rider follows the trip end to end.
+    if (!ride || !ACTIVE_RIDE_STATUSES.includes(ride.status)) return
     const interval = window.setInterval(() => {
       fetchPrototypeSrRide(ride.id).then(setRide).catch(() => {})
     }, 4000)
@@ -188,6 +208,31 @@ export function SrRidePage({ lang }: Props) {
       setMessage(error instanceof Error ? error.message : t.error)
     }
   }
+
+  async function cancelRide() {
+    if (!ride) return
+    setStatus('saving')
+    setMessage('')
+
+    try {
+      setRide(await cancelPrototypeSrRide(ride.id))
+      setStatus('idle')
+      setMessage(t.cancelled)
+    } catch (error) {
+      setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  function startNewRide() {
+    setRide(null)
+    setQuote(null)
+    setStatus('idle')
+    setMessage('')
+  }
+
+  const canCancel = Boolean(ride && RIDER_CANCELLABLE_STATUSES.includes(ride.status))
+  const isTerminal = Boolean(ride && ['COMPLETED', 'CANCELLED'].includes(ride.status))
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -287,14 +332,35 @@ export function SrRidePage({ lang }: Props) {
           {ride && ['REQUESTED', 'MATCHING'].includes(ride.status) && (
             <div style={styles.message}>{t.waitingForDriver}</div>
           )}
-          {ride?.driverId && (
+          {ride?.status === 'DRIVER_ASSIGNED' && (
             <div style={styles.message}>{t.driverAssigned}</div>
+          )}
+          {ride?.status === 'DRIVER_ARRIVING' && (
+            <div style={styles.message}>{t.driverArriving}</div>
+          )}
+          {ride?.status === 'IN_PROGRESS' && (
+            <div style={styles.message}>{t.inProgress}</div>
+          )}
+          {ride?.status === 'COMPLETED' && (
+            <div style={styles.message}>{t.completed}</div>
+          )}
+          {ride?.status === 'CANCELLED' && (
+            <div style={{ ...styles.message, ...styles.error }}>{t.cancelled}</div>
           )}
 
           <div style={styles.actions}>
-            <button disabled={!ride || status === 'saving'} style={styles.secondaryButton} onClick={() => void refreshRide()}>
+            <button disabled={!ride || isTerminal || status === 'saving'} style={styles.secondaryButton} onClick={() => void refreshRide()}>
               {t.refresh}
             </button>
+            {isTerminal ? (
+              <button disabled={status === 'saving'} style={styles.primaryButton} onClick={startNewRide}>
+                {t.newRide}
+              </button>
+            ) : (
+              <button disabled={!canCancel || status === 'saving'} style={styles.cancelButton} onClick={() => void cancelRide()}>
+                {status === 'saving' ? t.cancelling : t.cancel}
+              </button>
+            )}
           </div>
 
           {message && (
@@ -342,6 +408,7 @@ const styles: Record<string, CSSProperties> = {
   stat: { border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#9aa6ba', display: 'flex', justifyContent: 'space-between', gap: 12, padding: 12 },
   primaryButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#19d7ff', color: '#051014', fontWeight: 950, padding: '0 14px' },
   secondaryButton: { minHeight: 48, border: '1px solid #263651', borderRadius: 8, background: '#131e2e', color: '#fff', fontWeight: 900, padding: '0 14px' },
+  cancelButton: { minHeight: 48, border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 900, padding: '0 14px' },
   actions: { display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' },
   message: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 8, background: 'rgba(32,210,155,.1)', color: '#b7ffe8', padding: 12, fontWeight: 900 },
   error: { borderColor: 'rgba(255,96,96,.45)', background: 'rgba(255,96,96,.1)', color: '#ffd1d1' },

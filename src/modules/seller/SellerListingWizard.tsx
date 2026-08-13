@@ -367,7 +367,14 @@ export function SellerListingWizard({ lang }: Props) {
                   items={DIVISION_OPTIONS.map((item) => item[lang])}
                   onChange={(label) => {
                     const next = DIVISION_OPTIONS.find((item) => item[lang] === label)
-                    if (next) setDivision(next.value)
+                    if (next && next.value !== division) {
+                      // Cars and property divisions use different visual-filter groups. Clear the
+                      // division-specific selection when switching so a previous division's keys
+                      // (e.g. Cars' carBrand) can't leak into the next division's submission.
+                      setVisualFilters({})
+                      setSelectedType(PROPERTY_TYPES[0].en)
+                      setDivision(next.value)
+                    }
                   }}
                   title={isAr ? 'القسم' : 'Division'}
                 />

@@ -2,6 +2,7 @@ import { randomUUID, createHmac, timingSafeEqual } from 'crypto'
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { s3Config, putObjectS3, getObjectS3, deleteObjectS3, presignGetS3 } from './s3-client.mjs'
 
 // Production object-storage abstraction. One seam so callers never touch the filesystem or a
 // specific cloud SDK directly. Selected by env STORAGE_PROVIDER:
@@ -53,15 +54,25 @@ function provider() {
   return (process.env.STORAGE_PROVIDER || 'local').toLowerCase()
 }
 
+// Production must never silently persist private documents to local disk. If we are in production
+// (NODE_ENV=production) the local adapter is refused unless explicitly opted in with
+// STORAGE_ALLOW_LOCAL=true — so a missing STORAGE_PROVIDER=s3 config fails closed instead of
+// falling back to disk.
+function assertProviderAllowed() {
+  if (provider() === 'local' && process.env.NODE_ENV === 'production' && process.env.STORAGE_ALLOW_LOCAL !== 'true') {
+    throw storageError(503, 'STORAGE_LOCAL_DISALLOWED_IN_PRODUCTION', 'Local disk storage is not permitted in production. Configure the S3-compatible object store.')
+  }
+}
+
+function s3Path(bucket, key) {
+  return `${bucket}/${key}`
+}
+
 export function storageStatus() {
   const p = provider()
   if (p === 'local') return { provider: 'local', configured: true, durable: false }
   if (p === 's3') {
-    return {
-      provider: 's3',
-      configured: Boolean(process.env.STORAGE_S3_BUCKET && process.env.STORAGE_S3_REGION),
-      durable: true,
-    }
+    return { provider: 's3', configured: Boolean(s3Config()), durable: true }
   }
   return { provider: p, configured: false, durable: false }
 }
@@ -89,16 +100,16 @@ export async function putObject(bucket, { base64, contentType }) {
   if (bytes.length > policy.maxBytes) throw storageError(400, 'STORAGE_TOO_LARGE', 'The uploaded file is too large.')
 
   const key = `${randomUUID()}.${ext}`
+  assertProviderAllowed()
 
   if (provider() === 'local') {
     const dir = path.join(LOCAL_ROOT, bucket)
     await mkdir(dir, { recursive: true })
     await writeFile(path.join(dir, key), bytes)
   } else if (provider() === 's3') {
-    requireS3Config()
-    // Integration seam: PUT bytes to s3://${STORAGE_S3_BUCKET}/${bucket}/${key} via the S3/GCS
-    // SDK or a SigV4 request. Not implemented here (no live credentials / bucket in this env).
-    throw storageError(503, 'STORAGE_NOT_CONFIGURED', 'Object storage upload is not enabled in this environment.')
+    const cfg = s3Config()
+    if (!cfg) requireS3Config() // throws STORAGE_NOT_CONFIGURED — fail closed
+    await putObjectS3(cfg, s3Path(bucket, key), bytes, contentType)
   } else {
     throw storageError(500, 'STORAGE_PROVIDER_UNKNOWN', `Unknown storage provider "${provider()}".`)
   }
@@ -109,22 +120,26 @@ export async function putObject(bucket, { base64, contentType }) {
 export async function getObjectBytes(bucket, key) {
   bucketPolicy(bucket)
   validateKey(key)
+  assertProviderAllowed()
   if (provider() === 'local') {
     return readFile(path.join(LOCAL_ROOT, bucket, key))
   }
-  requireS3Config()
-  throw storageError(503, 'STORAGE_NOT_CONFIGURED', 'Object storage retrieval is not enabled in this environment.')
+  const cfg = s3Config()
+  if (!cfg) requireS3Config()
+  return getObjectS3(cfg, s3Path(bucket, key))
 }
 
 export async function deleteObject(bucket, key) {
   bucketPolicy(bucket)
   if (!KEY_RE.test(key || '')) return
+  assertProviderAllowed()
   if (provider() === 'local') {
     await unlink(path.join(LOCAL_ROOT, bucket, key)).catch(() => {})
     return
   }
-  requireS3Config()
-  // s3 delete seam (fails closed above via requireS3Config throwing only when unconfigured).
+  const cfg = s3Config()
+  if (!cfg) requireS3Config()
+  await deleteObjectS3(cfg, s3Path(bucket, key))
 }
 
 // --- Signed, time-limited retrieval for private objects ---
@@ -137,6 +152,12 @@ function signature(bucket, key, exp) {
 export function signObjectUrl(bucket, key, expiresInSec = 300) {
   bucketPolicy(bucket)
   validateKey(key)
+  if (provider() === 's3') {
+    const cfg = s3Config()
+    if (!cfg) requireS3Config()
+    // Real store-native presigned URL — retrieval goes directly to the object store, not the app.
+    return presignGetS3(cfg, s3Path(bucket, key), expiresInSec)
+  }
   const exp = Math.floor(Date.now() / 1000) + Math.max(1, expiresInSec)
   return `/api/storage/${bucket}/${key}?exp=${exp}&sig=${signature(bucket, key, exp)}`
 }

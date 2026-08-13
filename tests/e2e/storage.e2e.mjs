@@ -10,6 +10,7 @@
 import {
   putObject, getObjectBytes, deleteObject, signObjectUrl, verifySignedObject, storageStatus,
 } from '../../server/lib/storage.mjs'
+import { signV4, presignGetS3 } from '../../server/lib/s3-client.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
 let pass = 0, fail = 0
@@ -66,6 +67,30 @@ delete process.env.STORAGE_S3_BUCKET
 delete process.env.STORAGE_S3_REGION
 check('s3 provider reports not-configured', storageStatus().configured === false, JSON.stringify(storageStatus()))
 await expectThrow('s3 upload fails closed (STORAGE_NOT_CONFIGURED)', () => putObject('kyc', { base64: PNG, contentType: 'image/png' }), 'STORAGE_NOT_CONFIGURED')
+process.env.STORAGE_PROVIDER = prior || 'local'
+
+console.log('\n=== 8. REAL S3 SIGV4 CORRECTNESS (AWS published GET reference) ===')
+// AWS SigV4 reference: GET examplebucket.s3.amazonaws.com/test.txt (empty payload), Range 0-9,
+// key AKIAIOSFODNN7EXAMPLE, 2013-05-24, us-east-1/s3 -> documented signature.
+const ref = signV4({
+  method: 'GET',
+  url: 'https://examplebucket.s3.amazonaws.com/test.txt',
+  headers: { range: 'bytes=0-9' },
+  payloadHashHex: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+  secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  region: 'us-east-1', service: 's3', now: new Date('2013-05-24T00:00:00Z'),
+})
+check('SigV4 signature matches the AWS reference vector', ref.signature === 'f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41', ref.signature)
+const presigned = presignGetS3({ bucket: 'b', region: 'us-east-1', accessKeyId: 'AKIA', secretAccessKey: 'secret', service: 's3' }, 'kyc/x.png', 300, new Date('2013-05-24T00:00:00Z'))
+check('presigned URL carries SigV4 query params', /X-Amz-Algorithm=AWS4-HMAC-SHA256/.test(presigned) && /X-Amz-Signature=[a-f0-9]{64}/.test(presigned), presigned.slice(0, 60))
+
+console.log('\n=== 9. PRODUCTION CANNOT SILENTLY FALL BACK TO LOCAL DISK ===')
+const priorEnv = process.env.NODE_ENV
+process.env.NODE_ENV = 'production'
+delete process.env.STORAGE_PROVIDER // => defaults to local
+await expectThrow('local disk refused in production (STORAGE_LOCAL_DISALLOWED_IN_PRODUCTION)', () => putObject('kyc', { base64: PNG, contentType: 'image/png' }), 'STORAGE_LOCAL_DISALLOWED_IN_PRODUCTION')
+process.env.NODE_ENV = priorEnv
 process.env.STORAGE_PROVIDER = prior || 'local'
 
 console.log(`\n==== STORAGE E2E: ${pass} passed, ${fail} failed ====`)

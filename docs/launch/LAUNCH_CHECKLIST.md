@@ -1,6 +1,6 @@
 # SYBNB — Master Launch Checklist
 
-**Runtime RC:** `e9fb4ff` (was 63f9854 — advanced by the error-boundary fix + dependency-CVE patch, both verified below; re-frozen here) · **Verdict:** CONDITIONAL GO · **Live payments:** disabled ·
+**Runtime RC:** `e9dfd68` (63f9854 → e9fb4ff error-boundary + dep-CVE → e9dfd68 PaymentProof race fix; all verified below) · **Verdict:** CONDITIONAL GO · **Live payments:** disabled ·
 **Legal docs:** DRAFT/launch-blocking. Status legend: **PASS** (done + evidence) ·
 **BLOCKED-OWNER** (needs owner input/credentials) · **BLOCKED-COUNSEL** · **PENDING** (agent, gated on
 a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
@@ -10,13 +10,14 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 |------|--------|----------|
 | Build / typecheck | **PASS** | `tsc && vite build` clean |
 | Schema valid | **PASS** | `prisma validate` |
-| Migrations apply to fresh DB | **PASS** | `db:migrate:deploy` on disposable DB = up-to-date, 10 migrations, uuid |
+| Migrations apply to fresh DB | **PASS** | `db:migrate:deploy` on disposable DB = up-to-date, 11 migrations, uuid |
 | 16 governed E2E suites | **PASS** | `scripts/run-all-e2e.sh` → 0 failures (marketplace 32, cars 38, buy 40, rentals 42, new-construction 42, sell 37, advertising 35, SR Ride green, wallet 38, otp 20, storage 23, legal 11, operations 14, payment 21, storage-s3 6, sms 7) |
 | Identity: server OTP + registration binding | **PASS** | `test:e2e:otp` 20/20 |
 | No public DRIVER self-registration | **PASS** | otp suite; `auth.mjs` |
 | Storage: real S3/SigV4 + no prod local-disk | **PASS** | `test:e2e:storage` 23/23, `test:e2e:storage-s3` 6/6 |
 | SMS adapter (real endpoint) | **PASS** | `test:e2e:sms` 7/7 |
 | Payments (sandbox): webhook/replay/idempotency/refund/reconciliation | **PASS** | `test:e2e:payment` 21/21 ×3 |
+| PaymentProof duplicate-reference race | **PASS (remediated)** | DB UNIQUE(provider,provider_ref) + atomic P2002; `test:e2e:payment-race` 4/4 (8 concurrent → 1 created, 7 rejected) |
 | Wallet/Gift authorization + IDOR closed | **PASS** | `test:e2e:wallet` 38/38 |
 | Operations: logging/headers/limits/health/env-fails-closed | **PASS** | `test:e2e:operations` 14/14 |
 | No committed secrets / live keys | **PASS** | secret scan clean |
@@ -61,7 +62,7 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 | DNS / public cutover | **RESERVED** | explicit owner authorization only |
 
 ## Launch verdict
-**CONDITIONAL GO.** All application-code gates PASS at `e9fb4ff`. Remaining blockers are **owner
+**CONDITIONAL GO.** All application-code gates PASS at `e9dfd68`. Remaining blockers are **owner
 inputs / external accounts / counsel approval / the reserved go-live switches** — none are code
 defects. Do not call SYBNB launch-ready until Section B (counsel + publish), C, D are green and the
 deployed candidate passes Section E pre-cutover certification.

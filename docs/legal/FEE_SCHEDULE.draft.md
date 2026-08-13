@@ -29,7 +29,7 @@ SYBNB charges nothing.
 | New Construction | **1%** | of the transaction/sale amount |
 | Cars / Vehicle Sales | **1%** | of the vehicle sale amount |
 | SR Ride (ride-hailing) | **12%** | commission on the ride fare |
-| Advertising | **USD $50 per advertisement / one week** (outside Canada) | flat fee; Canada priced separately in CAD → `[[OWNER TO SET CAD amount, e.g. CAD $50/week]]` |
+| Advertising | **USD $50 / week** (outside Canada) · **CAD $50 / week** (Canada) | flat fee per advertisement; Canada priced **separately in CAD**, not a conversion of the USD rate |
 
 **SR Ride (12%) and Cars/Vehicle Sales (1%) are separate divisions and must never share a rate.**
 
@@ -38,14 +38,14 @@ SYBNB charges nothing.
 - **Syria and all countries other than Canada:** amounts shown with `$` in this Fee Schedule are
   **USD**.
 - **Advertising outside Canada:** **USD $50 / week**.
-- **Advertising in Canada:** denominated **separately in CAD** — do **not** treat USD $50 as
-  CAD $50 or perform an undisclosed conversion. `[[OWNER TO SET the CAD price]]`
+- **Advertising in Canada:** **CAD $50 / week** — set **separately** in CAD (owner-confirmed), **not**
+  a conversion of the USD rate. USD $50/week and CAD $50/week are independent list prices.
 - **Percentage commissions** (10%, 1%, 12%, …) are calculated against the transaction amount/
   currency applicable to that transaction, subject to the final payment/currency rules approved by
   counsel. `[[COUNSEL: payment/currency handling, FX disclosure, settlement]]`
 
 ## Open items
-- `[[OWNER — INPUT NEEDED]]` Canadian advertising price in CAD.
+- Canadian advertising price — **RESOLVED: CAD $50/week** (independent of the USD rate).
 - `[[COUNSEL/ACCOUNTANT]]` taxes/VAT, invoicing, settlement, and FX disclosure for cross-currency
   transactions.
 - `[[OWNER/COUNSEL]]` how "free period" and later activation are surfaced to users (notice/consent).

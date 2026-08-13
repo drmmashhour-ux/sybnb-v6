@@ -27,7 +27,7 @@ two documents. **Nothing here is legal advice.** Items are grouped; "Doc" cites 
 7. **Commission — RESOLVED (owner)** → see `FEE_SCHEDULE.draft.md`: Daily Stays 10%, Long-Term
    Rentals 50% of one month's rent, Real-estate Buyer free / Seller 1%, New Construction 1%,
    Cars/Vehicle Sales 1%, SR Ride 12%, Advertising USD $50/week (non-Canada). All waived through
-   31 Dec 2026; not auto-activated. **Open:** Canadian advertising price in CAD. (T §6)
+   31 Dec 2026; not auto-activated. **Canada advertising: CAD $50/week (set separately, no conversion).** (T §6)
 8. **Fees & refunds** — seller/advertising plan fee terms, billing, refundability, and the
    cancellation/refund terms for Daily-Stay bookings surfaced in-product. (T §5, §6)
 9. **Card processing / PCI** — confirm the card provider (e.g. Stripe), that SYBNB stores no full

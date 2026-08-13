@@ -41,6 +41,31 @@ behavior; duplicate/replayed payment reference; double approval; invalid amount/
 advertiser/admin authorization; cross-advertiser isolation; unknown campaign handling. No real
 money movement.
 
+## Wallet / Gift
+
+```bash
+AUTH_SECRET=<secret> SENDER=<uuid> RECIPIENT=<uuid> OTHER=<uuid> ADMIN=<uuid> \
+npm run test:e2e:wallet
+```
+
+Expected: **33 passed, 0 failed.**
+
+Money model: Wallet = stored value (`cachedBalanceMinor` + append-only `WalletEntry` ledger with
+a UNIQUE idempotency key). Gift = a phone-targeted claimable entitlement (6-digit HMAC claim code
+from `AUTH_SECRET`); small gifts (< 100000) are created `SENT`, large gifts (>= 100000) are
+`CLAIM_PENDING` and require admin approval to become `SENT`. Claiming credits the claiming user's
+wallet as a promotional/platform-funded `CREDIT` (no sender debit — not a double-entry transfer).
+Claims are code-verified, brute-force locked (3 fails → 10 min), single-use (row-locked
+`SENT`→`CLAIMED`), and expiry-enforced.
+
+Covers: create/claim, ledger credit + exact balance, replay/double-claim blocked (no double
+credit), wrong-phone / wrong-code / brute-force lock, expiry rejection, admin approval of large
+gifts, admin-route authorization, wallet self-scoping, ledger invariants (non-negative, gift
+CREDIT entries present). No real money movement.
+
+Reversal/revocation after claim: **NOT SUPPORTED** (a claimed gift's CREDIT is not un-doable;
+pre-claim, a `CLAIM_PENDING` gift can be admin-rejected → `ADMIN_BLOCKED`).
+
 ### Product gap (documented, NOT SUPPORTED)
 
 The landing **"Featured ads" marquee is static** (hardcoded `AD_SPONSORS` in

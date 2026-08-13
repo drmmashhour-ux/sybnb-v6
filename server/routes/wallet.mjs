@@ -94,6 +94,12 @@ export async function handleWallet(req, res, url, context) {
     })
 
     if (!gift || gift.status !== 'SENT') throw giftClaimError()
+    // A gift carries an expiry (expiresAt) but the claim path never enforced it, so a SENT gift
+    // past its window stayed claimable and the modelled EXPIRED status was never reached. Reject
+    // expired gifts before any credit so the entitlement genuinely lapses.
+    if (gift.expiresAt && gift.expiresAt <= new Date()) {
+      throw giftClaimError('This gift has expired and can no longer be claimed.', 'GIFT_EXPIRED')
+    }
     if (gift.recipientPhoneHash !== phoneHash) {
       await registerFailedGiftClaim(gift)
       throw giftClaimError()

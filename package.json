@@ -13,6 +13,7 @@
     "smoke": "npm run smoke:api && npm run smoke:routes",
     "smoke:api": "node scripts/smoke-v6.mjs",
     "smoke:routes": "node scripts/smoke-routes-v6.mjs",
+    "test:e2e:advertising": "node tests/e2e/advertising-payment-tunnel.e2e.mjs",
     "db:validate": "prisma validate",
     "db:migrate:dev": "prisma migrate dev",
     "db:generate": "prisma generate"

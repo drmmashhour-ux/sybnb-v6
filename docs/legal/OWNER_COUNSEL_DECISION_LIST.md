@@ -23,14 +23,17 @@ two documents. **Nothing here is legal advice.** Items are grouped; "Doc" cites 
 ## C. Payments, fees & tax
 6. **Payment-services licensing** — confirm SYBNB is **not** acting as a bank/money transmitter/
    payment institution, or identify what licence is required. (T §6)
-7. **Commission** — confirm the Daily-Stay service commission rate (draft assumes **10%**) and which
-   divisions it applies to. (T §6)
+7. **Commission — RESOLVED (owner)** → see `FEE_SCHEDULE.draft.md`: Daily Stays 10%, Long-Term
+   Rentals 50% of one month's rent, Real-estate Buyer free / Seller 1%, New Construction 1%,
+   Cars/Vehicle Sales 1%, SR Ride 12%, Advertising USD $50/week (non-Canada). All waived through
+   31 Dec 2026; not auto-activated. **Open:** Canadian advertising price in CAD. (T §6)
 8. **Fees & refunds** — seller/advertising plan fee terms, billing, refundability, and the
    cancellation/refund terms for Daily-Stay bookings surfaced in-product. (T §5, §6)
 9. **Card processing / PCI** — confirm the card provider (e.g. Stripe), that SYBNB stores no full
    card data, and PCI scope. (T §6; P §1, §3)
-10. **Taxes/VAT & invoicing** — VAT/tax treatment and invoicing obligations, and currency handling
-    (SYP vs settlement currency). (T §6)
+10. **Currency — RESOLVED (owner):** Canada=CAD; Syria + all non-Canada `$`=USD (see Fee Schedule).
+    **Taxes/VAT & invoicing** remain **[[COUNSEL/accountant]]** (tax treatment, invoicing, settlement,
+    FX disclosure). (T §6)
 
 ## D. Wallet & promotional gifts
 11. **Promotional-credit characterization** — confirm the Wallet/Gift is a **platform-funded

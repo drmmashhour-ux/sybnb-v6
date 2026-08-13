@@ -15,10 +15,10 @@ does not substitute for counsel on legal-conclusion items. Legend:
 | 4 | Drivers/SR Ride | Independent, vetted before activation (ID, licence, vehicle docs, required insurance/permits); no unrestricted public self-registration | [OWNER ✓ provisional] + **[COUNSEL]** (status/licences) |
 | 5 | Minimum age | 18+ to create an account and transact | [OWNER ✓ provisional] + **[COUNSEL]** (capacity) |
 | 6 | Bank/MTL status | Not intended as a bank/money-transmitter; payments via authorized third-party processors | [OWNER ✓ provisional] + **[COUNSEL]** (wallet/gift obligations) |
-| 7 | Commission | Daily Stays 10% (to confirm); other divisions **not yet set**. Use a separate **fee schedule** referenced by Terms | **[OWNER — INPUT NEEDED]** (per-division rates) |
+| 7 | Commission | **RESOLVED** — Fee Schedule set (Daily Stays 10%, Rentals 50% of 1 month, Buyer free/Seller 1%, New Construction 1%, Cars 1%, SR Ride 12%, Advertising USD $50/wk); waived through 31 Dec 2026; not auto-activated | [OWNER ✓] · open: CAD ad price |
 | 8 | Refunds/cancellations | **Division-specific** policies (not one shared rule) | [OWNER ✓ provisional] + **[COUNSEL]** |
 | 9 | Card processor | Describe as "an authorized third-party payment processor"; name **Stripe only once confirmed** as the live provider | [OWNER ✓ provisional] |
-| 10 | Taxes/currency | Display transaction currency; **no specific tax treatment promised** | [OWNER ✓ provisional] + **[COUNSEL/accountant]** |
+| 10 | Currency/taxes | **Currency RESOLVED** — Canada=CAD; Syria+non-Canada `$`=USD; no silent conversion. Taxes/VAT/invoicing still open | [OWNER ✓] + **[COUNSEL/accountant]** |
 | 11 | Wallet/Gifts | Promotional platform credit; no cash withdrawal; not transferable except via authorized gift; may expire; not cash-exchangeable | [OWNER ✓ provisional] + **[COUNSEL]** (not e-money) |
 | 12 | Prohibited content | Fraud, impersonation, illegal goods/services, misleading listings, harassment, discriminatory/abusive content, IP infringement, malware/spam, unlawful content | [OWNER ✓ provisional] + **[COUNSEL]** (final wording + takedown) |
 | 13 | Suspension/termination | Restrict/suspend for fraud, safety, payment abuse, false info, repeat violations, legal need; support/appeal channel unless legally barred | [OWNER ✓ provisional] + **[COUNSEL]** |
@@ -37,8 +37,7 @@ does not substitute for counsel on legal-conclusion items. Legend:
 ## Still blocking finalization (owner inputs only you can give)
 - **A. Registered legal entity name** (#1).
 - **B. Contact-email strategy** — one address vs `legal@`/`privacy@` (#2).
-- **D. Per-division commission/fee schedule** — Daily Stays 10% to confirm; Cars, Buy/Sell, Rentals,
-  New Construction, SR Ride, Advertising still unset (#7).
+- **D. Fee schedule — RESOLVED** (`FEE_SCHEDULE.draft.md`); only the **Canadian advertising CAD price** remains (#7).
 - **Vendor finalization** for the processor list + regions (#16, #17).
 
 ## Owner confirmations recommended (owner adopts; agent will not decide)

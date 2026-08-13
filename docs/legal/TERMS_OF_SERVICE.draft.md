@@ -55,8 +55,17 @@ mandatory, acceptable documents, retention period, and lawful basis]]`
   cancellation/refund terms surfaced in-product]]`
 
 ## 6. Fees & payments
-- **Seller/advertising plans** may carry fees (shown before purchase). SYBNB may take a **service
-  commission** on facilitated Daily-Stay bookings (currently `[[OWNER TO CONFIRM: 10%]]`).
+- SYBNB's fees and commissions are set out in a separate **Fee Schedule**
+  (`docs/legal/FEE_SCHEDULE.draft.md`), which is incorporated by reference and may be updated with
+  notice. Divisions have **independent** rates (e.g. SR Ride 12% vs Cars/Vehicle Sales 1% — never
+  shared).
+- **Promotional/test period:** all SYBNB platform commissions and platform fees are **waived through
+  31 December 2026**. Post-promotional pricing does **not** activate automatically; charges apply
+  only after the final Fee Schedule is published and the required user notice/consent is completed.
+- **Currency:** in Canada, prices/fees are in **CAD**; in Syria and all other countries, `$` means
+  **USD** (e.g. advertising USD $50/week outside Canada; the Canadian price is set separately in CAD,
+  never a silent conversion). Percentage commissions apply to the transaction's amount/currency,
+  subject to counsel-approved payment/currency rules.
 - Payments today are handled via **manual payment references/proof** (e.g. Sham Cash, local wallet,
   bank transfer) that SYBNB reviews and verifies, and/or via a card provider where enabled. **A card
   payment is only considered confirmed when the payment provider confirms it server-side** — never

@@ -10,8 +10,11 @@
 > compliance with any specific law or certification that has not been verified.
 
 **Effective date:** `[[LEGAL/OWNER TO CONFIRM]]` · **Version:** `[[set on publish]]`
-**Controller:** `[[LEGAL/OWNER TO CONFIRM: legal entity, address, and a data-protection contact/DPO
-if required]]`
+**Controller:** **9375-7649 QUÉBEC INC.** (Québec, Canada) `[[OWNER/COUNSEL TO CONFIRM address +
+whether a privacy officer/DPO is required]]`
+> **Counsel note (material):** as a Québec enterprise, **Québec Law 25** (and potentially Canadian
+> PIPEDA) likely applies in addition to any Syrian requirements. Applicable privacy regime, the
+> privacy-officer requirement, breach thresholds, and data-subject rights/periods are for counsel.
 
 ## 1. Data we process (as implemented)
 - **Account:** display name, email, **phone number** (stored as a salted hash, `phoneHash`), and
@@ -75,5 +78,5 @@ This policy is versioned; material changes may require renewed consent recorded 
 you accept. `[[LEGAL: notice mechanism]]`
 
 ## 10. Contact
-`[[OWNER TO CONFIRM privacy contact]]` — current in-product support: email `info@sybnb.app`,
-WhatsApp `00963998191422`.
+Privacy: `privacy@sybnb.app` · Legal: `legal@sybnb.app` · Support: `support@sybnb.app`
+(owner-recommended) `[[OWNER TO CREATE/CONFIRM]]`. Also `info@sybnb.app`, WhatsApp `+963 998 191 422`.

@@ -6,10 +6,11 @@ two documents. **Nothing here is legal advice.** Items are grouped; "Doc" cites 
 (T = Terms, P = Privacy).
 
 ## A. Business & entity
-1. **Operating entity** — exact legal name, registration/number, registered address, and official
-   contact for the operator of SYBNB. (T §Operator, T §14; P §Controller)
-2. **Support/legal/privacy contacts** — confirm the public contact(s). Current in-product:
-   `info@sybnb.app`, WhatsApp `00963998191422`. Is a separate legal/privacy address needed? (T §15, P §10)
+1. **Operating entity — RESOLVED (owner):** **9375-7649 QUÉBEC INC.** (Québec, Canada). Open: registered
+   address, trade name, registration number. **Counsel (material): Québec incorporation → Canadian/
+   Québec law incl. Law 25 privacy likely applies alongside Syrian considerations.** (T §Operator; P §Controller)
+2. **Contacts — owner recommends SEPARATE** `support@` / `legal@` / `privacy@sybnb.app` (+ existing
+   `info@sybnb.app`, WhatsApp `+963 998 191 422`). Open: create/confirm the mailboxes. (T §15, P §10)
 
 ## B. Regulatory / licensing (does SYBNB need a licence for any of these in Syria?)
 3. **Intermediary status** — confirm SYBNB is characterized as an intermediary/facilitator (not a
@@ -18,7 +19,7 @@ two documents. **Nothing here is legal advice.** Items are grouped; "Doc" cites 
    for any division? (T §1, §8, §9)
 4. **Driver vetting & transport** — required driver vetting standard, transport regulation,
    insurance, and driver employment status (independent contractor vs employee). (T §2, §8)
-5. **Age/capacity** — confirm minimum age (draft says 18) and contractual-capacity wording. (T §2)
+5. **Age — RESOLVED (owner): 18+.** Capacity wording remains **[[COUNSEL]]**. (T §2)
 
 ## C. Payments, fees & tax
 6. **Payment-services licensing** — confirm SYBNB is **not** acting as a bank/money transmitter/
@@ -36,10 +37,9 @@ two documents. **Nothing here is legal advice.** Items are grouped; "Doc" cites 
     FX disclosure). (T §6)
 
 ## D. Wallet & promotional gifts
-11. **Promotional-credit characterization** — confirm the Wallet/Gift is a **platform-funded
-    promotional credit** (not the sender's money, not stored-value/e-money, no cash value), and that
-    the expiry / non-transferability / single-use terms are acceptable and **not** a regulated
-    payment/e-money product. (T §7; P §1)
+11. **Wallet/Gift — RESOLVED (owner):** promotional platform credit only, no cash withdrawal, not
+    customer money held as a bank/e-wallet. Counsel confirms this avoids regulated e-money treatment.
+    (T §7; P §1)
 
 ## E. Content, conduct & enforcement
 12. **Prohibited content & IP/takedown** — the prohibited-content list, intellectual-property policy,

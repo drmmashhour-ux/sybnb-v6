@@ -11,7 +11,11 @@
 
 **Effective date:** `[[LEGAL/OWNER TO CONFIRM]]`
 **Version:** `[[set on publish, e.g. 1.0.0]]`
-**Operator:** `[[LEGAL/OWNER TO CONFIRM: legal entity name, registration, address, contact]]`
+**Operator:** **9375-7649 QUÉBEC INC.** (Québec, Canada) `[[OWNER/COUNSEL TO CONFIRM: registered
+address, any trade/business name (e.g. "SYBNB"), and registration number]]`
+> **Counsel note (material):** the operator is a **Québec-incorporated** company. Canadian/Québec
+> law (including Québec's private-sector privacy law, "Law 25") is likely relevant **in addition to**
+> Syrian law for operations in Syria. Governing law, jurisdiction, and privacy regime are for counsel.
 
 ## 1. What SYBNB is
 SYBNB is an online **intermediary platform** that connects users with third parties across several
@@ -25,7 +29,8 @@ driver. `[[LEGAL/OWNER TO CONFIRM the intermediary characterization and any lice
 status required in Syria for real estate, vehicles, transport, advertising, and payments]]`
 
 ## 2. Eligibility & accounts
-- You must be at least **18** and able to form a binding contract. `[[LEGAL TO CONFIRM age/capacity]]`
+- You must be at least **18** (owner-confirmed) and able to form a binding contract.
+  `[[COUNSEL: capacity wording per applicable law]]`
 - Account creation with a phone number requires **one-time-passcode (OTP) verification** sent by
   SMS; SYBNB verifies the code server-side before an account bound to that phone is created.
 - You are responsible for your credentials and all activity under your account.
@@ -113,5 +118,6 @@ SYBNB may update these Terms; material changes will be versioned and **re-consen
 language of contract]]`
 
 ## 15. Contact
-`[[OWNER TO CONFIRM support/legal contact]]` — current in-product support: email `info@sybnb.app`,
-WhatsApp `00963998191422`.
+- Support: `support@sybnb.app` · Legal: `legal@sybnb.app` · Privacy: `privacy@sybnb.app`
+  (owner-recommended separate addresses) `[[OWNER TO CREATE/CONFIRM these mailboxes]]`
+- Also in-product: `info@sybnb.app`, WhatsApp `+963 998 191 422`.

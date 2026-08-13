@@ -26,7 +26,8 @@
     "bootstrap:admin": "node scripts/bootstrap-admin.mjs",
     "db:validate": "prisma validate",
     "db:migrate:dev": "prisma migrate dev",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "test:e2e:storage": "node tests/e2e/storage.e2e.mjs"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

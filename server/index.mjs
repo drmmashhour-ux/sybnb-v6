@@ -13,6 +13,7 @@ import { handleListings } from './routes/listings.mjs'
 import { handleMe } from './routes/me.mjs'
 import { handleMessages } from './routes/messages.mjs'
 import { handleOtp } from './routes/otp.mjs'
+import { handleStorage } from './routes/storage.mjs'
 import { handlePayments } from './routes/payments.mjs'
 import { handleReviews } from './routes/reviews.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
@@ -73,6 +74,7 @@ async function dispatch(req, res, url, context) {
   for (const handler of [
     handleAuth,
     handleOtp,
+    handleStorage,
     handleListings,
     handleBookings,
     handlePayments,

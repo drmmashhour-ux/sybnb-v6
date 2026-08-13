@@ -13,6 +13,7 @@
     "smoke": "npm run smoke:api && npm run smoke:routes",
     "smoke:api": "node scripts/smoke-v6.mjs",
     "smoke:routes": "node scripts/smoke-routes-v6.mjs",
+    "test:e2e:otp": "node tests/e2e/otp-identity.e2e.mjs",
     "test:e2e:advertising": "node tests/e2e/advertising-payment-tunnel.e2e.mjs",
     "test:e2e:wallet": "node tests/e2e/wallet-gift.e2e.mjs",
     "test:e2e:marketplace": "node tests/e2e/marketplace.e2e.mjs",

@@ -36,6 +36,7 @@ profiles before division/sell/advertising runs (paid-plan gate observes pristine
 | SR Ride | `npm run test:e2e:sr-ride` | full lifecycle green |
 | Advertising | `npm run test:e2e:advertising` | 35/35 |
 | Wallet / Gift | `npm run test:e2e:wallet` | 33/33 |
+| OTP / Identity | `npm run test:e2e:otp` (needs `OTP_EXPOSE_FOR_TEST=true` on the API) | 17/17 |
 
 Env: division/sell/advertising suites use `SELLER1 SELLER2 BUYER ADMIN`; wallet uses
 `SENDER RECIPIENT OTHER ADMIN`; SR Ride uses `BUYER` + `DRIVER_ID`. All need `AUTH_SECRET`

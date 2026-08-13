@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto'
 
 const PASSWORD_PREFIX = 'scrypt:v1'
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
@@ -98,4 +98,22 @@ export function verifySessionToken(token) {
 
 export function idempotencyKey(parts) {
   return createHash('sha256').update(parts.filter(Boolean).join(':')).digest('hex')
+}
+
+// --- OTP (server-side one-time verification codes) ---
+// Codes are crypto-random and never stored in plaintext; only an HMAC of the code is persisted.
+export function generateOtpCode() {
+  return String(randomInt(0, 1_000_000)).padStart(6, '0')
+}
+
+export function hashOtpCode(identifierHash, purpose, code) {
+  return createHmac('sha256', requiredSecret('AUTH_SECRET'))
+    .update(`otp:${identifierHash}:${purpose}:${String(code)}`)
+    .digest('hex')
+}
+
+export function verifyOtpCode(identifierHash, purpose, code, expectedHash) {
+  const candidate = Buffer.from(hashOtpCode(identifierHash, purpose, code))
+  const expected = Buffer.from(String(expectedHash || ''))
+  return candidate.length === expected.length && timingSafeEqual(candidate, expected)
 }

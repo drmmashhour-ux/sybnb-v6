@@ -449,6 +449,41 @@ model WalletGift {
   @@map("wallet_gifts")
 }
 
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  LOCKED
+  CANCELLED
+
+  @@map("verification_status")
+}
+
+// Server-authoritative phone/identity verification (OTP). Codes are generated, hashed, sent, and
+// verified entirely on the backend. The plaintext code is never stored or returned to production
+// clients. (Table + enum already existed in the DB ahead of the schema; this models them.)
+model VerificationCode {
+  id                String             @id @default(uuid())
+  identifierHash    String             @map("identifier_hash")
+  purpose           String
+  codeHash          String             @map("code_hash")
+  status            VerificationStatus @default(PENDING)
+  attempts          Int                @default(0)
+  maxAttempts       Int                @default(5) @map("max_attempts")
+  expiresAt         DateTime           @map("expires_at")
+  sentProvider      String?            @map("sent_provider")
+  providerMessageId String?            @map("provider_message_id")
+  verifiedAt        DateTime?          @map("verified_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  channel           String             @default("sms")
+
+  @@index([identifierHash, purpose, status])
+  @@index([expiresAt])
+  @@index([channel])
+  @@map("verification_codes")
+}
+
 model OtpAttemptLock {
   id             String   @id @default(uuid())
   purpose        String

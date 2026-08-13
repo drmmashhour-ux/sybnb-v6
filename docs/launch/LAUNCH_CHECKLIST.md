@@ -61,7 +61,7 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 | DNS / public cutover | **RESERVED** | explicit owner authorization only |
 
 ## Launch verdict
-**CONDITIONAL GO.** All application-code gates PASS at `63f9854`. Remaining blockers are **owner
+**CONDITIONAL GO.** All application-code gates PASS at `e9fb4ff`. Remaining blockers are **owner
 inputs / external accounts / counsel approval / the reserved go-live switches** — none are code
 defects. Do not call SYBNB launch-ready until Section B (counsel + publish), C, D are green and the
 deployed candidate passes Section E pre-cutover certification.

@@ -23,12 +23,17 @@ function arg(name) {
 const email = arg('email')
 const role = (arg('role') || 'ADMIN').toUpperCase()
 
+// Roles that are NOT publicly self-registerable and must be granted by an operator:
+// ADMIN/SUPPORT (platform operators) and DRIVER (vetted onboarding — public DRIVER
+// self-registration is disabled to prevent unvetted ride-claim + rider-PII access).
+const GRANTABLE_ROLES = ['ADMIN', 'SUPPORT', 'DRIVER']
+
 if (!email) {
-  console.error('Missing --email. Usage: node scripts/bootstrap-admin.mjs --email <user-email> [--role ADMIN|SUPPORT]')
+  console.error('Missing --email. Usage: node scripts/bootstrap-admin.mjs --email <user-email> [--role ADMIN|SUPPORT|DRIVER]')
   process.exit(2)
 }
-if (!['ADMIN', 'SUPPORT'].includes(role)) {
-  console.error(`Invalid --role "${role}". Allowed: ADMIN, SUPPORT.`)
+if (!GRANTABLE_ROLES.includes(role)) {
+  console.error(`Invalid --role "${role}". Allowed: ${GRANTABLE_ROLES.join(', ')}.`)
   process.exit(2)
 }
 if (!process.env.DATABASE_URL) {

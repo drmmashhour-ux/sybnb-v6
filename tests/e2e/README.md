@@ -19,6 +19,28 @@ Stripe, or touches production.**
 3. Synthetic user ids (SELLER role x2, GUEST, ADMIN) present in that DB, passed via env. Tokens
    are minted with `server/lib/security.mjs#createSessionToken` using the same `AUTH_SECRET`.
 
+## Suites & expected counts
+
+All are integration E2Es against a running API + schema-correct `sybnb_v6`. Reset the two seller
+profiles before division/sell/advertising runs (paid-plan gate observes pristine state):
+`DELETE FROM seller_profiles WHERE user_id IN ('<SELLER1>','<SELLER2>');`
+
+| Suite | Script | Expected |
+|-------|--------|----------|
+| Marketplace | `npm run test:e2e:marketplace` | 32/32 |
+| Cars | `npm run test:e2e:cars` | 38/38 |
+| Buy | `npm run test:e2e:buy` | 40/40 |
+| Rentals | `npm run test:e2e:rentals` | 42/42 |
+| New Construction | `npm run test:e2e:new-construction` | 42/42 |
+| Sell | `npm run test:e2e:sell` | 37/37 |
+| SR Ride | `npm run test:e2e:sr-ride` | full lifecycle green |
+| Advertising | `npm run test:e2e:advertising` | 35/35 |
+| Wallet / Gift | `npm run test:e2e:wallet` | 33/33 |
+
+Env: division/sell/advertising suites use `SELLER1 SELLER2 BUYER ADMIN`; wallet uses
+`SENDER RECIPIENT OTHER ADMIN`; SR Ride uses `BUYER` + `DRIVER_ID`. All need `AUTH_SECRET`
+matching the running API.
+
 ## Advertising / Payment Tunnel
 
 ```bash

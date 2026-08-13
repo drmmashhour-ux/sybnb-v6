@@ -15,6 +15,13 @@
     "smoke:routes": "node scripts/smoke-routes-v6.mjs",
     "test:e2e:advertising": "node tests/e2e/advertising-payment-tunnel.e2e.mjs",
     "test:e2e:wallet": "node tests/e2e/wallet-gift.e2e.mjs",
+    "test:e2e:marketplace": "node tests/e2e/marketplace.e2e.mjs",
+    "test:e2e:cars": "node tests/e2e/cars.e2e.mjs",
+    "test:e2e:buy": "node tests/e2e/buy.e2e.mjs",
+    "test:e2e:rentals": "node tests/e2e/rentals.e2e.mjs",
+    "test:e2e:new-construction": "node tests/e2e/new-construction.e2e.mjs",
+    "test:e2e:sell": "node tests/e2e/sell.e2e.mjs",
+    "test:e2e:sr-ride": "node tests/e2e/sr-ride.e2e.mjs",
     "db:validate": "prisma validate",
     "db:migrate:dev": "prisma migrate dev",
     "db:generate": "prisma generate"

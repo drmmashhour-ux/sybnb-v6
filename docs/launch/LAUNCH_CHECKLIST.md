@@ -1,6 +1,6 @@
 # SYBNB — Master Launch Checklist
 
-**Runtime RC:** `63f9854` (frozen) · **Verdict:** CONDITIONAL GO · **Live payments:** disabled ·
+**Runtime RC:** `e9fb4ff` (was 63f9854 — advanced by the error-boundary fix + dependency-CVE patch, both verified below; re-frozen here) · **Verdict:** CONDITIONAL GO · **Live payments:** disabled ·
 **Legal docs:** DRAFT/launch-blocking. Status legend: **PASS** (done + evidence) ·
 **BLOCKED-OWNER** (needs owner input/credentials) · **BLOCKED-COUNSEL** · **PENDING** (agent, gated on
 a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
@@ -20,6 +20,11 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 | Wallet/Gift authorization + IDOR closed | **PASS** | `test:e2e:wallet` 38/38 |
 | Operations: logging/headers/limits/health/env-fails-closed | **PASS** | `test:e2e:operations` 14/14 |
 | No committed secrets / live keys | **PASS** | secret scan clean |
+| Dependency vulnerabilities | **PASS** | `npm audit` → 0 vulnerabilities (nanoid + postcss CVEs patched, lockfile-only) |
+| Top-level error boundary (no blank-screen) | **PASS** | prod-build proof: throwing route → recovery UI, not blank; happy path unchanged |
+| Backup + restore drill (local) | **PASS** | pg_dump→pg_restore to disposable DB: exact row counts + FKs + unique indexes intact |
+| Unknown route handling | **PASS (P2)** | soft-falls back to Landing (no broken page); dedicated 404 page is a post-launch nicety |
+| No schedulers/workers (expiry opportunistic-on-read) | **PASS** | documented design; a proactive cron is a post-launch P2 |
 
 ## B. Legal
 | Gate | Status | Owner/Counsel action |

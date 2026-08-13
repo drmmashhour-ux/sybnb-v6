@@ -41,6 +41,8 @@ profiles before division/sell/advertising runs (paid-plan gate observes pristine
 | Legal / Consent | `npm run test:e2e:legal` (needs `BUYER` + `AUTH_SECRET`) | 11/11 |
 | Operations | `npm run test:e2e:operations` | 14/14 |
 | Payment Sandbox | `npm run test:e2e:payment` (needs `PAYMENT_WEBHOOK_SECRET` + `BUYER`/`OTHER` + `AUTH_SECRET`) | 21/21 |
+| S3 Storage Integration | `npm run test:e2e:storage-s3` (self-contained mock) | 6/6 |
+| SMS Provider Integration | `npm run test:e2e:sms` (self-contained mock) | 7/7 |
 
 Env: division/sell/advertising suites use `SELLER1 SELLER2 BUYER ADMIN`; wallet uses
 `SENDER RECIPIENT OTHER ADMIN`; SR Ride uses `BUYER` + `DRIVER_ID`. All need `AUTH_SECRET`

@@ -74,5 +74,20 @@ check('verify that code succeeds', (await verify(pD, dOtp, 'guest-login')).j?.ve
 // OTP_EXPOSE_FOR_TEST so this suite stays deterministic/re-runnable. The idempotent per-identifier
 // abuse controls above (resend throttle + 5-attempt lock) are the ones asserted here.
 
+console.log('\n=== 7. REGISTRATION IS BOUND TO A SERVER-VERIFIED OTP (no UI bypass) ===')
+const regPhone = phone(50)
+const regEmail = `otp-reg-${base}@sybnb.local`
+const register = (email, ph, extra = {}) => call('/api/auth/register', { email, password: 'StrongPass123', phone: ph, role: 'GUEST', displayName: 'OTP Reg', ...extra })
+// direct API registration with a phone but NO verified OTP -> rejected
+check('register with phone but no verified OTP -> 403 REGISTRATION_OTP_REQUIRED', code(await register(regEmail, regPhone)) === 'REGISTRATION_OTP_REQUIRED', 'bypass allowed')
+// verify OTP, then register -> allowed
+const rs = await send(regPhone)
+const rok = await verify(regPhone, rs.j?.devCode)
+check('OTP verified for registration phone', rok.j?.verified === true, 'verify failed')
+const created = await register(regEmail, regPhone)
+check('register after verified OTP succeeds (201)', created.status === 201, created.status + ' ' + code(created))
+// reuse: the consumed OTP cannot bind a second account (replay/cross-account)
+check('reusing a consumed OTP for another register -> 403', code(await register(`otp-reg2-${base}@sybnb.local`, regPhone)) === 'REGISTRATION_OTP_REQUIRED', 'consumed OTP reused')
+
 console.log(`\n==== OTP / IDENTITY E2E: ${pass} passed, ${fail} failed ====`)
 process.exit(fail ? 1 : 0)

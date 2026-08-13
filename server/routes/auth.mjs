@@ -14,6 +14,8 @@ const PUBLIC_REGISTER_ROLES = new Set(['GUEST', 'HOST', 'SELLER'])
 // but far better than the current no-limit state.
 const RATE_WINDOW_MS = 60_000
 const RATE_MAX = 20
+// A verified OTP must be recent to bind to a registration.
+const OTP_BIND_WINDOW_MS = 30 * 60_000
 const rateBuckets = new Map()
 function rateLimited(req, bucketKey) {
   const ipRaw = req.headers['x-forwarded-for']
@@ -57,21 +59,58 @@ export async function handleAuth(req, res, url) {
     const phoneHash = body.phone ? hashPhone(body.phone) : undefined
     const passwordHash = hashPassword(body.password)
 
-    try {
-      const user = await db().user.create({
-        data: {
-          email: body.email || undefined,
-          phoneHash,
-          passwordHash,
-          displayName: body.displayName || body.email || 'SYBNB User',
-          roles: {
-            create: { role },
-          },
-          wallets: {
-            create: { currency: 'SYP' },
-          },
+    // Registration with a phone MUST be backed by a server-side VERIFIED, unexpired OTP for that
+    // phone. The browser cannot assert verification itself — a raw API caller with no verified OTP
+    // is rejected. The verified code is consumed (single-use) so it cannot be replayed or reused
+    // to create another account.
+    let otpToConsume = null
+    if (phoneHash) {
+      const verified = await db().verificationCode.findFirst({
+        where: {
+          identifierHash: phoneHash,
+          status: 'VERIFIED',
+          verifiedAt: { gt: new Date(Date.now() - OTP_BIND_WINDOW_MS) },
         },
-        include: { roles: true },
+        orderBy: { verifiedAt: 'desc' },
+      })
+      if (!verified) {
+        const error = new Error('Phone verification is required before creating this account.')
+        error.statusCode = 403
+        error.code = 'REGISTRATION_OTP_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      otpToConsume = verified
+    }
+
+    try {
+      const user = await db().$transaction(async (tx) => {
+        if (otpToConsume) {
+          // Consume atomically: only a still-VERIFIED code flips to CANCELLED, so two concurrent
+          // registrations can't both bind the same code (cross-account replay).
+          const consumed = await tx.verificationCode.updateMany({
+            where: { id: otpToConsume.id, status: 'VERIFIED' },
+            data: { status: 'CANCELLED' },
+          })
+          if (consumed.count === 0) {
+            const error = new Error('Phone verification is required before creating this account.')
+            error.statusCode = 403
+            error.code = 'REGISTRATION_OTP_REQUIRED'
+            error.expose = true
+            throw error
+          }
+        }
+        return tx.user.create({
+          data: {
+            email: body.email || undefined,
+            phoneHash,
+            passwordHash,
+            displayName: body.displayName || body.email || 'SYBNB User',
+            roles: { create: { role } },
+            wallets: { create: { currency: 'SYP' } },
+          },
+          include: { roles: true },
+        })
       })
 
       return json(res, 201, {

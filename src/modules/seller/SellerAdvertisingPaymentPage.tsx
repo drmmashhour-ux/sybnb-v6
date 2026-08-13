@@ -289,9 +289,11 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
           onClick={() => {
             setPaymentStarted(true)
             if (methodKey === 'creditCard') {
+              // Record a reference for the proof flow only. A card payment is NEVER "confirmed"
+              // from client state — real Stripe confirmation is server-verified (not yet enabled),
+              // so this must not assert success. The ad still requires proof upload + admin review.
               const stripeReference = createStripeReference(followCode)
               setPaymentReference((current) => current || stripeReference)
-              setStripeSucceeded(stripeConfigured)
             }
           }}
         >

@@ -28,7 +28,10 @@
     "db:migrate:dev": "prisma migrate dev",
     "db:generate": "prisma generate",
     "test:e2e:storage": "node tests/e2e/storage.e2e.mjs",
-    "test:e2e:legal": "node tests/e2e/legal-consent.e2e.mjs"
+    "test:e2e:legal": "node tests/e2e/legal-consent.e2e.mjs",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:status": "prisma migrate status",
+    "test:e2e:operations": "node tests/e2e/operations.e2e.mjs"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

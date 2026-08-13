@@ -39,6 +39,7 @@ profiles before division/sell/advertising runs (paid-plan gate observes pristine
 | OTP / Identity | `npm run test:e2e:otp` (needs `OTP_EXPOSE_FOR_TEST=true` on the API) | 20/20 |
 | Production Storage | `npm run test:e2e:storage` (needs `AUTH_SECRET` matching the API) | 23/23 |
 | Legal / Consent | `npm run test:e2e:legal` (needs `BUYER` + `AUTH_SECRET`) | 11/11 |
+| Operations | `npm run test:e2e:operations` | 14/14 |
 
 Env: division/sell/advertising suites use `SELLER1 SELLER2 BUYER ADMIN`; wallet uses
 `SENDER RECIPIENT OTHER ADMIN`; SR Ride uses `BUYER` + `DRIVER_ID`. All need `AUTH_SECRET`

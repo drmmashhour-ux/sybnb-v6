@@ -1,3 +1,4 @@
+import { log, errorSummary } from './logger.mjs'
 export function json(res, statusCode, body, headers = {}) {
   const payload = JSON.stringify(body, null, 2)
   res.writeHead(statusCode, {
@@ -33,9 +34,22 @@ export function methodNotAllowed(res, allowed) {
   )
 }
 
+// Max JSON request body. KYC/proof uploads are base64 (8MB binary ~= 11MB base64), so allow 12MB
+// and reject early — an unbounded body was a memory-exhaustion (DoS) risk.
+const MAX_BODY_BYTES = 12 * 1024 * 1024
+
 export async function readJson(req) {
   const chunks = []
+  let total = 0
   for await (const chunk of req) {
+    total += chunk.length
+    if (total > MAX_BODY_BYTES) {
+      const error = new Error('Request body is too large.')
+      error.statusCode = 413
+      error.code = 'PAYLOAD_TOO_LARGE'
+      error.expose = true
+      throw error
+    }
     chunks.push(chunk)
   }
 
@@ -54,7 +68,8 @@ export async function readJson(req) {
 
 export function handleRouteError(res, error) {
   if (!error.statusCode || error.statusCode >= 500) {
-    console.error('[api:error]', error)
+    // Redacted summary only — never dump the raw error object (may carry sensitive context).
+    log.error('api_error', errorSummary(error))
   }
 
   json(res, error.statusCode || 500, {

@@ -1,9 +1,10 @@
 import { createServer } from 'node:http'
 import { API_ENDPOINTS, PLATFORM_SECURITY_RULES } from './contracts.mjs'
 import { getAuthContext } from './lib/auth-context.mjs'
-import { loadEnv } from './lib/env.mjs'
+import { loadEnv, validateEnv } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
+import { log, logRequest, newRequestId } from './lib/logger.mjs'
 import { handleAdmin } from './routes/admin.mjs'
 import { handleAuth } from './routes/auth.mjs'
 import { handleBookings } from './routes/bookings.mjs'
@@ -22,6 +23,13 @@ import { handleWallet } from './routes/wallet.mjs'
 
 loadEnv()
 
+// Fail closed on missing required configuration before accepting traffic.
+const envProblems = validateEnv()
+if (envProblems.length) {
+  log.error('env_validation_failed', { problems: envProblems })
+  process.exit(1)
+}
+
 const PORT = Number(process.env.API_PORT || 3051)
 const HOST = process.env.API_HOST || '127.0.0.1'
 const DEFAULT_CORS_ORIGIN = [
@@ -38,19 +46,29 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
 
 const server = createServer(async (req, res) => {
   const url = publicUrl(req)
+  const requestId = req.headers['x-request-id'] || newRequestId()
+  const startedAt = Date.now()
+  res.setHeader('x-request-id', requestId)
+  res.on('finish', () => logRequest({ requestId, method: req.method, path: url.pathname, status: res.statusCode, durationMs: Date.now() - startedAt }))
 
   try {
     setCors(req, res)
+    setSecurityHeaders(res)
     if (req.method === 'OPTIONS') {
       res.writeHead(204)
       return res.end()
     }
 
-    if (url.pathname === '/api/health') {
+    // Liveness: process is up (no dependency check). Readiness: dependencies (DB) are usable.
+    if (url.pathname === '/api/health/live') {
+      return json(res, 200, { ok: true, status: 'alive' })
+    }
+    if (url.pathname === '/api/health' || url.pathname === '/api/health/ready') {
       const db = await databaseStatus()
       return json(res, db.ok ? 200 : 503, {
         ok: db.ok,
         service: 'sybnb-v6-api',
+        status: db.ok ? 'ready' : 'not-ready',
         database: db,
       })
     }
@@ -127,13 +145,35 @@ function setCors(req, res) {
   res.setHeader('access-control-allow-headers', 'content-type,authorization')
 }
 
+function setSecurityHeaders(res) {
+  res.setHeader('x-content-type-options', 'nosniff')
+  res.setHeader('x-frame-options', 'DENY')
+  res.setHeader('referrer-policy', 'no-referrer')
+  res.setHeader('cross-origin-resource-policy', 'same-origin')
+  // API responses are JSON and must never be treated as active content.
+  res.setHeader('content-security-policy', "default-src 'none'; frame-ancestors 'none'")
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('strict-transport-security', 'max-age=31536000; includeSubDomains')
+  }
+}
+
 server.listen(PORT, HOST, () => {
-  console.log(`SYBNB V6 API listening on http://${HOST}:${PORT}`)
+  log.info('server_listening', { host: HOST, port: PORT, env: process.env.NODE_ENV || 'development' })
 })
 
+let shuttingDown = false
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, async () => {
-    await disconnectDb()
-    server.close(() => process.exit(0))
+    if (shuttingDown) return
+    shuttingDown = true
+    log.info('server_shutdown', { signal })
+    // Stop accepting new connections, drain, release the DB, then exit. Hard-timeout so a hung
+    // connection can't block shutdown indefinitely.
+    const timer = setTimeout(() => process.exit(0), 10_000)
+    server.close(async () => {
+      await disconnectDb().catch(() => {})
+      clearTimeout(timer)
+      process.exit(0)
+    })
   })
 }

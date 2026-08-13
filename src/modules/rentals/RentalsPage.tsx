@@ -320,7 +320,12 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setStatus('loading')
     setMessage('')
     try {
-      const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS')
+      // Forward the renter's visual-filter selection so the search actually narrows results.
+      // fetchApprovedListings only forwards server-backed scalar keys (propertyType); 'any' and
+      // unsupported keys (roomType/bedType/amenities) are ignored, so nothing over-filters.
+      const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS', {
+        attributes: visualFilters,
+      })
       setListings(nextListings)
       setSelectedId(nextListings[0]?.id || '')
       setStatus('ready')
@@ -371,6 +376,8 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setActiveSearchPanel(null)
     setHasSearched(true)
     setShowFilters(false)
+    // Re-run the fetch so the selected filters actually apply to the results.
+    void loadRentals()
   }
 
   function chooseMainGroup(value: string) {

@@ -1,12 +1,7 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import {
-  createVerificationCodeDraft,
-  verifyCodeDraft,
-  type VerificationCodeDraft,
-} from '../../engines/security/verificationCodeEngine'
-import { createStaffAccountSession } from '../../shared/api/platformApi'
+import { confirmOtp, createStaffAccountSession, requestOtp } from '../../shared/api/platformApi'
 
 type StaffRole = 'ADMIN' | 'HOST' | 'DRIVER'
 
@@ -70,7 +65,6 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [password, setPassword] = useState('')
   const [phone, setPhone] = useState(defaultPhone(role))
   const [code, setCode] = useState('')
-  const [draft, setDraft] = useState<VerificationCodeDraft | null>(null)
   const [codeError, setCodeError] = useState('')
 
   const actionLabel = role === 'ADMIN' ? t.admin : role === 'DRIVER' ? t.driver : t.host
@@ -80,7 +74,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       setCodeError(t.required)
       return
     }
-    if (!verifyCodeDraft(draft, code)) {
+    const verified = await confirmOtp({ phone: phone.trim(), purpose: 'staff-login', code: code.trim() }).catch(() => false)
+    if (!verified) {
       setCodeError(t.codeInvalid)
       return
     }
@@ -100,11 +95,14 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     }
   }
 
-  function sendCode() {
-    const nextDraft = createVerificationCodeDraft({ phone, purpose: 'staff-login' })
-    setDraft(nextDraft)
-    setCodeError('')
-    setStatus('codeSent')
+  async function sendCode() {
+    try {
+      await requestOtp({ phone: phone.trim(), purpose: 'staff-login' })
+      setCodeError('')
+      setStatus('codeSent')
+    } catch (err) {
+      setCodeError(err instanceof Error ? err.message : t.codeInvalid)
+    }
   }
 
   return (
@@ -150,14 +148,6 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             </div>
           </label>
         </div>
-        {draft && (
-          <div style={styles.smsBox}>
-            <p>{lang === 'ar' ? draft.messageAr : draft.messageEn}</p>
-            <small>
-              {t.demoCode}: <b dir="ltr">{draft.code}</b>
-            </small>
-          </div>
-        )}
         {status === 'codeSent' && <p style={styles.note}>{t.codeSent} <b dir="ltr">{phone}</b></p>}
         {codeError && <p style={styles.error}>{codeError}</p>}
         <button style={styles.primary} onClick={openSession} disabled={status === 'loading'}>

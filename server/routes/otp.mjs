@@ -21,6 +21,10 @@ const EXPOSE_CODE = process.env.OTP_EXPOSE_FOR_TEST === 'true'
 
 const ipBuckets = new Map()
 function ipLimited(req) {
+  // The per-IP limiter is process-global. Bypass it only in explicit test mode
+  // (OTP_EXPOSE_FOR_TEST, never set in production) so the governed E2E is deterministic; the
+  // per-identifier resend throttle + attempt lock remain active and tested in all modes.
+  if (EXPOSE_CODE) return false
   const ipRaw = req.headers['x-forwarded-for']
   const ip = (Array.isArray(ipRaw) ? ipRaw[0] : ipRaw || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown'
   const now = Date.now()

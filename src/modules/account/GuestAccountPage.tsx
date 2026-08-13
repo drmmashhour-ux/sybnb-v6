@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { createGuestAccountSession, submitGuestIdDocument } from '../../shared/api/platformApi'
+import { confirmOtp, createGuestAccountSession, requestOtp, submitGuestIdDocument } from '../../shared/api/platformApi'
 import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 
@@ -219,10 +219,15 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
         <div style={styles.codeRow}>
           <button
             style={styles.secondaryButton}
-            onClick={() => {
-              setCodeSent(true)
-              setCodeConfirmed(false)
-              setMessage(codeInstruction)
+            onClick={async () => {
+              try {
+                await requestOtp({ phone: phone.trim(), purpose: 'account-verify' })
+                setCodeSent(true)
+                setCodeConfirmed(false)
+                setMessage(t.codeSent)
+              } catch (err) {
+                setMessage(err instanceof Error ? err.message : t.error)
+              }
             }}
             disabled={phone.trim().length < 8}
           >
@@ -242,9 +247,15 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
           <button
             style={styles.secondaryButton}
             disabled={!codeSent || code.trim().length < 4}
-            onClick={() => {
-              setCodeConfirmed(true)
-              setMessage(readyMessage)
+            onClick={async () => {
+              try {
+                const ok = await confirmOtp({ phone: phone.trim(), purpose: 'account-verify', code: code.trim() })
+                setCodeConfirmed(ok)
+                setMessage(ok ? readyMessage : t.error)
+              } catch (err) {
+                setCodeConfirmed(false)
+                setMessage(err instanceof Error ? err.message : t.error)
+              }
             }}
           >
             {codeConfirmed ? '✓' : t.confirmCode}

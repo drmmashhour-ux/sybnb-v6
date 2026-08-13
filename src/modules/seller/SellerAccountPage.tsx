@@ -3,9 +3,11 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
 import {
+  confirmOtp,
   createSellerAccountSession,
   fetchSellerOverview,
   getStoredSellerSession,
+  requestOtp,
   submitSellerPlanProof,
 } from '../../shared/api/platformApi'
 import { SELLER_PLANS, pickSellerRole } from './sellerData'
@@ -116,9 +118,6 @@ function createAdminFollowCode() {
   return `ADV-${suffix}`
 }
 
-function createMobileVerificationCode() {
-  return `${Math.floor(100000 + Math.random() * 900000)}`
-}
 
 function readStoredFollowCode() {
   const stored = window.sessionStorage.getItem(AD_FOLLOW_CODE_STORAGE_KEY)
@@ -149,7 +148,6 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
   const [mobileCodeSent, setMobileCodeSent] = useState(false)
-  const [sentMobileCode, setSentMobileCode] = useState('')
   const [mobileCode, setMobileCode] = useState('')
   const [mobileCodeConfirmed, setMobileCodeConfirmed] = useState(false)
   const [accountDocumentCount, setAccountDocumentCount] = useState(() => readStoredUploadedFiles().length)
@@ -649,7 +647,6 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                 onChange={(event) => {
                   setPhone(event.target.value)
                   setMobileCodeSent(false)
-                  setSentMobileCode('')
                   setMobileCode('')
                   setMobileCodeConfirmed(false)
                   setAccountSentToAdmin(false)
@@ -695,23 +692,23 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                       ? 'أرسل رمز تحقق قبل إنشاء الحساب.'
                       : 'Send a verification code before creating the account.'}
                 </span>
-                {mobileCodeSent && sentMobileCode && (
-                  <small className="seller-demo-sms-code">
-                    {isAr ? 'رمز التحقق المرسل:' : 'Sent verification code:'} <b dir="ltr">{sentMobileCode}</b>
-                  </small>
-                )}
               </div>
               <button
                 type="button"
                 disabled={!phone.trim()}
-                onClick={() => {
-                  setSentMobileCode(createMobileVerificationCode())
-                  setMobileCodeSent(true)
-                  setMobileCode('')
-                  setMobileCodeConfirmed(false)
-                  setAccountSentToAdmin(false)
-                  setSubmitState('idle')
-                  setSubmitError('')
+                onClick={async () => {
+                  try {
+                    await requestOtp({ phone: phone.trim(), purpose: 'seller-login' })
+                    setMobileCodeSent(true)
+                    setMobileCode('')
+                    setMobileCodeConfirmed(false)
+                    setAccountSentToAdmin(false)
+                    setSubmitState('idle')
+                    setSubmitError('')
+                  } catch (err) {
+                    setSubmitState('error')
+                    setSubmitError(err instanceof Error ? err.message : isAr ? 'تعذر إرسال الرمز.' : 'Could not send code.')
+                  }
                 }}
               >
                 {mobileCodeSent ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : isAr ? 'إرسال الرمز' : 'Send code'}
@@ -733,10 +730,17 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               <button
                 type="button"
                 disabled={!mobileCodeSent || mobileCode.trim().length !== 6}
-                onClick={() => {
-                  if (mobileCode.trim() !== sentMobileCode) {
+                onClick={async () => {
+                  try {
+                    const ok = await confirmOtp({ phone: phone.trim(), purpose: 'seller-login', code: mobileCode.trim() })
+                    if (!ok) {
+                      setSubmitState('error')
+                      setSubmitError(isAr ? 'رمز الهاتف غير صحيح.' : 'Incorrect mobile code.')
+                      return
+                    }
+                  } catch (err) {
                     setSubmitState('error')
-                    setSubmitError(isAr ? 'رمز الهاتف غير صحيح. اكتب الرمز المرسل إلى رقم الهاتف.' : 'Incorrect mobile code. Enter the code sent to the phone number.')
+                    setSubmitError(err instanceof Error ? err.message : isAr ? 'رمز الهاتف غير صحيح.' : 'Incorrect mobile code.')
                     return
                   }
                   setSubmitState('idle')

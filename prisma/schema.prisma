@@ -449,6 +449,21 @@ model WalletGift {
   @@map("wallet_gifts")
 }
 
+// Records a user's acceptance of a specific legal-document VERSION. The document text itself is
+// owner/legal-supplied (see server/lib/legal.mjs manifest) — this only binds consent to a version
+// so re-consent can be required when a document is republished.
+model LegalConsent {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  documentKey String   @map("document_key")
+  version     String
+  acceptedAt  DateTime @default(now()) @map("accepted_at")
+
+  @@unique([userId, documentKey, version])
+  @@index([userId])
+  @@map("legal_consents")
+}
+
 enum VerificationStatus {
   PENDING
   VERIFIED

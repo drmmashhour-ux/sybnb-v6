@@ -22,6 +22,7 @@
     "test:e2e:new-construction": "node tests/e2e/new-construction.e2e.mjs",
     "test:e2e:sell": "node tests/e2e/sell.e2e.mjs",
     "test:e2e:sr-ride": "node tests/e2e/sr-ride.e2e.mjs",
+    "bootstrap:admin": "node scripts/bootstrap-admin.mjs",
     "db:validate": "prisma validate",
     "db:migrate:dev": "prisma migrate dev",
     "db:generate": "prisma generate"

@@ -316,8 +316,8 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
 
         <div className="seller-payment-documents">
           {method.usesStripe && (
-            <div className={`seller-stripe-result ${stripeSucceeded ? 'success' : ''}`}>
-              <strong>{stripeSucceeded ? (isAr ? 'تم تأكيد Stripe' : 'Stripe confirmed') : isAr ? 'بانتظار مراجعة Stripe' : 'Waiting for Stripe review'}</strong>
+            <div className="seller-stripe-result">
+              <strong>{isAr ? 'بانتظار مراجعة الدفع' : 'Waiting for payment review'}</strong>
               <span>
                 {isAr
                   ? 'ارفع تأكيد Stripe أو إيصال الدفع، ثم أرسله للإدارة. الإدارة توافق فقط بعد التأكد من استلام المال.'

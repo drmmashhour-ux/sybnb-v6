@@ -519,7 +519,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <section style={styles.tabPanel}>
               <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
               {listing.division === 'CARS' && <VehicleSpecs metadata={listing.metadata} lang={lang} />}
-              {['BUY', 'RENTALS'].includes(listing.division) && <PropertySpecs metadata={listing.metadata} lang={lang} />}
+              {['BUY', 'RENTALS', 'NEW_CONSTRUCTION'].includes(listing.division) && (
+                <PropertySpecs metadata={listing.metadata} lang={lang} division={listing.division} />
+              )}
               {!customerReady && <div style={styles.accountHint}>{t.requestOnlyAfterAccount}</div>}
               {listing.division === 'STAYS' && (
                 <>
@@ -895,9 +897,10 @@ function VehicleSpecs({ metadata, lang }: { metadata: Record<string, unknown>; l
 
 // Surfaces the property attributes a seller captured (metadata) as a labelled spec list for
 // BUY/RENTALS listings. Read-only over already-persisted data; adds no new property schema.
-function PropertySpecs({ metadata, lang }: { metadata: Record<string, unknown>; lang: Lang }) {
+function PropertySpecs({ metadata, lang, division = 'BUY' }: { metadata: Record<string, unknown>; lang: Lang; division?: string }) {
   const isAr = lang === 'ar'
   const md = metadata || {}
+  const heading = division === 'NEW_CONSTRUCTION' ? (isAr ? 'تفاصيل المشروع' : 'Project details') : isAr ? 'تفاصيل العقار' : 'Property details'
   const vf = (md.visualFilters as Record<string, unknown> | undefined) || {}
   const typeValue = typeof vf.propertyType === 'string' ? vf.propertyType : typeof md.propertyType === 'string' ? md.propertyType : ''
   const typeOption = propertyFilterGroup.options.find((opt) => opt.id === typeValue)
@@ -914,8 +917,8 @@ function PropertySpecs({ metadata, lang }: { metadata: Record<string, unknown>; 
   if (rows.length === 0) return null
 
   return (
-    <section style={styles.specGrid} aria-label={isAr ? 'تفاصيل العقار' : 'Property details'}>
-      <strong>{isAr ? 'تفاصيل العقار' : 'Property details'}</strong>
+    <section style={styles.specGrid} aria-label={heading}>
+      <strong>{heading}</strong>
       <dl style={styles.specList}>
         {rows.map((row) => (
           <div key={row.key} style={styles.specRow}>

@@ -35,7 +35,7 @@ profiles before division/sell/advertising runs (paid-plan gate observes pristine
 | Sell | `npm run test:e2e:sell` | 37/37 |
 | SR Ride | `npm run test:e2e:sr-ride` | full lifecycle green |
 | Advertising | `npm run test:e2e:advertising` | 35/35 |
-| Wallet / Gift | `npm run test:e2e:wallet` | 33/33 |
+| Wallet / Gift | `npm run test:e2e:wallet` | 38/38 |
 | OTP / Identity | `npm run test:e2e:otp` (needs `OTP_EXPOSE_FOR_TEST=true` on the API) | 20/20 |
 | Production Storage | `npm run test:e2e:storage` (needs `AUTH_SECRET` matching the API) | 23/23 |
 | Legal / Consent | `npm run test:e2e:legal` (needs `BUYER` + `AUTH_SECRET`) | 11/11 |

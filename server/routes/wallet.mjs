@@ -65,20 +65,45 @@ export async function handleWallet(req, res, url, context) {
       throw error
     }
 
+    // Close the IDOR: any authenticated caller who knows/guesses a gift id could previously read the
+    // full record (sender/recipient user ids + the private message). Full detail is now limited to
+    // the sender, the assigned recipient, or an admin/support agent. Everyone else (e.g. a recipient
+    // opening a share link before claiming) gets only the minimal fields the claim screen needs —
+    // no user ids, no private message — so ids can't be enumerated and messages can't be harvested.
+    const privileged =
+      gift.senderUserId === context.user.id ||
+      gift.recipientUserId === context.user.id ||
+      context.roles.includes('ADMIN') ||
+      context.roles.includes('SUPPORT')
+
+    if (privileged) {
+      return json(res, 200, {
+        ok: true,
+        gift: {
+          id: gift.id,
+          senderUserId: gift.senderUserId,
+          recipientUserId: gift.recipientUserId,
+          amountMinor: gift.amountMinor,
+          currency: gift.currency,
+          message: gift.message,
+          status: gift.status,
+          expiresAt: gift.expiresAt,
+          createdAt: gift.createdAt,
+          updatedAt: gift.updatedAt,
+          sender: gift.sender,
+        },
+      })
+    }
+
     return json(res, 200, {
       ok: true,
       gift: {
         id: gift.id,
-        senderUserId: gift.senderUserId,
-        recipientUserId: gift.recipientUserId,
         amountMinor: gift.amountMinor,
         currency: gift.currency,
-        message: gift.message,
         status: gift.status,
         expiresAt: gift.expiresAt,
-        createdAt: gift.createdAt,
-        updatedAt: gift.updatedAt,
-        sender: gift.sender,
+        sender: { displayName: gift.sender?.displayName },
       },
     })
   }

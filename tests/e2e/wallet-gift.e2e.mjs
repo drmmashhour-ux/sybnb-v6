@@ -107,6 +107,18 @@ check('recipient claims approved large gift (200)', bigClaim.status === 200, big
 check('large gift credits exact amount', (await balance(R)) - beforeBig === 150000, 'wrong delta')
 check('double approval of gift blocked (GIFT_NOT_REVIEWABLE)', code(await call('PATCH', `/api/admin/review-queue/gift/${bigGift.id}`, A, { decision: 'APPROVE' })) === 'GIFT_NOT_REVIEWABLE', 'not guarded')
 
+console.log('\n=== 6b. GIFT-PREVIEW IDOR CLOSED ===')
+// sender sees full detail (user ids + message); a third party gets only minimal claim fields.
+const gPrev = await createGift(S, 7000, RCPT_PHONE, { message: 'private note' })
+const gid = gPrev.j?.gift?.id
+const senderView = await call('GET', `/api/wallet/gifts/${gid}`, S)
+check('sender sees full detail (senderUserId + message)', senderView.j?.gift?.senderUserId === sender.id && senderView.j?.gift?.message === 'private note', 'sender detail missing')
+const strangerView = await call('GET', `/api/wallet/gifts/${gid}`, O)
+check('third party gets 200 minimal preview (claim UX preserved)', strangerView.status === 200 && strangerView.j?.gift?.amountMinor === 7000, strangerView.status)
+check('third party CANNOT read user ids (IDOR closed)', strangerView.j?.gift?.senderUserId === undefined && strangerView.j?.gift?.recipientUserId === undefined, 'ids leaked')
+check('third party CANNOT read the private message', strangerView.j?.gift?.message === undefined, 'message leaked')
+check('admin sees full detail', (await call('GET', `/api/wallet/gifts/${gid}`, A)).j?.gift?.message === 'private note', 'admin blocked')
+
 console.log('\n=== 7. WALLET ISOLATION + LEDGER INVARIANT ===')
 const wR = await call('GET','/api/wallet', R)
 const wO = await call('GET','/api/wallet', O)

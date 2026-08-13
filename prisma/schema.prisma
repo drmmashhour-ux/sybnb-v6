@@ -335,6 +335,10 @@ model PaymentProof {
   booking Booking? @relation(fields: [bookingId], references: [id])
   payer   User     @relation("PaymentPayer", fields: [userId], references: [id])
 
+  // A given provider reference may be submitted only once. Postgres treats NULLs as distinct, so
+  // internally-generated proofs without a providerRef are unaffected; this closes the TOCTOU race
+  // where two concurrent submissions with the same reference could both create a proof.
+  @@unique([provider, providerRef], map: "payment_proofs_provider_provider_ref_key")
   @@index([status, createdAt])
   @@index([userId])
   @@map("payment_proofs")

@@ -53,6 +53,7 @@ run "legal"            legal-consent.e2e.mjs
 run "operations"       operations.e2e.mjs
 run "wallet"           wallet-gift.e2e.mjs
 run "payment"          payment-sandbox.e2e.mjs
+run "payment-race"     payment-proof-race.e2e.mjs
 run "marketplace"      marketplace.e2e.mjs      reset
 run "cars"             cars.e2e.mjs             reset
 run "buy"              buy.e2e.mjs              reset

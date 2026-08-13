@@ -17,6 +17,22 @@ function requireStripe() {
   return stripe
 }
 
+// Translate a DB unique-constraint violation on (provider, provider_ref) into the governed
+// duplicate error. This is what closes the TOCTOU race: even if two concurrent submissions both
+// pass the app-level pre-check, only one insert can win — the other raises P2002 here.
+function paymentReferenceDuplicate() {
+  const error = new Error('This transaction reference was already submitted.')
+  error.statusCode = 409
+  error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+  error.expose = true
+  return error
+}
+function isProviderRefUniqueViolation(err) {
+  const target = err?.meta?.target
+  return err?.code === 'P2002' && (target === 'payment_proofs_provider_provider_ref_key' ||
+    (Array.isArray(target) && target.includes('provider_ref')) || String(target || '').includes('provider_ref'))
+}
+
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
@@ -60,7 +76,8 @@ async function finalizeStripeSession(session) {
   const bookingId = session.metadata?.bookingId
   if (!bookingId || session.payment_status !== 'paid') return null
 
-  return db().$transaction(async (tx) => {
+  try {
+   return await db().$transaction(async (tx) => {
     const existingProof = await tx.paymentProof.findFirst({
       where: { provider: 'stripe', providerRef: session.id },
     })
@@ -87,7 +104,15 @@ async function finalizeStripeSession(session) {
       actorUserId: await firstAdminId(tx),
       note: 'Auto-approved: Stripe confirmed the card charge was captured.',
     })
-  })
+   })
+  } catch (err) {
+    // Concurrent webhook delivery may have finalized first — the unique constraint rejects the
+    // second insert; return the already-created proof so finalization stays idempotent.
+    if (isProviderRefUniqueViolation(err)) {
+      return db().paymentProof.findFirst({ where: { provider: 'stripe', providerRef: session.id } })
+    }
+    throw err
+  }
 }
 
 export async function handlePayments(req, res, url, context) {
@@ -281,24 +306,31 @@ export async function handlePayments(req, res, url, context) {
     const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
     const planCode = body.planCode ? String(body.planCode).trim() : undefined
 
-    const [proof] = await db().$transaction([
-      db().paymentProof.create({
-        data: {
-          userId: context.user.id,
-          provider: 'seller_plan',
-          status: 'PENDING_ADMIN_REVIEW',
-          amountMinor,
-          currency: body.currency || 'USD',
-          proofAssetUrl: body.proofAssetUrl || undefined,
-          providerRef,
-        },
-      }),
-      db().sellerProfile.upsert({
-        where: { userId: context.user.id },
-        create: { userId: context.user.id, legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
-        update: { legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
-      }),
-    ])
+    let proof
+    try {
+      const [created] = await db().$transaction([
+        db().paymentProof.create({
+          data: {
+            userId: context.user.id,
+            provider: 'seller_plan',
+            status: 'PENDING_ADMIN_REVIEW',
+            amountMinor,
+            currency: body.currency || 'USD',
+            proofAssetUrl: body.proofAssetUrl || undefined,
+            providerRef,
+          },
+        }),
+        db().sellerProfile.upsert({
+          where: { userId: context.user.id },
+          create: { userId: context.user.id, legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
+          update: { legalName, sellerType, planCode, documentStatus: 'PENDING_REVIEW' },
+        }),
+      ])
+      proof = created
+    } catch (err) {
+      if (isProviderRefUniqueViolation(err)) throw paymentReferenceDuplicate()
+      throw err
+    }
 
     return json(res, 201, { ok: true, proof })
   }
@@ -366,18 +398,24 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    const proof = await db().paymentProof.create({
-      data: {
-        bookingId: booking?.id || undefined,
-        userId: context.user.id,
-        provider: 'syrian_local_wallet',
-        status: 'PENDING_ADMIN_REVIEW',
-        amountMinor,
-        currency: booking?.currency || body.currency || 'SYP',
-        proofAssetUrl: body.proofAssetUrl || undefined,
-        providerRef,
-      },
-    })
+    let proof
+    try {
+      proof = await db().paymentProof.create({
+        data: {
+          bookingId: booking?.id || undefined,
+          userId: context.user.id,
+          provider: 'syrian_local_wallet',
+          status: 'PENDING_ADMIN_REVIEW',
+          amountMinor,
+          currency: booking?.currency || body.currency || 'SYP',
+          proofAssetUrl: body.proofAssetUrl || undefined,
+          providerRef,
+        },
+      })
+    } catch (err) {
+      if (isProviderRefUniqueViolation(err)) throw paymentReferenceDuplicate()
+      throw err
+    }
 
     return json(res, 201, { ok: true, proof })
   }

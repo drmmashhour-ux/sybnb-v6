@@ -11,7 +11,7 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 | Build / typecheck | **PASS** | `tsc && vite build` clean |
 | Schema valid | **PASS** | `prisma validate` |
 | Migrations apply to fresh DB | **PASS** | `db:migrate:deploy` on disposable DB = up-to-date, 11 migrations, uuid |
-| 16 governed E2E suites | **PASS** | `scripts/run-all-e2e.sh` → 0 failures (marketplace 32, cars 38, buy 40, rentals 42, new-construction 42, sell 37, advertising 35, SR Ride green, wallet 38, otp 20, storage 23, legal 11, operations 14, payment 21, storage-s3 6, sms 7) |
+| 17 governed E2E suites | **PASS** | `scripts/run-all-e2e.sh` → 0 failures (marketplace 32, cars 38, buy 40, rentals 42, new-construction 42, sell 37, advertising 35, SR Ride green, wallet 38, otp 20, storage 23, legal 11, operations 14, payment 21, payment-race 4, storage-s3 6, sms 7) |
 | Identity: server OTP + registration binding | **PASS** | `test:e2e:otp` 20/20 |
 | No public DRIVER self-registration | **PASS** | otp suite; `auth.mjs` |
 | Storage: real S3/SigV4 + no prod local-disk | **PASS** | `test:e2e:storage` 23/23, `test:e2e:storage-s3` 6/6 |

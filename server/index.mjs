@@ -16,6 +16,7 @@ import { handleMessages } from './routes/messages.mjs'
 import { handleOtp } from './routes/otp.mjs'
 import { handleStorage } from './routes/storage.mjs'
 import { handleLegal } from './routes/legal.mjs'
+import { handlePaymentIntents } from './routes/payment-intents.mjs'
 import { handlePayments } from './routes/payments.mjs'
 import { handleReviews } from './routes/reviews.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
@@ -95,6 +96,7 @@ async function dispatch(req, res, url, context) {
     handleOtp,
     handleStorage,
     handleLegal,
+    handlePaymentIntents,
     handleListings,
     handleBookings,
     handlePayments,

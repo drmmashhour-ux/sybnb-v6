@@ -449,6 +449,57 @@ model WalletGift {
   @@map("wallet_gifts")
 }
 
+// Electronic payment intent (card/provider path). Server-authoritative amount + currency; the
+// client can never declare success — status only advances via a cryptographically verified
+// provider webhook. Distinct from manual PaymentProof (Sham Cash / local wallet / bank transfer)
+// and from WalletGift (platform-funded promotional credit).
+model PaymentIntent {
+  id           String         @id @default(uuid())
+  userId       String         @map("user_id")
+  reference    String         @unique
+  amountMinor  Int            @map("amount_minor")
+  currency     String
+  status       PaymentIntentStatus @default(REQUIRES_PAYMENT)
+  provider     String         @default("stripe")
+  providerRef  String?        @map("provider_ref")
+  bookingId    String?        @map("booking_id")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  events PaymentEvent[]
+
+  @@index([userId])
+  @@map("payment_intents")
+}
+
+// Auditable, idempotent provider event history. providerEventId is unique, so a duplicate/replayed
+// webhook delivery is a no-op.
+model PaymentEvent {
+  id              String   @id @default(uuid())
+  intentId        String   @map("intent_id")
+  providerEventId String   @unique @map("provider_event_id")
+  type            String
+  amountMinor     Int?     @map("amount_minor")
+  currency        String?
+  receivedAt      DateTime @default(now()) @map("received_at")
+
+  intent PaymentIntent @relation(fields: [intentId], references: [id], onDelete: Cascade)
+
+  @@index([intentId])
+  @@map("payment_events")
+}
+
+enum PaymentIntentStatus {
+  REQUIRES_PAYMENT
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  REFUNDED
+
+  @@map("payment_intent_status")
+}
+
 // Records a user's acceptance of a specific legal-document VERSION. The document text itself is
 // owner/legal-supplied (see server/lib/legal.mjs manifest) — this only binds consent to a version
 // so re-consent can be required when a document is republished.

@@ -35,7 +35,9 @@ evidence) · **BLOCKED-OWNER** (needs owner input/credentials) · **BLOCKED-COUN
 | Identity: server OTP + registration binding | **PASS** | `test:e2e:otp` 20/20 |
 | No public DRIVER self-registration | **PASS** | otp suite; `auth.mjs` |
 | Storage: real S3/SigV4 + no prod local-disk | **PASS** | `test:e2e:storage` 23/23, `test:e2e:storage-s3` 6/6 |
-| SMS adapter (real endpoint) | **PASS** | `test:e2e:sms` 7/7 |
+| SMS delivery | **NOT APPLICABLE** | email-only communications (Resend); no workflow needs SMS/phone — see `COMMUNICATION_AUDIT.md`. SMS adapter retained inert for optional phone-OTP |
+| Email verification/recovery (email-first OTP) | **PASS** | `test:e2e:email-otp` 11/11; email-only registration OTP-gated (fail-closed); no hidden SMS dependency |
+| Email adapter (Resend; idempotency + webhook signature) | **PASS (code)** | `server/lib/email.mjs`; webhook verify offline PASS; live cert BLOCKED-OWNER (`RESEND_CERTIFICATION.md`) |
 | Payments (sandbox): webhook/replay/idempotency/refund/reconciliation | **PASS** | `test:e2e:payment` 21/21 ×3 |
 | PaymentProof duplicate-reference race | **PASS (remediated)** | DB UNIQUE(provider,provider_ref) + atomic P2002; `test:e2e:payment-race` 4/4 (8 concurrent → 1 created, 7 rejected) |
 | Wallet/Gift authorization + IDOR closed | **PASS** | `test:e2e:wallet` 38/38 |
@@ -83,7 +85,8 @@ evidence) · **BLOCKED-OWNER** (needs owner input/credentials) · **BLOCKED-COUN
 |------|--------|---------|
 | Production Postgres provisioned + migrated | **BLOCKED-OWNER** | no prod DB credentials in this env; procedure in `PROVIDER_CERTIFICATION.md` §4 |
 | S3 private bucket + IAM + versioning/retention | **BLOCKED-OWNER** | no bucket/keys; code path certified (mock); §1 |
-| SMS provider sandbox certified vs real endpoint | **BLOCKED-OWNER** | no provider account; adapter certified (mock); §2 |
+| Email (Resend) domain + SPF/DKIM/DMARC + live delivery cert | **BLOCKED-OWNER** | needs domain/DNS + `RESEND_API_KEY` + region/Syria written confirmation; `RESEND_CERTIFICATION.md` |
+| Provider selection (hosting/PG/storage/payments/monitoring) | **BLOCKED-OWNER** | candidates in `PROVIDER_RECOMMENDATIONS.md`; each needs written lawful-Syria confirmation + counsel |
 | Stripe TEST mode certified vs real endpoint | **BLOCKED-OWNER** | no Stripe keys; architecture certified (sandbox secret); §3 |
 | Monitoring/log sink + alerting | **BLOCKED-OWNER** | destination not chosen; code emits redacted structured logs |
 | Backup schedule + restore drill | **BLOCKED-OWNER** (procedure PASS) | needs a real DB; `OPERATIONS_RUNBOOK.md` |

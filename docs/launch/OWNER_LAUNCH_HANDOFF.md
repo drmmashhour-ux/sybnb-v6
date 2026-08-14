@@ -17,6 +17,9 @@ Preserved release (Danny SSD): `SYBNB_CLEAN_FINALS/RELEASES/c89c495/` — archiv
 | Reproducible release archive + full SHA-256 manifest (permanently preserved) | **PASS** |
 | Clean-room deploy simulation (start/health/shutdown) | **PASS** |
 | Mailboxes `info@`/`support@`/`legal@`/`privacy@sybnb.app` (send/receive tested) | **PASS (owner gate complete)** |
+| Communications: email-only via Resend; SMS **NOT APPLICABLE** | **PASS** (`COMMUNICATION_AUDIT.md`); email-OTP 11/11 |
+| Resend live certification (domain + SPF/DKIM/DMARC + delivery/webhooks) | **BLOCKED-OWNER** (`RESEND_CERTIFICATION.md`) |
+| Provider selection (hosting/PG/storage/payments/monitoring) | **BLOCKED-OWNER** (`PROVIDER_RECOMMENDATIONS.md`) |
 | Final Terms/Privacy content approved + published | **BLOCKED-COUNSEL** |
 | Production vendors + data regions (payments/SMS/storage/DB/hosting/monitoring) | **BLOCKED-OWNER** |
 | Real sandbox-provider certification | **BLOCKED-OWNER** (credentials) |
@@ -27,8 +30,11 @@ Preserved release (Danny SSD): `SYBNB_CLEAN_FINALS/RELEASES/c89c495/` — archiv
 1. **Counsel-approved legal** — final Terms and Privacy **text**, each **version** (start 1.0) and
    **effective date**, for a Québec-incorporated operator running a **Syria-only** service. → agent
    wires `server/lib/legal.mjs` DRAFT→PUBLISHED and re-runs the legal suite.
-2. **Selected vendors** — name the production **payment, SMS, object-storage, database, hosting, and
-   monitoring** providers.
+2. **Selected vendors** — name the production **payment, object-storage, database, hosting, and
+   monitoring** providers (candidates + preferred/fallback stacks in `PROVIDER_RECOMMENDATIONS.md`).
+   **Email = Resend** (settled); **SMS not required**. Each vendor needs written lawful-Syria confirmation.
+2a. **Resend** — sending domain on `sybnb.app`, publish SPF/DKIM/DMARC, provide `RESEND_API_KEY` +
+   `EMAIL_FROM` (secure entry, never in git) and Resend's written region/Syria-service confirmation.
 3. **Vendor regions + lawful-Syria confirmation** — the exact data **region** per vendor and **written
    confirmation** each supports lawful service to Syria (permitted-country / sanctions-export review),
    plus DPAs. → feeds the Privacy "Processors" / "International transfers" sections.

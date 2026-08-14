@@ -25,8 +25,19 @@ else
   no "unexpected direct import of countries/syria/data" "got: $GOT"
 fi
 
+echo "=== FRONTEND MASTER isolation — payments (only shim + neutral resolver bridge to countries/syria/payments) ==="
+# src files importing countries/syria/payments must be exactly: the compat shim + the adapter resolver.
+PBRIDGES=$(grep -rln "countries/syria/payments" src/ 2>/dev/null || true)
+PEXPECTED="src/engines/payments/manualPaymentAdapter.ts
+src/engines/payments/syrianLocalWallet.ts"
+if [ "$(echo "$PBRIDGES" | sort)" = "$(echo "$PEXPECTED" | sort)" ]; then
+  ok "countries/syria/payments imported only via the shim + country-neutral resolver"
+else
+  no "unexpected direct import of countries/syria/payments" "got: $PBRIDGES"
+fi
+
 echo "=== shims are re-export only (no logic) ==="
-for f in src/engines/search/syriaData.ts src/engines/search/osmSyriaRoads.ts; do
+for f in src/engines/search/syriaData.ts src/engines/search/osmSyriaRoads.ts src/engines/payments/syrianLocalWallet.ts; do
   # allow comments + a single 'export * from' line; reject any other statement.
   BODY=$(grep -vE "^\s*//|^\s*$" "$f")
   if echo "$BODY" | grep -qvE "^export \* from '"; then

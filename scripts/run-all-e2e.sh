@@ -51,6 +51,7 @@ echo "== self-contained integration certs =="
 run "storage-s3" storage-s3-integration.e2e.mjs
 run "sms"        sms-integration.e2e.mjs
 run "country" country-selection.e2e.mjs
+run "syria-wallet" syria-wallet.e2e.mjs
 
 echo "== api-backed governed suites =="
 run "otp"              otp-identity.e2e.mjs

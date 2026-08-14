@@ -1,9 +1,18 @@
 # SYBNB — Master Launch Checklist
 
-**Runtime RC:** `e9dfd68` (63f9854 → e9fb4ff error-boundary + dep-CVE → e9dfd68 PaymentProof race fix; all verified below) · **Verdict:** CONDITIONAL GO · **Live payments:** disabled ·
-**Legal docs:** DRAFT/launch-blocking. Status legend: **PASS** (done + evidence) ·
-**BLOCKED-OWNER** (needs owner input/credentials) · **BLOCKED-COUNSEL** · **PENDING** (agent, gated on
-a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
+**Runtime RC:** `c89c495` (final country-separation candidate: e9dfd68 → country-neutral master +
+countries/syria + fail-closed selection → shim removal; all verified below) · **Verdict:** CONDITIONAL GO ·
+**Live payments:** disabled · **Legal docs:** DRAFT/launch-blocking. Status legend: **PASS** (done +
+evidence) · **BLOCKED-OWNER** (needs owner input/credentials) · **BLOCKED-COUNSEL** · **PENDING**
+(agent, gated on a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
+
+> **Phase 8 release prep 2026-08-14 (RC `c89c495`):** reproducible source archive
+> (`sybnb-src-c89c495.tar.gz`, sha256 `36e33e1a0479af2db170622e853c8fc60efd1732a968f3eb1ab07b912dfa2581`,
+> identical across 2 runs; archive == committed tree, 367 files, 0 untracked); build clean; schema
+> valid; 11 migrations apply to fresh DB (up-to-date); **21 E2E suites 0 failures** + isolation 0 +
+> bundle-safety 0; clean-room deploy sim 13/13 (health/live+ready, headers, rate-limit, redaction,
+> graceful shutdown). Full hashes in `RELEASE_MANIFEST.md`. Mailbox owner gate COMPLETE
+> (info@/support@/legal@/privacy@). Candidate unchanged by packaging (docs/release-prep only).
 
 > **Independent re-audit 2026-08-14 (RC `e9dfd68`, docs ahead at `72a6d69`):** all 17 suites re-run
 > green (0 failures); fresh empty-DB `migrate deploy` = 11 migrations + up-to-date + unique index
@@ -66,7 +75,7 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 | Advertising price (Syria market) | **PASS** | USD $50/week; **no CAD/Canada pricing** — SYBNB is Syria-only |
 | Country-neutral master + `countries/syria` | **PASS** | `server/lib/country.mjs` (neutral loader) + `countries/syria/profile.mjs`; fail-closed `SYBNB_COUNTRY`; `test:e2e` country 12/12 |
 | Fail-closed country selection | **PASS** | startup refuses on missing/unsupported/incomplete profile; currency override validated vs active profile |
-| Mailboxes support@/legal@/privacy@ | **PASS** | owner-confirmed 2026-08-14: `support@`, `legal@`, `privacy@sybnb.app` send/receive verified + reply-from-same-address configured |
+| Mailboxes info@/support@/legal@/privacy@ | **PASS (owner gate complete)** | owner-confirmed 2026-08-14: `info@`, `support@`, `legal@`, `privacy@sybnb.app` configured; send/receive tests passed; reply-from-same-address configured |
 | Vendor + region selection | **BLOCKED-OWNER** | `VENDOR_REGION_MATRIX.md` |
 
 ## D. Infrastructure & providers (real endpoints)

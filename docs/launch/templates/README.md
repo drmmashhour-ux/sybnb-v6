@@ -1,6 +1,6 @@
 # SYBNB — Deploy Config Templates (placeholders only)
 
-These are **templates for RC `e9dfd68`**. They contain **no secrets** — every sensitive value is a
+These are **templates for RC `c89c495`**. They contain **no secrets** — every sensitive value is a
 `<placeholder>`. The agent will not fill real credentials, select vendors, or deploy. Fill these on
 the deploy host or in a secret manager, per `../OWNER_ACTIONS.md`.
 

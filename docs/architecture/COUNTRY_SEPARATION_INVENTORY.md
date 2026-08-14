@@ -56,6 +56,17 @@ These reference Syria only as data/labels or consume Tier-A/B via interfaces —
 - **Phase 7:** delete re-export shims; update importers to `countries/syria/*`; prove master imports nothing Syria-specific implicitly.
 - **Phase 8:** regenerate release archive + manifest + SHA-256s + templates + certification against the **final** candidate.
 
+## Phase 8 — remaining sample-phone-literal audit (report only; not changed)
+15 `+963` literals remain in `src/`, all **sample/demo/copy content**, none in a country-selection,
+profile, or config path (verified: no `+963` under any country/profile/config module). They do **not**
+violate fail-closed country isolation, so Phase 8 leaves them unchanged:
+- `src/shared/api/platformApi.ts` (×4) — mock fixture phone values.
+- `src/modules/account/StaffAccessPage.tsx` (×3) — demo staff-login numbers.
+- `src/modules/payments/SyrianLocalWalletPaymentPage.tsx` (×2), `WalletPage.tsx`, `GiftFlowRoutes.tsx` (×2) — `useState` seed defaults / masked example.
+- `src/modules/wallet/gift-flow/GiftRecipientLanding.tsx` (×2), `GiftCodeVerify.tsx` — per-language UI copy / masked example.
+Optional future cleanup: source the visible placeholders/masked examples from `phonePlaceholder()` and
+replace mock fixtures with neutral sample values — a cosmetic follow-up, not an isolation requirement.
+
 ## Isolation proof to run each phase
 - `grep -rE "countries/syria" server/ src/` in **master** must show only the neutral loader path,
   never a direct Syria-data/legal/provider import outside an adapter.

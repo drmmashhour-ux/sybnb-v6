@@ -1,15 +1,15 @@
-# SYBNB V6 API — systemd unit TEMPLATE (RC e9dfd68). Placeholders only; no secrets here.
+# SYBNB V6 API — systemd unit TEMPLATE (RC c89c495). Placeholders only; no secrets here.
 # Secrets live in the EnvironmentFile (mode 0600, NOT in git). Install:
 #   cp sybnb-api.service.template /etc/systemd/system/sybnb-api.service  (edit <...>)
 #   systemctl daemon-reload && systemctl enable --now sybnb-api
 [Unit]
-Description=SYBNB V6 API (RC e9dfd68)
+Description=SYBNB V6 API (RC c89c495)
 After=network.target
 
 [Service]
 Type=simple
 User=<service-user>
-WorkingDirectory=<deploy-path>/sybnb-e9dfd68
+WorkingDirectory=<deploy-path>/sybnb-c89c495
 # Secrets come ONLY from this file (chmod 600, root:root), never from the unit:
 EnvironmentFile=<deploy-path>/production.env
 ExecStart=/usr/bin/node server/index.mjs

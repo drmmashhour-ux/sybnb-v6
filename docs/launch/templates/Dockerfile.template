@@ -1,6 +1,6 @@
-# SYBNB V6 — container build TEMPLATE (RC e9dfd68). No secrets baked in.
+# SYBNB V6 — container build TEMPLATE (RC c89c495). No secrets baked in.
 # Secrets are injected at RUN time via env/secret manager, never via ARG/ENV in the image.
-# Build the exact release: docker build -t sybnb:e9dfd68 .
+# Build the exact release: docker build -t sybnb:c89c495 .
 FROM node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -18,7 +18,7 @@ COPY --from=build /app/server ./server
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/package.json ./package.json
 # Run migrations as a SEPARATE deploy step (not in the image):
-#   docker run --env-file production.env sybnb:e9dfd68 npx prisma migrate deploy
+#   docker run --env-file production.env sybnb:c89c495 npx prisma migrate deploy
 EXPOSE 3051
 # Node receives SIGTERM directly for graceful shutdown:
 STOPSIGNAL SIGTERM

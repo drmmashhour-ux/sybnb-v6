@@ -1,7 +1,7 @@
 # SYBNB — Go-Live Command Runbook (prepared, not executed)
 
 Copy-ready command checklists for the deployed candidate. **Nothing here has been run against
-production** — there is no authenticated deploy target in this environment. Runtime RC **`e9dfd68`**.
+production** — there is no authenticated deploy target in this environment. Runtime RC **`c89c495`**.
 Secrets are shown as variable **names** only. Reserved actions (live payments, DNS cutover, real
 customer SMS/KYC, destructive prod mutation) require a separate explicit owner authorization and are
 **out of scope of this runbook**.
@@ -10,13 +10,13 @@ Legend: `#` = run on the deploy host once credentials/target exist.
 
 ---
 
-## 0. Pre-flight (local, already PASSING at `e9dfd68`)
+## 0. Pre-flight (local, already PASSING at `c89c495`)
 ```bash
-git rev-parse --short HEAD           # expect e9dfd68 (runtime) — docs may sit ahead
+git rev-parse --short HEAD           # expect c89c495 (runtime) — docs may sit ahead
 npm ci
 npm run build                        # tsc && vite build — clean
 npx prisma validate                  # schema valid
-bash scripts/run-all-e2e.sh          # 17 suites → "suites with failures: 0"
+bash scripts/run-all-e2e.sh          # 21 E2E suites + isolation + bundle scan → "suites with failures: 0"
 npm audit --omit=dev                 # 0 vulnerabilities
 ```
 
@@ -26,7 +26,7 @@ npm audit --omit=dev                 # 0 vulnerabilities
 #   NODE_ENV=production, AUTH_SECRET, PHONE_HASH_SECRET, DATABASE_URL,
 #   CORS_ORIGIN, STORAGE_PROVIDER=s3 + STORAGE_S3_*, PAYMENT_WEBHOOK_SECRET (test)
 #   NOT SET: OTP_EXPOSE_FOR_TEST, STORAGE_ALLOW_LOCAL, live STRIPE keys
-# git checkout e9dfd68
+# git checkout c89c495
 # npm ci && npm run build
 # npx prisma migrate deploy            # applies 11 migrations; idempotent
 # npx prisma migrate status            # expect "Database schema is up to date!"
@@ -48,12 +48,12 @@ curl -s -w " [%{http_code}]\n" $BASE/api/does-not-exist             # expect 404
 ```
 
 ## 3. Rollback (procedure prepared; deployed drill PENDING the deploy gate)
-> Prior RC `e9fb4ff` is a **build-verified rollback artifact**. That is not a deployed rollback
+> Prior RC `0717fa3` is a **build-verified rollback artifact**. That is not a deployed rollback
 > drill — executing checkout+restart+restore against the deployed target, and confirming service +
 > data recovery, is part of the deployment gate (Section E) and has not been performed.
 ```bash
-# Code rollback — prior RC e9fb4ff is build-verified as a rollback target:
-# git checkout e9fb4ff && npm ci && npm run build && restart
+# Code rollback — prior RC 0717fa3 is build-verified as a rollback target:
+# git checkout 0717fa3 && npm ci && npm run build && restart
 #
 # DB rollback — restore from the pre-deploy dump (drill verified: exact row counts + FKs + unique idx):
 # pg_dump  -Fc -d "$PROD_DB" -f pre_deploy.dump     # taken BEFORE step 1
@@ -77,12 +77,12 @@ Trigger → 1) capture x-request-id from the report / logs (no PII in logs by de
 ☐ Vendors + regions recorded, DPAs signed (§2)
 ☐ Providers certified vs real test endpoints (§3, PROVIDER_CERTIFICATION.md)
 ☐ Counsel-approved Terms/Privacy wired DRAFT→PUBLISHED, legal suite re-run green (§4)
-☐ Deployed at e9dfd68, smoke §2 green, rollback §3 certified (§5)
+☐ Deployed at c89c495, smoke §2 green, rollback §3 certified (§5)
 ☐ Backup schedule live on the real DB (OPERATIONS_RUNBOOK.md)
 —— reserved, explicit authorization each ——
 ☐ Enable live payments   ☐ DNS / public cutover
 ```
 
 ---
-**Status:** §0 verified locally at `e9dfd68`. §1–§5 are prepared command sheets awaiting an
+**Status:** §0 verified locally at `c89c495`. §1–§5 are prepared command sheets awaiting an
 authenticated deploy target and the owner inputs in `OWNER_ACTIONS.md`. No production action taken.

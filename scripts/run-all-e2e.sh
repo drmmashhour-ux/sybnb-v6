@@ -42,6 +42,11 @@ run() { # name script [needs_reset]
   [ "$rc" -ne 0 ] && { fails=$((fails+1)); tail -5 /tmp/sybnb-e2e-out.log; }
 }
 
+echo "== country isolation check (static) =="
+bash scripts/check-country-isolation.sh > /tmp/sybnb-iso.log 2>&1
+iso_rc=$?; printf "  %-18s %s  (exit %s)\n" "isolation:" "$(tail -1 /tmp/sybnb-iso.log)" "$iso_rc"
+[ "$iso_rc" -ne 0 ] && { fails=$((fails+1)); tail -8 /tmp/sybnb-iso.log; }
+
 echo "== self-contained integration certs =="
 run "storage-s3" storage-s3-integration.e2e.mjs
 run "sms"        sms-integration.e2e.mjs

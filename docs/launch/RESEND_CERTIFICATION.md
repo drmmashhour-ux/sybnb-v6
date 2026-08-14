@@ -3,13 +3,13 @@
 Resend is an **email API** (delivery + webhooks + idempotency) — **never** treated as SMS. This is the
 certification procedure and current status. **The API key is never printed or committed.**
 
-## Status: PREPARED — actual certification BLOCKED-OWNER (awaiting Add-Domain screen)
-The code path is built and verified offline; a certification runner (`scripts/certify-resend.mjs`,
-safe-skips without a key, never prints it) is ready. Live verification needs owner-provided inputs:
-complete **Resend → Domains → Add Domain → `notifications.sybnb.app`**, publish the exact DNS records
-it shows in GoDaddy, then provide the key securely. **Full step-by-step: `RESEND_DOMAIN_SETUP.md`.**
-Nothing below has been run against a live key. `certify-resend.mjs` offline checks (webhook
-signature+replay+dedup, suppression): **PASS**.
+## Status: DOMAIN VERIFIED — live delivery cert pending API key
+`notifications.sybnb.app` is **Verified** in Resend (2026-08-14, region eu-west-1). DNS is managed by
+**Vercel** (not GoDaddy); the DKIM + SPF records were written via Resend's **Auto configure** into
+Vercel — the root `sybnb.app` MX / Google Workspace mailboxes were **not** touched, and inbound
+("Enable Receiving") was left OFF. Remaining: create a Resend **API key** (owner) and run
+`scripts/certify-resend.mjs` for live send + idempotency; offline checks (webhook
+signature+replay+dedup, suppression) already **PASS**. Key is never printed/committed.
 
 | Item | Status |
 |------|--------|
@@ -19,10 +19,11 @@ signature+replay+dedup, suppression): **PASS**.
 | Webhook timestamp/replay window + duplicate-event guard | **PASS (offline test)** — `email-security` 11/11 |
 | Bounce/complaint suppression (block repeat delivery to bad addresses) | **PASS (offline lib)** — persistence store wired at live-webhook time |
 | Log redaction (adapter never logs body/key; errors exclude headers/body) | **PASS (code)** |
-| Sending **domain** + required sender addresses configured | **BLOCKED-OWNER** |
-| SPF / DKIM / DMARC verified | **BLOCKED-OWNER** (DNS + Resend dashboard) |
-| Live delivery / failure / retry-idempotency / bounce+complaint webhooks (safe test addresses) | **BLOCKED-OWNER** (API key) |
-| Resend processing region + written lawful-Syria confirmation | **BLOCKED-OWNER** |
+| Sending **domain** `notifications.sybnb.app` configured | **PASS** — added; DNS via **Vercel** (Auto configure); root `sybnb.app` MX / Google Workspace untouched |
+| SPF + DKIM verified (domain **Verified** in Resend, 2026-08-14) | **PASS** — DKIM TXT `resend._domainkey.notifications` + SPF MX/TXT `send.notifications`; region **Ireland (eu-west-1)** |
+| DMARC | **RECOMMENDED (optional)** — not required by Resend for verification; owner may add a `_dmarc.notifications` TXT policy later |
+| Live delivery / failure / retry-idempotency / bounce+complaint webhooks (safe test addresses) | **BLOCKED-OWNER** (API key) — run `scripts/certify-resend.mjs` |
+| Resend processing region + written lawful-Syria confirmation | **PARTIAL** — region recorded (**eu-west-1, Ireland**); written Syria-service confirmation + DPA still **BLOCKED-OWNER** |
 
 ## Dedicated sending subdomain (does NOT touch existing mailboxes / MX)
 Use a **dedicated sending subdomain** — `notifications.sybnb.app` — for Resend. This keeps the

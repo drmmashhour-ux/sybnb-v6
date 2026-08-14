@@ -29,25 +29,23 @@ SYBNB charges nothing.
 | New Construction | **1%** | of the transaction/sale amount |
 | Cars / Vehicle Sales | **1%** | of the vehicle sale amount |
 | SR Ride (ride-hailing) | **12%** | commission on the ride fare |
-| Advertising | **USD $50 / week** (outside Canada) · **CAD $50 / week** (Canada) | flat fee per advertisement; Canada priced **separately in CAD**, not a conversion of the USD rate |
+| Advertising | **USD $50 / week** | flat fee per advertisement (Syria market) |
 
 **SR Ride (12%) and Cars/Vehicle Sales (1%) are separate divisions and must never share a rate.**
 
-## Currency policy (owner-confirmed)
-- **Canada:** monetary prices and platform fees are denominated in **CAD**.
-- **Syria and all countries other than Canada:** amounts shown with `$` in this Fee Schedule are
-  **USD**.
-- **Advertising outside Canada:** **USD $50 / week**.
-- **Advertising in Canada:** **CAD $50 / week** — set **separately** in CAD (owner-confirmed), **not**
-  a conversion of the USD rate. USD $50/week and CAD $50/week are independent list prices.
+## Currency policy (owner-confirmed — Syria-only market)
+- SYBNB's only supported launch market is **Syria**. Prices/fees use **USD** (amounts shown with `$`)
+  and, for local settlement, **SYP** via the Syrian local wallet flow. **No CAD / Canadian pricing.**
+- **Advertising:** **USD $50 / week** unless another Syrian-market currency is explicitly approved by
+  the owner.
 - **Percentage commissions** (10%, 1%, 12%, …) are calculated against the transaction amount/
   currency applicable to that transaction, subject to the final payment/currency rules approved by
   counsel. `[[COUNSEL: payment/currency handling, FX disclosure, settlement]]`
+- A future non-Syria country version would set its own currency/pricing separately, out of scope here.
 
 ## Open items
-- Canadian advertising price — **RESOLVED: CAD $50/week** (independent of the USD rate).
-- `[[COUNSEL/ACCOUNTANT]]` taxes/VAT, invoicing, settlement, and FX disclosure for cross-currency
-  transactions.
+- `[[COUNSEL/ACCOUNTANT]]` Syrian taxes/VAT, invoicing, settlement, and FX disclosure for any
+  cross-currency (SYP/USD) transactions.
 - `[[OWNER/COUNSEL]]` how "free period" and later activation are surfaced to users (notice/consent).
 
 > Not wired into any charging logic (payments are not live). This schedule is for the DRAFT Terms +

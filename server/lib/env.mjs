@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { countryProblems } from './country.mjs'
 
 // Validate required configuration at startup, failing closed. Core secrets are always required;
 // production additionally requires an explicit CORS origin and, when the s3 storage provider is
@@ -20,6 +21,9 @@ export function validateEnv(env = process.env) {
       problems.push('STORAGE_S3_BUCKET and STORAGE_S3_REGION are required when STORAGE_PROVIDER=s3')
     }
   }
+  // Fail-closed country selection (all environments): refuse when the country profile is missing,
+  // unsupported, or incomplete, or when a currency override conflicts with the active profile.
+  problems.push(...countryProblems(env))
   return problems
 }
 

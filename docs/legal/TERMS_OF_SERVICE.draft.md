@@ -67,10 +67,10 @@ mandatory, acceptable documents, retention period, and lawful basis]]`
 - **Promotional/test period:** all SYBNB platform commissions and platform fees are **waived through
   31 December 2026**. Post-promotional pricing does **not** activate automatically; charges apply
   only after the final Fee Schedule is published and the required user notice/consent is completed.
-- **Currency:** in Canada, prices/fees are in **CAD**; in Syria and all other countries, `$` means
-  **USD** (e.g. advertising USD $50/week outside Canada; the Canadian price is set separately in CAD,
-  never a silent conversion). Percentage commissions apply to the transaction's amount/currency,
-  subject to counsel-approved payment/currency rules.
+- **Currency:** SYBNB's supported market is **Syria only**. Prices/fees shown with `$` mean **USD**
+  (e.g. advertising USD $50/week); local settlement may use **SYP** via the Syrian local wallet flow.
+  Percentage commissions apply to the transaction's amount/currency, subject to counsel-approved
+  payment/currency rules. **No CAD / Canadian-market pricing applies to SYBNB.**
 - Payments today are handled via **manual payment references/proof** (e.g. Sham Cash, local wallet,
   bank transfer) that SYBNB reviews and verifies, and/or via a card provider where enabled. **A card
   payment is only considered confirmed when the payment provider confirms it server-side** — never

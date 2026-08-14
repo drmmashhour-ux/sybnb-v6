@@ -1,12 +1,17 @@
 # SYBNB — Legal Package for Counsel (cover + review checklist)
 
-**For:** qualified Canadian/Québec counsel (with Syrian-market input as needed).
+**For:** qualified Québec/Canadian **corporate** counsel + qualified **Syrian-market** counsel — a
+Québec-incorporated company operating a **Syria-only** platform.
 **Purpose:** review and finalize SYBNB's Terms of Service and Privacy Policy before launch.
 **Status:** DRAFT — not in effect. The platform treats these as launch-blocking until approved.
 
 ## Operator (material)
-**9375-7649 QUÉBEC INC.** — a **Québec (Canada)** company operating a multi-division platform
-serving primarily the **Syrian** market. This dual context is the crux of the review.
+**9375-7649 QUÉBEC INC.** — a **Québec (Canada) incorporated** company operating a **Syria-only**
+multi-division platform. **Québec/Canada is the operator's place of incorporation, NOT a service
+market**; SYBNB is not offered to a Canadian consumer market. This split — a Québec corporate entity
+running a Syria-only service — is the crux of the review (applicable Syrian law; Canadian corporate/
+privacy law incl. **Law 25**; sanctions/export; payments; cross-border data). A separate future
+country version would be reviewed on its own.
 
 ## Documents in this package
 1. `TERMS_OF_SERVICE.draft.md` — draft Terms.
@@ -19,9 +24,9 @@ serving primarily the **Syrian** market. This dual context is the crux of the re
 - Entity 9375-7649 QUÉBEC INC.; **18+**; **intermediary** model; **drivers vetted**, no public
   self-registration; **Wallet/Gift = promotional platform credit** (no cash, not customer money held);
   **Fee Schedule** (Daily Stays 10%, Long-Term Rentals 50% of one month, Real-estate Buyer free /
-  Seller 1%, New Construction 1%, Cars 1%, SR Ride 12%, Advertising USD $50/wk non-Canada / CAD $50/wk
-  Canada); **all fees waived through 31 Dec 2026, not auto-activated**; currency **Canada=CAD,
-  non-Canada=USD, no conversion**; separate `support@`/`legal@`/`privacy@` mailboxes.
+  Seller 1%, New Construction 1%, Cars 1%, SR Ride 12%, **Advertising USD $50/wk — Syria market**);
+  **all fees waived through 31 Dec 2026, not auto-activated**; currency **USD (SYP for local
+  settlement), Syria-only, no CAD/Canada pricing, no conversion**; separate `support@`/`legal@`/`privacy@` mailboxes.
 
 ## Counsel review checklist (the decisions the drafter deliberately did not make)
 **Applicable law & structure**

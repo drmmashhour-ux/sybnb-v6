@@ -34,7 +34,7 @@ IDX=$(psql -d "$DB" -tAc "SELECT 1 FROM pg_indexes WHERE indexname='payment_proo
 echo "== 3. boot with prod-like config (storage-local ALLOWED only because no S3 creds in clean-room) =="
 DATABASE_URL="$DBURL" AUTH_SECRET=clean-room-secret PHONE_HASH_SECRET=clean-room-phone \
   PAYMENT_WEBHOOK_SECRET=whsec_sandbox_test CORS_ORIGIN=https://sim.local \
-  STORAGE_PROVIDER=local STORAGE_ALLOW_LOCAL=true \
+  STORAGE_PROVIDER=local STORAGE_ALLOW_LOCAL=true SYBNB_COUNTRY=syria \
   API_HOST=127.0.0.1 API_PORT=$PORT node server/index.mjs > /tmp/deploysim.log 2>&1 &
 API=$!; sleep 3
 

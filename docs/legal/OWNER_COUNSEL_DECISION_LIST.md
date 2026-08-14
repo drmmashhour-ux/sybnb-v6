@@ -26,13 +26,13 @@ two documents. **Nothing here is legal advice.** Items are grouped; "Doc" cites 
    payment institution, or identify what licence is required. (T §6)
 7. **Commission — RESOLVED (owner)** → see `FEE_SCHEDULE.draft.md`: Daily Stays 10%, Long-Term
    Rentals 50% of one month's rent, Real-estate Buyer free / Seller 1%, New Construction 1%,
-   Cars/Vehicle Sales 1%, SR Ride 12%, Advertising USD $50/week (non-Canada). All waived through
-   31 Dec 2026; not auto-activated. **Canada advertising: CAD $50/week (set separately, no conversion).** (T §6)
+   Cars/Vehicle Sales 1%, SR Ride 12%, Advertising **USD $50/week (Syria market)**. All waived through
+   31 Dec 2026; not auto-activated. **No CAD/Canada pricing — SYBNB is Syria-only.** (T §6)
 8. **Fees & refunds** — seller/advertising plan fee terms, billing, refundability, and the
    cancellation/refund terms for Daily-Stay bookings surfaced in-product. (T §5, §6)
 9. **Card processing / PCI** — confirm the card provider (e.g. Stripe), that SYBNB stores no full
    card data, and PCI scope. (T §6; P §1, §3)
-10. **Currency — RESOLVED (owner):** Canada=CAD; Syria + all non-Canada `$`=USD (see Fee Schedule).
+10. **Currency — RESOLVED (owner, Syria-only market):** `$`=USD; SYP for local settlement; no CAD/Canada (see Fee Schedule).
     **Taxes/VAT & invoicing** remain **[[COUNSEL/accountant]]** (tax treatment, invoicing, settlement,
     FX disclosure). (T §6)
 

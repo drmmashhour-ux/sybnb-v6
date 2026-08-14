@@ -63,7 +63,9 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 ## C. Owner inputs / accounts
 | Gate | Status | Owner action |
 |------|--------|--------------|
-| Canadian advertising CAD price | **PASS** | CAD $50/week (recorded `cd1c150`) |
+| Advertising price (Syria market) | **PASS** | USD $50/week; **no CAD/Canada pricing** — SYBNB is Syria-only |
+| Country-neutral master + `countries/syria` | **PASS** | `server/lib/country.mjs` (neutral loader) + `countries/syria/profile.mjs`; fail-closed `SYBNB_COUNTRY`; `test:e2e` country 12/12 |
+| Fail-closed country selection | **PASS** | startup refuses on missing/unsupported/incomplete profile; currency override validated vs active profile |
 | Mailboxes support@/legal@/privacy@ | **PASS** | owner-confirmed 2026-08-14: `support@`, `legal@`, `privacy@sybnb.app` send/receive verified + reply-from-same-address configured |
 | Vendor + region selection | **BLOCKED-OWNER** | `VENDOR_REGION_MATRIX.md` |
 

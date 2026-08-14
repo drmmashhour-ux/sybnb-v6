@@ -48,7 +48,8 @@ check('production rejects OTP_EXPOSE_FOR_TEST + STORAGE_ALLOW_LOCAL', (() => {
   const p = validateEnv({ AUTH_SECRET: 'a', PHONE_HASH_SECRET: 'b', DATABASE_URL: 'c', NODE_ENV: 'production', CORS_ORIGIN: 'x', STORAGE_PROVIDER: 's3', STORAGE_S3_BUCKET: 'b', STORAGE_S3_REGION: 'r', OTP_EXPOSE_FOR_TEST: 'true', STORAGE_ALLOW_LOCAL: 'true' })
   return p.some(x => /OTP_EXPOSE_FOR_TEST/.test(x)) && p.some(x => /STORAGE_ALLOW_LOCAL/.test(x))
 })(), 'not rejected')
-check('fully-configured production env passes', validateEnv({ AUTH_SECRET: 'a', PHONE_HASH_SECRET: 'b', DATABASE_URL: 'c', NODE_ENV: 'production', CORS_ORIGIN: 'https://x', STORAGE_PROVIDER: 's3', STORAGE_S3_BUCKET: 'b', STORAGE_S3_REGION: 'r' }).length === 0, 'unexpected problems')
+check('fully-configured production env passes', validateEnv({ AUTH_SECRET: 'a', PHONE_HASH_SECRET: 'b', DATABASE_URL: 'c', NODE_ENV: 'production', CORS_ORIGIN: 'https://x', STORAGE_PROVIDER: 's3', STORAGE_S3_BUCKET: 'b', STORAGE_S3_REGION: 'r', SYBNB_COUNTRY: 'syria' }).length === 0, 'unexpected problems')
+check('production env WITHOUT SYBNB_COUNTRY fails closed', validateEnv({ AUTH_SECRET: 'a', PHONE_HASH_SECRET: 'b', DATABASE_URL: 'c', NODE_ENV: 'production', CORS_ORIGIN: 'https://x', STORAGE_PROVIDER: 's3', STORAGE_S3_BUCKET: 'b', STORAGE_S3_REGION: 'r' }).some(p => /SYBNB_COUNTRY/.test(p)), 'country not enforced')
 
 console.log(`\n==== OPERATIONS E2E: ${pass} passed, ${fail} failed ====`)
 process.exit(fail ? 1 : 0)

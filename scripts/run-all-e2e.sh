@@ -28,7 +28,7 @@ DATABASE_URL="postgresql://x@127.0.0.1:5432/x" npx prisma validate 2>&1 | grep -
 
 echo "== start API (OTP_EXPOSE_FOR_TEST + sandbox payment secret) =="
 pkill -9 -f "server/index.mjs" 2>/dev/null; sleep 1
-DATABASE_URL="$DB_URL" API_HOST=127.0.0.1 API_PORT=3051 OTP_EXPOSE_FOR_TEST=true \
+DATABASE_URL="$DB_URL" API_HOST=127.0.0.1 API_PORT=3051 OTP_EXPOSE_FOR_TEST=true SYBNB_COUNTRY=syria \
   node server/index.mjs > /tmp/sybnb-e2e-api.log 2>&1 &
 API_PID=$!
 sleep 3
@@ -45,6 +45,7 @@ run() { # name script [needs_reset]
 echo "== self-contained integration certs =="
 run "storage-s3" storage-s3-integration.e2e.mjs
 run "sms"        sms-integration.e2e.mjs
+run "country" country-selection.e2e.mjs
 
 echo "== api-backed governed suites =="
 run "otp"              otp-identity.e2e.mjs

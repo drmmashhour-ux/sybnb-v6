@@ -12,7 +12,7 @@ import {
   type ManualPaymentStatus,
   type SyrianLocalWalletSubmission,
   validateSyrianLocalWalletSubmission,
-} from '../../engines/payments/syrianLocalWallet'
+} from '../../../countries/syria/payments/localWallet'
 import {
   fetchPrototypeBooking,
   submitPrototypeLocalWalletProof,

@@ -2,9 +2,9 @@
 // outputs, coordinates, fallback behavior, validation, and fare math of the SR ride geocoder BEFORE
 // and AFTER the Phase-5 move. NOTE: there is NO external geocoding provider — resolution is a local
 // gazetteer, so "provider-response/timeout" semantics = deterministic local match with NO network
-// call; this test pins that too. Imports through the stable path (../lib/sr-geocoding.mjs shim).
+// call; this test pins that too. Imports the country module directly (post-Phase-7; shim removed).
 //   node tests/e2e/sr-geocoding.e2e.mjs
-import * as g from '../../server/lib/sr-geocoding.mjs'
+import * as g from '../../countries/syria/geo/geocoding.mjs'
 
 let pass = 0, fail = 0
 const eq = (label, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (ok) { pass++; console.log(`   PASS  ${label}`) } else { fail++; console.log(`  FAIL  ${label}  -> got ${JSON.stringify(got)} want ${JSON.stringify(want)}`) } }

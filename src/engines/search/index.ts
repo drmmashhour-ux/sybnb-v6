@@ -1,2 +1,2 @@
-export * from './syriaData'
-export * from './osmSyriaRoads'
+export * from '../../../countries/syria/data/geo'
+export * from '../../../countries/syria/data/roads'

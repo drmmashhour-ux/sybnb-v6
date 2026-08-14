@@ -53,6 +53,7 @@ run "sms"        sms-integration.e2e.mjs
 run "country" country-selection.e2e.mjs
 run "syria-wallet" syria-wallet.e2e.mjs
 run "sr-geocoding" sr-geocoding.e2e.mjs
+run "presentation" presentation.e2e.mjs
 
 echo "== api-backed governed suites =="
 run "otp"              otp-identity.e2e.mjs

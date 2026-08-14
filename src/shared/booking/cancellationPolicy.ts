@@ -1,4 +1,5 @@
 import type { Lang } from '../../engines/language/languageEngine'
+import { localeForLang } from '../country/presentation'
 
 // Standard rate: free cancellation until this many days before check-in, then fees apply.
 // Protected rate: free cancellation any time up to check-in (that is what the protection fee buys).
@@ -19,7 +20,7 @@ export function cancellationCutoffDate(checkIn: string | undefined, protectedPla
 }
 
 export function formatCancellationDate(date: Date, lang: Lang) {
-  return date.toLocaleDateString(lang === 'ar' ? 'ar-SY' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+  return date.toLocaleDateString(localeForLang(lang), { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
 
 export function freeCancellationLabel(checkIn: string | undefined, protectedPlan: boolean, lang: Lang) {

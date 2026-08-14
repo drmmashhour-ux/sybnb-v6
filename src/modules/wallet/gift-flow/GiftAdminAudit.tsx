@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { localeForLang } from '../../../shared/country/presentation'
 import type { CSSProperties } from 'react'
 import {
   fetchPrototypeAdminAuditLog,
@@ -277,7 +278,7 @@ function shortId(value?: string | null) {
 
 function formatDate(value?: string | null, lang: Lang = 'ar') {
   if (!value) return '-'
-  return new Date(value).toLocaleString(lang === 'ar' ? 'ar-SY' : 'en-US')
+  return new Date(value).toLocaleString(localeForLang(lang))
 }
 
 const styles: Record<string, CSSProperties> = {

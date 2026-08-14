@@ -1,5 +1,6 @@
 import type { Lang } from '../../engines/language/languageEngine'
 import type { PlatformListing } from '../api/platformApi'
+import { localeForLang } from '../country/presentation'
 
 export const statusLabels: Record<Lang, Record<string, string>> = {
   ar: {
@@ -127,7 +128,7 @@ export function divisionText(division: string | null | undefined, lang: Lang) {
 }
 
 export function moneyText(amountMinor: number | null | undefined, currency = 'SYP', lang: Lang) {
-  const amount = Number(amountMinor || 0).toLocaleString(lang === 'ar' ? 'ar-SY' : 'en-US')
+  const amount = Number(amountMinor || 0).toLocaleString(localeForLang(lang))
   const currencyText = lang === 'ar' && currency === 'SYP' ? 'ل.س' : currency
   return `${amount} ${currencyText}`
 }

@@ -62,9 +62,18 @@ for f in src/engines/search/syriaData.ts src/engines/search/osmSyriaRoads.ts src
   fi
 done
 
-echo "=== profile loader is the only importer of the Syria profile ==="
-PROF=$(grep -rln "countries/syria/profile" server/ src/ 2>/dev/null || true)
-[ "$PROF" = "server/lib/country.mjs" ] && ok "Syria profile imported only by server/lib/country.mjs" || no "profile leak" "$PROF"
+echo "=== SERVER profile is loaded only by the server loader (never by browser code) ==="
+# Match actual import statements only (not comments/prose that mention the path).
+PROF=$(grep -rlnE "from ['\"][^'\"]*countries/syria/profile" server/ src/ 2>/dev/null || true)
+[ "$PROF" = "server/lib/country.mjs" ] && ok "server profile imported only by server/lib/country.mjs (not by src/)" || no "server profile leak" "$PROF"
+
+echo "=== PUBLIC presentation profile reached from browser only via the neutral resolver ==="
+PRES=$(grep -rlnE "from ['\"][^'\"]*countries/syria/presentation" src/ 2>/dev/null || true)
+[ "$PRES" = "src/shared/country/presentation.ts" ] && ok "public presentation imported only by src/shared/country/presentation.ts" || no "presentation access leak" "$PRES"
+
+echo "=== browser code must NOT import the server-only country profile ==="
+SRVPROF_IN_SRC=$(grep -rlnE "from ['\"][^'\"]*countries/syria/profile" src/ 2>/dev/null || true)
+[ -z "$SRVPROF_IN_SRC" ] && ok "no src/* imports the server country profile" || no "server profile in browser" "$SRVPROF_IN_SRC"
 
 echo "== ISOLATION CHECK: $fails failure(s) =="
 exit "$fails"

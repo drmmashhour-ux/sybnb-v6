@@ -29,6 +29,17 @@ new path and delete the shim.
 Tier B keeps the code in master but removes the **hard-coded** country value, sourcing it from the
 active profile — this is what makes master genuinely country-neutral.
 
+**Phase 6 status (done):** a browser-safe public `CountryPresentationProfile`
+(`countries/syria/presentation.ts` + resolver `src/shared/country/presentation.ts`) now supplies
+locale/phone. Neutralized: `display.ts#moneyText`, `cancellationPolicy.ts`, and every page-level
+`ar-SY/en-US` locale (Host/Admin/Dashboard/GiftAdminAudit → `localeForLang`), plus the Seller phone
+placeholder (`phonePlaceholder()`). **Intentionally NOT changed (sample content, not presentation
+policy):** demo/mock phone values in `platformApi.ts` fixtures, `StaffAccessPage` demo logins,
+`useState` seed defaults, the masked example in `GiftCodeVerify`, and the `GiftRecipientLanding`
+per-language copy string — these are illustrative content a user overwrites, not a country default;
+sourcing them from the profile would change UX and is out of scope. The server profile is never
+imported by browser code (isolation + bundle-safety scan enforce this).
+
 ## Tier C — STAY (country-neutral; only incidental Syria mentions)
 `server/contracts.mjs`, `src/backend/contracts.ts` (API descriptions naming "Syrian local wallet"),
 `AdminReviewPage`, `RentalsPage`, `LandingPage`, `SearchPreviewPage`, `LocationCascade`,

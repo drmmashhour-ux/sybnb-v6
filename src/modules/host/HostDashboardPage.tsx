@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties, ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
@@ -583,7 +584,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
               {listing.expiresAt && (
                 <Info
                   label={t.expiresOn}
-                  value={new Date(listing.expiresAt).toLocaleDateString(isAr ? 'ar-SY' : 'en-US', { timeZone: 'UTC' })}
+                  value={new Date(listing.expiresAt).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en'), { timeZone: 'UTC' })}
                   dir={isAr ? 'rtl' : 'ltr'}
                 />
               )}
@@ -655,7 +656,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
               {['CONFIRMED', 'COMPLETED'].includes(request.status) && (
                 <div style={styles.actions}>
                   {request.guestCheckedInAt ? (
-                    <Info label={t.checkedInAt} value={new Date(request.guestCheckedInAt).toLocaleString(isAr ? 'ar-SY' : 'en-US')} dir={isAr ? 'rtl' : 'ltr'} />
+                    <Info label={t.checkedInAt} value={new Date(request.guestCheckedInAt).toLocaleString(localeForLang(isAr ? 'ar' : 'en'))} dir={isAr ? 'rtl' : 'ltr'} />
                   ) : (
                     <button
                       disabled={activeRequestId === request.id}
@@ -666,7 +667,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                     </button>
                   )}
                   {request.guestCheckedOutAt ? (
-                    <Info label={t.checkedOutAt} value={new Date(request.guestCheckedOutAt).toLocaleString(isAr ? 'ar-SY' : 'en-US')} dir={isAr ? 'rtl' : 'ltr'} />
+                    <Info label={t.checkedOutAt} value={new Date(request.guestCheckedOutAt).toLocaleString(localeForLang(isAr ? 'ar' : 'en'))} dir={isAr ? 'rtl' : 'ltr'} />
                   ) : (
                     <button
                       disabled={activeRequestId === request.id || !request.guestCheckedInAt}

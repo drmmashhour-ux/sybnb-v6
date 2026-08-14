@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
@@ -132,9 +133,9 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
               <div key={row.bookingId} style={styles.tableRow}>
                 <span>{row.listingTitle}</span>
                 <span dir="ltr">
-                  {row.checkIn ? new Date(row.checkIn).toLocaleDateString(isAr ? 'ar-SY' : 'en-US') : '-'}
+                  {row.checkIn ? new Date(row.checkIn).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en')) : '-'}
                   {' → '}
-                  {row.checkOut ? new Date(row.checkOut).toLocaleDateString(isAr ? 'ar-SY' : 'en-US') : '-'}
+                  {row.checkOut ? new Date(row.checkOut).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en')) : '-'}
                 </span>
                 <span>{statusText(row.status, lang)}</span>
                 <b dir="ltr">{moneyText(row.hostGrossMinor, row.currency, lang)}</b>

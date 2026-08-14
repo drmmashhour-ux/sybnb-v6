@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
@@ -342,7 +343,7 @@ function normalizePastTrip(booking: PlatformOverview['bookings'][number], lang: 
 }
 
 function tripDateRange(checkIn: string, checkOut: string, lang: Lang) {
-  const locale = lang === 'ar' ? 'ar-SY' : 'en-US'
+  const locale = localeForLang(lang)
   const format = (value: string) => new Date(value).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' })
   return `${format(checkIn)} - ${format(checkOut)}`
 }

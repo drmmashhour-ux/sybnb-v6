@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties, ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
@@ -173,12 +174,12 @@ export function AdminReviewPage({ lang }: Props) {
     return [...liveItems, ...fallback].slice(0, 4)
   }, [isAr, lang, visibleAuditLog])
   const visibleTotal = visibleListings.length + visiblePayments.length + visibleGifts.length + visibleBookings.length
-  const nowLabel = new Intl.DateTimeFormat(isAr ? 'ar-SY' : 'en-US', {
+  const nowLabel = new Intl.DateTimeFormat(localeForLang(isAr ? 'ar' : 'en'), {
     weekday: 'long',
     month: 'short',
     day: 'numeric',
   }).format(new Date())
-  const timeLabel = new Intl.DateTimeFormat(isAr ? 'ar-SY' : 'en-US', {
+  const timeLabel = new Intl.DateTimeFormat(localeForLang(isAr ? 'ar' : 'en'), {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date())
@@ -1125,7 +1126,7 @@ function ShortRentAdminCommandDashboard({
                 <small>
                   {payout.eligibleNow
                     ? (isAr ? 'جاهز للصرف الآن' : 'Eligible now')
-                    : (isAr ? `يفتح في ${payout.eligibleAt ? new Date(payout.eligibleAt).toLocaleDateString(isAr ? 'ar-SY' : 'en-US') : ''}` : `Opens ${payout.eligibleAt ? new Date(payout.eligibleAt).toLocaleDateString('en-US') : ''}`)}
+                    : (isAr ? `يفتح في ${payout.eligibleAt ? new Date(payout.eligibleAt).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en')) : ''}` : `Opens ${payout.eligibleAt ? new Date(payout.eligibleAt).toLocaleDateString('en-US') : ''}`)}
                 </small>
                 <button
                   disabled={!payout.eligibleNow || releasingPayoutId === payout.bookingId}
@@ -2211,7 +2212,7 @@ function AuditLogCard({
   labels: { actor: string; entity: string; details: string }
   lang: Lang
 }) {
-  const date = new Intl.DateTimeFormat(lang === 'ar' ? 'ar-SY' : 'en-US', {
+  const date = new Intl.DateTimeFormat(localeForLang(lang), {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(entry.createdAt))

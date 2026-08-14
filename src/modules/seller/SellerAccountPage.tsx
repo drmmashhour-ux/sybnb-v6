@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { phonePlaceholder } from '../../shared/country/presentation'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
@@ -651,7 +652,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                   setMobileCodeConfirmed(false)
                   setAccountSentToAdmin(false)
                 }}
-                placeholder="+963 9XX XXX XXX"
+                placeholder={phonePlaceholder()}
                 type="tel"
                 value={phone}
               />

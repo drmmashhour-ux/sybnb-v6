@@ -9,7 +9,8 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 > green (0 failures); fresh empty-DB `migrate deploy` = 11 migrations + up-to-date + unique index
 > present + cleanly dropped; backup→restore preserved exact row counts (85 users / 1013 listings /
 > 100 payment_proofs / 274 wallet_entries) + 37 FKs + unique index; prior RC `e9fb4ff` builds clean
-> (rollback target); fail-closed prod start refuses (env_validation_failed, incl. storage-local);
+> (rollback **artifact** available — a deployed rollback drill is NOT yet done; it stays in the
+> deployment gate, Section E); fail-closed prod start refuses (env_validation_failed, incl. storage-local);
 > health/live+ready 200, security headers present, 404 JSON, rate-limit 20→429, **0 secret leaks in
 > logs**, graceful `server_shutdown` on SIGTERM; prod build serves (200, root mount, hashed bundle);
 > payment-race 4/4. **No new safe blocker found → candidate unchanged at `e9dfd68`.** Owner steps:
@@ -67,7 +68,7 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 |------|--------|------|
 | Controlled prod-like deploy (payments off) | **BLOCKED-OWNER** | no authenticated deploy target |
 | Deployed desktop/mobile + API certification | **PENDING** | after deploy; against the deployed candidate |
-| Rollback verification | **PENDING** | after deploy |
+| Rollback verification (deployed drill) | **PENDING** | after deploy — build-verified rollback **artifact** (`e9fb4ff`) exists, but restore-on-deployed-target is not yet exercised; part of this gate |
 | Enable live payments | **RESERVED** | explicit owner authorization only |
 | DNS / public cutover | **RESERVED** | explicit owner authorization only |
 

@@ -47,7 +47,10 @@ curl -s -w " [%{http_code}]\n" $BASE/api/does-not-exist             # expect 404
 # Confirm NO secret values appear in the process logs (redaction).
 ```
 
-## 3. Rollback (verified procedure — prior RC builds clean)
+## 3. Rollback (procedure prepared; deployed drill PENDING the deploy gate)
+> Prior RC `e9fb4ff` is a **build-verified rollback artifact**. That is not a deployed rollback
+> drill — executing checkout+restart+restore against the deployed target, and confirming service +
+> data recovery, is part of the deployment gate (Section E) and has not been performed.
 ```bash
 # Code rollback — prior RC e9fb4ff is build-verified as a rollback target:
 # git checkout e9fb4ff && npm ci && npm run build && restart

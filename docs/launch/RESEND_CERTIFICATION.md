@@ -3,9 +3,13 @@
 Resend is an **email API** (delivery + webhooks + idempotency) — **never** treated as SMS. This is the
 certification procedure and current status. **The API key is never printed or committed.**
 
-## Status: PREPARED — actual certification BLOCKED-OWNER
-The code path is built and partially verified offline; live verification needs owner-provided inputs
-(sending domain + DNS access + a Resend **API key**). Nothing below has been run against a live key.
+## Status: PREPARED — actual certification BLOCKED-OWNER (awaiting Add-Domain screen)
+The code path is built and verified offline; a certification runner (`scripts/certify-resend.mjs`,
+safe-skips without a key, never prints it) is ready. Live verification needs owner-provided inputs:
+complete **Resend → Domains → Add Domain → `notifications.sybnb.app`**, publish the exact DNS records
+it shows in GoDaddy, then provide the key securely. **Full step-by-step: `RESEND_DOMAIN_SETUP.md`.**
+Nothing below has been run against a live key. `certify-resend.mjs` offline checks (webhook
+signature+replay+dedup, suppression): **PASS**.
 
 | Item | Status |
 |------|--------|

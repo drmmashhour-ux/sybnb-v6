@@ -5,12 +5,22 @@
 **BLOCKED-OWNER** (needs owner input/credentials) · **BLOCKED-COUNSEL** · **PENDING** (agent, gated on
 a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 
+> **Independent re-audit 2026-08-14 (RC `e9dfd68`, docs ahead at `72a6d69`):** all 17 suites re-run
+> green (0 failures); fresh empty-DB `migrate deploy` = 11 migrations + up-to-date + unique index
+> present + cleanly dropped; backup→restore preserved exact row counts (85 users / 1013 listings /
+> 100 payment_proofs / 274 wallet_entries) + 37 FKs + unique index; prior RC `e9fb4ff` builds clean
+> (rollback target); fail-closed prod start refuses (env_validation_failed, incl. storage-local);
+> health/live+ready 200, security headers present, 404 JSON, rate-limit 20→429, **0 secret leaks in
+> logs**, graceful `server_shutdown` on SIGTERM; prod build serves (200, root mount, hashed bundle);
+> payment-race 4/4. **No new safe blocker found → candidate unchanged at `e9dfd68`.** Owner steps:
+> `OWNER_ACTIONS.md`; command sheets: `GO_LIVE_RUNBOOK.md`.
+
 ## A. Application code & tests
 | Gate | Status | Evidence |
 |------|--------|----------|
 | Build / typecheck | **PASS** | `tsc && vite build` clean |
 | Schema valid | **PASS** | `prisma validate` |
-| Migrations apply to fresh DB | **PASS** | `db:migrate:deploy` on disposable DB = up-to-date, 11 migrations, uuid |
+| Migrations apply to fresh DB | **PASS** | `db:migrate:deploy` on disposable DB = up-to-date, 11 migrations, uuid, `provider_ref` unique index present, 26 tables (re-verified 2026-08-14) |
 | 17 governed E2E suites | **PASS** | `scripts/run-all-e2e.sh` → 0 failures (marketplace 32, cars 38, buy 40, rentals 42, new-construction 42, sell 37, advertising 35, SR Ride green, wallet 38, otp 20, storage 23, legal 11, operations 14, payment 21, payment-race 4, storage-s3 6, sms 7) |
 | Identity: server OTP + registration binding | **PASS** | `test:e2e:otp` 20/20 |
 | No public DRIVER self-registration | **PASS** | otp suite; `auth.mjs` |

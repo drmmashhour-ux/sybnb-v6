@@ -47,6 +47,10 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 | Deploy config templates (no secrets) | **PASS** | `templates/production.env.template`, `sybnb-api.service.template`, `Dockerfile.template` — placeholders only |
 | Release checksums | **PASS** | source tarball + dist bundles + key runtime files digested in `RELEASE_MANIFEST.md` |
 | Defaults held OFF | **PASS** | live payments (no `STRIPE_SECRET_KEY`), public access (DNS/edge), legal DRAFT — all off by default |
+| Clean-room deploy simulation | **PASS** | `scripts/deploy-simulation.sh` → 13/13, 0 failures (fail-closed + fresh migrate + smoke + rate-limit + redaction + graceful shutdown, disposable DB) |
+| Provider-certification harness | **PASS (ready)** | `scripts/certify-providers.mjs` — real Stripe(test)/SMS/S3 round-trips when creds present; safe-SKIP with none (0 external calls) |
+| Monitoring setup instructions | **PASS (doc)** | `MONITORING_SETUP.md` — app emits structured redacted logs + health/ready; owner provisions sink |
+| Legal publication procedure wired | **PASS (prepared)** | `docs/legal/PUBLISH_PROCEDURE.md` — exact `legal.mjs` diff + test update; stays DRAFT until counsel text |
 
 ## B. Legal
 | Gate | Status | Owner/Counsel action |
@@ -60,7 +64,7 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 | Gate | Status | Owner action |
 |------|--------|--------------|
 | Canadian advertising CAD price | **PASS** | CAD $50/week (recorded `cd1c150`) |
-| Mailboxes support@/legal@/privacy@ | **BLOCKED-OWNER** | `MAILBOX_SETUP.md` |
+| Mailboxes support@/legal@/privacy@ | **PASS** | owner-confirmed 2026-08-14: `support@`, `legal@`, `privacy@sybnb.app` send/receive verified + reply-from-same-address configured |
 | Vendor + region selection | **BLOCKED-OWNER** | `VENDOR_REGION_MATRIX.md` |
 
 ## D. Infrastructure & providers (real endpoints)

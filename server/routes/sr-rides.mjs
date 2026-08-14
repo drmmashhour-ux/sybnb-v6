@@ -1,14 +1,16 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-import { quoteSrRide } from '../lib/sr-geocoding.mjs'
+// Consume the country-neutral geocoding seam (resolves the active country's geocoder, fail-closed) —
+// the route does NOT depend on any country's geocoder module directly.
+import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
 
 export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/sr/quote') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
     const body = await readJson(req)
-    const quote = quoteSrRide({
+    const quote = quoteSrRideForActiveCountry({
       pickup: body.pickup,
       dropoff: body.dropoff,
       category: body.category,
@@ -26,7 +28,7 @@ export async function handleSrRides(req, res, url, context) {
     const category = String(body.category || 'SR Economy')
     const pickup = String(body.pickup || '')
     const dropoff = String(body.dropoff || '')
-    const quote = quoteSrRide({
+    const quote = quoteSrRideForActiveCountry({
       pickup,
       dropoff,
       category,

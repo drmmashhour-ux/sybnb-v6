@@ -26,7 +26,7 @@ const send = (p, purpose = 'account-verify', extra = {}) => call('/api/otp/send'
 const verify = (p, otp, purpose = 'account-verify') => call('/api/otp/verify', { phone: p, purpose, code: otp })
 
 console.log('=== 1. INPUT VALIDATION ===')
-check('missing phone rejected (OTP_PHONE_REQUIRED)', code(await call('/api/otp/send', { purpose: 'account-verify' })) === 'OTP_PHONE_REQUIRED', 'wrong')
+check('missing identifier rejected (OTP_IDENTIFIER_REQUIRED)', code(await call('/api/otp/send', { purpose: 'account-verify' })) === 'OTP_IDENTIFIER_REQUIRED', 'wrong')
 check('invalid purpose rejected (OTP_PURPOSE_INVALID)', code(await send(phone(1), 'not-a-purpose')) === 'OTP_PURPOSE_INVALID', 'wrong')
 check('verify missing code rejected (OTP_INPUT_REQUIRED)', code(await call('/api/otp/verify', { phone: phone(1), purpose: 'account-verify' })) === 'OTP_INPUT_REQUIRED', 'wrong')
 

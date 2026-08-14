@@ -1,6 +1,7 @@
 import { db } from '../lib/prisma.mjs'
-import { hashPhone, generateOtpCode, hashOtpCode, verifyOtpCode } from '../lib/security.mjs'
+import { hashPhone, hashEmail, generateOtpCode, hashOtpCode, verifyOtpCode } from '../lib/security.mjs'
 import { sendSms } from '../lib/sms.mjs'
+import { sendEmail } from '../lib/email.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
 const CODE_TTL_MS = 10 * 60 * 1000
@@ -51,6 +52,30 @@ function maskPhone(phone) {
   return p.length <= 5 ? p : `${p.slice(0, 4)}••••${p.slice(-3)}`
 }
 
+function maskEmail(email) {
+  const [u, d] = String(email).split('@')
+  if (!d) return maskPhone(email)
+  const uu = u.length <= 2 ? `${u[0]}•` : `${u.slice(0, 2)}••${u.slice(-1)}`
+  return `${uu}@${d}`
+}
+
+// Resolve the verification identifier: EMAIL is the primary channel (email-only communications).
+// PHONE stays supported/optional (legacy + any documented country requirement). Exactly one is used.
+function resolveIdentifier(body) {
+  const email = typeof body.email === 'string' ? body.email.trim() : ''
+  const phone = typeof body.phone === 'string' ? body.phone.trim() : ''
+  if (email) return { kind: 'email', value: email, identifierHash: hashEmail(email), masked: maskEmail(email), channel: 'email' }
+  if (phone) return { kind: 'phone', value: phone, identifierHash: hashPhone(phone), masked: maskPhone(phone), channel: 'sms' }
+  return null
+}
+
+async function deliverCode(id, code, purpose, idempotencyKey) {
+  if (id.kind === 'email') {
+    return sendEmail({ to: id.value, subject: 'SYBNB verification code', text: otpMessage(code), purpose, idempotencyKey })
+  }
+  return sendSms({ to: id.value, body: otpMessage(code), purpose })
+}
+
 async function currentLock(purpose, subjectHash) {
   return db().otpAttemptLock.findUnique({ where: { purpose_subjectHash: { purpose, subjectHash } } })
 }
@@ -60,13 +85,14 @@ export async function handleOtp(req, res, url) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     if (ipLimited(req)) throw fail(429, 'RATE_LIMITED', 'Too many verification requests. Please wait a minute.')
     const body = await readJson(req)
-    const phone = typeof body.phone === 'string' ? body.phone.trim() : ''
     const purpose = String(body.purpose || '')
-    const channel = body.channel === 'whatsapp' ? 'whatsapp' : 'sms'
-    if (!phone) throw fail(400, 'OTP_PHONE_REQUIRED', 'A phone number is required.')
+    const id = resolveIdentifier(body)
+    if (!id) throw fail(400, 'OTP_IDENTIFIER_REQUIRED', 'An email (or phone) is required.')
+    // Email uses the 'email' channel; phone keeps sms/whatsapp selection.
+    const channel = id.kind === 'email' ? 'email' : (body.channel === 'whatsapp' ? 'whatsapp' : 'sms')
     if (!ALLOWED_PURPOSES.has(purpose)) throw fail(400, 'OTP_PURPOSE_INVALID', 'Unsupported verification purpose.')
 
-    const identifierHash = hashPhone(phone)
+    const identifierHash = id.identifierHash
 
     const lock = await currentLock(purpose, identifierHash)
     if (lock?.lockedUntil && lock.lockedUntil > new Date()) {
@@ -92,7 +118,9 @@ export async function handleOtp(req, res, url) {
     const codeHash = hashOtpCode(identifierHash, purpose, code)
     const expiresAt = new Date(Date.now() + CODE_TTL_MS)
 
-    const delivery = await sendSms({ to: phone, body: otpMessage(code), purpose })
+    // Idempotency key (email provider): identical retried send de-duplicates; a new code differs.
+    const idempotencyKey = `otp:${identifierHash}:${purpose}:${codeHash.slice(0, 16)}`
+    const delivery = await deliverCode(id, code, purpose, idempotencyKey)
 
     const record = await db().verificationCode.create({
       data: {
@@ -106,7 +134,9 @@ export async function handleOtp(req, res, url) {
       ok: true,
       sent: true,
       verificationId: record.id,
-      maskedPhone: maskPhone(phone),
+      channel: id.channel,
+      masked: id.masked,
+      ...(id.kind === 'phone' ? { maskedPhone: id.masked } : { maskedEmail: id.masked }),
       expiresAt,
       provider: delivery.provider,
       ...(EXPOSE_CODE ? { devCode: code } : {}),
@@ -117,13 +147,13 @@ export async function handleOtp(req, res, url) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     if (ipLimited(req)) throw fail(429, 'RATE_LIMITED', 'Too many verification requests. Please wait a minute.')
     const body = await readJson(req)
-    const phone = typeof body.phone === 'string' ? body.phone.trim() : ''
     const purpose = String(body.purpose || '')
     const code = String(body.code || '').trim()
-    if (!phone || !code) throw fail(400, 'OTP_INPUT_REQUIRED', 'Phone and code are required.')
+    const id = resolveIdentifier(body)
+    if (!id || !code) throw fail(400, 'OTP_INPUT_REQUIRED', 'Email (or phone) and code are required.')
     if (!ALLOWED_PURPOSES.has(purpose)) throw fail(400, 'OTP_PURPOSE_INVALID', 'Unsupported verification purpose.')
 
-    const identifierHash = hashPhone(phone)
+    const identifierHash = id.identifierHash
 
     const lock = await currentLock(purpose, identifierHash)
     if (lock?.lockedUntil && lock.lockedUntil > new Date()) {

@@ -57,6 +57,7 @@ run "presentation" presentation.e2e.mjs
 
 echo "== api-backed governed suites =="
 run "otp"              otp-identity.e2e.mjs
+  run "email-otp"        email-otp.e2e.mjs
 run "storage"          storage.e2e.mjs
 run "legal"            legal-consent.e2e.mjs
 run "operations"       operations.e2e.mjs

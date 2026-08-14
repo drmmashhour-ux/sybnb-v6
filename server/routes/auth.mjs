@@ -1,5 +1,5 @@
 import { db } from '../lib/prisma.mjs'
-import { createSessionToken, hashPassword, hashPhone, verifyPassword } from '../lib/security.mjs'
+import { createSessionToken, hashPassword, hashPhone, hashEmail, verifyPassword } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
 // DRIVER is intentionally NOT self-registerable: an unvetted self-registered driver could claim
@@ -59,22 +59,25 @@ export async function handleAuth(req, res, url) {
     const phoneHash = body.phone ? hashPhone(body.phone) : undefined
     const passwordHash = hashPassword(body.password)
 
-    // Registration with a phone MUST be backed by a server-side VERIFIED, unexpired OTP for that
-    // phone. The browser cannot assert verification itself — a raw API caller with no verified OTP
-    // is rejected. The verified code is consumed (single-use) so it cannot be replayed or reused
-    // to create another account.
+    // Registration MUST be backed by a server-side VERIFIED, unexpired OTP for the account's
+    // verification identifier. EMAIL is the primary channel (email-only communications); phone is
+    // supported too. If a phone is supplied it binds the phone OTP (precedence, legacy); otherwise
+    // an email account binds the EMAIL OTP. The browser cannot assert verification itself — a raw
+    // API caller with no verified OTP is rejected. The verified code is consumed (single-use) so it
+    // cannot be replayed to create another account.
+    const otpIdentifierHash = phoneHash || (body.email ? hashEmail(body.email) : undefined)
     let otpToConsume = null
-    if (phoneHash) {
+    if (otpIdentifierHash) {
       const verified = await db().verificationCode.findFirst({
         where: {
-          identifierHash: phoneHash,
+          identifierHash: otpIdentifierHash,
           status: 'VERIFIED',
           verifiedAt: { gt: new Date(Date.now() - OTP_BIND_WINDOW_MS) },
         },
         orderBy: { verifiedAt: 'desc' },
       })
       if (!verified) {
-        const error = new Error('Phone verification is required before creating this account.')
+        const error = new Error('Verification is required before creating this account.')
         error.statusCode = 403
         error.code = 'REGISTRATION_OTP_REQUIRED'
         error.expose = true

@@ -27,6 +27,20 @@ export function hashPhone(phone) {
   return createHmac('sha256', requiredSecret('PHONE_HASH_SECRET')).update(normalized).digest('hex')
 }
 
+// Hash an email identifier for OTP/verification (same keyed-HMAC scheme as hashPhone). Email is the
+// primary verification identifier for the email-only communication plan; phone stays optional.
+export function hashEmail(email) {
+  const normalized = String(email || '').trim().toLowerCase()
+  if (!normalized || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalized)) {
+    const error = new Error('A valid email is required.')
+    error.statusCode = 400
+    error.code = 'EMAIL_REQUIRED'
+    error.expose = true
+    throw error
+  }
+  return createHmac('sha256', requiredSecret('PHONE_HASH_SECRET')).update(`email:${normalized}`).digest('hex')
+}
+
 export function hashPassword(password) {
   if (!password || String(password).length < 8) {
     const error = new Error('password must be at least 8 characters.')

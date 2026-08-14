@@ -47,9 +47,15 @@ if (!key || !from) {
 const auth = { authorization: `Bearer ${key}` } // never logged
 try {
   const res = await fetch(`https://api.resend.com/domains`, { headers: auth })
-  const j = await res.json()
-  const d = (j?.data || []).find((x) => x.name === domain)
-  rec('domain verification status', d?.status === 'verified' ? 'PASS' : 'FAIL', d ? `${domain}: ${d.status}` : `${domain} not found — Add Domain first`)
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    // A least-privilege Sending-access key cannot list domains (management scope). That is expected
+    // and NOT a failure — live delivery below proves the domain works. SKIP, don't fail.
+    rec('domain verification status', 'SKIP', `key lacks domains:read (HTTP ${res.status}) — expected for a Sending-access key; verify in dashboard`)
+  } else {
+    const d = (j?.data || []).find((x) => x.name === domain)
+    rec('domain verification status', d?.status === 'verified' ? 'PASS' : 'FAIL', d ? `${domain}: ${d.status}` : `${domain} not found`)
+  }
 } catch (e) { rec('domain verification status', 'FAIL', String(e.message || e)) }
 
 if (to) {

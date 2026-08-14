@@ -3,7 +3,7 @@
 Resend is an **email API** (delivery + webhooks + idempotency) — **never** treated as SMS. This is the
 certification procedure and current status. **The API key is never printed or committed.**
 
-## Status: DOMAIN VERIFIED — live delivery cert pending API key
+## Status: CERTIFIED (live delivery + idempotency PASS) — remaining: written Syria-service confirmation + DPA
 `notifications.sybnb.app` is **Verified** in Resend (2026-08-14, region eu-west-1). DNS is managed by
 **Vercel** (not GoDaddy); the DKIM + SPF records were written via Resend's **Auto configure** into
 Vercel — the root `sybnb.app` MX / Google Workspace mailboxes were **not** touched, and inbound
@@ -22,7 +22,10 @@ signature+replay+dedup, suppression) already **PASS**. Key is never printed/comm
 | Sending **domain** `notifications.sybnb.app` configured | **PASS** — added; DNS via **Vercel** (Auto configure); root `sybnb.app` MX / Google Workspace untouched |
 | SPF + DKIM verified (domain **Verified** in Resend, 2026-08-14) | **PASS** — DKIM TXT `resend._domainkey.notifications` + SPF MX/TXT `send.notifications`; region **Ireland (eu-west-1)** |
 | DMARC | **RECOMMENDED (optional)** — not required by Resend for verification; owner may add a `_dmarc.notifications` TXT policy later |
-| Live delivery / failure / retry-idempotency / bounce+complaint webhooks (safe test addresses) | **BLOCKED-OWNER** (API key) — run `scripts/certify-resend.mjs` |
+| Live delivery (real send to a safe inbox) | **PASS** — 2026-08-14, Sending-access key, delivered to `info@sybnb.app` (msg ids `241ba082…`, `5edb3098…`) |
+| Retry / idempotency (same Idempotency-Key → one email) | **PASS** — same request returned the same message id (no duplicate) |
+| Webhook signature + timestamp/replay + duplicate-event + suppression | **PASS (offline)** — `email-security` 11/11 + `certify-resend` offline checks |
+| Live bounce/complaint webhook wiring (endpoint + `RESEND_WEBHOOK_SECRET`) | **PENDING** — add a webhook route + secret when going live (verifier + suppression already built/tested) |
 | Resend processing region + written lawful-Syria confirmation | **PARTIAL** — region recorded (**eu-west-1, Ireland**); written Syria-service confirmation + DPA still **BLOCKED-OWNER** |
 
 ## Dedicated sending subdomain (does NOT touch existing mailboxes / MX)

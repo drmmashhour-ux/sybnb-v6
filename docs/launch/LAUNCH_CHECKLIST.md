@@ -38,6 +38,16 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 | Unknown route handling | **PASS (P2)** | soft-falls back to Landing (no broken page); dedicated 404 page is a post-launch nicety |
 | No schedulers/workers (expiry opportunistic-on-read) | **PASS** | documented design; a proactive cron is a post-launch P2 |
 
+## A2. Release packaging (RC `e9dfd68`, packaged 2026-08-14) — see `RELEASE_MANIFEST.md`
+| Gate | Status | Evidence |
+|------|--------|----------|
+| Reproducible source package | **PASS** | `git archive` of tree `16f1109`; identical SHA-256 across 2 runs (`849d1f9…`) |
+| Clean install + build from package | **PASS** | `npm ci` (0 vulns) + `npm run build` clean + `prisma validate` valid on the extracted tarball |
+| Packaged-API runtime cert | **PASS** | fresh-DB migrate (11) + `health/live`+`ready` 200 + graceful `server_shutdown` + PaymentProof race 4/4, all against the packaged API |
+| Deploy config templates (no secrets) | **PASS** | `templates/production.env.template`, `sybnb-api.service.template`, `Dockerfile.template` — placeholders only |
+| Release checksums | **PASS** | source tarball + dist bundles + key runtime files digested in `RELEASE_MANIFEST.md` |
+| Defaults held OFF | **PASS** | live payments (no `STRIPE_SECRET_KEY`), public access (DNS/edge), legal DRAFT — all off by default |
+
 ## B. Legal
 | Gate | Status | Owner/Counsel action |
 |------|--------|----------------------|

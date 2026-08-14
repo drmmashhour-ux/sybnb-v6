@@ -1,6 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { createSessionToken, hashPassword, hashPhone, hashEmail, verifyPassword } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { channelEnabled } from '../lib/country.mjs'
 
 // DRIVER is intentionally NOT self-registerable: an unvetted self-registered driver could claim
 // live rides and harvest rider pickup/dropoff + identity. Drivers (like ADMIN/SUPPORT) are
@@ -60,12 +61,20 @@ export async function handleAuth(req, res, url) {
     const passwordHash = hashPassword(body.password)
 
     // Registration MUST be backed by a server-side VERIFIED, unexpired OTP for the account's
-    // verification identifier. EMAIL is the primary channel (email-only communications); phone is
-    // supported too. If a phone is supplied it binds the phone OTP (precedence, legacy); otherwise
-    // an email account binds the EMAIL OTP. The browser cannot assert verification itself — a raw
-    // API caller with no verified OTP is rejected. The verified code is consumed (single-use) so it
-    // cannot be replayed to create another account.
-    const otpIdentifierHash = phoneHash || (body.email ? hashEmail(body.email) : undefined)
+    // verification identifier, consumed single-use so it cannot be replayed to create another account.
+    // EMAIL is the authentication identifier. PHONE is optional CONTACT data and is NEVER an auth
+    // requirement; it binds an OTP only if the active country explicitly enables the SMS channel
+    // (email-only countries like Syria never do). Under an email-only country an account MUST have a
+    // verified email — a phone-only signup is refused (fail-closed, no unverified account).
+    const smsEnabled = channelEnabled('sms')
+    const otpIdentifierHash = body.email ? hashEmail(body.email) : (smsEnabled && phoneHash ? phoneHash : undefined)
+    if (!body.email && !smsEnabled) {
+      const error = new Error('An email is required to create an account.')
+      error.statusCode = 400
+      error.code = 'REGISTRATION_EMAIL_REQUIRED'
+      error.expose = true
+      throw error
+    }
     let otpToConsume = null
     if (otpIdentifierHash) {
       const verified = await db().verificationCode.findFirst({
@@ -96,7 +105,7 @@ export async function handleAuth(req, res, url) {
             data: { status: 'CANCELLED' },
           })
           if (consumed.count === 0) {
-            const error = new Error('Phone verification is required before creating this account.')
+            const error = new Error('Verification is required before creating this account.')
             error.statusCode = 403
             error.code = 'REGISTRATION_OTP_REQUIRED'
             error.expose = true

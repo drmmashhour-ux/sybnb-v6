@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { hashPhone, hashEmail, generateOtpCode, hashOtpCode, verifyOtpCode } from '../lib/security.mjs'
 import { sendSms } from '../lib/sms.mjs'
 import { sendEmail } from '../lib/email.mjs'
+import { channelEnabled } from '../lib/country.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
 const CODE_TTL_MS = 10 * 60 * 1000
@@ -72,6 +73,12 @@ function resolveIdentifier(body) {
 async function deliverCode(id, code, purpose, idempotencyKey) {
   if (id.kind === 'email') {
     return sendEmail({ to: id.value, subject: 'SYBNB verification code', text: otpMessage(code), purpose, idempotencyKey })
+  }
+  // SMS delivery is reachable ONLY if the active country profile enables it (fail-closed). Under an
+  // email-only country (Syria: communications.sms=false) this throws BEFORE sendSms is ever called,
+  // so no Syria route can invoke the SMS adapter.
+  if (!channelEnabled('sms')) {
+    throw fail(400, 'OTP_CHANNEL_NOT_ENABLED', 'SMS verification is not enabled for this country.')
   }
   return sendSms({ to: id.value, body: otpMessage(code), purpose })
 }

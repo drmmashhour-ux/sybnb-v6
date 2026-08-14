@@ -55,5 +55,16 @@ echo "=== browser code must NOT import the server-only country profile ==="
 SRVPROF_IN_SRC=$(grep -rlnE "from ['\"][^'\"]*countries/syria/profile" src/ 2>/dev/null || true)
 [ -z "$SRVPROF_IN_SRC" ] && ok "no src/* imports the server country profile" || no "server profile in browser" "$SRVPROF_IN_SRC"
 
+echo "=== SMS adapter is reachable ONLY through the country-gated OTP path ==="
+# sendSms may be imported only by the OTP route (the single gated caller). No other module calls it.
+SMS_IMPORTERS=$(grep -rlnE "from ['\"][^'\"]*lib/sms" server/ src/ 2>/dev/null || true)
+[ "$SMS_IMPORTERS" = "server/routes/otp.mjs" ] && ok "sendSms imported only by server/routes/otp.mjs" || no "sendSms imported elsewhere" "$SMS_IMPORTERS"
+# The single sendSms call site must be guarded by channelEnabled('sms') (fail-closed for Syria).
+if grep -q "channelEnabled('sms')" server/routes/otp.mjs && grep -q "OTP_CHANNEL_NOT_ENABLED" server/routes/otp.mjs; then
+  ok "sendSms call site gated by channelEnabled('sms') (Syria: sms=false -> unreachable)"
+else
+  no "sendSms not gated" "missing channelEnabled('sms') guard in otp.mjs"
+fi
+
 echo "== ISOLATION CHECK: $fails failure(s) =="
 exit "$fails"

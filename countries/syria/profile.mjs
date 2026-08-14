@@ -22,6 +22,11 @@ export const profile = {
   phoneCountryCode: '+963',
   defaultLocale: 'ar-SY',
 
+  // Communication channels. Syria is EMAIL-ONLY: SMS is disabled, so no Syria route can invoke the
+  // SMS adapter. Phone may be optional CONTACT data but is never an authentication channel here.
+  // (SMS remains a neutral adapter, reachable only if a future certified country sets sms:true.)
+  communications: { email: true, sms: false },
+
   // Per-country launch gates — all remain closed until Syria-specific review passes:
   gates: {
     legal: 'DRAFT',            // countries/syria legal versions (counsel-approved) required

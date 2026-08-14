@@ -61,3 +61,12 @@ export function countryProblems(env = process.env) {
 export function supportedCountries() {
   return Object.keys(REGISTRY)
 }
+
+// Whether the ACTIVE country enables a communication channel. Defaults to false (fail-closed): a
+// channel is reachable only if the loaded profile explicitly enables it. Used to keep the SMS
+// adapter unreachable under email-only countries (Syria).
+export function channelEnabled(channel, env = process.env) {
+  const { profile } = loadCountryProfile(env)
+  if (!profile) return false
+  return Boolean(profile.communications && profile.communications[channel] === true)
+}

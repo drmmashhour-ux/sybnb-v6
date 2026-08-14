@@ -12,9 +12,14 @@ verification workflow and determines whether any genuinely depends on SMS or a t
 | Booking / payment / support / operational notifications | in-app + email addresses (`support@`/`info@`) | **No** — email/in-app only; no SMS sender in any route |
 | SR Ride pickup/dropoff | free-text + gazetteer; phone is contact metadata only | **No** — no SMS/telephone-network dependency |
 
-Method: `grep` for SMS senders/callers — the only SMS surface is `server/lib/sms.mjs` +
-`server/routes/otp.mjs` (now email-first). No route sends SMS for bookings/payments/support. No
-workflow requires a telephone **network**; phone numbers are optional contact data.
+Method: `grep` for SMS senders/callers — the only SMS surface is `server/lib/sms.mjs`, imported by
+exactly one caller, `server/routes/otp.mjs`. **Correction (precise):** it is not merely that "no route
+sends SMS" — an SMS branch technically exists in the OTP route. Under Phase 10 that branch is now
+**country-gated**: `deliverCode` refuses the phone channel (`OTP_CHANNEL_NOT_ENABLED`) unless the
+**active country profile** sets `communications.sms = true`. Syria sets `sms: false`, so **no Syria
+route can reach `sendSms`** — proven by governed test (phone OTP under Syria → refused before delivery)
+and a static isolation check (sole importer + guarded call site). Bookings/payments/support routes
+send no SMS at all. No workflow requires a telephone **network**; phone numbers are optional contact data.
 
 ## Verdict — SMS: **NOT APPLICABLE** (not PASS)
 No required workflow depends on SMS or a phone number. SMS is **removed as a launch requirement** and

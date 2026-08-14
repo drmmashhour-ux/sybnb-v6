@@ -12,17 +12,32 @@ The code path is built and partially verified offline; live verification needs o
 | Email adapter (`server/lib/email.mjs`): sandbox default + `resend` provider, fails closed, key never logged | **PASS (code)** |
 | Idempotency support (`Idempotency-Key` header on send) | **PASS (code)** |
 | Webhook signature verification (`verifyResendWebhook`, Svix HMAC, constant-time) | **PASS (offline test)** |
+| Webhook timestamp/replay window + duplicate-event guard | **PASS (offline test)** — `email-security` 11/11 |
+| Bounce/complaint suppression (block repeat delivery to bad addresses) | **PASS (offline lib)** — persistence store wired at live-webhook time |
 | Log redaction (adapter never logs body/key; errors exclude headers/body) | **PASS (code)** |
 | Sending **domain** + required sender addresses configured | **BLOCKED-OWNER** |
 | SPF / DKIM / DMARC verified | **BLOCKED-OWNER** (DNS + Resend dashboard) |
 | Live delivery / failure / retry-idempotency / bounce+complaint webhooks (safe test addresses) | **BLOCKED-OWNER** (API key) |
 | Resend processing region + written lawful-Syria confirmation | **BLOCKED-OWNER** |
 
+## Dedicated sending subdomain (does NOT touch existing mailboxes / MX)
+Use a **dedicated sending subdomain** — `notifications.sybnb.app` — for Resend. This keeps the
+existing **Google Workspace** mailboxes (`info@`/`support@`/`legal@`/`privacy@`) and the **root-domain
+MX** records **unchanged**: transactional email is sent from `notifications.sybnb.app` while inbound
+mail to `@sybnb.app` continues to flow to Google Workspace untouched. Sender address, e.g.
+`no-reply@notifications.sybnb.app`.
+
 ## Owner inputs required (no secret values in git)
-1. **Sending domain** on `sybnb.app`; sender addresses (e.g. `no-reply@sybnb.app`, plus `support@`/
-   `legal@`/`privacy@`/`info@` already configured).
-2. **DNS records** from the Resend dashboard: SPF (TXT), DKIM (CNAMEs), DMARC (TXT) — publish, then
-   confirm "Verified" in Resend. (Agent verifies status via API/DNS lookup — never handles the key.)
+1. In Resend, add the domain **`notifications.sybnb.app`** (not the root domain) → Resend displays the
+   exact DNS records to publish.
+2. **DNS record TYPES Resend will show** (publish the EXACT values from the Resend dashboard — the
+   agent does NOT invent DNS values):
+   - **SPF** — a `TXT` on `notifications.sybnb.app` (Resend's `include:` value).
+   - **DKIM** — one or more `CNAME` (or `TXT`) records on `resend._domainkey.notifications…` (or as shown).
+   - **DMARC** — a `TXT` on `_dmarc.notifications.sybnb.app` (policy per the dashboard).
+   - **MX for the SENDING SUBDOMAIN only** (bounce handling), scoped to `notifications.sybnb.app` —
+     this does **not** alter the root `sybnb.app` MX used by Google Workspace.
+   Publish, then confirm "Verified" in Resend. (Agent then verifies status via `dig`/API — never handles the key.)
 3. **`RESEND_API_KEY`** + **`EMAIL_FROM`** as environment variables in a certification host / secret
    manager (never in git/chat). Set `EMAIL_PROVIDER=resend`.
 4. **Webhook signing secret** (`whsec_…`) for delivery/bounce/complaint events → `RESEND_WEBHOOK_SECRET`.

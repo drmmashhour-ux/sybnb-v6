@@ -1,6 +1,6 @@
 # SYBNB — Master Launch Checklist
 
-**Runtime RC:** `c89c495` (final country-separation candidate: e9dfd68 → country-neutral master +
+**Runtime RC:** `d1fd5b9` (final country-separation candidate: e9dfd68 → country-neutral master +
 countries/syria + fail-closed selection → shim removal; all verified below) · **Verdict:** CONDITIONAL GO ·
 **Live payments:** disabled · **Legal docs:** DRAFT/launch-blocking. Status legend: **PASS** (done +
 evidence) · **BLOCKED-OWNER** (needs owner input/credentials) · **BLOCKED-COUNSEL** · **PENDING**

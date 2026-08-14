@@ -1,17 +1,17 @@
-# SYBNB — Owner Launch Handoff (RC `c89c495`)
+# SYBNB — Owner Launch Handoff (RC `d1fd5b9`)
 
 Country separation and local certification are complete. Everything remaining is an **external owner,
 counsel, vendor, credential, deployment, or activation action** — no code work remains. Legal stays
 DRAFT, live payments disabled, deployment blocked, public access closed until the steps below complete.
 
-Preserved release (Danny SSD): `SYBNB_CLEAN_FINALS/RELEASES/c89c495/` — archive
-`sybnb-src-c89c495.tar.gz` (SHA-256 `36e33e1a0479af2db170622e853c8fc60efd1732a968f3eb1ab07b912dfa2581`),
+Preserved release (Danny SSD): `SYBNB_CLEAN_FINALS/RELEASES/d1fd5b9/` — archive
+`sybnb-src-d1fd5b9.tar.gz` (SHA-256 `b5c7ca1c05bd2809aaaa7211181166131f38d11f657ccedfccde836c8137416e`),
 `SHA256SUMS.txt`, `RELEASE_MANIFEST.md`, `IDENTITY.txt`, `CERTIFICATION_EVIDENCE.md`, `ROLLBACK.md`.
 
 ## PASS / BLOCKED matrix
 | Gate | Status |
 |------|--------|
-| Application code, 21 governed E2E suites, isolation, bundle-safety | **PASS** (`c89c495`) |
+| Application code, 21 governed E2E suites, isolation, bundle-safety | **PASS** (`d1fd5b9`) |
 | Build / schema / 11 migrations (fresh DB) / dependency audit | **PASS** |
 | Country-neutral master + `countries/syria` + fail-closed selection | **PASS** |
 | Reproducible release archive + full SHA-256 manifest (permanently preserved) | **PASS** |
@@ -21,7 +21,7 @@ Preserved release (Danny SSD): `SYBNB_CLEAN_FINALS/RELEASES/c89c495/` — archiv
 | Resend live certification (domain + SPF/DKIM/DMARC + delivery/webhooks) | **BLOCKED-OWNER** (`RESEND_CERTIFICATION.md`) |
 | Provider selection (hosting/PG/storage/payments/monitoring) | **BLOCKED-OWNER** (`PROVIDER_RECOMMENDATIONS.md`) |
 | Final Terms/Privacy content approved + published | **BLOCKED-COUNSEL** |
-| Production vendors + data regions (payments/SMS/storage/DB/hosting/monitoring) | **BLOCKED-OWNER** |
+| Production vendors + data regions (payments/storage/DB/hosting/monitoring; email=Resend) | **BLOCKED-OWNER** |
 | Real sandbox-provider certification | **BLOCKED-OWNER** (credentials) |
 | Authenticated deploy + deployed rollback certification | **BLOCKED-OWNER** (target) |
 | Enable live payments · DNS/public cutover | **RESERVED** (explicit authorization each) |
@@ -40,13 +40,13 @@ Preserved release (Danny SSD): `SYBNB_CLEAN_FINALS/RELEASES/c89c495/` — archiv
    plus DPAs. → feeds the Privacy "Processors" / "International transfers" sections.
 4. **Sandbox credentials (variable names only; no values here)** — provide by a secure channel, never
    in git/chat: `STRIPE_SECRET_KEY` (test `sk_test_…`) + `PAYMENT_WEBHOOK_SECRET` (`whsec_…`);
-   `SMS_HTTP_ENDPOINT` + `SMS_API_KEY`; `STORAGE_S3_BUCKET` / `STORAGE_S3_REGION` /
+   `RESEND_API_KEY` + `EMAIL_FROM` (email; SMS not required); `STORAGE_S3_BUCKET` / `STORAGE_S3_REGION` /
    `STORAGE_S3_ACCESS_KEY_ID` / `STORAGE_S3_SECRET_ACCESS_KEY` (disposable test bucket). Secure entry:
    set as environment variables in the certification/deploy host or a secret manager — the agent runs
    `scripts/certify-providers.mjs` against the real test endpoints; it never sees or stores the values.
 5. **Authenticated deployment target** — host + auth + production `DATABASE_URL`, with the production
    env from `templates/production.env.template` (`SYBNB_COUNTRY=syria` required). → agent deploys
-   `c89c495` (payments off), runs smoke, and performs the deployed rollback certification.
+   `d1fd5b9` (payments off), runs smoke, and performs the deployed rollback certification.
 6. **Separate explicit authorizations (one each)** — (a) publish legal documents, (b) deploy to
    production, (c) enable live payments, (d) DNS / public cutover.
 

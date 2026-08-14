@@ -1,15 +1,28 @@
-# SYBNB V6 — Release Manifest (RC `c89c495`)
+# SYBNB V6 — Release Manifest (RC `d1fd5b9`)
 
-Reproducible release metadata for the **final country-separation candidate**. Every artifact is
-derived from commit `c89c495` and content-addressed. Regenerate the source archive deterministically:
-`git archive --format=tar --prefix=sybnb-c89c495/ c89c495 | gzip -n` (mtime-independent).
+Reproducible release metadata for the **Phase 10 candidate** (Syria email-only hardening). Every
+artifact is derived from commit `d1fd5b9` and content-addressed. Regenerate the source archive:
+`git archive --format=tar --prefix=sybnb-d1fd5b9/ d1fd5b9 | gzip -n` (mtime-independent).
+**Supersedes** `565f138` (email-first) and `c89c495` (country-separation) — both retained for rollback.
 
 ## Identity
 | Field | Value |
 |-------|-------|
+| Runtime commit | `d1fd5b9fb0151b2c598f4a31720550193ddf3a8a` (`d1fd5b9`) |
+| Source tree object | `bd316f0b77a1f6950f98d4b811277c477bb87791` |
+| Tracked files in archive | 374 (archive == committed tree, verified; 0 untracked/uncommitted) |
+| Source archive SHA-256 | `b5c7ca1c05bd2809aaaa7211181166131f38d11f657ccedfccde836c8137416e` |
+| Governed certification | 24 E2E suites (0 failures) + isolation + bundle-safety |
+| Permanent copy | Danny SSD `SYBNB_CLEAN_FINALS/RELEASES/d1fd5b9/` |
+| Runtime anchors (sha256) | email.mjs `6e8d6dda…2269` · country.mjs `1a6a8dec…9677` · otp.mjs `6ee0b49b…cd04` · auth.mjs `c90d50a7…9e86` · syria/profile.mjs `d83921df…f707` |
+
+<details><summary>Prior candidate c89c495 (superseded — retained)</summary>
+
+| Field | Value |
+|-------|-------|
 | Runtime commit | `c89c495851add173539cccf9a3ae9e2672f9a828` (`c89c495`) |
 | Source tree object | `98b73d267c1f05b55396af8a6f3630a9f295fd4c` |
-| Tracked files in archive | 367 (archive == committed tree, verified; 0 untracked/uncommitted) |
+| Tracked files | 367 |</details>
 | Node baseline | 22.x (`node server/index.mjs`) |
 | Country selection | `SYBNB_COUNTRY` (fail-closed); this release supports `syria` only |
 | Migrations | 11 (`001…011`), applied via `prisma migrate deploy` |

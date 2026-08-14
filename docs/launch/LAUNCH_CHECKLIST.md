@@ -41,7 +41,7 @@ a dependency). Re-verify all code gates with `bash scripts/run-all-e2e.sh`.
 ## A2. Release packaging (RC `e9dfd68`, packaged 2026-08-14) — see `RELEASE_MANIFEST.md`
 | Gate | Status | Evidence |
 |------|--------|----------|
-| Reproducible source package | **PASS** | `git archive` of tree `16f1109`; identical SHA-256 across 2 runs (`849d1f9…`) |
+| Reproducible source package | **PASS** | `git archive` of tree `16f11094b6150e71144d020d80e0c8caac3306eb`; identical SHA-256 across 2 runs (`849d1f9342aed5932bba469a0d77e2fa16e9b3b74544bf953319e6d1ee162fc9`) |
 | Clean install + build from package | **PASS** | `npm ci` (0 vulns) + `npm run build` clean + `prisma validate` valid on the extracted tarball |
 | Packaged-API runtime cert | **PASS** | fresh-DB migrate (11) + `health/live`+`ready` 200 + graceful `server_shutdown` + PaymentProof race 4/4, all against the packaged API |
 | Deploy config templates (no secrets) | **PASS** | `templates/production.env.template`, `sybnb-api.service.template`, `Dockerfile.template` — placeholders only |

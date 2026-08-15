@@ -68,13 +68,21 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [codeError, setCodeError] = useState('')
 
   const actionLabel = role === 'ADMIN' ? t.admin : role === 'DRIVER' ? t.driver : t.host
+  // HOST is a real customer-facing role → email verification (email-only Syria config), phone optional.
+  // ADMIN/DRIVER remain on their existing internal phone flow (out of scope).
+  const isHost = role === 'HOST'
+  const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
+  const requiredMsg = isHost ? (isAr ? 'أدخل البريد الإلكتروني وكلمة المرور قبل طلب الدخول.' : 'Enter email and password before requesting access.') : t.required
 
   async function openSession() {
-    if (!email.trim() || !phone.trim() || !password.trim()) {
-      setCodeError(t.required)
+    const identityMissing = isHost ? !emailValid || !password.trim() : !email.trim() || !phone.trim() || !password.trim()
+    if (identityMissing) {
+      setCodeError(requiredMsg)
       return
     }
-    const verified = await confirmOtp({ phone: phone.trim(), purpose: 'staff-login', code: code.trim() }).catch(() => false)
+    const verified = await confirmOtp(
+      isHost ? { email: email.trim(), purpose: 'staff-login', code: code.trim() } : { phone: phone.trim(), purpose: 'staff-login', code: code.trim() },
+    ).catch(() => false)
     if (!verified) {
       setCodeError(t.codeInvalid)
       return
@@ -96,8 +104,12 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   }
 
   async function sendCode() {
+    if (isHost && !emailValid) {
+      setCodeError(requiredMsg)
+      return
+    }
     try {
-      await requestOtp({ phone: phone.trim(), purpose: 'staff-login' })
+      await requestOtp(isHost ? { email: email.trim(), purpose: 'staff-login' } : { phone: phone.trim(), purpose: 'staff-login' })
       setCodeError('')
       setStatus('codeSent')
     } catch (err) {
@@ -135,20 +147,25 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             />
           </label>
           <label style={styles.label}>
-            {t.phone}
+            {isHost ? (isAr ? 'رقم الهاتف (اختياري)' : 'Phone number (optional)') : t.phone}
             <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
           </label>
           <label style={styles.label}>
             {t.code}
             <div style={styles.codeRow}>
               <input style={styles.input} value={code} onChange={(event) => setCode(event.target.value)} dir="ltr" />
-              <button style={styles.codeButton} onClick={sendCode}>
-                {t.sendCode}
+              <button style={styles.codeButton} onClick={sendCode} disabled={isHost && !emailValid}>
+                {status === 'codeSent' ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : isHost ? (isAr ? 'إرسال الرمز إلى البريد' : 'Email me the code') : t.sendCode}
               </button>
             </div>
           </label>
         </div>
-        {status === 'codeSent' && <p style={styles.note}>{t.codeSent} <b dir="ltr">{phone}</b></p>}
+        {status === 'codeSent' && (
+          <p style={styles.note}>
+            {isHost ? (isAr ? 'تم إرسال رمز الدخول إلى بريدك الإلكتروني.' : 'Access code sent to your email.') : t.codeSent}{' '}
+            <b dir="ltr">{isHost ? email : phone}</b>
+          </p>
+        )}
         {codeError && <p style={styles.error}>{codeError}</p>}
         <button style={styles.primary} onClick={openSession} disabled={status === 'loading'}>
           {status === 'loading' ? t.opening : actionLabel}

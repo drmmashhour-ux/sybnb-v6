@@ -62,6 +62,7 @@ run "otp"              otp-identity.e2e.mjs
   run "email-security"   email-security.e2e.mjs
   run "signup-journey"   signup-journey.e2e.mjs
   run "seller-signup"    seller-signup-journey.e2e.mjs
+  run "host-login"       host-login-journey.e2e.mjs
   run "resend-webhook"   resend-webhook.e2e.mjs
 run "storage"          storage.e2e.mjs
 run "legal"            legal-consent.e2e.mjs

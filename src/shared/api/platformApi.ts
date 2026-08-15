@@ -688,14 +688,19 @@ export async function createStaffAccountSession(
   const email = input?.email?.trim()
   const password = input?.password?.trim()
   const phone = input?.phone?.trim()
-  if (!email || !password || !phone) {
+  // Email is the account identity; phone is optional contact (email-only Syria config).
+  if (!email || !password) {
     throw new Error('Staff credentials are required')
   }
+  // Phone is optional CONTACT only. When the host omits it, register with NO phone (email-only,
+  // like the seller flow) — never inject the shared prototype fallback phone, which would collide
+  // on the phoneHash unique index (P2002 → 409) against the seeded host account.
+  const { phone: _fallbackPhone, ...fallbackRest } = fallbackAccount
   const account = {
-    ...fallbackAccount,
+    ...fallbackRest,
     email,
     password,
-    phone,
+    ...(phone ? { phone } : { phone: '' }),
   }
   const session = input?.mode === 'signUp' ? await createStaffAccount(account) : await ensurePrototypeSession(account)
   sessionStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))

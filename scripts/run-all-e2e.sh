@@ -13,6 +13,7 @@ DB_URL="${DB_URL:-postgresql://$(whoami)@127.0.0.1:5432/sybnb_v6?schema=public}"
 export AUTH_SECRET="${AUTH_SECRET:-dev-e2e-secret}"
 export PHONE_HASH_SECRET="${PHONE_HASH_SECRET:-dev-e2e-phone}"
 export PAYMENT_WEBHOOK_SECRET="${PAYMENT_WEBHOOK_SECRET:-whsec_sandbox_test}"
+export RESEND_WEBHOOK_SECRET="${RESEND_WEBHOOK_SECRET:-whsec_dGVzdC13ZWJob29rLXNlY3JldA==}"
 export SELLER1="${SELLER1:-1fdde54d-20f1-41ae-9f9a-2a4482f13c69}"
 export SELLER2="${SELLER2:-f845e528-dff8-404f-b9ef-6f096fefd9c5}"
 export BUYER="${BUYER:-b2cf0295-8b24-4be0-a014-8b9321c44e0a}"
@@ -59,6 +60,7 @@ echo "== api-backed governed suites =="
 run "otp"              otp-identity.e2e.mjs
   run "email-otp"        email-otp.e2e.mjs
   run "email-security"   email-security.e2e.mjs
+  run "resend-webhook"   resend-webhook.e2e.mjs
 run "storage"          storage.e2e.mjs
 run "legal"            legal-consent.e2e.mjs
 run "operations"       operations.e2e.mjs

@@ -198,17 +198,18 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
       : Array.from({ length: accountDocumentCount }, (_, index) =>
           isAr ? `مستند حساب ${index + 1}.pdf` : `account-document-${index + 1}.pdf`,
         )
+  // EMAIL is the verification identity (email-only Syria config). Phone is optional contact.
+  const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
   const accountIdentityReady =
     accountMode === 'signup'
       ? Boolean(
           firstName.trim() &&
             lastName.trim() &&
-            email.trim() &&
-            phone.trim() &&
+            emailValid &&
             password.length >= 8 &&
             password === repeatPassword,
         )
-      : Boolean(email.trim() && phone.trim() && password.length >= 8)
+      : Boolean(emailValid && password.length >= 8)
   // Every flow now requires a real, backend-approved plan/review proof before it counts as
   // ready — advertising and platform-sale used to skip this via client-only "admin lane" flags.
   const accountReadyForNext =
@@ -397,12 +398,12 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
       return
     }
 
-    if (!trimmedPhone || !mobileCodeSent || !mobileCodeConfirmed) {
+    if (!mobileCodeSent || !mobileCodeConfirmed) {
       setSubmitState('error')
       setSubmitError(
         isAr
-          ? 'أدخل رقم الهاتف، أرسل رمز التحقق، ثم أكّد الرمز قبل المتابعة.'
-          : 'Enter a phone number, send the verification code, then confirm the code before continuing.',
+          ? 'أرسل رمز التحقق إلى بريدك الإلكتروني ثم أكّده قبل المتابعة.'
+          : 'Send the verification code to your email, then confirm it before continuing.',
       )
       return
     }
@@ -519,12 +520,12 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
           <p>
             {isAdvertisingFlow
               ? isAr
-                ? 'أنشئ الحساب، أكّد رقم الهاتف، أضف مستندات الحساب، ثم أكّد الدفع قبل إرسال الطلب للإدارة.'
-                : 'Create the account, verify the phone, add account documents, then confirm payment before admin review.'
+                ? 'أنشئ الحساب، أكّد رمز البريد الإلكتروني، أضف مستندات الحساب، ثم أكّد الدفع قبل إرسال الطلب للإدارة.'
+                : 'Create the account, verify the email code, add account documents, then confirm payment before admin review.'
               : isPlatformSaleFlow
                 ? isAr
-                  ? 'أنشئ الحساب، أكّد الهاتف، ارفع إثبات الملكية أو التفويض، ثم ترسل الإدارة كود المتابعة وتستلم SYBNB إدارة البيع.'
-                  : 'Create the account, verify the phone, upload ownership or authorization, then admin confirms the follow-up code and SYBNB manages the sale.'
+                  ? 'أنشئ الحساب، أكّد رمز البريد، ارفع إثبات الملكية أو التفويض، ثم ترسل الإدارة كود المتابعة وتستلم SYBNB إدارة البيع.'
+                  : 'Create the account, verify the email code, upload ownership or authorization, then admin confirms the follow-up code and SYBNB manages the sale.'
                 : isAr
                   ? 'بعد إنشاء الحساب، اختر طريقة الدفع، أكّد الدفع، ثم أضف ملفات العقار والتفويض قبل المراجعة.'
                   : 'After account creation, choose a payment method, confirm payment, then add property and authorization files before review.'}
@@ -641,7 +642,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               />
             </label>
             <label>
-              <span>{isAr ? 'رقم الهاتف' : 'Phone number'}</span>
+              <span>{isAr ? 'رقم الهاتف (اختياري)' : 'Phone number (optional)'}</span>
               <input
                 autoComplete="tel"
                 dir="ltr"
@@ -683,23 +684,23 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
             </div>
             <div className="seller-verification-box">
               <div>
-                <strong>{isAr ? 'توثيق رقم الهاتف' : 'Mobile verification'}</strong>
+                <strong>{isAr ? 'توثيق البريد الإلكتروني' : 'Email verification'}</strong>
                 <span>
                   {mobileCodeSent
                     ? isAr
-                      ? `تم إرسال رمز التحقق إلى ${phone.trim()}. أدخل الرمز المستلم.`
-                      : `Verification code sent to ${phone.trim()}. Enter the received code.`
+                      ? `تم إرسال رمز التحقق إلى بريدك الإلكتروني ${email.trim()}. أدخل الرمز المستلم.`
+                      : `Verification code sent to your email ${email.trim()}. Enter the received code.`
                     : isAr
-                      ? 'أرسل رمز تحقق قبل إنشاء الحساب.'
-                      : 'Send a verification code before creating the account.'}
+                      ? 'أرسل رمز تحقق إلى بريدك الإلكتروني قبل إنشاء الحساب.'
+                      : 'Send a verification code to your email before creating the account.'}
                 </span>
               </div>
               <button
                 type="button"
-                disabled={!phone.trim()}
+                disabled={!emailValid}
                 onClick={async () => {
                   try {
-                    await requestOtp({ phone: phone.trim(), purpose: 'seller-login' })
+                    await requestOtp({ email: email.trim(), purpose: 'seller-login' })
                     setMobileCodeSent(true)
                     setMobileCode('')
                     setMobileCodeConfirmed(false)
@@ -712,7 +713,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                   }
                 }}
               >
-                {mobileCodeSent ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : isAr ? 'إرسال الرمز' : 'Send code'}
+                {mobileCodeSent ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : isAr ? 'إرسال الرمز إلى البريد' : 'Email me the code'}
               </button>
               <label>
                 <small>{isAr ? 'رمز التحقق' : 'Verification code'}</small>
@@ -733,15 +734,15 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                 disabled={!mobileCodeSent || mobileCode.trim().length !== 6}
                 onClick={async () => {
                   try {
-                    const ok = await confirmOtp({ phone: phone.trim(), purpose: 'seller-login', code: mobileCode.trim() })
+                    const ok = await confirmOtp({ email: email.trim(), purpose: 'seller-login', code: mobileCode.trim() })
                     if (!ok) {
                       setSubmitState('error')
-                      setSubmitError(isAr ? 'رمز الهاتف غير صحيح.' : 'Incorrect mobile code.')
+                      setSubmitError(isAr ? 'الرمز غير صحيح.' : 'The code is not correct.')
                       return
                     }
                   } catch (err) {
                     setSubmitState('error')
-                    setSubmitError(err instanceof Error ? err.message : isAr ? 'رمز الهاتف غير صحيح.' : 'Incorrect mobile code.')
+                    setSubmitError(err instanceof Error ? err.message : isAr ? 'الرمز غير صحيح.' : 'The code is not correct.')
                     return
                   }
                   setSubmitState('idle')

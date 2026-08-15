@@ -12,7 +12,6 @@ type Props = {
   children: ReactNode
 }
 
-const BUILD_EDITION = 'FINAL JULY 6 · CAPSULE EDITION · 3055'
 
 export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   const isAr = lang === 'ar'
@@ -48,7 +47,6 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
         <header className="top-nav">
           <button className="brand-lockup" onClick={() => navigate('/')} aria-label="SYBNB home">
             <BrandLogo logo="platform" size="nav" className="top-nav-logo" />
-            <span className="build-edition-badge">{BUILD_EDITION}</span>
           </button>
 
           <nav className="nav-actions" aria-label={isAr ? 'إجراءات الحساب' : 'Account actions'}>

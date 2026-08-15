@@ -74,7 +74,7 @@ export function App() {
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
   const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
-  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/dashboard' || path === '/account' || path === '/wallet' ? 'generic' : 'stays'
+  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' ? 'generic' : 'stays'
   const hasGuestSession = typeof window !== 'undefined' && Boolean(sessionStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
@@ -98,7 +98,7 @@ export function App() {
         ) : isTrustProtectionRoute(path) ? (
           <TrustProtectionRoutes lang={lang} path={path} />
         ) : guestAccountMatch ? (
-          <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : '/stays'} />
+          <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} flow={guestAccountMatch[1] ? 'stays' : 'generic'} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : '/stays'} />
         ) : path === '/dashboard' || path === '/account' ? (
           <DashboardPage lang={lang} />
         ) : path === '/host' ||

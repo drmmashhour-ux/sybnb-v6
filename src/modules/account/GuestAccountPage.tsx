@@ -22,39 +22,47 @@ const copy = {
     title: 'حساب الإيجار اليومي',
     rentalsTitle: 'حساب الإيجار الشهري',
     rideTitle: 'حساب SR Ride',
+    genericTitle: 'إنشاء حساب SYBNB',
     gateTitle: 'يرجى تسجيل الدخول للمتابعة',
     gateChip: 'طلب إيجار',
     rideGateChip: 'طلب رحلة',
     subtitle: 'أنشئ الحساب أو سجّل الدخول قبل إرسال طلب الحجز. الدفع لا يبدأ من هذه الخطوة.',
     rentalsSubtitle: 'أنشئ الحساب أو سجّل الدخول قبل متابعة طلب الإيجار الشهري. الدفع لا يبدأ قبل فتح الطلب الصحيح.',
-    rideSubtitle: 'أنشئ الحساب أو سجّل الدخول قبل إرسال طلب الرحلة. لا يمكن طلب سائق بدون رقم هاتف وحساب مؤكد.',
+    rideSubtitle: 'أنشئ الحساب أو سجّل الدخول قبل إرسال طلب الرحلة. يلزم حساب مؤكد قبل إرسال الطلب.',
+    genericSubtitle: 'أنشئ حسابك بالبريد الإلكتروني للاستفادة من كل خدمات SYBNB. الدفع لا يبدأ من هذه الخطوة.',
     signup: 'تسجيل حساب جديد',
     signin: 'تسجيل الدخول',
     firstName: 'الاسم الأول',
     lastName: 'اسم العائلة',
     email: 'البريد الإلكتروني',
-    phone: 'رقم الهاتف',
+    phone: 'رقم الهاتف (اختياري)',
     password: 'كلمة المرور',
     repeatPassword: 'تأكيد كلمة المرور',
-    sendCode: 'طلب إرسال الرمز',
+    sendCode: 'إرسال الرمز إلى البريد',
+    sending: 'جارٍ الإرسال…',
     resendCode: 'إعادة إرسال الرمز',
     code: 'رمز التحقق',
     confirmCode: 'تأكيد الرمز',
     openAccount: 'فتح الحساب والمتابعة',
     signInAccount: 'تسجيل الدخول والمتابعة',
-    error: 'أكمل البيانات المطلوبة، تأكد من كلمة المرور، واطلب رمز الهاتف ثم أكد الرمز قبل فتح الحساب.',
+    error: 'أكمل البيانات المطلوبة، تأكد من كلمة المرور، ثم اطلب رمز البريد الإلكتروني وأكّده قبل فتح الحساب.',
+    invalidEmail: 'أدخل بريداً إلكترونياً صحيحاً لإرسال الرمز.',
+    networkError: 'تعذّر الاتصال بالخادم. تحقق من الاتصال وحاول مرة أخرى.',
+    codeSentPrefix: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني',
     idDocumentTitle: 'إثبات الهوية (اختياري الآن)',
     idDocumentHelp: 'ارفع صورة واضحة عن هويتك الشخصية أو جواز السفر الآن، أو لاحقاً قبل الدفع. مطلوب مرة واحدة فقط قبل تأكيد أول حجز.',
     idDocumentCta: 'اضغط لرفع صورة الهوية',
     idDocumentEmpty: 'لم يتم رفع الهوية بعد. يمكنك رفعها لاحقاً قبل الدفع.',
     idDocumentRequired: 'ارفع صورة عن هويتك قبل الدفع.',
-    codeSent: 'تم إرسال رمز التحقق إلى رقم الهاتف.',
+    codeSent: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني.',
     ready: 'تم تجهيز حساب العميل. يمكنك الآن إرسال طلب الحجز.',
     rentalsReady: 'تم تجهيز حساب العميل. يمكنك الآن متابعة طلب الإيجار.',
     rideReady: 'تم تجهيز حساب العميل. يمكنك الآن متابعة طلب الرحلة.',
+    genericReady: 'تم إنشاء حسابك بنجاح.',
     policy: 'بعد فتح الحساب يعود العميل إلى تفاصيل الإعلان لإرسال الطلب. الدفع يأتي بعد إنشاء الطلب فقط.',
     rentalsPolicy: 'بعد فتح الحساب يعود العميل إلى صفحة الإيجار الشهري لمراجعة الاختيارات ومتابعة الطلب. الدفع يأتي بعد إنشاء الطلب فقط.',
     ridePolicy: 'بعد فتح الحساب يعود العميل إلى SR Ride لإدخال نقطة الانطلاق والوجهة وطلب السائق.',
+    genericPolicy: 'حساب واحد لكل خدمات SYBNB داخل سوريا. الدفع لا يبدأ من هذه الخطوة.',
   },
   en: {
     back: 'Back',
@@ -62,39 +70,47 @@ const copy = {
     title: 'Short-Term Rental Account',
     rentalsTitle: 'Monthly Rental Account',
     rideTitle: 'SR Ride Account',
+    genericTitle: 'Create your SYBNB account',
     gateTitle: 'Please sign in to continue',
     gateChip: 'Rental request',
     rideGateChip: 'Ride request',
     subtitle: 'Create an account or sign in before sending the booking request. Payment does not start from this step.',
     rentalsSubtitle: 'Create an account or sign in before continuing the monthly rental request. Payment starts only after the correct request is opened.',
-    rideSubtitle: 'Create an account or sign in before requesting a ride. A verified phone and account are required before dispatch.',
+    rideSubtitle: 'Create an account or sign in before requesting a ride. A verified account is required before dispatch.',
+    genericSubtitle: 'Create your account with your email to use all SYBNB services. Payment does not start from this step.',
     signup: 'Create new account',
     signin: 'Sign in',
     firstName: 'First name',
     lastName: 'Last name',
     email: 'Email address',
-    phone: 'Phone number',
+    phone: 'Phone number (optional)',
     password: 'Password',
     repeatPassword: 'Repeat password',
-    sendCode: 'Send code',
+    sendCode: 'Email me the code',
+    sending: 'Sending…',
     resendCode: 'Resend code',
     code: 'Verification code',
     confirmCode: 'Confirm code',
     openAccount: 'Open account and continue',
     signInAccount: 'Sign in and continue',
-    error: 'Complete the required details, confirm the password, then request and confirm the phone code before opening the account.',
+    error: 'Complete the required details, confirm the password, then request and confirm the email code before opening the account.',
+    invalidEmail: 'Enter a valid email address to receive the code.',
+    networkError: 'Could not reach the server. Check your connection and try again.',
+    codeSentPrefix: 'Verification code sent to your email',
     idDocumentTitle: 'ID verification (optional for now)',
     idDocumentHelp: 'Upload a clear photo of your national ID or passport now, or later before payment. Required once, before your first booking is confirmed.',
     idDocumentCta: 'Tap to upload your ID photo',
     idDocumentEmpty: 'No ID uploaded yet. You can add it later before payment.',
     idDocumentRequired: 'Upload a photo of your ID before payment.',
-    codeSent: 'Verification code sent to the phone number.',
+    codeSent: 'Verification code sent to your email.',
     ready: 'Guest account is ready. You can now send the booking request.',
     rentalsReady: 'Guest account is ready. You can now continue the rental request.',
     rideReady: 'Guest account is ready. You can now continue the ride request.',
+    genericReady: 'Your account is ready.',
     policy: 'After opening the account, the guest returns to the stay details to send the booking request. Payment comes only after the booking request is created.',
     rentalsPolicy: 'After opening the account, the renter returns to the monthly rental page to review choices and continue the request. Payment comes only after the request is created.',
     ridePolicy: 'After opening the account, the client returns to SR Ride to enter pickup, destination, and request a driver.',
+    genericPolicy: 'One account for all SYBNB services in Syria. Payment does not start from this step.',
   },
 }
 
@@ -116,7 +132,15 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
   // display-only name list above, which feeds the shared PaymentProofUpload component.
   const [idDocumentFile, setIdDocumentFile] = useState<File | null>(null)
   const [message, setMessage] = useState('')
+  const [tone, setTone] = useState<'error' | 'success' | 'info'>('info')
+  const [sending, setSending] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  // Always surface a status; never swallow an OTP/API error silently.
+  function setStatus(text: string, nextTone: 'error' | 'success' | 'info') {
+    setMessage(text)
+    setTone(nextTone)
+  }
 
   function addIdDocumentFiles(fileList: FileList | null) {
     const selected = Array.from(fileList || [])
@@ -126,33 +150,40 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
     setIdDocumentFiles([file.name])
   }
   const returnPath = listingId ? `/listing/${listingId}` : sanitizeReturnPath(explicitReturnPath) || readStoredReturnPath()
+  const isGenericFlow = flow === 'generic'
   const isRentalsFlow = flow === 'rentals' || returnPath.startsWith('/rentals')
   const isRideFlow = flow === 'ride' || returnPath.startsWith('/ride')
-  const title = isRideFlow ? t.rideTitle : isRentalsFlow ? t.rentalsTitle : t.title
-  const subtitle = isRideFlow ? t.rideSubtitle : isRentalsFlow ? t.rentalsSubtitle : t.subtitle
+  const title = isRideFlow ? t.rideTitle : isRentalsFlow ? t.rentalsTitle : isGenericFlow ? t.genericTitle : t.title
+  const subtitle = isRideFlow ? t.rideSubtitle : isRentalsFlow ? t.rentalsSubtitle : isGenericFlow ? t.genericSubtitle : t.subtitle
   const gateTitle = isRentalsFlow || isRideFlow ? t.gateTitle : title
-  const readyMessage = isRideFlow ? t.rideReady : isRentalsFlow ? t.rentalsReady : t.ready
-  const policy = isRideFlow ? t.ridePolicy : isRentalsFlow ? t.rentalsPolicy : t.policy
+  const readyMessage = isRideFlow ? t.rideReady : isRentalsFlow ? t.rentalsReady : isGenericFlow ? t.genericReady : t.ready
+  const policy = isRideFlow ? t.ridePolicy : isRentalsFlow ? t.rentalsPolicy : isGenericFlow ? t.genericPolicy : t.policy
+  const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
   const codeInstruction = isAr
-    ? `رسالة من المنصة: أرسلنا لك رمز التحقق إلى رقم هاتفك ${maskPhone(phone)}. أضف هذا الرمز ثم أرسله لنا للتأكيد.`
-    : `Platform message: We sent the verification code to your phone number ${maskPhone(phone)}. Enter this code, then send it back to us for confirmation.`
+    ? `رسالة من المنصة: أرسلنا رمز التحقق إلى بريدك الإلكتروني ${maskEmail(email)}. أدخل الرمز ثم اضغط تأكيد.`
+    : `Platform message: we sent the verification code to your email ${maskEmail(email)}. Enter it, then press confirm.`
+
+  // Surface the server's exact message (e.g. "code has expired" / "code is not correct") so invalid
+  // and expired states are distinct; fall back to a clear network message. Never swallow the error.
+  function errText(err: unknown) {
+    return err instanceof Error && err.message ? err.message : t.networkError
+  }
 
   async function complete() {
     const signupMissing =
       mode === 'signup' &&
       (firstName.trim().length < 2 ||
         lastName.trim().length < 2 ||
-        !email.includes('@') ||
         password !== repeatPassword)
     if (
       signupMissing ||
-      phone.trim().length < 8 ||
+      !emailValid ||
       password.length < 8 ||
       !codeSent ||
       code.trim().length < 4 ||
       !codeConfirmed
     ) {
-      setMessage(t.error)
+      setStatus(t.error, 'error')
       return
     }
 
@@ -171,10 +202,10 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
       sessionStorage.setItem(CUSTOMER_GATE_KEY, '1')
       if (listingId) sessionStorage.setItem(`${CUSTOMER_GATE_KEY}:${listingId}`, '1')
       if (!listingId) sessionStorage.removeItem(GUEST_RETURN_PATH_KEY)
-      setMessage(readyMessage)
+      setStatus(readyMessage, 'success')
       window.location.hash = returnPath
-    } catch {
-      setMessage(t.error)
+    } catch (error) {
+      setStatus(errText(error), 'error')
     } finally {
       setSaving(false)
     }
@@ -209,9 +240,9 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
             <>
               <input style={styles.input} value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder={t.firstName} />
               <input style={styles.input} value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder={t.lastName} />
-              <input dir="ltr" style={styles.input} value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t.email} />
             </>
           ) : null}
+          <input dir="ltr" type="email" autoComplete="email" style={styles.input} value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t.email} />
           <input dir="ltr" inputMode="tel" style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder={t.phone} />
           <input style={styles.input} type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t.password} />
           {mode === 'signup' ? <input style={styles.input} type="password" value={repeatPassword} onChange={(event) => setRepeatPassword(event.target.value)} placeholder={t.repeatPassword} /> : null}
@@ -220,18 +251,25 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
           <button
             style={styles.secondaryButton}
             onClick={async () => {
+              if (!emailValid) {
+                setStatus(t.invalidEmail, 'error')
+                return
+              }
+              setSending(true)
               try {
-                await requestOtp({ phone: phone.trim(), purpose: 'account-verify' })
+                const res = await requestOtp({ email: email.trim(), purpose: 'account-verify' })
                 setCodeSent(true)
                 setCodeConfirmed(false)
-                setMessage(t.codeSent)
+                setStatus(`${t.codeSentPrefix} (${res.maskedEmail || maskEmail(email)}).`, 'info')
               } catch (err) {
-                setMessage(err instanceof Error ? err.message : t.error)
+                setStatus(errText(err), 'error')
+              } finally {
+                setSending(false)
               }
             }}
-            disabled={phone.trim().length < 8}
+            disabled={sending || !emailValid}
           >
-            {codeSent ? t.resendCode : t.sendCode}
+            {sending ? t.sending : codeSent ? t.resendCode : t.sendCode}
           </button>
           <input
             dir="ltr"
@@ -249,12 +287,12 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
             disabled={!codeSent || code.trim().length < 4}
             onClick={async () => {
               try {
-                const ok = await confirmOtp({ phone: phone.trim(), purpose: 'account-verify', code: code.trim() })
+                const ok = await confirmOtp({ email: email.trim(), purpose: 'account-verify', code: code.trim() })
                 setCodeConfirmed(ok)
-                setMessage(ok ? readyMessage : t.error)
+                setStatus(ok ? readyMessage : t.error, ok ? 'success' : 'error')
               } catch (err) {
                 setCodeConfirmed(false)
-                setMessage(err instanceof Error ? err.message : t.error)
+                setStatus(errText(err), 'error')
               }
             }}
           >
@@ -296,13 +334,24 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
           </p>
         )}
         <p style={styles.policy}>{policy}</p>
-        {message ? <strong style={message === t.error ? styles.error : styles.success}>{message}</strong> : null}
+        {message ? (
+          <strong role="status" aria-live="polite" style={tone === 'error' ? styles.error : tone === 'success' ? styles.success : styles.infoText}>
+            {message}
+          </strong>
+        ) : null}
         <button style={styles.primaryButton} onClick={() => void complete()} disabled={saving}>
           {saving ? '...' : mode === 'signup' ? t.openAccount : t.signInAccount}
         </button>
       </section>
     </main>
   )
+}
+
+function maskEmail(value: string) {
+  const [user, domain] = value.trim().split('@')
+  if (!domain) return value.trim() || 'you@email'
+  const maskedUser = user.length <= 2 ? `${user[0] || ''}•` : `${user.slice(0, 2)}••${user.slice(-1)}`
+  return `${maskedUser}@${domain}`
 }
 
 function maskPhone(value: string) {
@@ -349,4 +398,5 @@ const styles: Record<string, CSSProperties> = {
   notice: { border: '1px solid rgba(82,104,255,.45)', borderRadius: 8, background: 'rgba(82,104,255,.1)', color: '#dce3ff', padding: 12, margin: 0, lineHeight: 1.6, fontWeight: 850 },
   success: { color: '#20d29b' },
   error: { color: '#ff8f9f' },
+  infoText: { color: '#9fb0ff' },
 }

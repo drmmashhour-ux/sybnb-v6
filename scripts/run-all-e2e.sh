@@ -60,6 +60,7 @@ echo "== api-backed governed suites =="
 run "otp"              otp-identity.e2e.mjs
   run "email-otp"        email-otp.e2e.mjs
   run "email-security"   email-security.e2e.mjs
+  run "signup-journey"   signup-journey.e2e.mjs
   run "resend-webhook"   resend-webhook.e2e.mjs
 run "storage"          storage.e2e.mjs
 run "legal"            legal-consent.e2e.mjs

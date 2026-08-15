@@ -581,13 +581,17 @@ export async function createGuestAccountSession(input: {
   firstName?: string
   lastName?: string
   email?: string
-  phone: string
+  phone?: string
   password: string
 }) {
-  const normalizedPhone = input.phone.replace(/\D/g, '')
-  const loginEmail = normalizedPhone
-    ? `guest-${normalizedPhone}@sybnb.local`
-    : input.email || `guest-${Date.now()}@sybnb.local`
+  // EMAIL is the account identity (email-first). Phone is optional contact only. Fall back to a
+  // phone- or time-derived local address only when no email was provided (legacy/edge).
+  const normalizedPhone = (input.phone || '').replace(/\D/g, '')
+  const loginEmail = input.email?.trim()
+    ? input.email.trim()
+    : normalizedPhone
+      ? `guest-${normalizedPhone}@sybnb.local`
+      : `guest-${Date.now()}@sybnb.local`
   const displayName = [input.firstName, input.lastName].filter(Boolean).join(' ').trim() || 'SYBNB Guest'
   const account = {
     email: loginEmail,
@@ -1647,7 +1651,7 @@ export async function requestOtp(input: { email?: string; phone?: string; purpos
   )
 }
 
-export async function confirmOtp(input: { phone: string; purpose: OtpPurpose; code: string }): Promise<boolean> {
+export async function confirmOtp(input: { email?: string; phone?: string; purpose: OtpPurpose; code: string }): Promise<boolean> {
   const response = await apiRequest<{ ok: true; verified: boolean }>('/api/otp/verify', { method: 'POST', body: input })
   return response.verified === true
 }

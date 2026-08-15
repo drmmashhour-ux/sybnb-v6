@@ -8,6 +8,18 @@ contact for the DPA). **The agent sends nothing** — you send these and paste t
 
 Fill the bracketed bits: `[registration # / address]`, ticket references, your name/title.
 
+### Getting a usable, attributable answer
+- **Route to compliance/legal, not sales.** Sales "yes" is not clearance. Open a support ticket and
+  explicitly ask it be **escalated to compliance/legal**; CC their privacy/DPA contact.
+- **Ask for it in writing** and attributable (name/role or ticket #). A verbal/chat "should be fine"
+  does not qualify — for the tracker it is **INCONCLUSIVE**.
+- **Name Syria explicitly.** Don't soften it to "the Middle East" — the whole point is the Syria
+  determination. If they need it, offer your incorporation details and a one-line platform description.
+- **Follow-up cadence:** if no substantive reply in ~5 business days, reply on the same thread asking
+  for a written compliance decision; escalate once more before treating it as INCONCLUSIVE.
+- **Preserve everything.** Paste the verbatim reply + ticket ref + date into `PROVIDER_CLEARANCE.md`
+  and share with counsel — the exact conditions matter more than a yes/no.
+
 ---
 
 ## 1) Render — API hosting + Render Postgres

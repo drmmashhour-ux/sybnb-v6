@@ -71,6 +71,19 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   // HOST is a real customer-facing role → email verification (email-only Syria config), phone optional.
   // ADMIN/DRIVER remain on their existing internal phone flow (out of scope).
   const isHost = role === 'HOST'
+  // A stay host is a customer, not internal staff — show host-oriented wording (no "internal team
+  // only" framing). ADMIN/DRIVER keep the internal-gate copy.
+  const gateTitle = isHost ? (isAr ? 'دخول المضيفين' : 'Host sign in') : t.title
+  const gateSubtitle = isHost
+    ? isAr
+      ? 'سجّل الدخول أو أنشئ حساب مضيف لإدراج مكانك وإدارة إقاماتك وطلبات الضيوف.'
+      : 'Sign in or create a host account to list your place and manage your stays and guest requests.'
+    : t.subtitle
+  const gateNote = isHost
+    ? isAr
+      ? 'من هنا تدير إقاماتك، طلبات الضيوف، والدفع المحمي.'
+      : 'Manage your stays, guest requests, and protected payments here.'
+    : t.note
   const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
   const requiredMsg = isHost ? (isAr ? 'أدخل البريد الإلكتروني وكلمة المرور قبل طلب الدخول.' : 'Enter email and password before requesting access.') : t.required
 
@@ -121,8 +134,8 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <section style={styles.card}>
         <span style={styles.badge}>{role}</span>
-        <h1 style={styles.title}>{t.title}</h1>
-        <p style={styles.body}>{t.subtitle}</p>
+        <h1 style={styles.title}>{gateTitle}</h1>
+        <p style={styles.body}>{gateSubtitle}</p>
         <div style={styles.segmented}>
           <button style={mode === 'signIn' ? styles.segmentActive : styles.segment} onClick={() => setMode('signIn')}>
             {t.signIn}
@@ -171,7 +184,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
           {status === 'loading' ? t.opening : actionLabel}
         </button>
         {status === 'error' && <p style={styles.error}>{t.error}</p>}
-        <p style={styles.note}>{t.note}</p>
+        <p style={styles.note}>{gateNote}</p>
       </section>
     </main>
   )

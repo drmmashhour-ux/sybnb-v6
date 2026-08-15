@@ -253,7 +253,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const isStaysHost = focus === 'stays'
-  const providerCopy = getProviderCopy(t, isAr, focus)
+  const providerCopy = getProviderCopy(t, isAr, focus, mode)
   const [overview, setOverview] = useState<PlatformHostOverview | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'saving'>('loading')
   const [message, setMessage] = useState('')
@@ -777,7 +777,7 @@ function matchesProviderFocus(listing: Pick<PlatformListing, 'division'>, focus?
   return true
 }
 
-function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focus?: ProviderFocus) {
+function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focus?: ProviderFocus, mode?: HostDashboardMode) {
   if (focus === 'cars') {
     return {
       dashboardTitle: t.carSellerDashboard,
@@ -812,6 +812,19 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
     }
   }
   if (focus === 'stays') {
+    return {
+      dashboardTitle: t.hostDashboard,
+      subtitle: t.staysSubtitle,
+      verifiedLabel: t.verifiedHost,
+      filtersHint: t.staysFiltersHint,
+      inventoryTitle: t.hostingInventory,
+      activeUnit: isAr ? 'استضافات حاليا' : 'active stays',
+      verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
+    }
+  }
+  // A stay host lands here via /host (focus undefined, mode 'host'): use host wording, not the
+  // combined "Seller / Host" label. Marketplace/broker seller modes keep the seller-facing default.
+  if (mode === 'host') {
     return {
       dashboardTitle: t.hostDashboard,
       subtitle: t.staysSubtitle,

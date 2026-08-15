@@ -219,6 +219,15 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           <p>{divisionCopy?.ready || (isStaysEntry ? t.staysReady : t.ready)}</p>
           <h1>{divisionCopy?.title || (isStaysEntry ? t.staysTitle : lang === 'ar' ? 'محرك بحث SYBNB' : 'SYBNB Search Engine')}</h1>
           <span>{divisionCopy?.body || (isStaysEntry ? t.staysBody : t.body)}</span>
+          {effectiveInitialDivision === 'stays' && (
+            <button
+              type="button"
+              className="stays-host-cta"
+              onClick={() => (window.location.hash = '/host')}
+            >
+              {lang === 'ar' ? 'هل لديك مكان؟ أدرج مكانك واستضِف' : 'Have a place? List your place & host'}
+            </button>
+          )}
         </div>
         <div className="search-hero-metrics" aria-label={lang === 'ar' ? 'حالة البحث' : 'Search status'}>
           <strong>{listings.length}</strong>

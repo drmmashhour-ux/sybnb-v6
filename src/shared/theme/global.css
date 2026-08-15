@@ -5084,6 +5084,26 @@ a {
   max-width: 720px;
 }
 
+.stays-host-cta {
+  align-items: center;
+  background: rgba(82, 108, 255, 0.12);
+  border: 1px solid #526cff;
+  border-radius: 999px;
+  color: #cdd6ff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 15px;
+  font-weight: 800;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 12px 20px;
+  transition: background 0.15s ease;
+}
+
+.stays-host-cta:hover {
+  background: rgba(82, 108, 255, 0.22);
+}
+
 .search-hero-metrics {
   align-items: center;
   background: #090a10;

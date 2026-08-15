@@ -139,6 +139,11 @@ export function listingTitleText(
 ) {
   if (lang === 'en') return listing.titleEn || listing.titleAr
   if (hasArabic(listing.titleAr)) return listing.titleAr
+  // A non-empty title with no Arabic (e.g. a car "BMW 320i 2020", "Kia Rio 2019") is still the
+  // real, meaningful name — show it instead of a generic "{division} {id}" placeholder that hides
+  // the make/model/year from Arabic users. Only fall back when no usable title text exists at all.
+  const meaningfulTitle = (listing.titleAr || listing.titleEn || '').trim()
+  if (meaningfulTitle) return meaningfulTitle
   return `${divisionText(listing.division, lang)} ${listing.id.slice(0, 8).toUpperCase()}`
 }
 

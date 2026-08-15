@@ -6,10 +6,22 @@ Docker, Resend, payment, webhook, DNS, or infrastructure change. Preserves: runt
 rollback `d1fd5b9`, payments OFF, public CLOSED, Resend untouched/certified, infra not provisioned,
 verdict CONDITIONAL GO.
 
-> **Rule:** permission is NOT inferred from availability, pricing, or public docs. A provider is
-> **CONFIRMED** only with a written statement from that provider (support/compliance/legal ticket,
-> email, or signed doc). Absent that, it is **UNCONFIRMED**. Nothing here is legal advice; the
-> sanctions/export determination is for qualified counsel.
+> **Rule:** permission is NOT inferred from availability, pricing, or public docs. Classify each
+> written reply **strictly** — do not read vague language as approval — and **preserve the verbatim
+> conditions** for counsel. Nothing here is legal advice; the sanctions/export determination is for
+> qualified counsel.
+>
+> **Reply classification (use exactly one per provider):**
+> - **CONFIRMED** — written statement that the Syria-facing use IS permitted (record any conditions).
+> - **RESTRICTED** — permitted only under stated conditions/regions/attestations (record them verbatim).
+> - **REJECTED** — written statement that the use is NOT permitted → replace that provider.
+> - **INCONCLUSIVE** — no clear written answer / deflection / points to policy without a decision → treat as NOT cleared.
+> - **UNCONFIRMED** — not yet asked / no reply received.
+>
+> Provisioning requires **CONFIRMED** (or **RESTRICTED** whose conditions counsel accepts and we can meet) for **every** provider.
+>
+> **Outreach order (owner):** Render (API + Render Postgres, one request) → Cloudflare R2 → Resend.
+> **Neon** = fallback DB — send only if Render's reply is RESTRICTED/REJECTED/INCONCLUSIVE on the database.
 
 ## Clearance status — all providers UNCONFIRMED (as of 2026-08-14)
 | Provider | Role | Permitted for Syria use? | Geo/service restrictions | DPA available | Data region(s) | Sanctions/export conditions | Account/business verification | Status |

@@ -31,8 +31,11 @@ if (envProblems.length) {
   process.exit(1)
 }
 
-const PORT = Number(process.env.API_PORT || 3051)
-const HOST = process.env.API_HOST || '127.0.0.1'
+// Port: honor an explicit API_PORT, else the host-injected PORT (Render/Cloud Run/etc.), else dev default.
+const PORT = Number(process.env.API_PORT || process.env.PORT || 3051)
+// Host: bind all interfaces in production (containers must accept external traffic); keep loopback in
+// dev/test unless API_HOST is set explicitly.
+const HOST = process.env.API_HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1')
 const DEFAULT_CORS_ORIGIN = [
   'http://127.0.0.1:3050',
   'http://127.0.0.1:3053',

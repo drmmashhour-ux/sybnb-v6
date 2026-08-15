@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.github
+.env
+.env.*
+*.local
+docs
+tests
+scripts
+src
+public
+capsules
+*.md

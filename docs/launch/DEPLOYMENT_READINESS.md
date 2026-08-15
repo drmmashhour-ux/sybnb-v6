@@ -15,7 +15,7 @@ CONDITIONAL GO. Resend outbound config is **not** reopened.
 | DNS / domain | `sybnb.app` DNS is on **Vercel** (confirmed via Resend provider detection). `notifications.sybnb.app` verified for email (eu-west-1). Frontend could serve from Vercel; **API host + its domain/subdomain still to be decided** (e.g. `api.sybnb.app`). |
 | Health/readiness | `GET /api/health/live` (liveness), `GET /api/health` + `/api/health/ready` (readiness incl. DB). |
 | Migration/deploy cmds | `prisma migrate deploy` (11 migrations); `prisma migrate status`; `npm run build`; start `node server/index.mjs`. Templates: `templates/{production.env,sybnb-api.service,Dockerfile}.template`. |
-| Webhook endpoints | Payments: `/api/payments/webhook`, `/api/payments/stripe/webhook` (payments OFF). **Resend bounce/complaint webhook route does NOT exist yet** — only the verifier/suppression library is built (see §5). |
+| Webhook endpoints | Payments: `/api/payments/webhook`, `/api/payments/stripe/webhook` (payments OFF). **Resend webhook route `POST /api/webhooks/resend` is now IMPLEMENTED + certified** (candidate `8c5c2c3`; `resend-webhook` 9/9) — fail-closed without `RESEND_WEBHOOK_SECRET`. |
 
 ## 2. Production secret inventory (NAMES ONLY — values never printed/committed)
 **Required (all environments):** `SYBNB_COUNTRY` (=`syria`, fail-closed), `AUTH_SECRET`, `PHONE_HASH_SECRET`, `DATABASE_URL`.
@@ -53,8 +53,13 @@ webhook receipt.
 
 ## 5. Webhook readiness (Resend)
 - **Built + tested:** `verifyResendWebhook` (Svix HMAC signature + timestamp/replay window), `createWebhookReplayGuard` (duplicate-event), `createSuppressionList` (bounce/complaint) — `email-security` 11/11.
-- **Not built yet:** the **HTTP route** that receives Resend events. Exact endpoint to configure after deploy: **`POST /api/webhooks/resend`** (to be added), verifying with `RESEND_WEBHOOK_SECRET` and feeding the suppression store. Requires a small route + a persistent suppression store at deploy time.
-- **Do not create/rotate the Resend webhook secret yet** — not done. Outbound email config untouched.
+- **Built + certified (candidate `8c5c2c3`):** `POST /api/webhooks/resend` — signature + timestamp/replay
+  verify before trusting payload, duplicate-event dedup, bounce/complaint suppression, 64KB size cap,
+  per-IP rate cap, logs event type+id only (no secret/payload), fail-closed without `RESEND_WEBHOOK_SECRET`.
+  `resend-webhook` 9/9. **Follow-up for multi-instance/durable:** back the in-memory replay guard +
+  suppression with a shared store, and consult suppression in the send path.
+- **Resend webhook secret** to be created + set (`RESEND_WEBHOOK_SECRET`) and the endpoint registered in
+  Resend at deploy time. Outbound email config untouched.
 
 ## 6. Payments — remain OFF
 - Enforced: `STRIPE_SECRET_KEY` unset → no Stripe client (fail-closed). No payment change made.

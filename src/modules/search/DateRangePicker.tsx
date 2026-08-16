@@ -79,6 +79,13 @@ export function isValidDate(value: string) {
   return Boolean(fromISO(value))
 }
 
+// A day is selectable only if it is today or later AND not blocked by availability. Past dates are
+// never selectable. ISO YYYY-MM-DD strings compare lexicographically in true chronological order,
+// so `iso >= todayIso` is a safe, timezone-stable past-date guard.
+export function isSelectableDay(iso: string, todayIso: string, disabledDates?: Set<string>) {
+  return iso >= todayIso && !disabledDates?.has(iso)
+}
+
 export function nightsBetween(start: string, end: string) {
   const first = fromISO(start)
   const last = fromISO(end)
@@ -106,7 +113,10 @@ export function DateField({ lang, label, value, active, onClick }: DateFieldProp
 }
 
 export function DateRangePicker({ lang, value, onChange, onClose, disabledDates, disabledHint }: DateRangePickerProps) {
-  const baseDate = fromISO(value.checkIn) ?? new Date(2026, 6, 1)
+  // Default to the CURRENT month (a selected check-in still wins). The previous hardcoded July-2026
+  // default opened the picker on a past month.
+  const todayIso = toISO(new Date())
+  const baseDate = fromISO(value.checkIn) ?? new Date()
   const [cursor, setCursor] = useState(() => new Date(baseDate.getFullYear(), baseDate.getMonth(), 1))
   const [selecting, setSelecting] = useState<'checkIn' | 'checkOut'>(value.checkIn && !value.checkOut ? 'checkOut' : 'checkIn')
   const [blockedRangeWarning, setBlockedRangeWarning] = useState(false)
@@ -136,7 +146,8 @@ export function DateRangePicker({ lang, value, onChange, onClose, disabledDates,
 
   const selectDay = (date: Date) => {
     const iso = toISO(date)
-    if (disabledDates?.has(iso)) return
+    // Defensive guard: never accept a past or blocked date, regardless of input method.
+    if (!isSelectableDay(iso, todayIso, disabledDates)) return
     setBlockedRangeWarning(false)
 
     if (selecting === 'checkIn' || !value.checkIn) {
@@ -187,7 +198,7 @@ export function DateRangePicker({ lang, value, onChange, onClose, disabledDates,
           const isStart = iso === value.checkIn
           const isEnd = iso === value.checkOut
           const inRange = value.checkIn && value.checkOut && iso > value.checkIn && iso < value.checkOut
-          const isDisabled = disabledDates?.has(iso)
+          const isDisabled = !isSelectableDay(iso, todayIso, disabledDates)
           return (
             <button
               key={iso}

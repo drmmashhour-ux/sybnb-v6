@@ -56,6 +56,7 @@ run "syria-wallet" syria-wallet.e2e.mjs
 run "sr-geocoding" sr-geocoding.e2e.mjs
 run "presentation" presentation.e2e.mjs
 run "cars-title"   cars-title-display.e2e.mjs
+run "calendar-guard" calendar-date-guard.e2e.mjs
 
 echo "== api-backed governed suites =="
 run "otp"              otp-identity.e2e.mjs

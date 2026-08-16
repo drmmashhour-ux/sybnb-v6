@@ -1,0 +1,49 @@
+{
+  "_note": "Curated production inventory. Replace these EXAMPLES with real owner-approved listings. Run scripts/validate-inventory.mjs before importing. No *.local/example.com owners, no test/demo titles, no placeholder prices.",
+  "listings": [
+    {
+      "division": "STAYS",
+      "title_ar": "شقة مفروشة قرب ساحة الأمويين",
+      "title_en": "Furnished apartment near Umayyad Square",
+      "price_minor": 350000,
+      "currency": "SYP",
+      "city": "damascus",
+      "ownerEmail": "host1@sybnb.app",
+      "description_en": "Two-bedroom furnished flat, daily rental, central Damascus.",
+      "metadata": { "visualFilters": { "propertyType": "apartment" } }
+    },
+    {
+      "division": "CARS",
+      "title_ar": "تويوتا كامري 2021",
+      "title_en": "Toyota Camry 2021",
+      "price_minor": 15000000,
+      "currency": "SYP",
+      "city": "aleppo",
+      "ownerEmail": "seller1@sybnb.app",
+      "description_en": "Well-maintained sedan, full service history.",
+      "metadata": { "visualFilters": { "carBrand": "toyota" } }
+    },
+    {
+      "division": "BUY",
+      "title_ar": "فيلا للبيع في يعفور",
+      "title_en": "Villa for sale in Yaafour",
+      "price_minor": 850000000,
+      "currency": "SYP",
+      "city": "damascus-countryside",
+      "ownerEmail": "broker1@sybnb.app",
+      "description_en": "Four-bedroom villa with garden.",
+      "metadata": {}
+    },
+    {
+      "division": "MARKETPLACE",
+      "title_ar": "طقم أثاث غرفة معيشة",
+      "title_en": "Living-room furniture set",
+      "price_minor": 4500000,
+      "currency": "SYP",
+      "city": "homs",
+      "ownerEmail": "seller2@sybnb.app",
+      "description_en": "Excellent condition sofa set.",
+      "metadata": {}
+    }
+  ]
+}

@@ -25,9 +25,12 @@ ready.status === 200 && /"status"\s*:\s*"ready"/.test(ready.text)
   ? ok('health/ready ready (DB reachable)') : no('health/ready', `${ready.status} ${ready.text.slice(0, 80)}`)
 
 const h = live.headers
-h.get('x-content-type-options') === 'nosniff' ? ok('header nosniff') : no('nosniff', h.get('x-content-type-options'))
-/frame-ancestors 'none'/.test(h.get('content-security-policy') || '') ? ok('CSP present') : no('CSP', h.get('content-security-policy'))
-h.get('strict-transport-security') ? ok('HSTS present (production)') : no('HSTS', 'missing')
+const nosniff = h.get('x-content-type-options') === 'nosniff'
+nosniff ? ok('header nosniff') : no('nosniff', h.get('x-content-type-options'))
+const cspOk = (h.get('content-security-policy') || '').includes("frame-ancestors 'none'")
+cspOk ? ok('CSP present') : no('CSP', h.get('content-security-policy'))
+const hsts = Boolean(h.get('strict-transport-security'))
+hsts ? ok('HSTS present (production)') : no('HSTS', 'missing')
 h.get('x-request-id') || h.get('request-id') ? ok('request-id present') : no('request-id', 'missing')
 
 const nf = await get('/api/this-route-does-not-exist')

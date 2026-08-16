@@ -43,6 +43,7 @@ const T = {
     done: 'تم',
     nights: 'عدد الليالي',
     unset: 'غير محدد',
+    datePlaceholder: 'سنة-شهر-يوم',
     rangeHelp: 'اختر تاريخ الدخول ثم تاريخ الخروج.',
   },
   en: {
@@ -53,6 +54,7 @@ const T = {
     done: 'Done',
     nights: 'Nights',
     unset: 'Not set',
+    datePlaceholder: 'yyyy-mm-dd',
     rangeHelp: 'Choose check-in, then check-out.',
   },
 }
@@ -95,8 +97,8 @@ export function DateField({ lang, label, value, active, onClick }: DateFieldProp
   return (
     <button type="button" onClick={onClick} style={{ ...styles.field, border: `1px solid ${active ? '#4f6cff' : '#30384d'}` }}>
       <span style={styles.fieldLabel}>{label}</span>
-      <span dir="ltr" style={styles.fieldValue}>
-        {value || 'yyyy-mm-dd'}
+      <span dir={value ? 'ltr' : lang === 'ar' ? 'rtl' : 'ltr'} style={styles.fieldValue}>
+        {value || T[lang].datePlaceholder}
       </span>
       <span style={styles.fieldHint}>{value ? formatDateForLang(value, lang) : T[lang].choose}</span>
     </button>

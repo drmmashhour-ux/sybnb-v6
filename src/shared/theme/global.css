@@ -2,6 +2,14 @@
   box-sizing: border-box;
 }
 
+/* Keyboard accessibility: a visible focus ring for keyboard/AT users only (:focus-visible does not
+   trigger on mouse click, so the existing mouse visual design is unchanged). */
+:focus-visible {
+  outline: 2px solid #6f86ff;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 html,
 body,
 #root {

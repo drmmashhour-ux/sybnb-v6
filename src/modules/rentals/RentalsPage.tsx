@@ -329,6 +329,10 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       setListings(nextListings)
       setSelectedId(nextListings[0]?.id || '')
       setStatus('ready')
+      // Show available results by default — consistent with Stays/Cars/Marketplace/New Construction,
+      // which auto-populate. The search capsule still refines; this removes the empty-looking
+      // "there are no listings" first impression without changing any business rule.
+      setHasSearched(true)
     } catch (error) {
       setListings([])
       setStatus('error')
@@ -429,7 +433,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       <section style={styles.searchCapsule}>
         <div style={styles.searchCapsuleText}>
           <span style={styles.eyebrow}>{t.searchCapsule}</span>
-          <strong>{t.searchTitle}</strong>
+          <h1 style={{ margin: 0, fontSize: 'inherit', fontWeight: 800 }}>{t.searchTitle}</h1>
           <small>{t.searchCapsuleHint}</small>
         </div>
         <section style={styles.mainGroupCapsule}>
@@ -553,7 +557,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           <div style={styles.resultGrid}>
             {visibleListings.length ? visibleListings.map((listing) => (
               <article key={listing.id} style={selectedListing?.id === listing.id ? styles.resultCardActive : styles.resultCard}>
-                <img src={listingImage(listing, isBuyMode)} alt="" style={styles.resultImage} />
+                <img src={listingImage(listing, isBuyMode)} alt={listingTitleText(listing, lang)} style={styles.resultImage} />
                 <div style={styles.resultBody}>
                   <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
                   <h2 style={styles.cardTitle}>{listingTitleText(listing, lang)}</h2>
@@ -600,7 +604,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           {selectedListing ? (
             <>
               <section style={styles.selectedCard}>
-                <img src={listingImage(selectedListing, isBuyMode)} alt="" style={styles.selectedImage} />
+                <img src={listingImage(selectedListing, isBuyMode)} alt={listingTitleText(selectedListing, lang)} style={styles.selectedImage} />
                 <div style={styles.selectedContent}>
                   <span style={styles.statusPill}>{t.protected}</span>
                   <h2 style={styles.selectedTitle}>{listingTitleText(selectedListing, lang)}</h2>

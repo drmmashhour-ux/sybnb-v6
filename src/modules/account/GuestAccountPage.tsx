@@ -238,14 +238,17 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
         <div style={styles.formGrid}>
           {mode === 'signup' ? (
             <>
-              <input style={styles.input} value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder={t.firstName} />
-              <input style={styles.input} value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder={t.lastName} />
+              <input style={styles.input} value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder={t.firstName} aria-label={t.firstName} />
+              <input style={styles.input} value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder={t.lastName} aria-label={t.lastName} />
             </>
           ) : null}
-          <input dir="ltr" type="email" autoComplete="email" style={styles.input} value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t.email} />
-          <input dir="ltr" inputMode="tel" style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder={t.phone} />
-          <input style={styles.input} type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t.password} />
-          {mode === 'signup' ? <input style={styles.input} type="password" value={repeatPassword} onChange={(event) => setRepeatPassword(event.target.value)} placeholder={t.repeatPassword} /> : null}
+          <input dir="ltr" type="email" autoComplete="email" style={styles.input} value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t.email} aria-label={t.email} aria-invalid={email.trim().length > 0 && !emailValid} />
+          {email.trim().length > 0 && !emailValid ? (
+            <small role="alert" style={styles.fieldHint}>{t.invalidEmail}</small>
+          ) : null}
+          <input dir="ltr" inputMode="tel" style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder={t.phone} aria-label={t.phone} />
+          <input style={styles.input} type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t.password} aria-label={t.password} />
+          {mode === 'signup' ? <input style={styles.input} type="password" value={repeatPassword} onChange={(event) => setRepeatPassword(event.target.value)} placeholder={t.repeatPassword} aria-label={t.repeatPassword} /> : null}
         </div>
         <div style={styles.codeRow}>
           <button
@@ -281,6 +284,7 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
               setCodeConfirmed(false)
             }}
             placeholder={t.code}
+            aria-label={t.code}
           />
           <button
             style={styles.secondaryButton}
@@ -399,4 +403,5 @@ const styles: Record<string, CSSProperties> = {
   success: { color: '#20d29b' },
   error: { color: '#ff8f9f' },
   infoText: { color: '#9fb0ff' },
+  fieldHint: { color: '#ff8f9f', fontWeight: 700, marginTop: -6 },
 }

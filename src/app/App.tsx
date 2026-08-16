@@ -3,6 +3,7 @@ import { findDivisionByRoute } from '../engines/navigation/divisions'
 import type { Lang } from '../engines/language/languageEngine'
 import { getInitialLanguage, persistLanguage, text } from '../engines/language/languageEngine'
 import { AppShell } from '../shared/layout/AppShell'
+import { NotFoundPage } from '../modules/common/NotFoundPage'
 import { isSellerRoute } from '../modules/seller/sellerRoutes'
 import { isTrustProtectionRoute } from '../modules/trust/trustRoutes'
 import { isGiftFlowRoute } from '../modules/wallet/giftRoutes'
@@ -169,8 +170,10 @@ export function App() {
           <WalletPage lang={lang} />
         ) : division ? (
           <DivisionLivePage division={division} lang={lang} />
-        ) : (
+        ) : path === '/' || path === '' || path === '/home' ? (
           <LandingPage lang={lang} />
+        ) : (
+          <NotFoundPage lang={lang} path={path} />
         )}
       </Suspense>
     </AppShell>

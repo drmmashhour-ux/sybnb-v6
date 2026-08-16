@@ -33,6 +33,9 @@ const copy = {
     back: 'العودة',
     loading: 'جار التحميل',
     error: 'تعذر تحميل الإعلان',
+    notFoundHelp: 'قد يكون هذا الإعلان محذوفاً أو انتهت صلاحيته. تصفّح إعلانات أخرى أو عد إلى الرئيسية.',
+    browseAll: 'تصفح الإعلانات',
+    goHome: 'الصفحة الرئيسية',
     price: 'السعر',
     owner: 'المالك',
     division: 'القسم',
@@ -112,6 +115,9 @@ const copy = {
     back: 'Back',
     loading: 'Loading',
     error: 'Could not load listing',
+    notFoundHelp: 'This listing may have been removed or expired. Browse other listings or return home.',
+    browseAll: 'Browse listings',
+    goHome: 'Home',
     price: 'Price',
     owner: 'Owner',
     division: 'Division',
@@ -451,6 +457,20 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       {status === 'loading' && <section style={styles.panel}>{t.loading}</section>}
       {status === 'error' && <section ref={messageRef} style={styles.alert}>{message}</section>}
       {status !== 'error' && message && <section ref={messageRef} style={styles.alert}>{message}</section>}
+
+      {status === 'error' && !listing && (
+        <section style={styles.panel}>
+          <p style={{ margin: '0 0 14px', lineHeight: 1.7 }}>{t.notFoundHelp}</p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button style={styles.recoverPrimary} onClick={() => (window.location.hash = returnPath || '/stays')}>
+              {t.browseAll}
+            </button>
+            <button style={styles.recoverSecondary} onClick={() => (window.location.hash = '/')}>
+              {t.goHome}
+            </button>
+          </div>
+        </section>
+      )}
 
       {listing && (
         <>
@@ -996,6 +1016,8 @@ const styles: Record<string, CSSProperties> = {
   agreementInput: { width: 28, height: 28, accentColor: '#20d29b', margin: 0 },
   info: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 6, color: '#9aa6ba' },
   panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#fff', padding: 14, display: 'grid', gap: 12 },
+  recoverPrimary: { minHeight: 46, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 900, padding: '0 18px', cursor: 'pointer' },
+  recoverSecondary: { minHeight: 46, border: '1px solid #30384d', borderRadius: 8, background: 'transparent', color: '#fff', fontWeight: 800, padding: '0 18px', cursor: 'pointer' },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
   bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
 }

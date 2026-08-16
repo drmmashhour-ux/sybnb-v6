@@ -255,7 +255,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           <div className="search-result-grid">
             {listings.map((listing) => (
               <article key={listing.id} className="search-result-card">
-                <img src={listingImage(listing)} alt="" loading="lazy" />
+                <img src={listingImage(listing)} alt={listingTitleText(listing, lang)} loading="lazy" />
                 <div className="search-result-body">
                   <span className="search-result-status">{statusText(listing.status, lang)}</span>
                   <h2>{listingTitleText(listing, lang)}</h2>

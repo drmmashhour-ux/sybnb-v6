@@ -164,6 +164,14 @@ function setSecurityHeaders(res) {
   }
 }
 
+// Resource-exhaustion / slowloris protection: bound how long a client may take to send request
+// headers and the full request, and cap idle keep-alive and header count. Sized for a JSON API
+// behind a reverse proxy. requestTimeout must be >= headersTimeout.
+server.headersTimeout = 15_000
+server.requestTimeout = 30_000
+server.keepAliveTimeout = 10_000
+server.maxHeadersCount = 100
+
 server.listen(PORT, HOST, () => {
   log.info('server_listening', { host: HOST, port: PORT, env: process.env.NODE_ENV || 'development' })
 })

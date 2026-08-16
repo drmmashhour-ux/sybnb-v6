@@ -31,5 +31,14 @@ check('active-profile currency guard rejects CAD under syria', hasCountryProblem
 check('active-profile currency guard rejects STRIPE_CURRENCY=cad under syria', hasCountryProblem({ ...base, SYBNB_COUNTRY: 'syria', STRIPE_CURRENCY: 'cad' }), 'not rejected')
 check('USD advertising allowed under syria', validateEnv({ ...base, SYBNB_COUNTRY: 'syria', ADVERTISING_CURRENCY: 'USD' }).length === 0)
 
+console.log('\n=== PRODUCTION EMAIL PROVIDER FAIL-CLOSED (email OTP is the primary auth channel) ===')
+const prodBase = { ...base, SYBNB_COUNTRY: 'syria', NODE_ENV: 'production', CORS_ORIGIN: 'https://app', STORAGE_PROVIDER: 's3', STORAGE_S3_BUCKET: 'b', STORAGE_S3_REGION: 'r' }
+const hasEmailProblem = (env) => validateEnv(env).some((p) => /EMAIL_PROVIDER|RESEND_API_KEY|EMAIL_FROM/i.test(p))
+check('production on sandbox email refuses (would silently send no OTP)', hasEmailProblem({ ...prodBase }), 'not refused')
+check('production EMAIL_PROVIDER=resend without creds refuses', hasEmailProblem({ ...prodBase, EMAIL_PROVIDER: 'resend' }), 'not refused')
+check('production resend WITH creds passes the email check', !hasEmailProblem({ ...prodBase, EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'k', EMAIL_FROM: 'no-reply@x' }), 'blocked')
+check('fully-configured production has zero problems', validateEnv({ ...prodBase, EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'k', EMAIL_FROM: 'no-reply@x' }).length === 0, JSON.stringify(validateEnv({ ...prodBase, EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'k', EMAIL_FROM: 'no-reply@x' })))
+check('non-production sandbox email is allowed (staging/tests)', !hasEmailProblem({ ...base, SYBNB_COUNTRY: 'syria' }), 'blocked in non-prod')
+
 console.log(`\n==== COUNTRY SELECTION E2E: ${pass} passed, ${fail} failed ====`)
 process.exit(fail ? 1 : 0)

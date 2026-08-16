@@ -20,6 +20,16 @@ export function validateEnv(env = process.env) {
     if (provider === 's3' && (!env.STORAGE_S3_BUCKET || !env.STORAGE_S3_REGION)) {
       problems.push('STORAGE_S3_BUCKET and STORAGE_S3_REGION are required when STORAGE_PROVIDER=s3')
     }
+    // Email OTP is the primary auth identifier platform-wide (and the ONLY channel for email-only
+    // countries like Syria). The sandbox provider reports delivered:true but sends nothing, so a
+    // production deploy left on sandbox would let signups "succeed" while no OTP email is ever sent
+    // — nobody could sign in. Fail closed, consistent with the storage/CORS guards above.
+    const emailProvider = (env.EMAIL_PROVIDER || 'sandbox').toLowerCase()
+    if (emailProvider === 'sandbox') {
+      problems.push('EMAIL_PROVIDER must be a live email provider (not sandbox) in production — email OTP is the primary auth channel')
+    } else if (emailProvider === 'resend' && (!env.RESEND_API_KEY || !env.EMAIL_FROM)) {
+      problems.push('RESEND_API_KEY and EMAIL_FROM are required when EMAIL_PROVIDER=resend')
+    }
   }
   // Fail-closed country selection (all environments): refuse when the country profile is missing,
   // unsupported, or incomplete, or when a currency override conflicts with the active profile.

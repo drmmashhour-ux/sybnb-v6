@@ -71,11 +71,27 @@ export async function handleListings(req, res, url, context) {
         attributeConditions.push({ metadata: { path: ['bathrooms'], gte: bathroomsMin } })
       }
 
-      const priceMin = Number(url.searchParams.get('priceMin'))
-      const priceMax = Number(url.searchParams.get('priceMax'))
+      // priceMinor is an int4 column; validate range so an out-of-range value fails closed with a
+      // clear 400 instead of surfacing a Postgres integer-overflow 500.
+      const INT4_MAX = 2147483647
+      const parsePriceParam = (name) => {
+        const raw = url.searchParams.get(name)
+        if (raw == null || raw === '') return undefined
+        const n = Number(raw)
+        if (!Number.isFinite(n) || n < 0 || n > INT4_MAX) {
+          const error = new Error(`Invalid ${name}: expected a number between 0 and ${INT4_MAX}.`)
+          error.statusCode = 400
+          error.code = 'INVALID_PRICE_FILTER'
+          error.expose = true
+          throw error
+        }
+        return n
+      }
+      const priceMin = parsePriceParam('priceMin')
+      const priceMax = parsePriceParam('priceMax')
       const priceFilter = {}
-      if (Number.isFinite(priceMin) && priceMin > 0) priceFilter.gte = priceMin
-      if (Number.isFinite(priceMax) && priceMax > 0) priceFilter.lte = priceMax
+      if (priceMin !== undefined && priceMin > 0) priceFilter.gte = priceMin
+      if (priceMax !== undefined && priceMax > 0) priceFilter.lte = priceMax
 
       const listings = await db().listing.findMany({
         where: {

@@ -105,3 +105,36 @@ evidence) · **BLOCKED-OWNER** (needs owner input/credentials) · **BLOCKED-COUN
 inputs / external accounts / counsel approval / the reserved go-live switches** — none are code
 defects. Do not call SYBNB launch-ready until Section B (counsel + publish), C, D are green and the
 deployed candidate passes Section E pre-cutover certification.
+
+## F. Authority-review checkpoint (private environment) — 2026-08-17
+| Item | Status |
+|------|--------|
+| 45 synthetic authority-review listings imported and live (prod DB) | **PASS** |
+| 6 divisions distributed 8/8/8/8/8/5 (stays/rentals/buy/cars/marketplace/new-construction) | **PASS** |
+| Production DB pre-flight (correct DB, real-data guard) | **PASS** (0 pre-existing listings/users) |
+| 11/11 migrations verified on prod | **PASS** |
+| Live API verification (`sybnb-api.onrender.com`, per-division counts, no fixtures/leaks) | **PASS** |
+| Arabic/English inventory verified | **PASS** |
+| Synthetic inventory clearly marked (`metadata.inventory_source=authority_review_synthetic`) + fully removable | **PASS** — manifest `authority-review-manifest.json`; `scripts/remove-review-inventory.mjs` |
+| `payments=DISABLED` / `publicAccess=CLOSED` / Vercel Require-Log-In ON | **HELD** |
+| Browser AR/EN visual validation | **PENDING** — blocked only on `VERCEL_AUTOMATION_BYPASS_SECRET` |
+
+Keep the synthetic authority-review dataset **isolated from future real inventory**; preserve the
+removal manifest; remove the whole set (`remove-review-inventory.mjs --commit`) before the first real
+inventory load.
+
+## G. MANDATORY security gate before `publicAccess=OPEN` (hard requirement — not optional)
+Credentials were used/handled during private deployment; **rotate before any public launch.** This is
+a blocking gate for public cutover, NOT for authority-review prep. Do **not** rotate during current
+review prep unless necessary (private env is working).
+1. Rotate Render PostgreSQL password/credentials.
+2. Rotate Cloudflare R2 API token/credentials.
+3. Update the corresponding production secrets (Render/Vercel stores) — **without exposing values**.
+4. Revoke the old credentials.
+5. Verify API → PostgreSQL connectivity after rotation (`scripts/preflight-prod-db.mjs`).
+6. Verify R2 PUT/GET/DELETE after rotation (`scripts/verify-r2.mjs`).
+7. Run a secret-leak scan of repo, tracked files, logs, and deployment configuration.
+
+Rationale: the Render DB connection string (with password) and the R2 token surfaced in a working
+session transcript. Neither blocks authority review; both must be rotated + revoked before
+`publicAccess=OPEN`. **Do not enable payments or public access.**

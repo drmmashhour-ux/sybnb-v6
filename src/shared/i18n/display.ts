@@ -148,10 +148,18 @@ export function listingTitleText(
 }
 
 export function listingDescriptionText(
-  listing: Pick<PlatformListing, 'division' | 'description'>,
+  listing: Pick<PlatformListing, 'division' | 'description' | 'metadata'>,
   lang: Lang,
 ) {
-  if (lang === 'en') return listing.description || divisionDescriptions[listing.division]?.[lang] || ''
+  if (lang === 'en') {
+    // Prefer an explicit English description carried in metadata (descriptionEn); the single
+    // `description` column is Arabic-primary, so without this EN readers would see Arabic body text.
+    const enDesc = (listing.metadata as { descriptionEn?: unknown } | null | undefined)?.descriptionEn
+    if (typeof enDesc === 'string' && enDesc.trim()) return enDesc
+    // Otherwise use the stored description only if it isn't Arabic; else the localized division default.
+    if (listing.description && !hasArabic(listing.description)) return listing.description
+    return divisionDescriptions[listing.division]?.[lang] || ''
+  }
   if (listing.description && hasArabic(listing.description)) return listing.description
   return divisionDescriptions[listing.division]?.[lang] || ''
 }

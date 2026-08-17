@@ -250,9 +250,11 @@ export function DivisionLivePage({ division, lang }: Props) {
             <article key={listing.id} style={isCompact ? styles.compactCard : styles.card}>
               <div style={styles.cardHeader}>
                 <h2 style={isCompact ? styles.compactCardTitle : styles.cardTitle}>{listingTitleText(listing, lang)}</h2>
-                <span style={{ ...styles.statusPill, borderColor: `${division.accent}66`, color: division.accent }}>
-                  {statusText(listing.status, lang)}
-                </span>
+                {listing.status !== 'APPROVED' && (
+                  <span style={{ ...styles.statusPill, borderColor: `${division.accent}66`, color: division.accent }}>
+                    {statusText(listing.status, lang)}
+                  </span>
+                )}
               </div>
               {!isCompact && <p style={styles.cardBody}>{listingDescriptionText(listing, lang)}</p>}
               <div style={isCompact ? styles.compactMetaGrid : styles.metaStack}>

@@ -559,7 +559,9 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
               <article key={listing.id} style={selectedListing?.id === listing.id ? styles.resultCardActive : styles.resultCard}>
                 <img src={listingImage(listing, isBuyMode)} alt={listingTitleText(listing, lang)} style={styles.resultImage} />
                 <div style={styles.resultBody}>
-                  <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
+                  {listing.status !== 'APPROVED' && (
+                    <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
+                  )}
                   <h2 style={styles.cardTitle}>{listingTitleText(listing, lang)}</h2>
                   <p style={styles.cardBody}>{listingDescriptionText(listing, lang)}</p>
                   <div style={styles.metaRow}>
@@ -611,7 +613,9 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   <p style={styles.cardBody}>{listingDescriptionText(selectedListing, lang)}</p>
                   <Info label={t.price} value={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)} />
                   <Info label={t.owner} value={selectedListing.owner?.displayName || selectedListing.ownerId.slice(0, 8).toUpperCase()} />
-                  <Info label={t.status} value={statusText(selectedListing.status, lang)} />
+                  {selectedListing.status !== 'APPROVED' && (
+                    <Info label={t.status} value={statusText(selectedListing.status, lang)} />
+                  )}
                 </div>
               </section>
 

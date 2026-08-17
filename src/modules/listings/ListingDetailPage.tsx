@@ -676,7 +676,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                   label={t.rating}
                   value={reviewSummary.count > 0 ? `${reviewSummary.average} ★ (${t.reviewsCount(reviewSummary.count)})` : t.noReviewsYet}
                 />
-                <Info label={t.status} value={statusText(listing.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+                {listing.status !== 'APPROVED' && (
+                  <Info label={t.status} value={statusText(listing.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+                )}
                 <Info label={t.reference} value={listing.id.slice(0, 8).toUpperCase()} />
               </section>
               {reviewSummary.reviews.length > 0 && (

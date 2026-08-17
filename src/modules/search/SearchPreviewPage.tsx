@@ -257,7 +257,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               <article key={listing.id} className="search-result-card">
                 <img src={listingImage(listing)} alt={listingTitleText(listing, lang)} loading="lazy" />
                 <div className="search-result-body">
-                  <span className="search-result-status">{statusText(listing.status, lang)}</span>
+                  {listing.status !== 'APPROVED' && (
+                    <span className="search-result-status">{statusText(listing.status, lang)}</span>
+                  )}
                   <h2>{listingTitleText(listing, lang)}</h2>
                   <p>{listingDescriptionText(listing, lang) || t.pendingOnly}</p>
                   <div className="search-result-meta">

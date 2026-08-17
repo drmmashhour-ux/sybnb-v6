@@ -1,0 +1,885 @@
+{
+  "_note": "AUTHORITY-REVIEW SYNTHETIC dataset — NOT real customer listings. Every record tagged metadata.inventory_source=authority_review_synthetic; owners use @authority-review.invalid. Prices are demonstration values, not verified market prices. Remove cleanly before loading genuine inventory.",
+  "generatedFor": "private Syrian-authority review + technical demonstration",
+  "listings": [
+    {
+      "division": "STAYS",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "المالكي",
+      "areaEn": "Malki",
+      "title_ar": "شقة مفروشة بإطلالة - المالكي",
+      "title_en": "Furnished apartment with view - Malki",
+      "price_minor": 350000,
+      "currency": "SYP",
+      "description_ar": "شقة أنيقة مفروشة بالكامل للإيجار اليومي، قريبة من الخدمات.",
+      "description_en": "Elegant fully-furnished apartment for daily rental, close to amenities.",
+      "ownerName": "Damascus Stays (Review)",
+      "ownerEmail": "review-stays-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "studio",
+        "nightly": true
+      }
+    },
+    {
+      "division": "STAYS",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "المحافظة",
+      "areaEn": "Al-Muhafaza",
+      "title_ar": "استوديو حديث وسط المدينة - المحافظة",
+      "title_en": "Modern downtown studio - Al-Muhafaza",
+      "price_minor": 230000,
+      "currency": "SYP",
+      "description_ar": "استوديو عصري مناسب للأفراد ورجال الأعمال.",
+      "description_en": "Modern studio ideal for individuals and business travelers.",
+      "ownerName": "Aleppo Stays (Review)",
+      "ownerEmail": "review-stays-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "studio",
+        "nightly": true
+      }
+    },
+    {
+      "division": "STAYS",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الرمل الشمالي",
+      "areaEn": "Al-Raml",
+      "title_ar": "شقة عائلية واسعة - الرمل الشمالي",
+      "title_en": "Spacious family apartment - Al-Raml",
+      "price_minor": 500000,
+      "currency": "SYP",
+      "description_ar": "ثلاث غرف نوم، مطبخ مجهز، إنترنت عالي السرعة.",
+      "description_en": "Three bedrooms, equipped kitchen, high-speed internet.",
+      "ownerName": "Latakia Stays (Review)",
+      "ownerEmail": "review-stays-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "nightly": true
+      }
+    },
+    {
+      "division": "STAYS",
+      "city": "homs",
+      "governorate": "حمص",
+      "area": "الإنشاءات",
+      "areaEn": "Al-Inshaat",
+      "title_ar": "شقة بغرفتي نوم قرب البحر - الإنشاءات",
+      "title_en": "Two-bedroom near the sea - Al-Inshaat",
+      "price_minor": 430000,
+      "currency": "SYP",
+      "description_ar": "إطلالة جميلة ومناسبة للعائلات في اللاذقية.",
+      "description_en": "Pleasant sea-side setting, family-friendly.",
+      "ownerName": "Homs Stays (Review)",
+      "ownerEmail": "review-stays-homs@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "studio",
+        "nightly": true
+      }
+    },
+    {
+      "division": "STAYS",
+      "city": "tartus",
+      "governorate": "طرطوس",
+      "area": "الرميلة",
+      "areaEn": "Al-Rmeileh",
+      "title_ar": "شقة مفروشة بإطلالة - الرميلة",
+      "title_en": "Furnished apartment with view - Al-Rmeileh",
+      "price_minor": 390000,
+      "currency": "SYP",
+      "description_ar": "شقة أنيقة مفروشة بالكامل للإيجار اليومي، قريبة من الخدمات.",
+      "description_en": "Elegant fully-furnished apartment for daily rental, close to amenities.",
+      "ownerName": "Tartus Stays (Review)",
+      "ownerEmail": "review-stays-tartus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "studio",
+        "nightly": true
+      }
+    },
+    {
+      "division": "STAYS",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "المالكي",
+      "areaEn": "Malki",
+      "title_ar": "استوديو حديث وسط المدينة - المالكي",
+      "title_en": "Modern downtown studio - Malki",
+      "price_minor": 270000,
+      "currency": "SYP",
+      "description_ar": "استوديو عصري مناسب للأفراد ورجال الأعمال.",
+      "description_en": "Modern studio ideal for individuals and business travelers.",
+      "ownerName": "Damascus Stays (Review)",
+      "ownerEmail": "review-stays-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "studio",
+        "nightly": true
+      }
+    },
+    {
+      "division": "STAYS",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "المحافظة",
+      "areaEn": "Al-Muhafaza",
+      "title_ar": "شقة عائلية واسعة - المحافظة",
+      "title_en": "Spacious family apartment - Al-Muhafaza",
+      "price_minor": 540000,
+      "currency": "SYP",
+      "description_ar": "ثلاث غرف نوم، مطبخ مجهز، إنترنت عالي السرعة.",
+      "description_en": "Three bedrooms, equipped kitchen, high-speed internet.",
+      "ownerName": "Aleppo Stays (Review)",
+      "ownerEmail": "review-stays-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "nightly": true
+      }
+    },
+    {
+      "division": "STAYS",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الشيخ ضاهر",
+      "areaEn": "Sheikh Daher",
+      "title_ar": "شقة بغرفتي نوم قرب البحر - الشيخ ضاهر",
+      "title_en": "Two-bedroom near the sea - Sheikh Daher",
+      "price_minor": 470000,
+      "currency": "SYP",
+      "description_ar": "إطلالة جميلة ومناسبة للعائلات في اللاذقية.",
+      "description_en": "Pleasant sea-side setting, family-friendly.",
+      "ownerName": "Latakia Stays (Review)",
+      "ownerEmail": "review-stays-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "studio",
+        "nightly": true
+      }
+    },
+    {
+      "division": "RENTALS",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "المزة",
+      "areaEn": "Mazzeh",
+      "title_ar": "شقة للإيجار الشهري - دمشق",
+      "title_en": "Apartment for monthly rent - Damascus",
+      "price_minor": 2500000,
+      "currency": "SYP",
+      "description_ar": "شقة مريحة بعقد شهري، قريبة من المدارس والأسواق.",
+      "description_en": "Comfortable monthly-lease apartment near schools and markets.",
+      "ownerName": "Damascus Homes (Review)",
+      "ownerEmail": "review-rentals-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "term": "monthly"
+      }
+    },
+    {
+      "division": "RENTALS",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "العزيزية",
+      "areaEn": "Al-Aziziyah",
+      "title_ar": "فيلا للإيجار مع حديقة - حلب",
+      "title_en": "Villa for rent with garden - Aleppo",
+      "price_minor": 6650000,
+      "currency": "SYP",
+      "description_ar": "فيلا مستقلة بحديقة خاصة ومواقف سيارات.",
+      "description_en": "Detached villa with private garden and parking.",
+      "ownerName": "Aleppo Homes (Review)",
+      "ownerEmail": "review-rentals-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "term": "monthly"
+      }
+    },
+    {
+      "division": "RENTALS",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الزراعة",
+      "areaEn": "Al-Ziraa",
+      "title_ar": "شقة مفروشة طويلة الأمد - اللاذقية",
+      "title_en": "Long-term furnished flat - Latakia",
+      "price_minor": 3500000,
+      "currency": "SYP",
+      "description_ar": "مناسبة للعائلات، مفروشة بالكامل.",
+      "description_en": "Family-suitable, fully furnished.",
+      "ownerName": "Latakia Homes (Review)",
+      "ownerEmail": "review-rentals-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "term": "monthly"
+      }
+    },
+    {
+      "division": "RENTALS",
+      "city": "homs",
+      "governorate": "حمص",
+      "area": "الوعر",
+      "areaEn": "Al-Waer",
+      "title_ar": "شقة للإيجار الشهري - حمص",
+      "title_en": "Apartment for monthly rent - Homs",
+      "price_minor": 2950000,
+      "currency": "SYP",
+      "description_ar": "شقة مريحة بعقد شهري، قريبة من المدارس والأسواق.",
+      "description_en": "Comfortable monthly-lease apartment near schools and markets.",
+      "ownerName": "Homs Homes (Review)",
+      "ownerEmail": "review-rentals-homs@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "term": "monthly"
+      }
+    },
+    {
+      "division": "RENTALS",
+      "city": "tartus",
+      "governorate": "طرطوس",
+      "area": "وسط المدينة",
+      "areaEn": "City Center",
+      "title_ar": "فيلا للإيجار مع حديقة - طرطوس",
+      "title_en": "Villa for rent with garden - Tartus",
+      "price_minor": 7100000,
+      "currency": "SYP",
+      "description_ar": "فيلا مستقلة بحديقة خاصة ومواقف سيارات.",
+      "description_en": "Detached villa with private garden and parking.",
+      "ownerName": "Tartus Homes (Review)",
+      "ownerEmail": "review-rentals-tartus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "term": "monthly"
+      }
+    },
+    {
+      "division": "RENTALS",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "المزة",
+      "areaEn": "Mazzeh",
+      "title_ar": "شقة مفروشة طويلة الأمد - دمشق",
+      "title_en": "Long-term furnished flat - Damascus",
+      "price_minor": 3950000,
+      "currency": "SYP",
+      "description_ar": "مناسبة للعائلات، مفروشة بالكامل.",
+      "description_en": "Family-suitable, fully furnished.",
+      "ownerName": "Damascus Homes (Review)",
+      "ownerEmail": "review-rentals-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "term": "monthly"
+      }
+    },
+    {
+      "division": "RENTALS",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "العزيزية",
+      "areaEn": "Al-Aziziyah",
+      "title_ar": "شقة للإيجار الشهري - حلب",
+      "title_en": "Apartment for monthly rent - Aleppo",
+      "price_minor": 3400000,
+      "currency": "SYP",
+      "description_ar": "شقة مريحة بعقد شهري، قريبة من المدارس والأسواق.",
+      "description_en": "Comfortable monthly-lease apartment near schools and markets.",
+      "ownerName": "Aleppo Homes (Review)",
+      "ownerEmail": "review-rentals-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "term": "monthly"
+      }
+    },
+    {
+      "division": "RENTALS",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الرمل الشمالي",
+      "areaEn": "Al-Raml",
+      "title_ar": "فيلا للإيجار مع حديقة - اللاذقية",
+      "title_en": "Villa for rent with garden - Latakia",
+      "price_minor": 7550000,
+      "currency": "SYP",
+      "description_ar": "فيلا مستقلة بحديقة خاصة ومواقف سيارات.",
+      "description_en": "Detached villa with private garden and parking.",
+      "ownerName": "Latakia Homes (Review)",
+      "ownerEmail": "review-rentals-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment",
+        "term": "monthly"
+      }
+    },
+    {
+      "division": "BUY",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "أبو رمانة",
+      "areaEn": "Abu Rummaneh",
+      "title_ar": "شقة للبيع - دمشق",
+      "title_en": "Apartment for sale - Damascus",
+      "price_minor": 180000000,
+      "currency": "SYP",
+      "description_ar": "شقة بموقع مميز، تشطيب جيد، جاهزة للسكن.",
+      "description_en": "Prime location, good finishing, move-in ready.",
+      "ownerName": "Damascus Realty (Review)",
+      "ownerEmail": "review-buy-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment"
+      }
+    },
+    {
+      "division": "BUY",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "حلب الجديدة",
+      "areaEn": "New Aleppo",
+      "title_ar": "فيلا فاخرة للبيع - حلب",
+      "title_en": "Luxury villa for sale - Aleppo",
+      "price_minor": 955000000,
+      "currency": "SYP",
+      "description_ar": "فيلا واسعة بتصميم عصري وحديقة.",
+      "description_en": "Spacious modern villa with garden.",
+      "ownerName": "Aleppo Realty (Review)",
+      "ownerEmail": "review-buy-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "villa"
+      }
+    },
+    {
+      "division": "BUY",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الشيخ ضاهر",
+      "areaEn": "Sheikh Daher",
+      "title_ar": "بيت عربي تراثي - اللاذقية",
+      "title_en": "Heritage Arabic house - Latakia",
+      "price_minor": 330000000,
+      "currency": "SYP",
+      "description_ar": "بيت دمشقي بطابع تراثي أصيل.",
+      "description_en": "Authentic heritage Damascene house.",
+      "ownerName": "Latakia Realty (Review)",
+      "ownerEmail": "review-buy-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment"
+      }
+    },
+    {
+      "division": "BUY",
+      "city": "homs",
+      "governorate": "حمص",
+      "area": "كرم الزيتون",
+      "areaEn": "Karm al-Zeitoun",
+      "title_ar": "شقة للبيع - حمص",
+      "title_en": "Apartment for sale - Homs",
+      "price_minor": 195000000,
+      "currency": "SYP",
+      "description_ar": "شقة بموقع مميز، تشطيب جيد، جاهزة للسكن.",
+      "description_en": "Prime location, good finishing, move-in ready.",
+      "ownerName": "Homs Realty (Review)",
+      "ownerEmail": "review-buy-homs@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "villa"
+      }
+    },
+    {
+      "division": "BUY",
+      "city": "tartus",
+      "governorate": "طرطوس",
+      "area": "الثورة",
+      "areaEn": "Al-Thawra",
+      "title_ar": "فيلا فاخرة للبيع - طرطوس",
+      "title_en": "Luxury villa for sale - Tartus",
+      "price_minor": 970000000,
+      "currency": "SYP",
+      "description_ar": "فيلا واسعة بتصميم عصري وحديقة.",
+      "description_en": "Spacious modern villa with garden.",
+      "ownerName": "Tartus Realty (Review)",
+      "ownerEmail": "review-buy-tartus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment"
+      }
+    },
+    {
+      "division": "BUY",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "أبو رمانة",
+      "areaEn": "Abu Rummaneh",
+      "title_ar": "بيت عربي تراثي - دمشق",
+      "title_en": "Heritage Arabic house - Damascus",
+      "price_minor": 345000000,
+      "currency": "SYP",
+      "description_ar": "بيت دمشقي بطابع تراثي أصيل.",
+      "description_en": "Authentic heritage Damascene house.",
+      "ownerName": "Damascus Realty (Review)",
+      "ownerEmail": "review-buy-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "villa"
+      }
+    },
+    {
+      "division": "BUY",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "حلب الجديدة",
+      "areaEn": "New Aleppo",
+      "title_ar": "شقة للبيع - حلب",
+      "title_en": "Apartment for sale - Aleppo",
+      "price_minor": 210000000,
+      "currency": "SYP",
+      "description_ar": "شقة بموقع مميز، تشطيب جيد، جاهزة للسكن.",
+      "description_en": "Prime location, good finishing, move-in ready.",
+      "ownerName": "Aleppo Realty (Review)",
+      "ownerEmail": "review-buy-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "apartment"
+      }
+    },
+    {
+      "division": "BUY",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الزراعة",
+      "areaEn": "Al-Ziraa",
+      "title_ar": "فيلا فاخرة للبيع - اللاذقية",
+      "title_en": "Luxury villa for sale - Latakia",
+      "price_minor": 985000000,
+      "currency": "SYP",
+      "description_ar": "فيلا واسعة بتصميم عصري وحديقة.",
+      "description_en": "Spacious modern villa with garden.",
+      "ownerName": "Latakia Realty (Review)",
+      "ownerEmail": "review-buy-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "propertyType": "villa"
+      }
+    },
+    {
+      "division": "CARS",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "المالكي",
+      "areaEn": "Malki",
+      "title_ar": "تويوتا كورولا 2019",
+      "title_en": "Toyota Corolla 2019",
+      "price_minor": 22000000,
+      "currency": "SYP",
+      "description_ar": "سيارة اقتصادية بحالة جيدة، صيانة منتظمة.",
+      "description_en": "Economical sedan in good condition, regular maintenance.",
+      "ownerName": "Damascus Motors (Review)",
+      "ownerEmail": "review-cars-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "visualFilters": {
+          "carBrand": "toyota"
+        }
+      }
+    },
+    {
+      "division": "CARS",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "المحافظة",
+      "areaEn": "Al-Muhafaza",
+      "title_ar": "هيونداي إلنترا 2020",
+      "title_en": "Hyundai Elantra 2020",
+      "price_minor": 26500000,
+      "currency": "SYP",
+      "description_ar": "سيارة عائلية موفرة للوقود.",
+      "description_en": "Fuel-efficient family sedan.",
+      "ownerName": "Aleppo Motors (Review)",
+      "ownerEmail": "review-cars-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "visualFilters": {
+          "carBrand": "hyundai"
+        }
+      }
+    },
+    {
+      "division": "CARS",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الرمل الشمالي",
+      "areaEn": "Al-Raml",
+      "title_ar": "كيا سبورتاج 2018",
+      "title_en": "Kia Sportage 2018",
+      "price_minor": 35000000,
+      "currency": "SYP",
+      "description_ar": "دفع رباعي مناسب للطرقات المختلفة.",
+      "description_en": "SUV suitable for varied roads.",
+      "ownerName": "Latakia Motors (Review)",
+      "ownerEmail": "review-cars-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "visualFilters": {
+          "carBrand": "kia"
+        }
+      }
+    },
+    {
+      "division": "CARS",
+      "city": "homs",
+      "governorate": "حمص",
+      "area": "الإنشاءات",
+      "areaEn": "Al-Inshaat",
+      "title_ar": "مرسيدس E200 2016",
+      "title_en": "Mercedes E200 2016",
+      "price_minor": 59500000,
+      "currency": "SYP",
+      "description_ar": "سيارة فخمة بحالة ممتازة.",
+      "description_en": "Premium sedan in excellent condition.",
+      "ownerName": "Homs Motors (Review)",
+      "ownerEmail": "review-cars-homs@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "visualFilters": {
+          "carBrand": "mercedes"
+        }
+      }
+    },
+    {
+      "division": "CARS",
+      "city": "tartus",
+      "governorate": "طرطوس",
+      "area": "الرميلة",
+      "areaEn": "Al-Rmeileh",
+      "title_ar": "تويوتا كورولا 2019",
+      "title_en": "Toyota Corolla 2019",
+      "price_minor": 24000000,
+      "currency": "SYP",
+      "description_ar": "سيارة اقتصادية بحالة جيدة، صيانة منتظمة.",
+      "description_en": "Economical sedan in good condition, regular maintenance.",
+      "ownerName": "Tartus Motors (Review)",
+      "ownerEmail": "review-cars-tartus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "visualFilters": {
+          "carBrand": "toyota"
+        }
+      }
+    },
+    {
+      "division": "CARS",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "المالكي",
+      "areaEn": "Malki",
+      "title_ar": "هيونداي إلنترا 2020",
+      "title_en": "Hyundai Elantra 2020",
+      "price_minor": 28500000,
+      "currency": "SYP",
+      "description_ar": "سيارة عائلية موفرة للوقود.",
+      "description_en": "Fuel-efficient family sedan.",
+      "ownerName": "Damascus Motors (Review)",
+      "ownerEmail": "review-cars-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "visualFilters": {
+          "carBrand": "hyundai"
+        }
+      }
+    },
+    {
+      "division": "CARS",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "المحافظة",
+      "areaEn": "Al-Muhafaza",
+      "title_ar": "كيا سبورتاج 2018",
+      "title_en": "Kia Sportage 2018",
+      "price_minor": 37000000,
+      "currency": "SYP",
+      "description_ar": "دفع رباعي مناسب للطرقات المختلفة.",
+      "description_en": "SUV suitable for varied roads.",
+      "ownerName": "Aleppo Motors (Review)",
+      "ownerEmail": "review-cars-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "visualFilters": {
+          "carBrand": "kia"
+        }
+      }
+    },
+    {
+      "division": "CARS",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الشيخ ضاهر",
+      "areaEn": "Sheikh Daher",
+      "title_ar": "مرسيدس E200 2016",
+      "title_en": "Mercedes E200 2016",
+      "price_minor": 61500000,
+      "currency": "SYP",
+      "description_ar": "سيارة فخمة بحالة ممتازة.",
+      "description_en": "Premium sedan in excellent condition.",
+      "ownerName": "Latakia Motors (Review)",
+      "ownerEmail": "review-cars-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "visualFilters": {
+          "carBrand": "mercedes"
+        }
+      }
+    },
+    {
+      "division": "MARKETPLACE",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "المزة",
+      "areaEn": "Mazzeh",
+      "title_ar": "طقم كنب مودرن - Damascus",
+      "title_en": "Modern sofa set - Damascus",
+      "price_minor": 4500000,
+      "currency": "SYP",
+      "description_ar": "طقم كنب بحالة ممتازة، تصميم عصري.",
+      "description_en": "Modern sofa set in excellent condition.",
+      "ownerName": "Damascus Market (Review)",
+      "ownerEmail": "review-marketplace-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic"
+      }
+    },
+    {
+      "division": "MARKETPLACE",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "العزيزية",
+      "areaEn": "Al-Aziziyah",
+      "title_ar": "ثلاجة كبيرة - Aleppo",
+      "title_en": "Large refrigerator - Aleppo",
+      "price_minor": 3900000,
+      "currency": "SYP",
+      "description_ar": "ثلاجة موفرة للطاقة بحالة جيدة.",
+      "description_en": "Energy-efficient fridge, good condition.",
+      "ownerName": "Aleppo Market (Review)",
+      "ownerEmail": "review-marketplace-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic"
+      }
+    },
+    {
+      "division": "MARKETPLACE",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الزراعة",
+      "areaEn": "Al-Ziraa",
+      "title_ar": "تلفزيون ذكي 55 بوصة - Latakia",
+      "title_en": "55-inch smart TV - Latakia",
+      "price_minor": 3100000,
+      "currency": "SYP",
+      "description_ar": "شاشة ذكية عالية الدقة.",
+      "description_en": "High-definition smart display.",
+      "ownerName": "Latakia Market (Review)",
+      "ownerEmail": "review-marketplace-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic"
+      }
+    },
+    {
+      "division": "MARKETPLACE",
+      "city": "homs",
+      "governorate": "حمص",
+      "area": "الوعر",
+      "areaEn": "Al-Waer",
+      "title_ar": "غرفة نوم كاملة - Homs",
+      "title_en": "Complete bedroom set - Homs",
+      "price_minor": 6500000,
+      "currency": "SYP",
+      "description_ar": "غرفة نوم خشبية فاخرة.",
+      "description_en": "Premium wooden bedroom set.",
+      "ownerName": "Homs Market (Review)",
+      "ownerEmail": "review-marketplace-homs@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic"
+      }
+    },
+    {
+      "division": "MARKETPLACE",
+      "city": "tartus",
+      "governorate": "طرطوس",
+      "area": "وسط المدينة",
+      "areaEn": "City Center",
+      "title_ar": "طقم كنب مودرن - Tartus",
+      "title_en": "Modern sofa set - Tartus",
+      "price_minor": 4900000,
+      "currency": "SYP",
+      "description_ar": "طقم كنب بحالة ممتازة، تصميم عصري.",
+      "description_en": "Modern sofa set in excellent condition.",
+      "ownerName": "Tartus Market (Review)",
+      "ownerEmail": "review-marketplace-tartus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic"
+      }
+    },
+    {
+      "division": "MARKETPLACE",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "المزة",
+      "areaEn": "Mazzeh",
+      "title_ar": "ثلاجة كبيرة - Damascus",
+      "title_en": "Large refrigerator - Damascus",
+      "price_minor": 4300000,
+      "currency": "SYP",
+      "description_ar": "ثلاجة موفرة للطاقة بحالة جيدة.",
+      "description_en": "Energy-efficient fridge, good condition.",
+      "ownerName": "Damascus Market (Review)",
+      "ownerEmail": "review-marketplace-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic"
+      }
+    },
+    {
+      "division": "MARKETPLACE",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "العزيزية",
+      "areaEn": "Al-Aziziyah",
+      "title_ar": "تلفزيون ذكي 55 بوصة - Aleppo",
+      "title_en": "55-inch smart TV - Aleppo",
+      "price_minor": 3500000,
+      "currency": "SYP",
+      "description_ar": "شاشة ذكية عالية الدقة.",
+      "description_en": "High-definition smart display.",
+      "ownerName": "Aleppo Market (Review)",
+      "ownerEmail": "review-marketplace-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic"
+      }
+    },
+    {
+      "division": "MARKETPLACE",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الرمل الشمالي",
+      "areaEn": "Al-Raml",
+      "title_ar": "غرفة نوم كاملة - Latakia",
+      "title_en": "Complete bedroom set - Latakia",
+      "price_minor": 6900000,
+      "currency": "SYP",
+      "description_ar": "غرفة نوم خشبية فاخرة.",
+      "description_en": "Premium wooden bedroom set.",
+      "ownerName": "Latakia Market (Review)",
+      "ownerEmail": "review-marketplace-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic"
+      }
+    },
+    {
+      "division": "NEW_CONSTRUCTION",
+      "city": "damascus",
+      "governorate": "دمشق",
+      "area": "المالكي",
+      "areaEn": "Malki",
+      "title_ar": "مشروع سكني جديد - المرحلة الأولى - دمشق",
+      "title_en": "New residential project - Phase 1 - Damascus",
+      "price_minor": 450000000,
+      "currency": "SYP",
+      "description_ar": "مجمع سكني حديث بمرافق متكاملة.",
+      "description_en": "Modern residential complex with integrated amenities.",
+      "ownerName": "Damascus Developments (Review)",
+      "ownerEmail": "review-new_construction-damascus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "projectPhase": 1
+      }
+    },
+    {
+      "division": "NEW_CONSTRUCTION",
+      "city": "aleppo",
+      "governorate": "حلب",
+      "area": "المحافظة",
+      "areaEn": "Al-Muhafaza",
+      "title_ar": "أبراج سكنية قيد الإنشاء - حلب",
+      "title_en": "Residential towers under construction - Aleppo",
+      "price_minor": 700000000,
+      "currency": "SYP",
+      "description_ar": "شقق بمواصفات عالية وتسليم مجدول.",
+      "description_en": "High-spec apartments with scheduled delivery.",
+      "ownerName": "Aleppo Developments (Review)",
+      "ownerEmail": "review-new_construction-aleppo@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "projectPhase": 2
+      }
+    },
+    {
+      "division": "NEW_CONSTRUCTION",
+      "city": "latakia",
+      "governorate": "اللاذقية",
+      "area": "الرمل الشمالي",
+      "areaEn": "Al-Raml",
+      "title_ar": "مشروع سكني جديد - المرحلة الأولى - اللاذقية",
+      "title_en": "New residential project - Phase 1 - Latakia",
+      "price_minor": 490000000,
+      "currency": "SYP",
+      "description_ar": "مجمع سكني حديث بمرافق متكاملة.",
+      "description_en": "Modern residential complex with integrated amenities.",
+      "ownerName": "Latakia Developments (Review)",
+      "ownerEmail": "review-new_construction-latakia@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "projectPhase": 3
+      }
+    },
+    {
+      "division": "NEW_CONSTRUCTION",
+      "city": "homs",
+      "governorate": "حمص",
+      "area": "الإنشاءات",
+      "areaEn": "Al-Inshaat",
+      "title_ar": "أبراج سكنية قيد الإنشاء - حمص",
+      "title_en": "Residential towers under construction - Homs",
+      "price_minor": 740000000,
+      "currency": "SYP",
+      "description_ar": "شقق بمواصفات عالية وتسليم مجدول.",
+      "description_en": "High-spec apartments with scheduled delivery.",
+      "ownerName": "Homs Developments (Review)",
+      "ownerEmail": "review-new_construction-homs@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "projectPhase": 1
+      }
+    },
+    {
+      "division": "NEW_CONSTRUCTION",
+      "city": "tartus",
+      "governorate": "طرطوس",
+      "area": "الرميلة",
+      "areaEn": "Al-Rmeileh",
+      "title_ar": "مشروع سكني جديد - المرحلة الأولى - طرطوس",
+      "title_en": "New residential project - Phase 1 - Tartus",
+      "price_minor": 530000000,
+      "currency": "SYP",
+      "description_ar": "مجمع سكني حديث بمرافق متكاملة.",
+      "description_en": "Modern residential complex with integrated amenities.",
+      "ownerName": "Tartus Developments (Review)",
+      "ownerEmail": "review-new_construction-tartus@authority-review.invalid",
+      "metadata": {
+        "inventory_source": "authority_review_synthetic",
+        "projectPhase": 2
+      }
+    }
+  ]
+}

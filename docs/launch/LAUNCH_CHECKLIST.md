@@ -117,7 +117,14 @@ deployed candidate passes Section E pre-cutover certification.
 | Arabic/English inventory verified | **PASS** |
 | Synthetic inventory clearly marked (`metadata.inventory_source=authority_review_synthetic`) + fully removable | **PASS** — manifest `authority-review-manifest.json`; `scripts/remove-review-inventory.mjs` |
 | `payments=DISABLED` / `publicAccess=CLOSED` / Vercel Require-Log-In ON | **HELD** |
-| Browser AR/EN visual validation | **PENDING** — blocked only on `VERCEL_AUTOMATION_BYPASS_SECRET` |
+| Browser AR/EN visual validation | **DONE (2026-08-17)** — identical app+data driven locally (deployed Vercel origin unreachable by browser tooling); homepage/6 divisions/search/filter/detail/contact→account boundary all PASS bilingually + responsive. Findings below. |
+
+### F.1 Browser-validation findings (2026-08-17)
+- **HIGH (pre-existing, prod):** `/api/listings/:id/availability` → `500 (P2021)` for ALL listings incl. STAYS — the `listing_availability` table is defined in `schema.prisma` (`@@map "listing_availability"`) but **no migration creates it** (schema drift). Prisma reports "up to date" yet the table is absent in every DB. Breaks the stays booking-calendar availability data. Not caused by inventory work. FIX: add a migration creating `listing_availability`, apply to prod (needs owner authorization — prod schema change).
+- **MEDIUM (FIXED):** Rentals & Buy showed mock fixtures, not the imported inventory — dataset stored `propertyType` at top-level metadata but the server filters `metadata.visualFilters.propertyType` (listings.mjs:59); RentalsPage's default `propertyType=apartment` matched 0 → mock fallback. Fixed in generator (`cc77bd8`), re-imported to prod; all 6 divisions now serve live data.
+- **LOW:** EN view shows Arabic description bodies (single `description` field is Arabic-primary; `descriptionEn` sits in metadata, unused by the renderer). EN titles/prices/UI correct.
+- **LOW:** Listing cards render a "مقبول / Approved" moderation-status badge to end users (internal vocabulary surfaced; cosmetic).
+- **PASS:** No synthetic marker/secret in client bundle; payments-OFF boundary clean ("Payment does not start…"); RTL/LTR correct; mobile no horizontal overflow; CORS correct; no runtime console errors (single clean instance).
 
 Keep the synthetic authority-review dataset **isolated from future real inventory**; preserve the
 removal manifest; remove the whole set (`remove-review-inventory.mjs --commit`) before the first real

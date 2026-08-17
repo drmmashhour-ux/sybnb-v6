@@ -38,7 +38,7 @@ const staySpecs = [
   ['شقة بغرفتي نوم قرب البحر','Two-bedroom near the sea',400000,2,'إطلالة جميلة ومناسبة للعائلات في اللاذقية.','Pleasant sea-side setting, family-friendly.'],
 ]
 for (let i = 0; i < 8; i++) { const c = cities[i % cities.length]; const s = staySpecs[i % staySpecs.length]
-  add('STAYS', c, i, `${s[0]} - ${DISTRICTS[c][i%DISTRICTS[c].length][0]}`, `${s[1]} - ${DISTRICTS[c][i%DISTRICTS[c].length][1]}`, s[2] + (i*10000), s[4], s[5], { propertyType: s[3] >= 3 ? 'apartment' : 'studio', nightly: true }) }
+  add('STAYS', c, i, `${s[0]} - ${DISTRICTS[c][i%DISTRICTS[c].length][0]}`, `${s[1]} - ${DISTRICTS[c][i%DISTRICTS[c].length][1]}`, s[2] + (i*10000), s[4], s[5], { visualFilters: { propertyType: s[3] >= 3 ? 'apartment' : 'studio' }, nightly: true }) }
 
 // RENTALS (8) — monthly
 const rentSpecs = [
@@ -47,7 +47,7 @@ const rentSpecs = [
   ['شقة مفروشة طويلة الأمد','Long-term furnished flat',3200000,'مناسبة للعائلات، مفروشة بالكامل.','Family-suitable, fully furnished.'],
 ]
 for (let i = 0; i < 8; i++) { const c = cities[i % cities.length]; const s = rentSpecs[i % rentSpecs.length]
-  add('RENTALS', c, i+1, `${s[0]} - ${CITY_EN[c]==='Damascus'?'دمشق':GOV[c]}`, `${s[1]} - ${CITY_EN[c]}`, s[2] + (i*150000), s[3], s[4], { propertyType: 'apartment', term: 'monthly' }) }
+  add('RENTALS', c, i+1, `${s[0]} - ${CITY_EN[c]==='Damascus'?'دمشق':GOV[c]}`, `${s[1]} - ${CITY_EN[c]}`, s[2] + (i*150000), s[3], s[4], { visualFilters: { propertyType: 'apartment' }, term: 'monthly' }) }
 
 // BUY (8) — for sale
 const buySpecs = [
@@ -56,7 +56,7 @@ const buySpecs = [
   ['بيت عربي تراثي','Heritage Arabic house',320000000,'بيت دمشقي بطابع تراثي أصيل.','Authentic heritage Damascene house.'],
 ]
 for (let i = 0; i < 8; i++) { const c = cities[i % cities.length]; const s = buySpecs[i % buySpecs.length]
-  add('BUY', c, i+2, `${s[0]} - ${GOV[c]}`, `${s[1]} - ${CITY_EN[c]}`, s[2] + (i*5000000), s[3], s[4], { propertyType: i%2?'villa':'apartment' }) }
+  add('BUY', c, i+2, `${s[0]} - ${GOV[c]}`, `${s[1]} - ${CITY_EN[c]}`, s[2] + (i*5000000), s[3], s[4], { visualFilters: { propertyType: i%2?'villa':'apartment' } }) }
 
 // CARS (8) — realistic
 const carSpecs = [

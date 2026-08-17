@@ -780,12 +780,11 @@ export async function fetchApprovedListings(
   if (filters?.bedroomsMin && filters.bedroomsMin > 0) params.set('bedroomsMin', String(filters.bedroomsMin))
   if (filters?.bathroomsMin && filters.bathroomsMin > 0) params.set('bathroomsMin', String(filters.bathroomsMin))
   if (filters?.city) params.set('city', filters.city)
-  try {
-    const response = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings?${params.toString()}`)
-    return response.listings.length ? response.listings : fallbackApprovedListings(division)
-  } catch {
-    return fallbackApprovedListings(division)
-  }
+  // Real customer journeys must show real inventory only. A legitimate zero-result search returns an
+  // empty list (callers render a genuine localized no-results state) — never substitute mock/demo
+  // fixtures. API/network errors propagate to the caller's try/catch, which shows the error state.
+  const response = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings?${params.toString()}`)
+  return response.listings
 }
 
 export type ListingAvailabilityEntry = {

@@ -2,7 +2,7 @@ export const colors = {
   ink: '#f7f8ff',
   text: '#f7f8ff',
   muted: '#9aa7bd',
-  dim: '#68758d',
+  dim: '#8592ad', // WCAG AA: >=4.6:1 on all app backgrounds (was #68758d = 3.35-4.11:1, failed AA)
   bg: '#0a0f1d',
   bg2: '#101827',
   panel: '#121c2f',

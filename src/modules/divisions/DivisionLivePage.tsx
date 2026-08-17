@@ -242,7 +242,7 @@ export function DivisionLivePage({ division, lang }: Props) {
       </section>
 
       {status === 'loading' && <section style={styles.panel}>{t.loading}</section>}
-      {message && <section style={styles.alert}>{message}</section>}
+      {message && <section role="alert" aria-live="assertive" style={styles.alert}>{message}</section>}
 
       <section style={styles.grid}>
         {listings.length ? (
@@ -277,7 +277,7 @@ export function DivisionLivePage({ division, lang }: Props) {
             </article>
           ))
         ) : (
-          status !== 'loading' && <section style={styles.panel}>{t.empty}</section>
+          status !== 'loading' && <section role="status" style={styles.panel}>{t.empty}</section>
         )}
       </section>
     </main>

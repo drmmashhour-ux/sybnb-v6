@@ -525,7 +525,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       </section>
 
       {status === 'loading' ? <section style={styles.panel}>{t.loading}</section> : null}
-      {message ? <section style={message === t.required || status === 'error' ? styles.alert : styles.notice}>{message}</section> : null}
+      {message ? <section role={status === 'error' ? 'alert' : 'status'} aria-live="polite" style={message === t.required || status === 'error' ? styles.alert : styles.notice}>{message}</section> : null}
 
       {!hasSearched ? <section style={styles.beforeSearchPanel}>{t.beforeSearch}</section> : null}
 
@@ -552,7 +552,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 {t.lowestPrice}
               </button>
             </div>
-            <strong>{t.availableResults} ({visibleListings.length})</strong>
+            <strong role="status" aria-live="polite">{t.availableResults} ({visibleListings.length})</strong>
           </div>
           <div style={styles.resultGrid}>
             {visibleListings.length ? visibleListings.map((listing) => (
@@ -573,7 +573,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   </button>
                 </div>
               </article>
-            )) : status !== 'loading' ? <p style={styles.empty}>{t.empty}</p> : null}
+            )) : status !== 'loading' ? <p style={styles.empty} role="status">{t.empty}</p> : null}
           </div>
         </section>
 

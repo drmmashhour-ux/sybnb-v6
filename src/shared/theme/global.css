@@ -209,7 +209,7 @@ a {
 }
 
 .route-separator {
-  color: #63708b;
+  color: #8592ad; /* WCAG AA (was #63708b = 3.4-3.8:1) */
 }
 
 .route-page {
@@ -5745,7 +5745,7 @@ a {
   background: #111119;
   border: 1px dashed rgba(255, 255, 255, 0.14);
   border-radius: 14px;
-  color: #6f7484;
+  color: #9aa7bd; /* WCAG AA on #111119 (was #6f7484 = 3.7-4.1:1) */
   display: grid;
   gap: 10px;
   justify-items: center;

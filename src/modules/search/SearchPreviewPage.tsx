@@ -279,7 +279,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             ))}
           </div>
         ) : (
-          <p className="search-empty-copy">{t.pendingOnly}</p>
+          <p className="search-empty-copy" role="status">{t.pendingOnly}</p>
         )}
       </section>
 

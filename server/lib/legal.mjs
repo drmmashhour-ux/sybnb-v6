@@ -21,6 +21,15 @@ export const LEGAL_DOCUMENTS = {
     status: 'DRAFT',
     ownerApprovalRequired: true,
   },
+  // The lister's understanding agreement: every host/seller must accept this (and pass ID verification)
+  // before a listing can be published, in any division. Text is owner/legal-supplied.
+  'listing-agreement': {
+    key: 'listing-agreement',
+    title: { en: 'Listing Agreement', ar: 'اتفاقية النشر' },
+    version: '0.0.0-draft',
+    status: 'DRAFT',
+    ownerApprovalRequired: true,
+  },
 }
 
 export function legalDocument(key) {

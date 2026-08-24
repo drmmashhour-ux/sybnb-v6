@@ -385,6 +385,29 @@ export async function handleListings(req, res, url, context) {
       error.expose = true
       throw error
     }
+    // Publish gate for EVERY division: the lister must (1) have a verified (admin-approved) ID and
+    // (2) have signed the platform listing agreement before a listing can go to review.
+    const publisher = await db().user.findUnique({
+      where: { id: context.user.id },
+      select: { idDocumentStatus: true },
+    })
+    if (publisher?.idDocumentStatus !== 'APPROVED') {
+      const error = new Error('Verify your identity (upload your ID and get it approved) before publishing a listing.')
+      error.statusCode = 403
+      error.code = 'ID_VERIFICATION_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const listingAgreement = await db().legalConsent.findFirst({
+      where: { userId: context.user.id, documentKey: 'listing-agreement' },
+    })
+    if (!listingAgreement) {
+      const error = new Error('Accept the platform listing agreement before publishing a listing.')
+      error.statusCode = 403
+      error.code = 'LISTING_AGREEMENT_REQUIRED'
+      error.expose = true
+      throw error
+    }
     const listing = await db().listing.update({
       where: { id: existing.id },
       data: { status: 'PENDING_REVIEW' },

@@ -38,11 +38,6 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
 
   return (
     <div className="app-shell" dir={isAr ? 'rtl' : 'ltr'}>
-      {(isAdvertisingTunnel || isAdminControlRoom) && (
-        <div className="final-isolated-watermark" aria-hidden="true">
-          FINAL · JULY 6 · CAPSULE EDITION · 3055
-        </div>
-      )}
       {!isAdvertisingTunnel && !isAdminControlRoom && (
         <header className="top-nav">
           <button className="brand-lockup" onClick={() => navigate('/')} aria-label="SYBNB home">

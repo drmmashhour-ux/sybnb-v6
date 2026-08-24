@@ -225,11 +225,6 @@ export function LandingPage({ lang }: Props) {
         })}
       </section>
 
-      <section className="landing-stats" aria-label={isAr ? 'أرقام المنصة' : 'Platform numbers'}>
-        <div><strong>12,450+</strong><span>{isAr ? 'عقارات مسجلة' : 'Registered properties'}</span></div>
-        <div><strong>85K+</strong><span>{isAr ? 'مستخدمون نشطون' : 'Active users'}</span></div>
-        <div><strong>{activeCount + 6}</strong><span>{isAr ? 'مناطق مغطاة' : 'Covered areas'}</span></div>
-      </section>
     </main>
   )
 }

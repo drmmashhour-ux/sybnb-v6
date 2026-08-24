@@ -29,7 +29,24 @@ type SortMode = 'newest' | 'lowest'
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 const GUEST_TOKEN_KEY = 'sybnb-v6-guest-token'
 
-const dateOptions = ['هذا الأسبوع', 'هذا الشهر', '3 أشهر', 'تاريخ مفتوح']
+const dateOptions = [
+  { key: 'week', ar: 'هذا الأسبوع', en: 'This week' },
+  { key: 'month', ar: 'هذا الشهر', en: 'This month' },
+  { key: 'quarter', ar: '3 أشهر', en: '3 months' },
+  { key: 'open', ar: 'تاريخ مفتوح', en: 'Open date' },
+]
+const dateLabelFor = (key: string, lang: 'ar' | 'en') => {
+  const opt = dateOptions.find((d) => d.key === key)
+  return opt ? (lang === 'ar' ? opt.ar : opt.en) : ''
+}
+// Map governorate key -> the English city name stored in listing.location.city (Syria's 5 governorates).
+const GOV_TO_CITY: Record<string, string> = {
+  damascus: 'Damascus',
+  aleppo: 'Aleppo',
+  latakia: 'Latakia',
+  homs: 'Homs',
+  tartus: 'Tartus',
+}
 const mainGroupOptions = [
   { id: 'apartment', ar: 'شقة', en: 'Apartment' },
   { id: 'villa', ar: 'فيلا', en: 'Villa' },
@@ -272,7 +289,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>({
     sort: 'newest',
     priceBand: 'any',
-    propertyType: 'apartment',
+    propertyType: 'any',
     roomType: 'any',
     bedType: 'any',
     amenities: ['wifi', 'parking'],
@@ -298,7 +315,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
         ? (selectedGovernorateData?.cities || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
         : activeSearchPanel === 'street'
           ? (selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
-          : dateOptions.map((item) => ({ key: item, label: item }))
+          : dateOptions.map((item) => ({ key: item.key, label: lang === 'ar' ? item.ar : item.en }))
   )
   const visibleListings = useMemo(() => {
     if (sortMode === 'lowest') {
@@ -316,15 +333,17 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     void loadRentals()
   }, [mode])
 
-  async function loadRentals() {
+  async function loadRentals(explicit = false) {
     setStatus('loading')
     setMessage('')
     try {
       // Forward the renter's visual-filter selection so the search actually narrows results.
       // fetchApprovedListings only forwards server-backed scalar keys (propertyType); 'any' and
       // unsupported keys (roomType/bedType/amenities) are ignored, so nothing over-filters.
+      // Location narrows only on an explicit capsule search, so the first broad load stays rich.
       const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS', {
         attributes: visualFilters,
+        city: explicit ? GOV_TO_CITY[selectedGovernorate] : undefined,
       })
       setListings(nextListings)
       setSelectedId(nextListings[0]?.id || '')
@@ -380,8 +399,8 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setActiveSearchPanel(null)
     setHasSearched(true)
     setShowFilters(false)
-    // Re-run the fetch so the selected filters actually apply to the results.
-    void loadRentals()
+    // Re-run the fetch so the selected filters (incl. location) actually apply to the results.
+    void loadRentals(true)
   }
 
   function chooseMainGroup(value: string) {
@@ -455,7 +474,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           <button style={activeSearchPanel === 'governorate' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'governorate' ? null : 'governorate')}>{selectedGovernorateLabel || t.governorate}</button>
           <button style={activeSearchPanel === 'city' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'city' ? null : 'city')}>{selectedCityLabel || t.city}</button>
           <button style={activeSearchPanel === 'street' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'street' ? null : 'street')}>{selectedStreetLabel || t.street}</button>
-          <button style={activeSearchPanel === 'date' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'date' ? null : 'date')}>{selectedDate || t.dateOptional}</button>
+          <button style={activeSearchPanel === 'date' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'date' ? null : 'date')}>{dateLabelFor(selectedDate, lang) || t.dateOptional}</button>
           <button style={styles.searchPillActive} onClick={() => setShowFilters((current) => !current)}>
             {showFilters ? t.hideFilters : t.showFilters}
           </button>
@@ -531,7 +550,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
       {hasSearched ? <section style={styles.searchSummary}>
         <strong>{selectedGovernorateLabel} · {selectedCityLabel} · {selectedStreetLabel}</strong>
-        <span>{selectedDate || t.dateOptional}</span>
+        <span>{dateLabelFor(selectedDate, lang) || t.dateOptional}</span>
         <span>{mainGroupOptions.find((option) => option.id === visualFilters.propertyType)?.[isAr ? 'ar' : 'en']}</span>
       </section> : null}
 

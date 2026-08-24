@@ -512,10 +512,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
             <section style={styles.figmaTrustCard}>
               <strong>{t.protectedTitle}</strong>
-              <div style={styles.trustPills}>
-                <span>{t.verifiedOwner}</span>
-                <span>{t.fastResponse}</span>
-              </div>
               <small>
                 {reviewSummary.count > 0
                   ? `${t.rating} ${reviewSummary.average} ★ (${reviewSummary.count})`
@@ -650,20 +646,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           {activeTab === 'host' && (
             <section style={styles.trustGrid}>
               <article style={styles.trustCard}>
-                <strong>{t.verifiedOwner}</strong>
-                <span>✓ {listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}</span>
-              </article>
-              <article style={styles.trustCard}>
-                <strong>{t.fastResponse}</strong>
-                <span>{isAr ? '١٨ دقيقة' : '18 minutes'}</span>
+                <strong>{t.host}</strong>
+                <span>{listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}</span>
               </article>
               <article style={styles.trustCard}>
                 <strong>{t.paymentProtected}</strong>
                 <span>{t.protected}</span>
-              </article>
-              <article style={styles.trustCard}>
-                <strong>{t.aiFit}</strong>
-                <span>91%</span>
               </article>
             </section>
           )}
@@ -671,7 +659,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           {activeTab === 'reviews' && (
             <>
               <section style={styles.grid}>
-                <Info label={t.trustScore} value="94/100" />
                 <Info
                   label={t.rating}
                   value={reviewSummary.count > 0 ? `${reviewSummary.average} ★ (${t.reviewsCount(reviewSummary.count)})` : t.noReviewsYet}
@@ -760,9 +747,7 @@ function toISODate(date: Date) {
 }
 
 function listingImage(listing: PlatformListing) {
-  if (listing.division === 'CARS' || listing.division === 'NEW_CONSTRUCTION' || listing.division === 'MARKETPLACE') {
-    return DIVISION_IMAGES[listing.division]
-  }
+  // Prefer the listing's real uploaded photo for every division; generic image is only a fallback.
   const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
   if (typeof mediaUrl === 'string') return mediaUrl
   return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'

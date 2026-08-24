@@ -24,6 +24,7 @@ const T = {
     liveResults: 'نتائج مباشرة من قاعدة البيانات',
     sampleResults: 'بيانات تجريبية - قاعدة البيانات غير متصلة',
     pendingOnly: 'الإعلانات قيد المراجعة لا تظهر هنا حتى يوافق فريق SYBNB.',
+    noResults: 'لا توجد نتائج مطابقة لبحثك. جرّب توسيع الفلاتر أو تغيير الموقع.',
     price: 'السعر',
     book: 'فتح تفاصيل الغرفة',
     details: 'عرض التفاصيل',
@@ -83,6 +84,7 @@ const T = {
     liveResults: 'Live database results',
     sampleResults: 'Sample data - database unavailable',
     pendingOnly: 'Listings under review stay hidden here until SYBNB approves them.',
+    noResults: 'No results match your search. Try widening the filters or changing the location.',
     price: 'Price',
     book: 'Open room details',
     details: 'View details',
@@ -180,6 +182,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             priceMax: Number(value.maxPrice) || undefined,
             bedroomsMin: value.bedroomsCount || undefined,
             bathroomsMin: value.bathrooms || undefined,
+            // Wire the chosen location to the server so results actually narrow to the selected
+            // governorate (maps the capsule key to the stored English city name). Empty when unmatched.
+            city: GOV_TO_CITY[value.governorate] || undefined,
           }
         : undefined
       const results = await fetchApprovedListings(toApiDivision(value?.division || effectiveInitialDivision), filters)
@@ -279,7 +284,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             ))}
           </div>
         ) : (
-          <p className="search-empty-copy" role="status">{t.pendingOnly}</p>
+          <p className="search-empty-copy" role="status">{t.noResults}</p>
         )}
       </section>
 
@@ -297,9 +302,8 @@ const flowStyles = {
 } as const
 
 function listingImage(listing: PlatformListing) {
-  if (listing.division === 'CARS' || listing.division === 'NEW_CONSTRUCTION' || listing.division === 'MARKETPLACE') {
-    return DIVISION_IMAGES[listing.division]
-  }
+  // Always prefer the listing's own uploaded photo; fall back to a generic division image only when
+  // no media exists — never force the generic over a real photo (cars/marketplace/new-construction).
   const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
   if (typeof mediaUrl === 'string') return mediaUrl
   return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
@@ -321,6 +325,16 @@ function searchSummary(value: UnifiedSearchValue, lang: Lang) {
     value.checkOut,
     value.keyword,
   ].filter(Boolean).join(' · ')
+}
+
+// Map the search capsule's governorate key to the English city name listings store in location.city,
+// so the server-side city filter actually matches (Syria's 5 covered governorates).
+const GOV_TO_CITY: Record<string, string> = {
+  damascus: 'Damascus',
+  aleppo: 'Aleppo',
+  latakia: 'Latakia',
+  homs: 'Homs',
+  tartus: 'Tartus',
 }
 
 function toApiDivision(division: UnifiedSearchValue['division']) {

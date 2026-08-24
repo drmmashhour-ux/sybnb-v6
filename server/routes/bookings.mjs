@@ -8,6 +8,7 @@ import {
 } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 
 export async function handleBookings(req, res, url, context) {
   const cancelMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/cancel$/)
@@ -37,6 +38,20 @@ export async function handleBookings(req, res, url, context) {
       error.code = 'BOOKING_NOT_CANCELLABLE'
       error.expose = true
       throw error
+    }
+
+    // Only money-moving when an approved payment actually exists to reverse — a guest cancelling
+    // before any payment was ever approved is a pure status change, not a payment operation.
+    if (existing.payments.some((payment) => payment.status === 'APPROVED')) {
+      authorizePaymentOperation({
+        operation: 'refund',
+        rail: 'manual_proof',
+        provider: 'manual',
+        division: existing.listing.division,
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+        actor: { roles: context.roles },
+      })
     }
 
     const booking = await db().$transaction(async (tx) => {

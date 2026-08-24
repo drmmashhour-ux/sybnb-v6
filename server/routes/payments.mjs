@@ -4,6 +4,8 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, expectedTotalMinor, firstAdminId, isProviderRefUniqueViolation } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
+import { log } from '../lib/logger.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
@@ -141,6 +143,15 @@ export async function handlePayments(req, res, url, context) {
   if (proofViewMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
+    authorizePaymentOperation({
+      operation: 'reconciliation_read',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
     const url_ = signObjectUrl('payment-proof', proofViewMatch[1], 300)
 
     await db().adminAuditLog.create({
@@ -191,6 +202,16 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    authorizePaymentOperation({
+      operation: 'create',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: booking.listing.division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
 
     const totalMinor = expectedTotalMinor(booking)
     const { currency, unitAmount } = stripeChargeAmount(totalMinor)
@@ -252,6 +273,16 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    authorizePaymentOperation({
+      operation: 'capture',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
     const proof = await finalizeStripeSession(session)
     if (!proof) {
       const error = new Error('Could not confirm this payment against the booking.')
@@ -290,8 +321,35 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    // Authenticated; durably received in the sense that Stripe itself retries delivery until it
+    // gets a 2xx. NOTE (limitation, tracked in the implementation report): this rail predates the
+    // PaymentEvent-style durable-intake table the newer payment-intents.mjs rail has, so unlike
+    // that rail, a webhook_apply denial below is not separately, durably recorded beyond the log
+    // line — this route has no intake/apply seam of its own to defer into yet.
+    authorizePaymentOperation({
+      operation: 'webhook_intake',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+    })
+
     if (event.type === 'checkout.session.completed') {
-      await finalizeStripeSession(event.data.object)
+      try {
+        authorizePaymentOperation({
+          operation: 'webhook_apply',
+          rail: 'stripe_checkout',
+          provider: 'stripe',
+          division: 'PLATFORM',
+          country: activePolicyCountryKey(),
+          environment: policyEnvironment(),
+        })
+        await finalizeStripeSession(event.data.object)
+      } catch (denied) {
+        if (denied?.code !== 'PAYMENT_POLICY_DENIED') throw denied
+        log.warn('payment_webhook_apply_denied', { rail: 'stripe_checkout', eventType: event.type, reason: denied.reason })
+      }
     }
 
     return json(res, 200, { ok: true, received: true })
@@ -342,6 +400,16 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    authorizePaymentOperation({
+      operation: 'create',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
 
     const legalName = body.legalName ? String(body.legalName).trim() : context.user.displayName
     const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
@@ -418,6 +486,16 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    authorizePaymentOperation({
+      operation: 'create',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: booking?.listing?.division || 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
     const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
     if (!providerRef) {
       const error = new Error('Syrian wallet transaction reference is required.')
@@ -470,6 +548,15 @@ export async function handlePayments(req, res, url, context) {
   if (paymentMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
+    authorizePaymentOperation({
+      operation: 'reconciliation_read',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
     const proof = await db().paymentProof.findUnique({
       where: { id: paymentMatch[1] },
       include: {

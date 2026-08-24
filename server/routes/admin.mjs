@@ -5,6 +5,7 @@ import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOL
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 
 export async function handleAdmin(req, res, url, context) {
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)
@@ -424,6 +425,31 @@ export async function handleAdmin(req, res, url, context) {
     const body = await readJson(req)
     const [entityType, entityId] = reviewMatch.slice(1)
     const decision = normalizeDecision(body.decision || body.action)
+
+    // Money-moving entity types only — listing/iddocument decisions never touch payment/wallet
+    // state and are deliberately not gated by a payment policy (see payment-policy-routes.mjs).
+    // An APPROVED booking decision is a pure status confirm (no wallet effect — see
+    // updateReviewEntity's booking branch, only reachable for decision !== 'APPROVED'), so it's
+    // intentionally excluded here rather than mislabeled as a refund.
+    const normalizedEntityType = String(entityType).toLowerCase()
+    let moneyMovingOperation
+    if (normalizedEntityType === 'payment' || normalizedEntityType === 'payments') {
+      moneyMovingOperation = decision === 'APPROVED' ? 'capture' : 'refund'
+    } else if ((normalizedEntityType === 'booking' || normalizedEntityType === 'bookings') && decision !== 'APPROVED') {
+      moneyMovingOperation = 'refund'
+    }
+    if (moneyMovingOperation) {
+      authorizePaymentOperation({
+        operation: moneyMovingOperation,
+        rail: 'manual_proof',
+        provider: 'manual',
+        division: 'PLATFORM',
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+        actor: { roles: context.roles },
+      })
+    }
+
     const result = await db().$transaction(async (tx) => {
       const before = await findReviewEntity(tx, entityType, entityId)
       const after = await updateReviewEntity(tx, entityType, entityId, decision, context.user.id, body)

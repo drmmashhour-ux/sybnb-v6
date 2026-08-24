@@ -11,6 +11,7 @@ import {
   reverseBookingPlatformShare,
 } from '../lib/finance-ledger.mjs'
 import { log, errorSummary } from '../lib/logger.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 
 // After this many failed apply attempts on the same event, stop retrying automatically and mark it
 // DEAD_LETTERED — it needs a human via the admin replay endpoint instead of an unbounded retry loop.
@@ -221,6 +222,15 @@ async function applyPaymentEvent({ eventId, intentId, type, obj }) {
   }
 }
 
+// Resolves the division a policy check should evaluate for an intent that's already known (i.e.
+// past the intake seam) — 'PLATFORM' for a standalone, non-booking-linked intent, otherwise the
+// linked booking's listing division.
+async function eventDivision(intent) {
+  if (!intent.bookingId) return 'PLATFORM'
+  const booking = await db().booking.findUnique({ where: { id: intent.bookingId }, select: { listing: { select: { division: true } } } })
+  return booking?.listing?.division || 'PLATFORM'
+}
+
 function computeDriftReasons(intent, { proof, walletEntries, latestEvent }) {
   const reasons = []
   if (intent.status === 'SUCCEEDED' && intent.bookingId && !proof) reasons.push('SUCCEEDED_WITHOUT_PAYMENT_PROOF')
@@ -315,6 +325,7 @@ export async function handlePaymentIntents(req, res, url, context) {
     let amountMinor
     let currency
     let bookingId
+    let division
 
     if (body.bookingId) {
       // Booking-linked: the guest total is server-derived (expectedTotalMinor, the same function
@@ -333,12 +344,24 @@ export async function handlePaymentIntents(req, res, url, context) {
       amountMinor = expectedTotalMinor(booking)
       currency = String(booking.currency).toLowerCase()
       bookingId = booking.id
+      division = booking.listing.division
     } else {
       amountMinor = Math.round(Number(body.amountMinor))
       currency = String(body.currency || '').toLowerCase()
       if (!Number.isFinite(amountMinor) || amountMinor <= 0) throw fail(400, 'PAYMENT_AMOUNT_INVALID', 'Amount must be greater than zero.')
       if (!/^[a-z]{3}$/.test(currency)) throw fail(400, 'PAYMENT_CURRENCY_INVALID', 'A 3-letter currency is required.')
+      division = 'PLATFORM'
     }
+
+    authorizePaymentOperation({
+      operation: 'create',
+      rail: 'payment_intent',
+      provider: 'sandbox',
+      division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
 
     // A UUID, not a timestamp+amount composite: two concurrent requests from the same user for the
     // same booking (identical amountMinor) can land in the same millisecond under real concurrency
@@ -375,6 +398,20 @@ export async function handlePaymentIntents(req, res, url, context) {
     requirePaymentIntentsEnabled()
     const raw = await readRawBody(req)
     const event = verifyWebhook(raw, req.headers['stripe-signature'], paymentWebhookSecret())
+
+    // webhook_intake is deliberately division-blind: it runs before we've even looked up which
+    // intent (and therefore which booking/division) this event is for. An authenticated event must
+    // still be authenticatable, durably storable, and dedupable even when the rest of the policy
+    // would deny — see the design doc's "separate webhook intake from webhook effects" correction.
+    authorizePaymentOperation({
+      operation: 'webhook_intake',
+      rail: 'payment_intent',
+      provider: 'sandbox',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+    })
+
     const obj = event.data?.object || {}
     const target = targetStatusFor(event.type)
     if (!target) return json(res, 200, { ok: true, ignored: event.type }) // unhandled event types are acknowledged, not applied
@@ -418,6 +455,24 @@ export async function handlePaymentIntents(req, res, url, context) {
       return json(res, 200, { ok: true, applied: false, deadLettered: true, status: intent.status })
     }
 
+    try {
+      authorizePaymentOperation({
+        operation: 'webhook_apply',
+        rail: 'payment_intent',
+        provider: 'sandbox',
+        division: await eventDivision(intent),
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+      })
+    } catch (denied) {
+      // Durably received (the upsert above already committed), application paused. Zero attempts
+      // consumed — this is an intentional policy pause, not a processing failure, so it must not
+      // count toward DEAD_LETTER_THRESHOLD. The row stays RECEIVED; a later redelivery or an
+      // explicit reconciliation pass applies it once policy allows.
+      log.warn('payment_webhook_apply_denied', { eventId: event.id, intentId: intent.id, reason: denied.reason })
+      return json(res, 200, { ok: true, applied: false, policyDeferred: true, status: intent.status })
+    }
+
     const result = await applyPaymentEvent({ eventId: eventRow.id, intentId: intent.id, type: event.type, obj })
     return json(res, 200, { ok: true, ...result })
   }
@@ -433,6 +488,16 @@ export async function handlePaymentIntents(req, res, url, context) {
     if (intent.userId !== context.user.id && !context.roles.includes('ADMIN') && !context.roles.includes('SUPPORT')) {
       throw fail(403, 'PAYMENT_INTENT_FORBIDDEN', 'This payment intent is not available for this account.')
     }
+
+    authorizePaymentOperation({
+      operation: 'reconciliation_read',
+      rail: 'payment_intent',
+      provider: 'sandbox',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
 
     const [booking, ctx] = await Promise.all([
       intent.bookingId ? db().booking.findUnique({ where: { id: intent.bookingId }, select: { id: true, status: true } }) : null,
@@ -456,6 +521,15 @@ export async function handlePaymentIntents(req, res, url, context) {
   if (url.pathname === '/api/admin/payment-intents/reconciliation') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
+    authorizePaymentOperation({
+      operation: 'reconciliation_read',
+      rail: 'payment_intent',
+      provider: 'sandbox',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
 
     const deadLetteredEvents = await db().paymentEvent.findMany({
       where: { processingStatus: { in: ['FAILED', 'DEAD_LETTERED'] } },
@@ -503,11 +577,21 @@ export async function handlePaymentIntents(req, res, url, context) {
     requireAuth(context, ['ADMIN'])
     requirePaymentIntentsEnabled()
 
-    const eventRow = await db().paymentEvent.findUnique({ where: { id: replayMatch[1] } })
+    const eventRow = await db().paymentEvent.findUnique({ where: { id: replayMatch[1] }, include: { intent: true } })
     if (!eventRow) throw fail(404, 'PAYMENT_EVENT_NOT_FOUND', 'Payment event not found.')
     if (!['FAILED', 'DEAD_LETTERED'].includes(eventRow.processingStatus)) {
       throw fail(409, 'PAYMENT_EVENT_NOT_REPLAYABLE', 'This event is not in a failed/dead-lettered state.')
     }
+
+    authorizePaymentOperation({
+      operation: 'replay',
+      rail: 'payment_intent',
+      provider: 'sandbox',
+      division: await eventDivision(eventRow.intent),
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
 
     const before = { processingStatus: eventRow.processingStatus, attempts: eventRow.attempts }
     let result

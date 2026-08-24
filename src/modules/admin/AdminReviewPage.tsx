@@ -7,6 +7,7 @@ import {
   fetchAdminPaymentProofUrl,
   fetchIdDocumentBlobUrl,
   fetchPrototypeAdminAuditLog,
+  fetchPrototypeAdminMetrics,
   fetchPrototypeReviewQueue,
   getStoredStaffSession,
   lookupAdminUserByEmail,
@@ -16,6 +17,7 @@ import {
   uploadIdDocumentForUser,
   type AdminPayout,
   type PlatformAdminAuditLog,
+  type PlatformAdminMetrics,
   type PlatformIdDocumentReview,
   type PlatformListing,
   type PlatformPaymentProof,
@@ -102,6 +104,7 @@ export function AdminReviewPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
   const [auditLog, setAuditLog] = useState<PlatformAdminAuditLog[]>([])
+  const [metrics, setMetrics] = useState<PlatformAdminMetrics | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'saving'>('loading')
   const [message, setMessage] = useState('')
   const [activeFilter, setActiveFilter] = useState<AdminFilter>('all')
@@ -158,12 +161,14 @@ export function AdminReviewPage({ lang }: Props) {
     setMessage('')
 
     try {
-      const [nextQueue, nextAuditLog] = await Promise.all([
+      const [nextQueue, nextAuditLog, nextMetrics] = await Promise.all([
         fetchPrototypeReviewQueue(),
         fetchPrototypeAdminAuditLog(12),
+        fetchPrototypeAdminMetrics(),
       ])
       setQueue(nextQueue)
       setAuditLog(nextAuditLog)
+      setMetrics(nextMetrics)
       setStatus('ready')
     } catch (error) {
       setStatus('error')
@@ -230,6 +235,7 @@ export function AdminReviewPage({ lang }: Props) {
       listings={visibleListings}
       loadQueue={loadQueue}
       message={message}
+      metrics={metrics}
       payments={visiblePayments.length ? visiblePayments : paymentQueue}
       queue={queue}
       status={status}
@@ -260,6 +266,7 @@ function ShortRentAdminCommandDashboard({
   listings,
   loadQueue,
   message,
+  metrics,
   payments,
   queue,
   status,
@@ -280,6 +287,7 @@ function ShortRentAdminCommandDashboard({
   listings: PlatformListing[]
   loadQueue: () => Promise<void>
   message: string
+  metrics: PlatformAdminMetrics | null
   payments: PlatformPaymentProof[]
   queue: PlatformReviewQueue | null
   status: 'loading' | 'ready' | 'error' | 'saving'
@@ -306,12 +314,14 @@ function ShortRentAdminCommandDashboard({
   const primaryPayment = payments.find((payment) => payment.id === selectedPaymentId) || payments[0]
   const previewPayment = primaryPayment || displayPayments.find((payment) => payment.id === selectedPaymentId) || displayPayments[0]
   const selectedBooking = bookings.find((booking) => booking.id === selectedBookingId) || bookings.find((booking) => booking.id === previewPayment?.bookingId)
+  const selectedBookingPayoutReleased = Boolean(
+    selectedBooking && selectedBooking.status.toUpperCase() === 'COMPLETED' && !payouts.some((payout) => payout.bookingId === selectedBooking.id),
+  )
+  const currentStep = currentFlowStepIndex(selectedBooking, previewPayment, selectedBookingPayoutReleased)
   const activeListings = (queue?.listings.length || listings.length || 0)
   const todayBookings = bookings
   const bookingNeedsApproval = bookings.filter(isBookingAwaitingApproval)
-  const confirmedBookingRows = bookings.filter(isBookingConfirmed)
   const disputeBookingRows = bookings.filter(isBookingDisputed)
-  const confirmedBookings = confirmedBookingRows.length
   const pendingPayments = payments.filter((payment) => payment.status !== 'APPROVED' && payment.status !== 'REJECTED').length
   const heldTotal = displayPayments.reduce((sum, payment) => sum + payment.amountMinor, 0)
   const activeLedger = createShortRentLedger(previewPayment?.amountMinor || 0)
@@ -465,14 +475,14 @@ function ShortRentAdminCommandDashboard({
   }
 
   const stats = [
-    { label: isAr ? 'Ø­Ø¬ÙØ²Ø§Øª Ø§ÙÙÙÙ' : 'Today bookings', value: String(todayBookings.length), tone: 'blue' },
-    { label: isAr ? 'Ø¨Ø§ÙØªØ¸Ø§Ø± ÙØ±Ø§Ø¬Ø¹Ø© Ø§ÙØ¯ÙØ¹' : 'Payment review', value: String(pendingPayments), tone: 'gold' },
-    { label: isAr ? 'Ø­Ø¬ÙØ²Ø§Øª ÙØ¤ÙØ¯Ø©' : 'Confirmed bookings', value: String(confirmedBookings), tone: 'green' },
-    { label: isAr ? 'Ø­Ø§ÙØ§Øª ÙØ²Ø§Ø¹' : 'Disputes', value: String(disputeBookingRows.length), tone: 'red' },
-    { label: isAr ? 'ÙØ¨Ø§ÙØº ÙØ­Ø¬ÙØ²Ø©' : 'Held funds', value: moneyText(heldTotal, 'SYP', lang), tone: 'gold' },
-    { label: isAr ? 'ÙØ¨Ø§ÙØº Ø¬Ø§ÙØ²Ø© ÙÙØµØ±Ù' : 'Ready payout', value: moneyText(readyPayout, 'SYP', lang), tone: 'green' },
-    { label: isAr ? 'Ø¹ÙÙÙØ© Ø§ÙÙÙØµØ©' : 'Platform commission', value: moneyText(totalAdminCommission, 'SYP', lang), tone: 'blue' },
-    { label: isAr ? 'Ø¹ÙØ§Ø±Ø§Øª ÙØ´Ø·Ø©' : 'Active stays', value: String(activeListings), tone: 'white' },
+    { label: isAr ? 'بانتظار القرار' : 'Awaiting decision', value: String(todayBookings.length), tone: 'blue' },
+    { label: isAr ? 'بانتظار مراجعة الدفع' : 'Payment review', value: String(pendingPayments), tone: 'gold' },
+    { label: isAr ? 'حجوزات مؤكدة (المنصة)' : 'Confirmed bookings (platform-wide)', value: String(metrics?.bookingsByStatus.CONFIRMED || 0), tone: 'green' },
+    { label: isAr ? 'حالات نزاع' : 'Disputes', value: String(disputeBookingRows.length), tone: 'red' },
+    { label: isAr ? 'مبالغ محجوزة' : 'Held funds', value: moneyText(heldTotal, 'SYP', lang), tone: 'gold' },
+    { label: isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout', value: moneyText(readyPayout, 'SYP', lang), tone: 'green' },
+    { label: isAr ? 'عمولة المنصة' : 'Platform commission', value: moneyText(totalAdminCommission, 'SYP', lang), tone: 'blue' },
+    { label: isAr ? 'إعلانات معتمدة (المنصة)' : 'Approved listings (platform-wide)', value: String(metrics?.listingsByStatus.APPROVED || 0), tone: 'white' },
   ]
   const adminGroups = [
     {
@@ -736,8 +746,8 @@ function ShortRentAdminCommandDashboard({
           </div>
           <div style={commandStyles.pipelineList}>
             {flowSteps.map((step, index) => (
-              <div key={step} style={{ ...commandStyles.pipelineStep, ...(index === 6 ? commandStyles.pipelineActive : {}) }}>
-                <small>{index < 6 ? (isAr ? 'تم' : 'Done') : index === 6 ? (isAr ? 'الآن' : 'Now') : '—'}</small>
+              <div key={step} style={{ ...commandStyles.pipelineStep, ...(index === currentStep ? commandStyles.pipelineActive : {}) }}>
+                <small>{index < currentStep ? (isAr ? 'تم' : 'Done') : index === currentStep ? (isAr ? 'الآن' : 'Now') : '—'}</small>
                 <span>{step}</span>
                 <strong>{index + 1}</strong>
               </div>
@@ -822,15 +832,6 @@ function ShortRentAdminCommandDashboard({
               <AdminEmptyLine text={isAr ? 'ÙØ§ ØªÙØ¬Ø¯ Ø­Ø¬ÙØ²Ø§Øª Ø¨Ø§ÙØªØ¸Ø§Ø± ÙÙØ§ÙÙØ© Ø§ÙØ¥Ø¯Ø§Ø±Ø© Ø§ÙØ¢Ù.' : 'No bookings currently need admin approval.'} />
             ) : bookingNeedsApproval.map((booking) => (
               <AdminBookingLine key={booking.id} booking={booking} disabled={disabled} isAr={isAr} lang={lang} selected={booking.id === selectedBooking?.id} onApprove={() => onBookingDecision(booking.id, 'APPROVE')} onReject={() => onBookingDecision(booking.id, 'REJECT')} onSelect={() => selectBooking(booking)} />
-            ))}
-          </div>
-        )}
-        {activeCommandView === 'bookings' && (
-          <div style={commandStyles.managementList}>
-            {confirmedBookingRows.length === 0 ? (
-              <AdminEmptyLine text={isAr ? 'ÙØ§ ØªÙØ¬Ø¯ Ø­Ø¬ÙØ²Ø§Øª ÙØ¤ÙØ¯Ø© ÙÙ ÙØ°Ù Ø§ÙÙØ§Ø¦ÙØ©.' : 'No confirmed bookings are in this queue.'} />
-            ) : confirmedBookingRows.map((booking) => (
-              <AdminBookingLine key={booking.id} booking={booking} disabled={true} isAr={isAr} lang={lang} selected={booking.id === selectedBooking?.id} onApprove={() => undefined} onReject={() => undefined} onSelect={() => selectBooking(booking)} />
             ))}
           </div>
         )}
@@ -1033,8 +1034,8 @@ function ShortRentAdminCommandDashboard({
           <h2>{isAr ? 'ÙØ³Ø§Ø± Ø§ÙØ­Ø¬Ø²' : 'Booking path'}</h2>
           <div style={commandStyles.pipelineList}>
             {flowSteps.map((step, index) => (
-              <div key={step} style={{ ...commandStyles.pipelineStep, ...(index === 6 ? commandStyles.pipelineActive : {}) }}>
-                <small>{index < 6 ? (isAr ? 'تم' : 'Done') : index === 6 ? (isAr ? 'الآن' : 'Now') : '—'}</small>
+              <div key={step} style={{ ...commandStyles.pipelineStep, ...(index === currentStep ? commandStyles.pipelineActive : {}) }}>
+                <small>{index < currentStep ? (isAr ? 'تم' : 'Done') : index === currentStep ? (isAr ? 'الآن' : 'Now') : '—'}</small>
                 <span>{step}</span>
                 <strong>{index + 1}</strong>
               </div>
@@ -1683,6 +1684,23 @@ function isBookingConfirmed(booking: PlatformReviewBooking) {
 function isBookingDisputed(booking: PlatformReviewBooking) {
   const status = booking.status.toUpperCase()
   return status.includes('DISPUT') || status.includes('CONFLICT') || status.includes('ESCALAT')
+}
+
+// Real, evidence-based step estimate instead of a static "we're always at step 7" indicator. The
+// backend has no event log for the early steps (search/account/terms) or exact host-confirmation/
+// checkout timestamps, so those are inferred as "done" once later real signals (payment/booking/
+// payout status) confirm the booking is past them — never claimed as independently observed.
+function currentFlowStepIndex(booking: PlatformReviewBooking | undefined, payment: PlatformPaymentProof | undefined, payoutReleased: boolean) {
+  const status = booking?.status.toUpperCase()
+  if (status === 'COMPLETED') return payoutReleased ? 12 : 11
+  if (status === 'CONFIRMED' || status === 'DISPUTED') return 8
+  // The booking record itself may not be loaded (the review queue only carries REQUESTED/DISPUTED
+  // bookings) even when its payment proof is — the payment's own status is still real signal.
+  if (payment?.status === 'APPROVED') return 7
+  if (payment?.status === 'PENDING_ADMIN_REVIEW') return 6
+  if (payment?.status === 'PENDING_PROOF') return 5
+  if (booking) return 3
+  return 2
 }
 
 

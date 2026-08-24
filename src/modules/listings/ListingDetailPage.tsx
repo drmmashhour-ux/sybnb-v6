@@ -220,6 +220,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const [acceptedGuestAgreement, setAcceptedGuestAgreement] = useState(bookingDraft.acceptedGuestAgreement ?? false)
   const [customerReady, setCustomerReady] = useState(false)
   const [offlineMapReady, setOfflineMapReady] = useState(false)
+  const [activeMedia, setActiveMedia] = useState(0)
   const [activeTab, setActiveTab] = useState<'terms' | 'host' | 'location' | 'reviews'>('terms')
   const [dateRange, setDateRange] = useState<DateRange>(
     bookingDraft.dateRange || loadSearchDatesDraft() || { checkIn: '', checkOut: '' },
@@ -482,16 +483,42 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               →
             </button>
             <div style={styles.media}>
-              <img
-                src={listingImage(listing)}
-                alt={title}
-                style={styles.mediaImage}
-                onError={(event) => {
-                  const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
-                  if (event.currentTarget.src.endsWith(fallback)) return
-                  event.currentTarget.src = fallback
-                }}
-              />
+              {(() => {
+                const mediaUrls = (listing.media || [])
+                  .map((item) => item.url || item.src || item.assetUrl)
+                  .filter((value): value is string => typeof value === 'string')
+                const heroSrc = mediaUrls[activeMedia] || listingImage(listing)
+                return (
+                  <>
+                    <img
+                      src={heroSrc}
+                      alt={title}
+                      style={styles.mediaImage}
+                      onError={(event) => {
+                        const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+                        if (event.currentTarget.src.endsWith(fallback)) return
+                        event.currentTarget.src = fallback
+                      }}
+                    />
+                    {mediaUrls.length > 1 && (
+                      <div style={styles.thumbStrip} role="group" aria-label={lang === 'ar' ? 'صور الإعلان' : 'Listing photos'}>
+                        {mediaUrls.map((url, index) => (
+                          <button
+                            key={`${url}-${index}`}
+                            type="button"
+                            onClick={() => setActiveMedia(index)}
+                            aria-label={`${title} ${index + 1}`}
+                            aria-current={index === activeMedia}
+                            style={index === activeMedia ? styles.thumbActive : styles.thumb}
+                          >
+                            <img src={url} alt="" style={styles.thumbImg} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
               <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
               {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
             </div>
@@ -953,6 +980,10 @@ const styles: Record<string, CSSProperties> = {
   heroNextButton: { position: 'absolute', top: 18, insetInlineEnd: 18, zIndex: 2, width: 52, height: 52, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.42)', color: '#fff', fontSize: 28, fontWeight: 900, display: 'grid', placeItems: 'center', backdropFilter: 'blur(10px)' },
   media: { minHeight: 330, background: '#0b1120', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 950, textTransform: 'uppercase', position: 'relative', overflow: 'hidden' },
   mediaImage: { width: '100%', height: '100%', minHeight: 330, objectFit: 'cover', display: 'block' },
+  thumbStrip: { position: 'absolute', left: 0, right: 0, bottom: 8, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', padding: '0 8px' },
+  thumb: { width: 56, height: 42, borderRadius: 8, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.5)', padding: 0, cursor: 'pointer', background: 'transparent' },
+  thumbActive: { width: 56, height: 42, borderRadius: 8, overflow: 'hidden', border: '2px solid #6f86ff', padding: 0, cursor: 'pointer', background: 'transparent' },
+  thumbImg: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
   mediaBadge: { position: 'absolute', insetInlineStart: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   instantBookBadge: { position: 'absolute', insetInlineStart: 14, top: 14, borderRadius: 999, background: 'rgba(213,169,21,.9)', color: '#1a1400', fontWeight: 950, border: '1px solid rgba(255,255,255,.25)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   detailBody: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', padding: 20, display: 'grid', gap: 18 },

@@ -2125,6 +2125,22 @@ a {
   padding: 14px;
 }
 
+.seller-agreement-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  margin-top: 12px;
+  background: rgba(10, 15, 29, 0.52);
+  border: 1px solid #263651;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.seller-agreement-check input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
 .seller-map-placeholder strong,
 .seller-map-placeholder span {
   display: block;

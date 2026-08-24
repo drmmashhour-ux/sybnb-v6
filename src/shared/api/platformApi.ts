@@ -1535,6 +1535,20 @@ export async function fetchPrototypeWallet() {
   return response.wallet
 }
 
+// Record the seller/host's acceptance of the platform listing agreement (required, alongside a
+// verified ID, before /api/listings/:id/submit will publish a listing — see server/lib/legal.mjs).
+export async function acceptListingAgreement() {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const manifest = await apiRequest<{ ok: true; documents: Array<{ key: string; version: string }> }>('/api/legal')
+  const doc = manifest.documents.find((d) => d.key === 'listing-agreement')
+  if (!doc) throw new Error('Listing agreement is not available.')
+  return apiRequest<{ ok: true; consent: unknown }>('/api/legal/consent', {
+    method: 'POST',
+    token: session.token,
+    body: { documentKey: 'listing-agreement', version: doc.version },
+  })
+}
+
 async function ensurePrototypeHostSession() {
   const stored = getStoredStaffSession('HOST') || getStoredStaffSession('SELLER')
   if (stored) return stored

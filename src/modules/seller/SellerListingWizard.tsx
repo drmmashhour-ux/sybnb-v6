@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
-import { createAndSubmitPrototypeListing } from '../../shared/api/platformApi'
+import { acceptListingAgreement, createAndSubmitPrototypeListing } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
@@ -198,6 +198,9 @@ export function SellerListingWizard({ lang }: Props) {
     },
   )
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle')
+  // Required alongside ID verification before a listing can be published (server-enforced too —
+  // see /api/listings/:id/submit). ID verification itself happens on the seller's account page.
+  const [agreementAccepted, setAgreementAccepted] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
   useEffect(() => {
@@ -257,11 +260,19 @@ export function SellerListingWizard({ lang }: Props) {
         setSubmitError(isAr ? 'ارفع مستندات البائع أو إثبات الملكية قبل إرسال الإعلان للمراجعة.' : 'Upload seller documents or ownership proof before sending the listing for review.')
         return
       }
+      if (!agreementAccepted) {
+        setSubmitState('error')
+        setSubmitError(isAr ? 'وافق على اتفاقية النشر قبل الإرسال.' : 'Accept the listing agreement before submitting.')
+        return
+      }
 
       setSubmitState('submitting')
       setSubmitError('')
 
       try {
+        // Record the agreement acceptance server-side. This — plus an admin-approved ID — is
+        // required by /api/listings/:id/submit before the listing can go to review.
+        await acceptListingAgreement()
         // Attach a real, viewable gallery image so buyer browse/detail shows the listing with a
         // photo (matching the division assets sample listings use). Uploaded document filenames
         // stay in metadata; hosted binary upload is a production-hardening item, out of scope here.
@@ -662,6 +673,18 @@ export function SellerListingWizard({ lang }: Props) {
                   {!isAdvertisingFlow && <li>{selectedFilterLabels(sellerPropertyFilterGroups, visualFilters, lang).join(' · ')}</li>}
                 </ul>
               </div>
+              <label className="seller-agreement-check">
+                <input
+                  type="checkbox"
+                  checked={agreementAccepted}
+                  onChange={(event) => setAgreementAccepted(event.target.checked)}
+                />
+                <span>
+                  {isAr
+                    ? 'أقر بأنني قرأت اتفاقية النشر الخاصة بمنصة SYBNB ووافقت عليها، وأن هويتي مقدمة للتحقق.'
+                    : 'I have read and accept the SYBNB platform listing agreement, and my identity has been submitted for verification.'}
+                </span>
+              </label>
               {submitState === 'error' && (
                 <div className="seller-inline-alert">
                   <strong>{isAr ? 'تعذر الإرسال' : 'Submission failed'}</strong>

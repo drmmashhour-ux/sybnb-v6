@@ -179,7 +179,9 @@ export async function handleListings(req, res, url, context) {
       // it to the English city name that browse filters match (location.city). Without this, host-
       // created listings are location-less and un-findable by city.
       let locationId
-      const govSlug = String(body.governorate || '').toLowerCase().replace(/-city$/, '')
+      const govSource = body.governorate || body.metadata?.governorate || ''
+      const areaSource = body.area || body.metadata?.area
+      const govSlug = String(govSource).toLowerCase().replace(/-city$/, '')
       const cityName = GOV_SLUG_TO_CITY[govSlug]
       if (cityName) {
         const location = await db().location.create({
@@ -187,7 +189,7 @@ export async function handleListings(req, res, url, context) {
             country: 'SY',
             governorate: cityName,
             city: cityName,
-            area: body.area ? String(body.area) : undefined,
+            area: areaSource ? String(areaSource) : undefined,
           },
         })
         locationId = location.id

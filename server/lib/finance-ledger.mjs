@@ -312,6 +312,86 @@ export async function originalAdminShareRecipient(tx, bookingId) {
   return entry?.wallet?.userId
 }
 
+// Cancellation/refund reversal of the platform's own position on a booking: the admin-share
+// CREDIT taken at approval time, plus a host payout clawback if it was already released. Does NOT
+// touch the guest's wallet — callers that also owe the guest a refund (e.g. the admin
+// dispute-rejection path) record that separately, since not every reversal implies a wallet refund
+// (a card refund via a payment-provider webhook already returned the guest's money through the
+// card network; crediting the wallet too would create money from nothing).
+export async function reverseBookingPlatformShare(tx, {
+  booking,
+  approvedPayment,
+  keyPrefix,
+  adminShareReversalNote,
+  payoutClawbackNote,
+}) {
+  const split = bookingFinanceSplit(booking, approvedPayment.amountMinor)
+  const adminRecipientId = await originalAdminShareRecipient(tx, booking.id)
+
+  await recordWalletEntry(tx, {
+    userId: adminRecipientId,
+    type: 'DEBIT',
+    amountMinor: split.adminShareMinor,
+    currency: booking.currency,
+    referenceType: 'booking_admin_share_reversal',
+    referenceId: booking.id,
+    keyParts: [`${keyPrefix}-admin-share-reversal`, booking.id, approvedPayment.id],
+    note: adminShareReversalNote,
+  })
+
+  // A HOLD entry never touches cachedBalanceMinor, so there's nothing to claw back from the host
+  // if the payout was only held. But if it was already RELEASED, the host's wallet genuinely
+  // holds that money now — without this, the host keeps the full payout while the platform's
+  // share and (at the call site) the guest's money are both reversed, creating money out of nothing.
+  const priorRelease = await tx.walletEntry.findFirst({
+    where: { referenceType: 'booking_payout', type: 'RELEASE', referenceId: booking.id },
+  })
+  let hostClawedBack = false
+  if (priorRelease) {
+    await recordWalletEntry(tx, {
+      userId: booking.listing.ownerId,
+      type: 'DEBIT',
+      amountMinor: split.hostGrossMinor,
+      currency: booking.currency,
+      referenceType: 'booking_payout_clawback',
+      referenceId: booking.id,
+      keyParts: [`${keyPrefix}-payout-clawback`, booking.id, approvedPayment.id],
+      note: payoutClawbackNote,
+    })
+    hostClawedBack = true
+  }
+
+  return { split, adminRecipientId, hostClawedBack }
+}
+
+// Picks the actor for a system/webhook-driven auto-approval that has no human context.user — e.g.
+// a Stripe or PaymentIntent webhook confirming a charge with nobody reviewing it in an admin tab.
+export async function firstAdminId(tx) {
+  const admin = await tx.userRole.findFirst({ where: { role: 'ADMIN' }, select: { userId: true } })
+  return admin?.userId
+}
+
+// The full amount a guest owes for a booking: rent/stay plus cleaning fee, tax, extra fees, and
+// the cancellation-protection add-on if purchased. Mirrors src/modules/bookings/guestFeeSummary.ts
+// so every payment rail (Stripe, local wallet, PaymentIntent) charges the same figure the guest saw,
+// and never trusts a client-supplied amount for a booking-linked payment.
+export function expectedTotalMinor(booking) {
+  const stayAmountMinor = Math.max(0, Math.round(booking.amountMinor || 0))
+  const listingMetadata = booking.listing?.metadata || {}
+  const bookingMetadata = booking.metadata || {}
+  const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
+
+  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
+  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
+  const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
+  const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
+  const cancellationProtectionFeeMinor = cancellationProtectionPurchased
+    ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') || Math.round(stayAmountMinor * CANCELLATION_PROTECTION_RATE)
+    : 0
+
+  return stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
+}
+
 // Shared by admin's payout queue and the host earnings report so both read the same numbers
 // instead of two independent computations that could silently drift apart.
 export function buildPayoutRow(booking, releasedBookingIds) {

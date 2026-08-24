@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, recordWalletEntry, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
@@ -628,9 +628,6 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (decision !== 'APPROVED') {
     const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
     if (approvedPayment) {
-      const split = bookingFinanceSplit(existing, approvedPayment.amountMinor)
-      const adminRecipientId = await originalAdminShareRecipient(tx, existing.id)
-
       await tx.paymentProof.updateMany({
         where: {
           bookingId: existing.id,
@@ -655,37 +652,16 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
         note: 'Guest refund after admin rejected/ruled against this booking.',
       })
 
-      await recordWalletEntry(tx, {
-        userId: adminRecipientId,
-        type: 'DEBIT',
-        amountMinor: split.adminShareMinor,
-        currency: existing.currency,
-        referenceType: 'booking_admin_share_reversal',
-        referenceId: existing.id,
-        keyParts: ['booking-admin-reject-admin-share-reversal', existing.id, approvedPayment.id],
-        note: 'Admin/SYBNB share reversed because the admin rejected/ruled against this booking.',
+      // Reverses the platform's own position (admin-share CREDIT, and a host payout clawback if
+      // it was already RELEASED) — shared with the PaymentIntent refund webhook path so both
+      // reversal routes stay in lockstep instead of two independent implementations drifting.
+      await reverseBookingPlatformShare(tx, {
+        booking: existing,
+        approvedPayment,
+        keyPrefix: 'booking-admin-reject',
+        adminShareReversalNote: 'Admin/SYBNB share reversed because the admin rejected/ruled against this booking.',
+        payoutClawbackNote: 'Host payout clawed back after admin rejected/ruled against this booking post-release.',
       })
-
-      // A HOLD entry never touches cachedBalanceMinor (see recordWalletEntry's balanceDelta), so
-      // there's nothing to claw back from the host if the payout was only held. But if it was
-      // already RELEASED before this dispute was decided, the host's wallet genuinely holds that
-      // money now — without this, the host keeps the full payout AND the guest gets a full refund
-      // above, creating money out of nothing.
-      const priorRelease = await tx.walletEntry.findFirst({
-        where: { referenceType: 'booking_payout', type: 'RELEASE', referenceId: existing.id },
-      })
-      if (priorRelease) {
-        await recordWalletEntry(tx, {
-          userId: existing.listing.ownerId,
-          type: 'DEBIT',
-          amountMinor: split.hostGrossMinor,
-          currency: existing.currency,
-          referenceType: 'booking_payout_clawback',
-          referenceId: existing.id,
-          keyParts: ['booking-admin-reject-payout-clawback', existing.id, approvedPayment.id],
-          note: 'Host payout clawed back after admin rejected/ruled against this booking post-release.',
-        })
-      }
     }
   }
 

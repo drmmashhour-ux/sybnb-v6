@@ -6,7 +6,9 @@
 // money, NO live provider, NO real credentials — signatures are minted with a sandbox test secret.
 //
 // Run: AUTH_SECRET=<secret> PAYMENT_WEBHOOK_SECRET=<secret> BUYER=<uuid> OTHER=<uuid>
-//      node tests/e2e/payment-sandbox.e2e.mjs   (server must run with the SAME PAYMENT_WEBHOOK_SECRET)
+//      node tests/e2e/payment-sandbox.e2e.mjs   (server must run with the SAME PAYMENT_WEBHOOK_SECRET
+//      AND with PAYMENT_INTENTS_ENABLED=true — this whole subsystem 503s otherwise. See also
+//      tests/e2e/payment-intents-booking.e2e.mjs for the booking/wallet wiring on top of this.)
 
 import { createSessionToken } from '../../server/lib/security.mjs'
 import { signWebhook } from '../../server/lib/payment-webhook.mjs'

@@ -1,7 +1,7 @@
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, expectedTotalMinor, firstAdminId } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 
@@ -43,10 +43,9 @@ function isProviderRefUniqueViolation(err) {
     (Array.isArray(target) && target.includes('provider_ref')) || String(target || '').includes('provider_ref'))
 }
 
-function metadataNumber(metadata, key) {
-  const value = metadata?.[key]
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
-}
+// expectedTotalMinor and firstAdminId now live in finance-ledger.mjs (shared with the PaymentIntent
+// webhook path) so both payment rails derive the guest total and the auto-approval actor from one
+// place instead of two copies that can drift.
 
 // Some upload flows (seller-plan documents, advertising payment files) genuinely upload several
 // real files. Only trust entries that are real object-storage references this server issued
@@ -61,24 +60,6 @@ function normalizeProofAssetUrls(body) {
   return typeof body.proofAssetUrl === 'string' && body.proofAssetUrl.startsWith('payment-proof://')
     ? [body.proofAssetUrl]
     : []
-}
-
-// Mirrors src/modules/bookings/guestFeeSummary.ts so the Stripe charge matches what the guest saw.
-function expectedTotalMinor(booking) {
-  const stayAmountMinor = Math.max(0, Math.round(booking.amountMinor || 0))
-  const listingMetadata = booking.listing?.metadata || {}
-  const bookingMetadata = booking.metadata || {}
-  const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
-
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
-  const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
-  const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
-  const cancellationProtectionFeeMinor = cancellationProtectionPurchased
-    ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') || Math.round(stayAmountMinor * CANCELLATION_PROTECTION_RATE)
-    : 0
-
-  return stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
 }
 
 // SYP is not a Stripe-supported settlement currency, so test-mode charges run in STRIPE_CURRENCY
@@ -99,11 +80,6 @@ function stripeChargeAmount(totalMinor) {
   const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
   const unitAmount = Math.max(50, Math.round((totalMinor / sypPerUsd) * 100))
   return { currency, unitAmount }
-}
-
-async function firstAdminId(tx) {
-  const admin = await tx.userRole.findFirst({ where: { role: 'ADMIN' }, select: { userId: true } })
-  return admin?.userId
 }
 
 async function finalizeStripeSession(session) {

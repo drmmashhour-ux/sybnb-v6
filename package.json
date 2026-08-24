@@ -35,7 +35,8 @@
     "test:e2e:payment": "node tests/e2e/payment-sandbox.e2e.mjs",
     "test:e2e:storage-s3": "node tests/e2e/storage-s3-integration.e2e.mjs",
     "test:e2e:sms": "node tests/e2e/sms-integration.e2e.mjs",
-    "test:e2e:payment-race": "node tests/e2e/payment-proof-race.e2e.mjs"
+    "test:e2e:payment-race": "node tests/e2e/payment-proof-race.e2e.mjs",
+    "test:e2e:payment-intents-booking": "node tests/e2e/payment-intents-booking.e2e.mjs"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

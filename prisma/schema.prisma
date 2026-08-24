@@ -308,6 +308,7 @@ model Booking {
   listing  Listing       @relation(fields: [listingId], references: [id])
   guest    User          @relation("BookingGuest", fields: [guestId], references: [id])
   payments PaymentProof[]
+  paymentIntents PaymentIntent[]
   review   ListingReview?
   messageThread MessageThread?
 
@@ -475,26 +476,41 @@ model PaymentIntent {
   createdAt    DateTime       @default(now()) @map("created_at")
   updatedAt    DateTime       @updatedAt @map("updated_at")
 
-  events PaymentEvent[]
+  booking Booking?       @relation(fields: [bookingId], references: [id])
+  events  PaymentEvent[]
 
   @@index([userId])
+  @@index([bookingId])
   @@map("payment_intents")
 }
 
 // Auditable, idempotent provider event history. providerEventId is unique, so a duplicate/replayed
-// webhook delivery is a no-op.
+// webhook delivery is a no-op at the intake layer. processingStatus/attempts/lastError track our
+// own handling of a delivery SEPARATELY from PaymentIntent.status (the business state) — a webhook
+// can be durably "received" even when applying its booking/wallet side effects fails and rolls back,
+// which is exactly the case this split exists to make visible instead of silently vanishing.
 model PaymentEvent {
-  id              String   @id @default(uuid())
-  intentId        String   @map("intent_id")
-  providerEventId String   @unique @map("provider_event_id")
-  type            String
-  amountMinor     Int?     @map("amount_minor")
-  currency        String?
-  receivedAt      DateTime @default(now()) @map("received_at")
+  id               String                       @id @default(uuid())
+  intentId         String                       @map("intent_id")
+  providerEventId  String                       @unique @map("provider_event_id")
+  type             String
+  amountMinor      Int?                         @map("amount_minor")
+  currency         String?
+  // The provider's own object id (e.g. a charge/payment-intent id from event.data.object.id).
+  // Non-sensitive metadata, stored alongside amountMinor/currency for the same reason: it lets an
+  // admin replay reconstruct the event snapshot without needing (or storing) the raw webhook payload.
+  providerObjectId String?                      @map("provider_object_id")
+  processingStatus PaymentEventProcessingStatus @default(RECEIVED) @map("processing_status")
+  attempts         Int                          @default(0)
+  lastAttemptAt    DateTime?                    @map("last_attempt_at")
+  lastError        String?                      @map("last_error")
+  appliedAt        DateTime?                     @map("applied_at")
+  receivedAt       DateTime                      @default(now()) @map("received_at")
 
   intent PaymentIntent @relation(fields: [intentId], references: [id], onDelete: Cascade)
 
   @@index([intentId])
+  @@index([processingStatus])
   @@map("payment_events")
 }
 
@@ -507,6 +523,24 @@ enum PaymentIntentStatus {
   REFUNDED
 
   @@map("payment_intent_status")
+}
+
+// Our own handling of one webhook delivery (or an admin replay of it) — distinct from
+// PaymentIntentStatus, which is the business state the provider reports. RECEIVED: durably
+// persisted, not yet attempted. APPLYING: an attempt is in flight (observability only, not a lock —
+// real safety is the unique constraints applyPaymentEvent relies on). APPLIED: side effects
+// committed (or none were needed). IGNORED: a legal-but-no-op or an out-of-order/illegal transition
+// — retrying would not change the outcome. FAILED: an attempt threw; eligible for retry via
+// redelivery or admin replay. DEAD_LETTERED: failed attempts reached the threshold; needs a human.
+enum PaymentEventProcessingStatus {
+  RECEIVED
+  APPLYING
+  APPLIED
+  IGNORED
+  FAILED
+  DEAD_LETTERED
+
+  @@map("payment_event_processing_status")
 }
 
 // Records a user's acceptance of a specific legal-document VERSION. The document text itself is

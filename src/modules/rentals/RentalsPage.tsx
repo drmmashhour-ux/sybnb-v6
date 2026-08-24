@@ -587,7 +587,17 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                     <span>{t.price}</span>
                     <strong>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
                   </div>
-                  <button style={styles.primaryButton} onClick={() => chooseListing(listing.id)}>
+                  <button
+                    style={styles.primaryButton}
+                    onClick={() => {
+                      // Open the rich shared listing detail (map/specs/reviews/inquiry) instead of the
+                      // lightweight inline panel — parity with Stays/Cars/Marketplace/New-Construction.
+                      if (typeof window !== 'undefined') {
+                        window.sessionStorage.setItem('sybnb-v6-listing-return-path', isBuyMode ? '/buy' : '/rentals')
+                      }
+                      window.location.hash = `/listing/${listing.id}`
+                    }}
+                  >
                     {t.viewDetails}
                   </button>
                 </div>
@@ -627,7 +637,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
               <section style={styles.selectedCard}>
                 <img src={listingImage(selectedListing, isBuyMode)} alt={listingTitleText(selectedListing, lang)} style={styles.selectedImage} />
                 <div style={styles.selectedContent}>
-                  <span style={styles.statusPill}>{t.protected}</span>
                   <h2 style={styles.selectedTitle}>{listingTitleText(selectedListing, lang)}</h2>
                   <p style={styles.cardBody}>{listingDescriptionText(selectedListing, lang)}</p>
                   <Info label={t.price} value={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)} />

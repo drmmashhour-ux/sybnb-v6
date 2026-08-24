@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { disputePrototypeBooking, fetchPrototypeBooking, type PlatformBooking, type PlatformListing } from '../../shared/api/platformApi'
+import { disputePrototypeBooking, fetchPrototypeBooking, submitGuestIdDocument, type PlatformBooking, type PlatformListing } from '../../shared/api/platformApi'
 import { listingTitleText } from '../../shared/i18n/display'
 export { isTrustProtectionRoute } from './trustRoutes'
 
@@ -51,21 +51,53 @@ function TrustCenterHome({ lang }: { lang: Lang }) {
 
 function TrustVerification({ lang }: { lang: Lang }) {
   const isAr = lang === 'ar'
-  const [submitted, setSubmitted] = useState(false)
+  const [file, setFile] = useState<File | null>(null)
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'submitted' | 'error'>('idle')
+  const [error, setError] = useState('')
+
+  async function submit() {
+    if (!file) return
+    setStatus('uploading')
+    setError('')
+    try {
+      await submitGuestIdDocument(file)
+      setStatus('submitted')
+    } catch (err) {
+      setStatus('error')
+      setError(err instanceof Error ? err.message : (isAr ? 'تعذر إرسال المستند.' : 'Could not submit the document.'))
+    }
+  }
+
   return (
     <main className="trust-phone" dir={isAr ? 'rtl' : 'ltr'}>
       <TrustHeader title={isAr ? 'توثيق الهوية' : 'Identity Verification'} />
       <div className="trust-stepper"><span /><span /><strong>1</strong></div>
       <h2 className="trust-section-title">{isAr ? 'صورة الهوية الوطنية' : 'National ID photo'}</h2>
-      <button className="trust-upload active" onClick={() => (window.location.hash = '/trust-center/verification')}>▣<span>{isAr ? 'الوجه الأمامي للهوية' : 'Front side of ID'}</span></button>
-      <button className="trust-upload" onClick={() => (window.location.hash = '/trust-center/verification')}>▣<span>{isAr ? 'الوجه الخلفي للهوية' : 'Back side of ID'}</span></button>
-      <h2 className="trust-section-title">{isAr ? 'التحقق بصورة سيلفي' : 'Selfie verification'}</h2>
-      <button className="trust-selfie" onClick={() => (window.location.hash = '/trust-center/verification')}><b>📷</b><span>{isAr ? 'التقط صورة واضحة لوجهك للتأكد من مطابقة الهوية' : 'Take a clear face photo to match your identity.'}</span></button>
+      <label className="trust-upload active" style={{ cursor: 'pointer' }}>
+        <input
+          accept="image/png,image/jpeg,application/pdf"
+          style={{ display: 'none' }}
+          type="file"
+          onChange={(event) => setFile(event.target.files?.[0] || null)}
+        />
+        ▣<span>{file ? file.name : (isAr ? 'ارفع صورة الهوية الوطنية' : 'Upload your national ID photo')}</span>
+      </label>
       <p className="trust-note">ⓘ {isAr ? 'بياناتك مشفرة بالكامل ولن يتم مشاركتها مع أي طرف ثالث.' : 'Your data is encrypted and will not be shared with third parties.'}</p>
-      {submitted ? (
-        <p className="trust-note">✓ {isAr ? 'تم إرسال طلب التوثيق للمراجعة. سنرسل حالة الطلب إلى رقم هاتفك.' : 'Verification was submitted for review. We will send the status to your phone.'}</p>
-      ) : null}
-      <button className="trust-primary" onClick={() => setSubmitted(true)}>{submitted ? (isAr ? 'تم الإرسال' : 'Submitted') : (isAr ? 'إرسال للمراجعة' : 'Submit for review')}</button>
+      {status === 'submitted' && (
+        <p className="trust-note">✓ {isAr ? 'تم إرسال طلب التوثيق للمراجعة. ستظهر حالة الطلب في حسابك بعد مراجعة الإدارة.' : 'Verification was submitted for review. The status will appear on your account once admin reviews it.'}</p>
+      )}
+      {status === 'error' && <p className="trust-note">{error}</p>}
+      <button
+        className="trust-primary"
+        disabled={!file || status === 'uploading' || status === 'submitted'}
+        onClick={() => void submit()}
+      >
+        {status === 'submitted'
+          ? (isAr ? 'تم الإرسال' : 'Submitted')
+          : status === 'uploading'
+            ? (isAr ? 'جارٍ الإرسال...' : 'Sending...')
+            : (isAr ? 'إرسال للمراجعة' : 'Submit for review')}
+      </button>
     </main>
   )
 }

@@ -29,9 +29,7 @@ const copy = {
     prepaid: 'أكواد وهدايا',
     safety: 'أمان المحفظة',
     safetyRows: ['سجل حركات غير قابل للتعديل', 'إثبات الدفع مرتبط بالحجز', 'منع الدفع خارج SYBNB', 'مراجعة الإدارة للحركات الحساسة'],
-    topup: 'شحن المحفظة',
     sendGiftQuick: 'إرسال هدية',
-    audit: 'تدقيق الهدايا',
     paymentStatus: 'حالة الدفع',
     trustCenter: 'مركز الثقة',
     financeLanes: 'مسارات المال',
@@ -40,12 +38,6 @@ const copy = {
     refunded: 'مسترجعة',
     inReview: 'قيد المراجعة',
     heldShort: 'محجوزة',
-    adminAudit: 'التدقيق الإداري',
-    adminAuditEn: 'ADMIN AUDIT',
-    lastAudit: 'آخر تدقيق',
-    pendingActions: 'إجراءات معلقة',
-    ledgerStatus: 'حالة السجل',
-    auditLog: 'سجل التدقيق',
     refundLane: 'استرداد / نزاع',
     giftLane: 'هدايا وأكواد مسبقة',
     adminLane: 'تدقيق الإدارة',
@@ -79,9 +71,7 @@ const copy = {
     prepaid: 'Codes and gifts',
     safety: 'Wallet safety',
     safetyRows: ['Immutable ledger trail', 'Payment proof connected to booking', 'Outside-SYBNB payment warning', 'Admin review for sensitive moves'],
-    topup: 'Top up wallet',
     sendGiftQuick: 'Send gift',
-    audit: 'Gift audit',
     paymentStatus: 'Payment status',
     trustCenter: 'Trust Center',
     financeLanes: 'Money lanes',
@@ -90,12 +80,6 @@ const copy = {
     refunded: 'Refunded',
     inReview: 'In Review',
     heldShort: 'Held',
-    adminAudit: 'Admin Audit',
-    adminAuditEn: 'ADMIN AUDIT',
-    lastAudit: 'Last audit',
-    pendingActions: 'Pending actions',
-    ledgerStatus: 'Ledger status',
-    auditLog: 'View audit log',
     refundLane: 'Refund / dispute',
     giftLane: 'Gifts and prepaid codes',
     adminLane: 'Admin audit',
@@ -191,7 +175,7 @@ export function WalletPage({ lang }: Props) {
       <section style={styles.balanceHero}>
         <div style={styles.balanceTop}>
           <span style={styles.protectedBadge}>{t.protected}</span>
-          <small>{t.accountId}: SY-992-B82</small>
+          {wallet?.id && <small>{t.accountId}: SY-{wallet.id.slice(0, 8).toUpperCase()}</small>}
         </div>
         <div style={styles.balanceColumns}>
           <article>
@@ -217,7 +201,7 @@ export function WalletPage({ lang }: Props) {
           [t.available, availableMinor, '#20d29b'],
           [t.held, heldMinor, '#e5b80b'],
           [t.refunds, refundMinor, '#5268ff'],
-          [t.prepaid, gift ? gift.amountMinor : Number(amountMinor || 0), '#ff5f7d'],
+          [t.prepaid, gift ? gift.amountMinor : 0, '#ff5f7d'],
         ].map(([label, value, color]) => (
           <article key={String(label)} style={{ ...styles.statCard, borderColor: `${color}55` }}>
             <span style={styles.statDot}>{String(label)}</span>
@@ -229,35 +213,18 @@ export function WalletPage({ lang }: Props) {
       </section>
 
       <section style={styles.iconActions}>
-        {[
-          ['⊕', t.topup, '/payment/local-wallet'],
-          ['□', t.sendGiftQuick, '/wallet/gift/claim'],
-          ['▤', t.audit, '/wallet/admin/gift-audit'],
-          ['◷', t.paymentStatus, '/status'],
-          ['♢', t.trustCenter, '/trust-center'],
-        ].map(([icon, label, route]) => (
-          <button key={String(label)} style={styles.iconButton} onClick={() => (window.location.hash = String(route))}>
+        {(
+          [
+            ['□', t.sendGiftQuick, () => document.getElementById('gift-compose')?.scrollIntoView({ behavior: 'smooth' })],
+            ['◷', t.paymentStatus, () => { window.location.hash = '/status' }],
+            ['♢', t.trustCenter, () => { window.location.hash = '/trust-center' }],
+          ] as Array<[string, string, () => void]>
+        ).map(([icon, label, onClick]) => (
+          <button key={label} style={styles.iconButton} onClick={onClick}>
             <span>{icon}</span>
             <strong>{label}</strong>
           </button>
         ))}
-      </section>
-
-      <section style={styles.auditPanel}>
-        <div>
-          <span style={styles.auditIcon}>▣</span>
-          <strong>2026/01/28</strong>
-          <b>0</b>
-          <small>{isAr ? 'تم التحقق' : 'Verified'}</small>
-        </div>
-        <div>
-          <h2>{t.adminAudit}</h2>
-          <small>{t.adminAuditEn}</small>
-          <p>{t.lastAudit}</p>
-          <p>{t.pendingActions}</p>
-          <p>{t.ledgerStatus}</p>
-        </div>
-        <button style={styles.auditButton} onClick={() => (window.location.hash = '/finance')}>{t.auditLog}</button>
       </section>
 
       <section style={styles.grid}>
@@ -294,7 +261,7 @@ export function WalletPage({ lang }: Props) {
       </section>
 
       <section style={styles.grid}>
-        <article style={styles.card}>
+        <article id="gift-compose" style={styles.card}>
           <h2 style={styles.cardTitle}>{t.gift}</h2>
           <label style={styles.label}>
             {t.recipientPhone}

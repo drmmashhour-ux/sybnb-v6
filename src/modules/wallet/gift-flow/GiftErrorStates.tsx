@@ -1,7 +1,7 @@
 import React from 'react'
 
 type Lang = 'ar' | 'en'
-type GiftErrorState = 'wrong_phone' | 'already_redeemed' | 'expired' | 'blocked_admin' | 'security_review'
+type GiftErrorState = 'wrong_phone' | 'already_redeemed' | 'expired' | 'blocked_admin' | 'security_review' | 'not_found'
 
 type GiftErrorStatesProps = {
   lang?: Lang
@@ -19,6 +19,7 @@ const COPY = {
       expired: 'منتهية',
       blocked_admin: 'محظورة',
       security_review: 'مراجعة أمنية',
+      not_found: 'غير موجودة',
     },
     states: {
       wrong_phone: {
@@ -53,8 +54,15 @@ const COPY = {
         icon: '؟',
         tone: '#d5a915',
         title: 'الهدية قيد المراجعة الأمنية',
-        body: 'AI Brain أو الإدارة يحتاجان إلى مراجعة قصيرة قبل إضافة الرصيد.',
+        body: 'تحتاج الإدارة إلى مراجعة قصيرة قبل إضافة الرصيد.',
         primary: 'متابعة الحالة',
+      },
+      not_found: {
+        icon: '?',
+        tone: '#8b95a7',
+        title: 'لم يتم العثور على هذه الهدية',
+        body: 'رابط الهدية غير صحيح أو منتهي. تأكد من الرابط أو تواصل مع من أرسل الهدية.',
+        primary: 'المحاولة مرة أخرى',
       },
     },
   },
@@ -66,6 +74,7 @@ const COPY = {
       expired: 'Expired',
       blocked_admin: 'Blocked',
       security_review: 'Security review',
+      not_found: 'Not found',
     },
     states: {
       wrong_phone: {
@@ -100,14 +109,21 @@ const COPY = {
         icon: '?',
         tone: '#d5a915',
         title: 'Gift under security review',
-        body: 'AI Brain or admin needs a short review before adding the credit.',
+        body: 'Admin needs a short review before adding the credit.',
         primary: 'Track status',
+      },
+      not_found: {
+        icon: '?',
+        tone: '#8b95a7',
+        title: 'This gift could not be found',
+        body: 'The gift link is invalid or expired. Check the link or contact whoever sent the gift.',
+        primary: 'Try again',
       },
     },
   },
 }
 
-export function GiftErrorStates({ lang = 'ar', initialState = 'wrong_phone', onPrimary, onSupport }: GiftErrorStatesProps) {
+export function GiftErrorStates({ lang = 'ar', initialState = 'not_found', onPrimary, onSupport }: GiftErrorStatesProps) {
   const state = initialState
   const isAr = lang === 'ar'
   const t = COPY[lang]

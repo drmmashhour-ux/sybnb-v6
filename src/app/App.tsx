@@ -86,8 +86,14 @@ export function App() {
   const paymentReceiptMatch = path.match(/^\/payment\/receipt\/([^/]+)$/)
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
-  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
-  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' ? 'generic' : 'stays'
+  // Claiming a gift calls a requireAuth() endpoint (server/routes/wallet.mjs), so a real guest
+  // session must exist before the claim screens render — otherwise the only thing standing between
+  // the user and a silently-failing claim call is a fake local "create account" step that never
+  // talks to the server.
+  const giftClaimRoute = path === '/wallet/gift/claim' || /^\/wallet\/gift\/claim\/[^/]+$/.test(path)
+    || path === '/wallet/gift/code' || /^\/wallet\/gift\/code\/[^/]+$/.test(path)
+  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || giftClaimRoute || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
+  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' || giftClaimRoute ? 'generic' : 'stays'
   const hasGuestSession = typeof window !== 'undefined' && Boolean(sessionStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)

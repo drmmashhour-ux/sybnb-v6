@@ -1,14 +1,13 @@
-import React, { useMemo, useState } from 'react'
+import React, { useState } from 'react'
 
 type Lang = 'ar' | 'en'
-type Mode = 'signup' | 'signin'
 
 type GiftRecipientLandingProps = {
   lang?: Lang
   amount?: string
   senderName?: string
   codeLast4?: string
-  onContinue?: (payload: { mode: Mode; phone: string }) => void
+  onContinue?: (payload: { phone: string }) => void
 }
 
 const T = {
@@ -20,23 +19,15 @@ const T = {
     amount: 'قيمة الهدية',
     from: 'من',
     last4: 'آخر 4 رموز',
-    signup: 'إنشاء حساب',
-    signin: 'تسجيل الدخول',
-    phone: 'رقم الهاتف',
+    phone: 'رقم الهاتف الذي استلم الهدية',
     phonePlaceholder: '+963 9XX XXX XXX',
-    password: 'كلمة المرور',
-    repeatPassword: 'تأكيد كلمة المرور',
-    sendCode: 'إرسال رمز التحقق',
-    resendCode: 'إعادة إرسال الرمز',
-    code: 'رمز التحقق',
-    securityError: 'أدخل كلمة المرور وتأكيدها ورمز التحقق قبل المتابعة.',
     phoneNote: 'يجب استخدام نفس رقم الهاتف الذي استلم الهدية',
     noSell: 'لا يمكن بيع أو تحويل الهدية إلى رقم آخر',
     walletNote: 'إذا لم يكن لديك محفظة، سيتم إنشاؤها تلقائياً بعد التحقق.',
     securityTitle: 'حماية الهدية',
     securityOne: 'الرصيد يدخل إلى محفظة الرقم المطابق فقط.',
-    securityTwo: 'لن تطلب SYBNB هذا الرمز منك أبداً.',
-    cta: 'التالي — إدخال رمز التحقق',
+    securityTwo: 'لن تطلب SYBNB رمز الاستلام منك إلا في الشاشة التالية.',
+    cta: 'التالي — إدخال رمز الاستلام',
   },
   en: {
     brand: 'SYBNB Wallet',
@@ -46,23 +37,15 @@ const T = {
     amount: 'Gift amount',
     from: 'From',
     last4: 'Last 4',
-    signup: 'Create account',
-    signin: 'Sign in',
-    phone: 'Phone number',
+    phone: 'Phone number the gift was sent to',
     phonePlaceholder: '+963 9XX XXX XXX',
-    password: 'Password',
-    repeatPassword: 'Repeat password',
-    sendCode: 'Send verification code',
-    resendCode: 'Resend code',
-    code: 'Verification code',
-    securityError: 'Enter password, repeated password, and verification code before continuing.',
     phoneNote: 'Use the same phone number that received this gift',
     noSell: 'This gift cannot be sold or moved to another number',
     walletNote: 'If you do not have a wallet, one will be created after verification.',
     securityTitle: 'Gift protection',
     securityOne: 'Credit lands only in the wallet for the matching phone.',
-    securityTwo: 'SYBNB will never ask you for this code.',
-    cta: 'Next — enter verification code',
+    securityTwo: 'SYBNB only asks for the claim code on the next screen.',
+    cta: 'Next — enter claim code',
   },
 }
 
@@ -101,17 +84,6 @@ const styles = {
     background: 'linear-gradient(135deg,#2a1e00,#111118 55%,#0a0a0f)',
     border: '1px solid rgba(213,169,21,.42)',
   },
-  modeGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 },
-  modeButton: {
-    minHeight: 52,
-    borderRadius: 14,
-    border: '1px solid #2c3448',
-    background: '#111827',
-    color: '#aeb8ca',
-    fontWeight: 900,
-    fontSize: 15,
-  },
-  modeActive: { borderColor: '#4f6cff', background: '#1c2a55', color: '#fff' },
   label: { display: 'block', marginBottom: 8, color: '#9aa6ba', fontSize: 13, fontWeight: 800 },
   input: {
     width: '100%',
@@ -124,16 +96,6 @@ const styles = {
     fontSize: 16,
     boxSizing: 'border-box' as const,
   },
-  securityGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 },
-  secondaryCta: {
-    minHeight: 52,
-    borderRadius: 14,
-    border: '1px solid #2c3448',
-    background: '#111827',
-    color: '#fff',
-    fontWeight: 900,
-  },
-  error: { color: '#ffabab', display: 'block', fontSize: 13, marginTop: 10 },
   note: {
     borderRadius: 14,
     border: '1px solid rgba(79,108,255,.3)',
@@ -160,35 +122,23 @@ const styles = {
 export function GiftRecipientLanding({
   lang = 'ar',
   amount,
-  senderName = 'Mohamed Mashhour',
-  codeLast4 = '9A4F',
+  senderName,
+  codeLast4,
   onContinue,
 }: GiftRecipientLandingProps) {
-  const [mode, setMode] = useState<Mode>('signup')
   const [phone, setPhone] = useState('')
-  const [password, setPassword] = useState('')
-  const [repeatPassword, setRepeatPassword] = useState('')
-  const [codeSent, setCodeSent] = useState(false)
-  const [code, setCode] = useState('')
-  const [error, setError] = useState('')
   const isAr = lang === 'ar'
   const t = T[lang]
-  const amountText = amount || (isAr ? '٥٠٬٠٠٠ ل.س' : '50,000 SYP')
-
-  const canContinue = useMemo(() => {
-    if (phone.trim().length < 8 || !codeSent || code.trim().length < 4) return false
-    if (mode === 'signin') return true
-    return password.length >= 8 && password === repeatPassword
-  }, [code, codeSent, mode, password, phone, repeatPassword])
+  // No fabricated fallback: the caller is expected to always pass a real, fetched gift's amount —
+  // a placeholder here would silently misrepresent a real gift's value.
+  const amountText = amount || '—'
+  const senderText = senderName || (isAr ? 'مُرسل غير معروف' : 'Unknown sender')
+  const codeText = codeLast4 || '----'
+  const canContinue = phone.trim().length >= 8
 
   const continueSecurely = () => {
-    if (!canContinue) {
-      setError(t.securityError)
-      return
-    }
-
-    setError('')
-    onContinue?.({ mode, phone })
+    if (!canContinue) return
+    onContinue?.({ phone })
   }
 
   return (
@@ -211,85 +161,23 @@ export function GiftRecipientLanding({
             <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <div>
                 <div style={{ color: '#9aa6ba', fontSize: 12 }}>{t.from}</div>
-                <strong>{senderName}</strong>
+                <strong>{senderText}</strong>
               </div>
               <div>
                 <div style={{ color: '#9aa6ba', fontSize: 12 }}>{t.last4}</div>
-                <strong dir="ltr">••••{codeLast4}</strong>
+                <strong dir="ltr">••••{codeText}</strong>
               </div>
             </div>
-          </div>
-
-          <div style={styles.modeGrid}>
-            <button
-              type="button"
-              onClick={() => setMode('signup')}
-              style={{ ...styles.modeButton, ...(mode === 'signup' ? styles.modeActive : {}) }}
-            >
-              {t.signup}
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('signin')}
-              style={{ ...styles.modeButton, ...(mode === 'signin' ? styles.modeActive : {}) }}
-            >
-              {t.signin}
-            </button>
           </div>
 
           <label style={styles.label}>{t.phone}</label>
           <input
             value={phone}
-            onChange={(event) => {
-              setPhone(event.target.value)
-              setCodeSent(false)
-              setCode('')
-            }}
+            onChange={(event) => setPhone(event.target.value)}
             placeholder={t.phonePlaceholder}
             inputMode="tel"
             style={styles.input}
           />
-
-          {mode === 'signup' && (
-            <div style={styles.securityGrid}>
-              <input
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder={t.password}
-                type="password"
-                style={styles.input}
-              />
-              <input
-                value={repeatPassword}
-                onChange={(event) => setRepeatPassword(event.target.value)}
-                placeholder={t.repeatPassword}
-                type="password"
-                style={styles.input}
-              />
-            </div>
-          )}
-
-          <div style={styles.securityGrid}>
-            <button
-              type="button"
-              disabled={phone.trim().length < 8}
-              onClick={() => {
-                setCodeSent(true)
-                setCode('')
-              }}
-              style={{ ...styles.secondaryCta, opacity: phone.trim().length >= 8 ? 1 : 0.45 }}
-            >
-              {codeSent ? t.resendCode : t.sendCode}
-            </button>
-            <input
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder={t.code}
-              inputMode="numeric"
-              style={styles.input}
-            />
-          </div>
-          {error ? <strong style={styles.error}>{error}</strong> : null}
 
           <div style={styles.note}>
             <strong>{t.phoneNote}</strong>

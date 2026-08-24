@@ -1546,13 +1546,12 @@ async function ensurePrototypeGuestSession() {
   const guestSession = getStoredGuestSession()
   if (guestSession) return guestSession
 
-  return ensurePrototypeSession({
-    email: 'guest@sybnb.local',
-    password: 'StrongPass123',
-    displayName: 'SYBNB Guest',
-    role: 'GUEST',
-    phone: '+963900000001',
-  })
+  // No shared fallback account. Customer actions are gated behind real account creation (email OTP),
+  // so reaching here means the caller is not signed in — surface a clear 'sign in required' error
+  // instead of silently transacting under a shared demo identity (and no credentials in the bundle).
+  const error = new Error('Please create an account or sign in to continue.') as Error & { code?: string }
+  error.code = 'GUEST_SESSION_REQUIRED'
+  throw error
 }
 
 async function ensurePrototypeAdminSession() {
@@ -1569,31 +1568,12 @@ async function ensurePrototypeDriverSession() {
   throw new Error('Driver staff session required')
 }
 
+// Non-sensitive display defaults only. The real email/password always come from the staff sign-in
+// form (see the account assembly), so no credentials are embedded in the shipped bundle.
 function staffPrototypeAccount(role: 'ADMIN' | 'HOST' | 'DRIVER') {
-  if (role === 'ADMIN') {
-    return {
-      email: 'admin@sybnb.local',
-      displayName: 'SYBNB Admin',
-      role: 'ADMIN',
-      phone: '+963900000099',
-    }
-  }
-
-  if (role === 'DRIVER') {
-    return {
-      email: 'driver@sybnb.local',
-      displayName: 'SYBNB Driver',
-      role: 'DRIVER',
-      phone: '+963900000077',
-    }
-  }
-
-  return {
-    email: 'host@sybnb.local',
-    displayName: 'SYBNB Host',
-    role: 'HOST',
-    phone: '+963900000050',
-  }
+  if (role === 'ADMIN') return { displayName: 'SYBNB Admin', role: 'ADMIN' as const, phone: '' }
+  if (role === 'DRIVER') return { displayName: 'SYBNB Driver', role: 'DRIVER' as const, phone: '' }
+  return { displayName: 'SYBNB Host', role: 'HOST' as const, phone: '' }
 }
 
 async function ensurePrototypeSession(account: {

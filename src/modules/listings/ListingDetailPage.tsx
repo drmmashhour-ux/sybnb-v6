@@ -676,10 +676,14 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                 <strong>{t.host}</strong>
                 <span>{listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}</span>
               </article>
-              <article style={styles.trustCard}>
-                <strong>{t.paymentProtected}</strong>
-                <span>{t.protected}</span>
-              </article>
+              {/* Payment protection only applies to the division that actually transacts (Stays);
+                  showing it on contact-only divisions (Rentals/Buy/Cars/Marketplace) would overclaim. */}
+              {listing.division === 'STAYS' && (
+                <article style={styles.trustCard}>
+                  <strong>{t.paymentProtected}</strong>
+                  <span>{t.protected}</span>
+                </article>
+              )}
             </section>
           )}
 

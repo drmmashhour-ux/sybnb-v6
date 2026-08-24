@@ -472,7 +472,10 @@ export async function handleHost(req, res, url, context) {
         data.currency = currency
       }
       if (body.metadata !== undefined) {
-        data.metadata = body.metadata || {}
+        // Merge, not replace — a partial patch (e.g. just one field) must not silently wipe unrelated
+        // keys already on the listing (visualFilters, bedrooms/bathrooms, uploaded document/ad file
+        // references, etc.) that this specific edit never intended to touch.
+        data.metadata = { ...(existing.metadata || {}), ...(body.metadata || {}) }
         // Keep the Location relation in sync if the edit changes governorate/area — otherwise city
         // browse silently goes stale after an edit (M2).
         const govSource = data.metadata?.governorate

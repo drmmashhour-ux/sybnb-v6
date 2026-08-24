@@ -7,6 +7,7 @@ import {
   fetchPrototypeAdminMetrics,
   fetchPrototypeReviewQueue,
   releaseAdminPayout,
+  reviewPrototypePaymentProof,
   type AdminPayout,
   type PlatformAdminAuditLog,
   type PlatformAdminMetrics,
@@ -118,6 +119,8 @@ export function FinanceReconciliationPage({ lang }: Props) {
   const [message, setMessage] = useState('')
   const [releasingId, setReleasingId] = useState<string | null>(null)
   const [releaseError, setReleaseError] = useState('')
+  const [decidingId, setDecidingId] = useState<string | null>(null)
+  const [decisionError, setDecisionError] = useState('')
   const [recentRejectionCount, setRecentRejectionCount] = useState(0)
 
   useEffect(() => {
@@ -157,6 +160,21 @@ export function FinanceReconciliationPage({ lang }: Props) {
       setReleaseError(error instanceof Error ? error.message : t.releaseError)
     } finally {
       setReleasingId(null)
+    }
+  }
+
+  async function handlePaymentDecision(proofId: string, decision: 'APPROVE' | 'REJECT') {
+    setDecidingId(proofId)
+    setDecisionError('')
+    try {
+      await reviewPrototypePaymentProof(proofId, decision)
+      await loadFinance()
+    } catch (error) {
+      // Sham Cash payments require reconciliation input the full review screen (/admin/review)
+      // collects — this page has no field for it, so surface that clearly instead of a silent no-op.
+      setDecisionError(error instanceof Error ? error.message : t.error)
+    } finally {
+      setDecidingId(null)
     }
   }
 
@@ -213,9 +231,23 @@ export function FinanceReconciliationPage({ lang }: Props) {
             <span style={styles.pendingPill}>{payments.length} Pending</span>
             <h2 style={styles.cardTitle}>{t.adminReviewTitle}</h2>
           </div>
+          {decisionError && (
+            <section style={styles.error}>
+              <strong>{t.error}</strong>
+              <span>{decisionError}</span>
+            </section>
+          )}
           {status === 'loading' && <p style={styles.empty}>{t.loading}</p>}
           {payments.length ? payments.slice(0, 4).map((payment) => (
-            <PaymentProofRow key={payment.id} payment={payment} lang={lang} labels={t} />
+            <PaymentProofRow
+              key={payment.id}
+              payment={payment}
+              lang={lang}
+              labels={t}
+              disabled={decidingId === payment.id}
+              onApprove={() => void handlePaymentDecision(payment.id, 'APPROVE')}
+              onReject={() => void handlePaymentDecision(payment.id, 'REJECT')}
+            />
           )) : status !== 'loading' && <p style={styles.empty}>{t.empty}</p>}
         </article>
 
@@ -337,13 +369,27 @@ function FinanceStat({ label, value, tone }: { label: string; value: string; ton
   )
 }
 
-function PaymentProofRow({ payment, lang, labels }: { payment: PlatformPaymentProof; lang: Lang; labels: typeof copy.ar }) {
+function PaymentProofRow({
+  payment,
+  lang,
+  labels,
+  disabled,
+  onApprove,
+  onReject,
+}: {
+  payment: PlatformPaymentProof
+  lang: Lang
+  labels: typeof copy.ar
+  disabled: boolean
+  onApprove: () => void
+  onReject: () => void
+}) {
   return (
     <article style={styles.financeRow}>
       <span style={{ ...styles.riskDot, background: payment.status === 'PENDING_REVIEW' ? '#e5b80b' : '#20d29b' }} />
       <div style={styles.rowActions}>
-        <button style={styles.approveButton} onClick={() => (window.location.hash = '/admin/review')}>{labels.approve}</button>
-        <button style={styles.rejectButton} onClick={() => (window.location.hash = '/admin/review')}>{labels.reject}</button>
+        <button disabled={disabled} style={styles.approveButton} onClick={onApprove}>{labels.approve}</button>
+        <button disabled={disabled} style={styles.rejectButton} onClick={onReject}>{labels.reject}</button>
       </div>
       <div>
         <strong>{payment.providerRef || payment.id.slice(0, 8).toUpperCase()}</strong>

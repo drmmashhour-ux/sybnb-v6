@@ -429,6 +429,81 @@ export async function handleHost(req, res, url, context) {
     return methodNotAllowed(res, ['GET', 'PATCH'])
   }
 
+  // Edit (PATCH) or remove (DELETE) a host's own listing. Editing content re-enters review so an
+  // approved listing can't be silently changed post-approval; delete is blocked when bookings exist.
+  const listingEditMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)$/)
+  if (listingEditMatch) {
+    requireAuth(context, ['HOST', 'SELLER'])
+    const existing = await db().listing.findFirst({ where: { id: listingEditMatch[1], ownerId: context.user.id } })
+    if (!existing) {
+      const error = new Error('Listing not found for this host account.')
+      error.statusCode = 404
+      error.code = 'HOST_LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    if (req.method === 'PATCH') {
+      const body = await readJson(req)
+      const data = {}
+      if (body.titleAr !== undefined) {
+        if (String(body.titleAr).trim().length < 3) {
+          const error = new Error('Listing title is required.')
+          error.statusCode = 400
+          error.code = 'LISTING_TITLE_REQUIRED'
+          error.expose = true
+          throw error
+        }
+        data.titleAr = String(body.titleAr).trim()
+      }
+      if (body.titleEn !== undefined) data.titleEn = body.titleEn || null
+      if (body.description !== undefined) data.description = body.description || null
+      if (body.currency !== undefined) data.currency = String(body.currency)
+      if (body.metadata !== undefined) data.metadata = body.metadata || {}
+      if (body.priceMinor !== undefined) {
+        const priceMinor = Number(body.priceMinor)
+        if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
+          const error = new Error('Listing price must be greater than zero.')
+          error.statusCode = 400
+          error.code = 'LISTING_PRICE_INVALID'
+          error.expose = true
+          throw error
+        }
+        data.priceMinor = priceMinor
+      }
+      // A content edit to a live/approved listing sends it back through admin review.
+      if (Object.keys(data).length && ['APPROVED', 'REJECTED', 'EXPIRED'].includes(existing.status)) {
+        data.status = 'PENDING_REVIEW'
+      }
+      const listing = await db().listing.update({ where: { id: existing.id }, data })
+      await db().adminAuditLog.create({
+        data: { actorUserId: context.user.id, action: 'HOST_LISTING_EDIT', entityType: 'listings', entityId: listing.id, before: existing, after: listing },
+      })
+      return json(res, 200, { ok: true, listing })
+    }
+
+    if (req.method === 'DELETE') {
+      const activeBooking = await db().booking.findFirst({
+        where: { listingId: existing.id, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] } },
+        select: { id: true },
+      })
+      if (activeBooking) {
+        const error = new Error('This listing has active bookings and cannot be deleted; pause it instead.')
+        error.statusCode = 409
+        error.code = 'HOST_LISTING_HAS_BOOKINGS'
+        error.expose = true
+        throw error
+      }
+      await db().listing.delete({ where: { id: existing.id } })
+      await db().adminAuditLog.create({
+        data: { actorUserId: context.user.id, action: 'HOST_LISTING_DELETE', entityType: 'listings', entityId: existing.id, before: existing, after: null },
+      })
+      return json(res, 200, { ok: true, deleted: existing.id })
+    }
+
+    return methodNotAllowed(res, ['PATCH', 'DELETE'])
+  }
+
   const listingMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/status$/)
   if (listingMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])

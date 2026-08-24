@@ -383,13 +383,12 @@ export function isBookingViewable(booking, context) {
 function buildBookingMetadata(body, listing) {
   const protection = body.cancellationProtectionPurchased === true || body.cancellationProtection === true
   if (!protection) return {}
-  const submittedFeeMinor = Number(body.cancellationProtectionFeeMinor || 0)
-  const fallbackFeeMinor = Math.round(Number(listing.priceMinor || 0) * 0.03)
+  // Always compute the protection fee server-side (3% of listing price). Never trust a client-
+  // submitted premium — it flows into the charge and the ledger, so a guest could otherwise set
+  // their own add-on amount.
   return {
     cancellationProtectionPurchased: true,
-    cancellationProtectionFeeMinor: Number.isFinite(submittedFeeMinor) && submittedFeeMinor > 0
-      ? Math.round(submittedFeeMinor)
-      : fallbackFeeMinor,
+    cancellationProtectionFeeMinor: Math.round(Number(listing.priceMinor || 0) * 0.03),
     cancellationProtectionVersion: 'SYBNB_GUEST_CANCELLATION_PROTECTION_V1',
   }
 }

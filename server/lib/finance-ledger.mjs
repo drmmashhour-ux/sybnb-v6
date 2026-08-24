@@ -194,9 +194,13 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       keyParts: ['booking-host-hold', proof.bookingId, proof.id],
       note: 'Host payout is protected until booking confirmation and completion.',
     })
+    // Platform revenue goes to a fixed house account (PLATFORM_ACCOUNT_ID) rather than the individual
+    // admin who happened to approve — otherwise revenue fragments across operators' personal wallets.
+    // Falls back to the actor only when no house account is configured (dev/e2e).
+    const revenueAccount = process.env.PLATFORM_ACCOUNT_ID || actorUserId
     if (actorUserId) {
       await recordWalletEntry(tx, {
-        userId: actorUserId,
+        userId: revenueAccount,
         type: 'CREDIT',
         amountMinor: split.adminShareMinor,
         currency: proof.currency,
@@ -211,7 +215,7 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       // unlike adminShareMinor it is never reversed on cancellation (see bookings.mjs/host.mjs).
       if (split.cancellationProtectionPurchased && split.cancellationProtectionFeeMinor > 0) {
         await recordWalletEntry(tx, {
-          userId: actorUserId,
+          userId: revenueAccount,
           type: 'CREDIT',
           amountMinor: split.cancellationProtectionFeeMinor,
           currency: proof.currency,
@@ -229,6 +233,13 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     await tx.sellerProfile.update({
       where: { userId: proof.userId },
       data: { documentStatus: 'APPROVED' },
+    })
+    // Grant the SELLER role here (authoritatively) rather than trusting the client to have set it at
+    // registration — approving the plan is what actually entitles paid-plan listing.
+    await tx.userRole.upsert({
+      where: { userId_role: { userId: proof.userId, role: 'SELLER' } },
+      update: {},
+      create: { userId: proof.userId, role: 'SELLER' },
     })
   }
 

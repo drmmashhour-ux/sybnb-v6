@@ -946,6 +946,25 @@ export async function sendListingInquiryMessage(listingId: string, body: string)
   return response.message
 }
 
+export type PlatformMyInquiryThread = {
+  id: string
+  listingId: string | null
+  updatedAt: string
+  listing: { id: string; titleAr: string; titleEn: string | null; division: string; priceMinor: number; currency: string } | null
+  messages: PlatformMessage[]
+}
+
+// Guest-side inbox: every real inquiry thread the guest has started across any listing (Rentals/Buy/
+// Cars/Marketplace/New-Construction) — mirrors fetchHostInquiries. Without this, a guest who sends a
+// listing inquiry has no way to ever see the host's reply.
+export async function fetchMyInquiries() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; threads: PlatformMyInquiryThread[] }>('/api/me/inquiries', {
+    token: session.token,
+  })
+  return response.threads
+}
+
 // Owner-side inbox: every real inquiry thread across the owner's own listings.
 export async function fetchHostInquiries(mode: HostDashboardMode = 'host') {
   const session = await getHostDashboardSession(mode)

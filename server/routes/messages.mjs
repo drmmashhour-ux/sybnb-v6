@@ -197,6 +197,26 @@ export async function handleMessages(req, res, url, context) {
     return json(res, 201, { ok: true, message })
   }
 
+  // Mirror of /api/host/inquiries for the guest side — without this, a guest who sends a listing
+  // inquiry (Rentals/Buy/Cars/Marketplace/New-Construction) has no way to ever see the host's reply;
+  // the inbox only supported booking/payment/ride/gift threads.
+  if (url.pathname === '/api/me/inquiries') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+
+    const threads = await db().messageThread.findMany({
+      where: { guestId: context.user.id, listingId: { not: null } },
+      include: {
+        listing: { select: { id: true, titleAr: true, titleEn: true, division: true, priceMinor: true, currency: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+    })
+
+    return json(res, 200, { ok: true, threads })
+  }
+
   if (url.pathname === '/api/host/inquiries') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)

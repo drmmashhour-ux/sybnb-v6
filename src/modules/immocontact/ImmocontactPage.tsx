@@ -452,7 +452,6 @@ export function ImmocontactPage({ lang }: Props) {
             <>
               <ContextRow label={t.linkedRecord} value={activeThread.id.slice(0, 12).toUpperCase()} />
               <ContextRow label={t.status} value={activeThread.status} />
-              {isStaff && <ContextRow label={t.assigned} value={isAr ? 'أحمد علي' : 'Ahmad Ali'} />}
               {isStaff && (
                 <ContextRow label={t.teamHandoff} value={activeThread.priority === 'urgent' ? (isAr ? 'الدعم + المالية' : 'Support + finance') : (isAr ? 'الدعم' : 'Support')} />
               )}

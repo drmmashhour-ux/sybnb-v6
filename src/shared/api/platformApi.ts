@@ -630,6 +630,19 @@ function readFileAsBase64(file: File): Promise<string> {
 // Previously this only ever sent the file's *name* to the server — the actual image was never
 // uploaded, so nothing (human or automated) could ever review what was actually submitted. This
 // now reads and sends the real file bytes.
+// Real payment-proof file upload (was previously filename-only for booking/seller-plan/advertising
+// payments, so nothing an admin could actually review before releasing real money). Accepts a token
+// directly since this is called from guest, seller, and host sessions alike.
+export async function uploadPaymentProofFile(file: File, token: string) {
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{ ok: true; proofAssetUrl: string }>('/api/payments/proof-upload', {
+    method: 'POST',
+    token,
+    body: { fileBase64, contentType: file.type },
+  })
+  return response.proofAssetUrl
+}
+
 export async function submitGuestIdDocument(file: File) {
   const session = await ensurePrototypeGuestSession()
   const fileBase64 = await readFileAsBase64(file)
@@ -1192,6 +1205,17 @@ async function runAdminRequest<T>(request: (token: string) => Promise<T>) {
   }
 }
 
+// Resolve a stored `payment-proof://<key>` reference to a short-lived signed URL admin can actually
+// open/view. Previously admin only ever checked truthiness of proofAssetUrl — there was no way to
+// see the real file even after real uploads were wired in.
+export async function fetchAdminPaymentProofUrl(proofAssetUrl: string) {
+  const key = proofAssetUrl.replace(/^payment-proof:\/\//, '')
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; url: string }>(`/api/admin/payment-proof/${encodeURIComponent(key)}/url`, { token }),
+  )
+  return response.url
+}
+
 // Supports the WhatsApp/email ID-submission channel: an admin who received a document outside
 // the platform looks the customer up by their account email, then attaches the file for them.
 export async function lookupAdminUserByEmail(email: string) {
@@ -1515,12 +1539,15 @@ export async function createPrototypeWalletGift(input: {
   message?: string
 }) {
   const session = await ensurePrototypeGuestSession()
-  const response = await apiRequest<{ ok: true; gift: PlatformWalletGift }>('/api/wallet/gifts', {
+  // The 6-digit claim code is never delivered by SMS/email (Syria is email-only and this model has
+  // no recipient email) — the server now returns it here so the sender can share it with the
+  // recipient directly, same as any gift-card PIN.
+  const response = await apiRequest<{ ok: true; gift: PlatformWalletGift; claimCode: string }>('/api/wallet/gifts', {
     method: 'POST',
     token: session.token,
     body: input,
   })
-  return response.gift
+  return { gift: response.gift, claimCode: response.claimCode }
 }
 
 export async function claimPrototypeWalletGift(giftId: string, phone: string, code: string) {

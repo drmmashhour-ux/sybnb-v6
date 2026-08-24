@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
+import { giftClaimCode, hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { recordWalletEntry } from '../lib/finance-ledger.mjs'
 
@@ -56,7 +56,12 @@ export async function handleWallet(req, res, url, context) {
       })
       return created
     })
-    return json(res, 201, { ok: true, gift })
+    // The claim code was previously never delivered to anyone (no SMS — Syria is email-only per
+    // countries/syria/profile.mjs communications.sms=false — and no email exists on this model), so a
+    // funded gift could never actually be claimed. Return it to the SENDER now (their own gift, they
+    // are authenticated) so they can share it with the recipient directly, the same pattern already
+    // used for document delivery elsewhere on this platform (WhatsApp/email, out of band).
+    return json(res, 201, { ok: true, gift, claimCode: giftClaimCode(gift) })
   }
 
   const giftPreviewMatch = url.pathname.match(/^\/api\/wallet\/gifts\/([^/]+)$/)

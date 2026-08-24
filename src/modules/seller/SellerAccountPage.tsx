@@ -10,6 +10,7 @@ import {
   getStoredSellerSession,
   requestOtp,
   submitSellerPlanProof,
+  uploadPaymentProofFile,
 } from '../../shared/api/platformApi'
 import { SELLER_PLANS, pickSellerRole } from './sellerData'
 import type { SellerPlanId } from './sellerData'
@@ -161,6 +162,12 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentProofAdded, setPaymentProofAdded] = useState(false)
   const [paymentProofFiles, setPaymentProofFiles] = useState<string[]>([])
+  // Real uploaded proof/document URLs (payment-proof:// references) — previously these forms only
+  // ever captured file NAMES, so admin had nothing real to review before approving a paid plan or a
+  // platform-sale document set.
+  const [paymentProofUrls, setPaymentProofUrls] = useState<string[]>([])
+  const [accountUploadedUrls, setAccountUploadedUrls] = useState<string[]>([])
+  const [proofUploadError, setProofUploadError] = useState('')
   const [paymentAmountConfirmed, setPaymentAmountConfirmed] = useState(false)
   const [paymentStarted, setPaymentStarted] = useState(false)
   const [cardNumber, setCardNumber] = useState('')
@@ -249,12 +256,12 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
     },
   ]
 
-  function addAccountDocumentFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
-    if (!names.length) return
+  async function addAccountDocumentFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
 
     setAccountUploadedFiles((current) => {
-      const nextFiles = Array.from(new Set([...current, ...names]))
+      const nextFiles = Array.from(new Set([...current, ...files.map((file) => file.name)]))
       setAccountDocumentCount(nextFiles.length)
       return nextFiles
     })
@@ -263,16 +270,42 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
     setAccountSentToAdmin(false)
     setSubmitState('idle')
     setSubmitError('')
+
+    const session = getStoredSellerSession()
+    if (!session) {
+      setProofUploadError(isAr ? 'سجّل الدخول أولاً لرفع المستندات.' : 'Sign in first to upload documents.')
+      return
+    }
+    try {
+      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
+      setAccountUploadedUrls((current) => [...current, ...urls])
+      setProofUploadError('')
+    } catch (error) {
+      setProofUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
+    }
   }
 
-  function addPaymentProofFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
-    if (!names.length) return
+  async function addPaymentProofFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
 
-    setPaymentProofFiles((current) => Array.from(new Set([...current, ...names])))
+    setPaymentProofFiles((current) => Array.from(new Set([...current, ...files.map((file) => file.name)])))
     setPaymentProofAdded(true)
     setSubmitState('idle')
     setSubmitError('')
+
+    const session = getStoredSellerSession()
+    if (!session) {
+      setProofUploadError(isAr ? 'سجّل الدخول أولاً لرفع إثبات الدفع.' : 'Sign in first to upload payment proof.')
+      return
+    }
+    try {
+      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
+      setPaymentProofUrls((current) => [...current, ...urls])
+      setProofUploadError('')
+    } catch (error) {
+      setProofUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
+    }
   }
 
   async function refreshSellerPlanStatus() {
@@ -294,7 +327,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
         amountMinor: plan.id === 'premium' ? 4900 : 1900,
         currency: 'USD',
         providerRef: paymentReference.trim(),
-        proofAssetUrl: paymentProofReference('seller-plan-payment-proof', paymentProofFiles),
+        proofAssetUrl: paymentProofUrls[0] || paymentProofReference('seller-plan-payment-proof', paymentProofFiles),
         planCode: plan.id,
         legalName: `${firstName.trim()} ${lastName.trim()}`.trim() || undefined,
         sellerType: role.id,
@@ -322,7 +355,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
         amountMinor: 0,
         currency: 'USD',
         providerRef: adminFollowCode,
-        proofAssetUrl: paymentProofReference('platform-sale-documents', accountUploadedFiles),
+        proofAssetUrl: accountUploadedUrls[0] || paymentProofReference('platform-sale-documents', accountUploadedFiles),
         planCode: 'platform-sale',
         legalName: `${firstName.trim()} ${lastName.trim()}`.trim() || undefined,
         sellerType: role.id,
@@ -823,7 +856,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                     : selectedBusinessType.helper[lang]
                 }
                 lang={lang}
-                onAddFiles={addAccountDocumentFiles}
+                onAddFiles={(files) => void addAccountDocumentFiles(files)}
                 title={
                   isAdvertisingFlow
                     ? isAr
@@ -1156,7 +1189,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               files={paymentProofFiles}
               help={isAr ? 'ارفع إيصال الدفع أو صورة التحويل قبل موافقة الإدارة.' : 'Upload payment receipt or transfer screenshot before admin approval.'}
               lang={lang}
-              onAddFiles={addPaymentProofFiles}
+              onAddFiles={(files) => void addPaymentProofFiles(files)}
               title={isAr ? 'مستندات الدفع' : 'Payment documents'}
             />
             {sellerProfileStatus === 'APPROVED' ? (

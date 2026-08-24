@@ -3,6 +3,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { putObject, signObjectUrl } from '../lib/storage.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
@@ -134,6 +135,30 @@ async function finalizeStripeSession(session) {
 }
 
 export async function handlePayments(req, res, url, context) {
+  // Real payment-proof file upload. Previously every payment-proof flow (booking local-wallet,
+  // seller-plan, advertising) only ever captured the selected file's NAME on the client and sent a
+  // fabricated `session://...` string as proofAssetUrl — no bytes were ever stored, so the manual
+  // admin-review safety net that gates real money release had nothing real to review. The
+  // 'payment-proof' storage bucket + policy already existed (private, jpeg/png/pdf, 8MB) but was
+  // never wired to an HTTP route. This stores the real bytes and returns a stable reference; admin
+  // resolves it to a short-lived signed URL on demand via the endpoint below.
+  if (url.pathname === '/api/payments/proof-upload') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const stored = await putObject('payment-proof', { base64: body.fileBase64, contentType: body.contentType })
+    return json(res, 201, { ok: true, proofAssetUrl: `payment-proof://${stored.key}` })
+  }
+
+  // Admin/support resolve a stored proof reference to a short-lived signed URL to actually view it.
+  const proofViewMatch = url.pathname.match(/^\/api\/admin\/payment-proof\/([^/]+)\/url$/)
+  if (proofViewMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const url_ = signObjectUrl('payment-proof', proofViewMatch[1], 300)
+    return json(res, 200, { ok: true, url: url_ })
+  }
+
   if (url.pathname === '/api/payments/stripe/create-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])

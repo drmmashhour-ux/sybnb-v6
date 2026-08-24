@@ -4,6 +4,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
+  fetchAdminPaymentProofUrl,
   fetchIdDocumentBlobUrl,
   fetchPrototypeAdminAuditLog,
   fetchPrototypeReviewQueue,
@@ -548,6 +549,7 @@ function ShortRentAdminCommandDashboard({
   const [heldPaymentIds, setHeldPaymentIds] = useState<Record<string, boolean>>({})
   const [adminOutbox, setAdminOutbox] = useState<Array<{ id: string; target: 'guest' | 'host'; bookingRef: string; message: string }>>([])
   const [manualShamCashMinor, setManualShamCashMinor] = useState<number | null>(() => readStoredMinor(SHAM_CASH_ACCOUNT_BALANCE_KEY))
+  const [proofViewError, setProofViewError] = useState('')
   const displayPayments = payments // real payment proofs only â no fabricated fallback rows
   const primaryPayment = payments.find((payment) => payment.id === selectedPaymentId) || payments[0]
   const previewPayment = primaryPayment || displayPayments.find((payment) => payment.id === selectedPaymentId) || displayPayments[0]
@@ -711,10 +713,10 @@ function ShortRentAdminCommandDashboard({
   }
 
   const stats = [
-    { label: isAr ? 'Ø­Ø¬ÙØ²Ø§Øª Ø§ÙÙÙÙ' : 'Today bookings', value: '24', tone: 'blue' },
+    { label: isAr ? 'Ø­Ø¬ÙØ²Ø§Øª Ø§ÙÙÙÙ' : 'Today bookings', value: String(todayBookings.length), tone: 'blue' },
     { label: isAr ? 'Ø¨Ø§ÙØªØ¸Ø§Ø± ÙØ±Ø§Ø¬Ø¹Ø© Ø§ÙØ¯ÙØ¹' : 'Payment review', value: String(pendingPayments), tone: 'gold' },
     { label: isAr ? 'Ø­Ø¬ÙØ²Ø§Øª ÙØ¤ÙØ¯Ø©' : 'Confirmed bookings', value: String(confirmedBookings), tone: 'green' },
-    { label: isAr ? 'Ø­Ø§ÙØ§Øª ÙØ²Ø§Ø¹' : 'Disputes', value: '3', tone: 'red' },
+    { label: isAr ? 'Ø­Ø§ÙØ§Øª ÙØ²Ø§Ø¹' : 'Disputes', value: String(disputeBookingRows.length), tone: 'red' },
     { label: isAr ? 'ÙØ¨Ø§ÙØº ÙØ­Ø¬ÙØ²Ø©' : 'Held funds', value: moneyText(heldTotal, 'SYP', lang), tone: 'gold' },
     { label: isAr ? 'ÙØ¨Ø§ÙØº Ø¬Ø§ÙØ²Ø© ÙÙØµØ±Ù' : 'Ready payout', value: moneyText(readyPayout, 'SYP', lang), tone: 'green' },
     { label: isAr ? 'Ø¹ÙÙÙØ© Ø§ÙÙÙØµØ©' : 'Platform commission', value: moneyText(totalAdminCommission, 'SYP', lang), tone: 'blue' },
@@ -938,7 +940,7 @@ function ShortRentAdminCommandDashboard({
 
           <section style={{ ...commandStyles.aiDecisionCard, borderColor: aiReview.borderColor }}>
             <div style={commandStyles.aiDecisionHeader}>
-              <span style={{ ...commandStyles.aiDecisionBadge, background: aiReview.badgeColor }}>{aiReview.confidence}%</span>
+              <span style={{ ...commandStyles.aiDecisionBadge, background: aiReview.badgeColor }}>{aiReview.label}</span>
               <div>
                 <small>AI Brain Advisory Only</small>
                 <h2>{aiReview.title}</h2>
@@ -948,6 +950,20 @@ function ShortRentAdminCommandDashboard({
               {aiReview.reasons.slice(0, 3).map((reason) => <span key={reason}>{reason}</span>)}
             </div>
             <button style={commandStyles.linkButton} onClick={() => (window.location.hash = '/ai-brain')}>{isAr ? 'ÙØªØ­ AI Brain' : 'Open AI Brain'}</button>
+            {previewPayment?.proofAssetUrl?.startsWith('payment-proof://') && (
+              <button
+                style={commandStyles.linkButton}
+                onClick={() => {
+                  setProofViewError('')
+                  fetchAdminPaymentProofUrl(previewPayment.proofAssetUrl as string)
+                    .then((url) => window.open(url, '_blank', 'noopener,noreferrer'))
+                    .catch((error) => setProofViewError(error instanceof Error ? error.message : 'Could not open proof.'))
+                }}
+              >
+                {isAr ? 'عرض إثبات الدفع' : 'View payment proof'}
+              </button>
+            )}
+            {proofViewError && <small style={{ color: '#ff5f76' }}>{proofViewError}</small>}
           </section>
         </aside>
 
@@ -955,7 +971,7 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.commandViewHeader}>
             <div>
               <h1>{bookingRef}</h1>
-              <small>{listingTitle} Â· {isAr ? 'Ø¯ÙØ´Ù' : 'Damascus'}</small>
+              <small>{listingTitle}</small>
             </div>
             <button style={commandStyles.blueButton} onClick={() => previewPayment?.bookingId ? (window.location.hash = `/booking/${previewPayment.bookingId}`) : undefined}>
               {isAr ? 'ØªÙØ§ØµÙÙ Ø§ÙØ­Ø¬Ø²' : 'Booking details'}
@@ -964,7 +980,7 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.pipelineList}>
             {flowSteps.map((step, index) => (
               <div key={step} style={{ ...commandStyles.pipelineStep, ...(index === 6 ? commandStyles.pipelineActive : {}) }}>
-                <small>{index < 6 ? sampleTimes[index] : index === 6 ? (isAr ? 'Ø§ÙØ¢Ù' : 'Now') : 'â'}</small>
+                <small>{index < 6 ? (isAr ? 'تم' : 'Done') : index === 6 ? (isAr ? 'الآن' : 'Now') : '—'}</small>
                 <span>{step}</span>
                 <strong>{index + 1}</strong>
               </div>
@@ -1007,7 +1023,7 @@ function ShortRentAdminCommandDashboard({
                 </div>
                 <b>{paymentListingTitle(payment, lang)}</b>
                 <strong>{moneyText(payment.amountMinor, payment.currency, lang)}</strong>
-                <small>{isAr ? 'Ø«ÙØ© Ø§ÙØ°ÙØ§Ø¡ Ø§ÙØ§ØµØ·ÙØ§Ø¹Ù' : 'AI confidence'} {createAiPaymentReview(payment, isAr).confidence}%</small>
+                <small>{isAr ? 'Ø«ÙØ© Ø§ÙØ°ÙØ§Ø¡ Ø§ÙØ§ØµØ·ÙØ§Ø¹Ù' : 'AI confidence'} {createAiPaymentReview(payment, isAr).label}</small>
                 <div style={commandStyles.proofActions}>
                   <button disabled={disabled || heldPaymentIds[payment.id] || (isShamCashProvider(payment.provider) && !shamCashReconciliation.canApprove)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'ÙØ¨ÙÙ' : 'Approve'}</button>
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'Ø±ÙØ¶' : 'Reject'}</button>
@@ -1194,7 +1210,7 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.managementList}>
             <article style={commandStyles.aiDecisionCard}>
               <h3>{aiReview.title}</h3>
-              <strong style={{ color: aiReview.borderColor }}>{aiReview.label} Â· {aiReview.confidence}%</strong>
+              <strong style={{ color: aiReview.borderColor }}>{aiReview.label}</strong>
               {aiReview.reasons.map((reason) => <p key={reason}>{reason}</p>)}
               <button style={commandStyles.blueButton} onClick={() => (window.location.hash = '/ai-brain')}>{isAr ? 'ÙØªØ­ AI Brain' : 'Open AI Brain'}</button>
             </article>
@@ -1257,7 +1273,7 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.pipelineList}>
             {flowSteps.map((step, index) => (
               <div key={step} style={{ ...commandStyles.pipelineStep, ...(index === 6 ? commandStyles.pipelineActive : {}) }}>
-                <small>{index < 6 ? sampleTimes[index] : index === 6 ? (isAr ? 'Ø§ÙØ¢Ù' : 'Now') : 'â'}</small>
+                <small>{index < 6 ? (isAr ? 'تم' : 'Done') : index === 6 ? (isAr ? 'الآن' : 'Now') : '—'}</small>
                 <span>{step}</span>
                 <strong>{index + 1}</strong>
               </div>
@@ -1403,7 +1419,7 @@ function AdminPaymentLine({
       <span>{providerText(payment.provider, lang)}</span>
       <div style={commandStyles.aiRowDecision}>
         <b>{moneyText(payment.amountMinor, payment.currency, lang)}</b>
-        <small style={{ color: aiReview.borderColor }}>{aiReview.label} Â· {aiReview.confidence}%</small>
+        <small style={{ color: aiReview.borderColor }}>{aiReview.label}</small>
       </div>
       <div style={commandStyles.managementRowActions}>
         <button disabled={disabled} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); onApprove() }}>{isAr ? 'ÙØ¨ÙÙ' : 'Approve'}</button>
@@ -1796,6 +1812,11 @@ function commandTone(tone: string): CSSProperties {
   return { color: colors[tone] || colors.white }
 }
 
+// The numeric "confidence" score below was removed entirely (was hardcoded 74/82/88/91/94 with no
+// real computation behind it — these are plain if/else branches on real booleans, not a model). A
+// specific-looking percentage next to real approve/reject controls falsely implied a computed
+// assessment. "AI Brain" title strings renamed to plain descriptions on the EN side; the reasons
+// themselves are genuinely derived from real data and stay useful as a checklist.
 function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: boolean) {
   const provider = payment?.provider || 'LOCAL_WALLET'
   const amount = payment?.amountMinor || 0
@@ -1807,8 +1828,7 @@ function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: 
   if (isRejected) {
     return {
       label: isAr ? 'Ø³Ø¨Ø¨ Ø±ÙØ¶' : 'Reject reason',
-      title: isAr ? 'AI Brain ÙÙØªØ±Ø­ Ø§ÙØ±ÙØ¶' : 'AI Brain suggests rejection',
-      confidence: 88,
+      title: isAr ? 'AI Brain ÙÙØªØ±Ø­ Ø§ÙØ±ÙØ¶' : 'Rejected in ledger',
       badgeColor: '#ff4d73',
       borderColor: '#ff4d73',
       reasons: [
@@ -1821,8 +1841,7 @@ function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: 
   if (!hasProof) {
     return {
       label: isAr ? 'ÙØ±Ø§Ø¬Ø¹Ø© ÙØ·ÙÙØ¨Ø©' : 'Review needed',
-      title: isAr ? 'AI Brain ÙØ·ÙØ¨ ÙØ±Ø§Ø¬Ø¹Ø© ÙØ¨Ù Ø§ÙÙØ±Ø§Ø±' : 'AI Brain asks for review before decision',
-      confidence: 74,
+      title: isAr ? 'AI Brain ÙØ·ÙØ¨ ÙØ±Ø§Ø¬Ø¹Ø© ÙØ¨Ù Ø§ÙÙØ±Ø§Ø±' : 'No payment proof yet',
       badgeColor: '#e6b80d',
       borderColor: '#e6b80d',
       reasons: [
@@ -1835,8 +1854,7 @@ function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: 
   if (isLarge) {
     return {
       label: isAr ? 'ØªØ¯ÙÙÙ Ø¥Ø¶Ø§ÙÙ' : 'Extra audit',
-      title: isAr ? 'AI Brain ÙØ·ÙØ¨ ØªØ¯ÙÙÙ ÙØ¨ÙØº ÙØ±ØªÙØ¹' : 'AI Brain requests high-value audit',
-      confidence: 82,
+      title: isAr ? 'AI Brain ÙØ·ÙØ¨ ØªØ¯ÙÙÙ ÙØ¨ÙØº ÙØ±ØªÙØ¹' : 'High-value transaction — needs audit',
       badgeColor: '#e6b80d',
       borderColor: '#e6b80d',
       reasons: [
@@ -1848,8 +1866,7 @@ function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: 
 
   return {
     label: isAr ? 'ÙÙØªØ±Ø­ ÙØ¨ÙÙ' : 'Approve suggested',
-    title: isApproved ? (isAr ? 'Ø§ÙØ¯ÙØ¹ ÙØ¤ÙØ¯ ÙÙ Ø§ÙØ³Ø¬Ù' : 'Payment is confirmed in ledger') : (isAr ? 'AI Brain ÙÙØªØ±Ø­ Ø§ÙÙØ¨ÙÙ' : 'AI Brain suggests approval'),
-    confidence: 94,
+    title: isApproved ? (isAr ? 'Ø§ÙØ¯ÙØ¹ ÙØ¤ÙØ¯ ÙÙ Ø§ÙØ³Ø¬Ù' : 'Payment is confirmed in ledger') : (isAr ? 'AI Brain ÙÙØªØ±Ø­ Ø§ÙÙØ¨ÙÙ' : 'Basic checks pass'),
     badgeColor: '#20d29b',
     borderColor: '#20d29b',
     reasons: [
@@ -1865,8 +1882,7 @@ function createAiPaymentReview(payment: PlatformPaymentProof | undefined, isAr: 
 function createAiCashMatchReview(isAr: boolean, missingAccount: boolean) {
   return {
     label: isAr ? 'Ø¥ÙÙØ§Ù ÙØ¨Ù Ø§ÙÙØ±Ø§Ø±' : 'Hold before decision',
-    title: isAr ? 'AI Brain ÙØ·ÙØ¨ ÙØ·Ø§Ø¨ÙØ© Ø´Ø§Ù ÙØ§Ø´' : 'AI Brain requires Sham Cash match',
-    confidence: 91,
+    title: isAr ? 'AI Brain ÙØ·ÙØ¨ ÙØ·Ø§Ø¨ÙØ© Ø´Ø§Ù ÙØ§Ø´' : 'Requires Sham Cash match',
     badgeColor: '#e6b80d',
     borderColor: '#e6b80d',
     reasons: [
@@ -1894,7 +1910,6 @@ function isBookingDisputed(booking: PlatformReviewBooking) {
   return status.includes('DISPUT') || status.includes('CONFLICT') || status.includes('ESCALAT')
 }
 
-const sampleTimes = ['10:02 AM', '10:05 AM', '10:07 AM', '10:10 AM', '10:15 AM', '10:18 AM']
 
 const commandStyles: Record<string, CSSProperties> = {
   page: { minHeight: '100vh', background: '#07080d', color: '#f7f7fb', padding: '18px 24px 88px', display: 'grid', gap: 18, fontFamily: 'inherit' },

@@ -121,6 +121,7 @@ export function WalletPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const [wallet, setWallet] = useState<PlatformWallet | null>(null)
   const [gift, setGift] = useState<PlatformWalletGift | null>(null)
+  const [giftClaimCode, setGiftClaimCode] = useState('')
   const [recipientPhone, setRecipientPhone] = useState('+963900000001')
   const [amountMinor, setAmountMinor] = useState('50000')
   const [message, setMessage] = useState(isAr ? 'هدية من محفظة SYBNB' : 'Gift from SYBNB Wallet')
@@ -157,13 +158,14 @@ export function WalletPage({ lang }: Props) {
     setNotice('')
 
     try {
-      const nextGift = await createPrototypeWalletGift({
+      const result = await createPrototypeWalletGift({
         recipientPhone,
         amountMinor: Math.max(0, Math.round(Number(amountMinor) || 0)),
         currency: 'SYP',
         message,
       })
-      setGift(nextGift)
+      setGift(result.gift)
+      setGiftClaimCode(result.claimCode)
       setStatus('idle')
     } catch (error) {
       setStatus('error')
@@ -315,6 +317,12 @@ export function WalletPage({ lang }: Props) {
             <div style={styles.meta}>
               <span>{t.status}</span>
               <strong dir={isAr ? 'rtl' : 'ltr'}>{statusText(gift.status, lang)}</strong>
+            </div>
+          )}
+          {gift && giftClaimCode && (
+            <div style={styles.meta}>
+              <span>{isAr ? 'رمز الاستلام — شاركه مع المستلم' : 'Claim code — share it with the recipient'}</span>
+              <strong dir="ltr" style={{ letterSpacing: 4, fontSize: 20 }}>{giftClaimCode}</strong>
             </div>
           )}
           {gift && (

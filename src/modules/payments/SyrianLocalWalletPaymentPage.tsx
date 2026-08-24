@@ -15,7 +15,9 @@ import {
 } from '../../../countries/syria/payments/localWallet'
 import {
   fetchPrototypeBooking,
+  getStoredGuestSession,
   submitPrototypeLocalWalletProof,
+  uploadPaymentProofFile,
   type PlatformPaymentProof,
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
@@ -162,6 +164,11 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
   const [senderName, setSenderName] = useState(isAr ? 'ضيف SYBNB' : 'SYBNB Guest')
   const [senderPhone, setSenderPhone] = useState('+963 900 000 001')
   const [uploadedProofFiles, setUploadedProofFiles] = useState<string[]>([])
+  // Real uploaded proof URLs (payment-proof:// references), parallel to uploadedProofFiles' names —
+  // the last one wins as the proof actually sent to admin. Previously this whole flow only ever
+  // captured the file's NAME, so admin had nothing real to review before releasing money.
+  const [uploadedProofUrls, setUploadedProofUrls] = useState<string[]>([])
+  const [proofUploadError, setProofUploadError] = useState('')
   const [submission, setSubmission] = useState<SyrianLocalWalletSubmission>(() =>
     createSyrianLocalWalletSubmission({
       bookingId,
@@ -198,7 +205,9 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     [submission.status],
   )
   const amountDue = Math.max(Number(amountMinor || 10), 1)
-  const proofReference = paymentProofReference('local-wallet-proof', uploadedProofFiles)
+  // Real uploaded file reference sent to admin — falls back to the old name-only reference only if
+  // an upload is still in flight (validation below requires at least one real URL to submit).
+  const proofReference = uploadedProofUrls[0] || paymentProofReference('local-wallet-proof', uploadedProofFiles)
   const qrPayload = useMemo(
     () =>
       createSyrianLocalWalletQrPayload({
@@ -280,7 +289,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     senderPhone,
     proofUrl: proofReference || undefined,
   }, paymentProof ? [] : [submission.status === 'PENDING_REVIEW' ? '' : submission.transactionReference].filter(Boolean))
-  const canSubmitProof = validation.ok && uploadedProofFiles.length > 0
+  const canSubmitProof = validation.ok && uploadedProofUrls.length > 0
 
   async function submitProof() {
     if (!canSubmitProof) return
@@ -315,10 +324,22 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     }
   }
 
-  function addProofFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
-    if (!names.length) return
-    setUploadedProofFiles((current) => Array.from(new Set([...current, ...names])))
+  async function addProofFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
+    const session = getStoredGuestSession()
+    if (!session) {
+      setProofUploadError(isAr ? 'سجّل الدخول أولاً لرفع إثبات الدفع.' : 'Sign in first to upload payment proof.')
+      return
+    }
+    setProofUploadError('')
+    setUploadedProofFiles((current) => Array.from(new Set([...current, ...files.map((file) => file.name)])))
+    try {
+      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
+      setUploadedProofUrls((current) => [...current, ...urls])
+    } catch (error) {
+      setProofUploadError(error instanceof Error ? error.message : t.apiError)
+    }
   }
 
   function paymentExportPayload() {
@@ -461,7 +482,8 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
             <span>{t.senderPhone}</span>
             <input dir="ltr" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} />
           </label>
-          <PaymentProofUpload lang={lang} files={uploadedProofFiles} onAddFiles={addProofFiles} />
+          <PaymentProofUpload lang={lang} files={uploadedProofFiles} onAddFiles={(files) => void addProofFiles(files)} />
+          {proofUploadError && <p className="wallet-note" style={{ color: '#ff5f76' }}>{proofUploadError}</p>}
           <button className="wallet-primary" disabled={apiState === 'saving' || !canSubmitProof} onClick={submitProof}>
             {apiState === 'saving' ? t.saving : t.submit}
           </button>

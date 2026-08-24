@@ -12,7 +12,7 @@ import {
 } from '../../engines/payments/platformPaymentGate'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
-import { fetchSellerOverview, submitSellerPlanProof } from '../../shared/api/platformApi'
+import { fetchSellerOverview, getStoredSellerSession, submitSellerPlanProof, uploadPaymentProofFile } from '../../shared/api/platformApi'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
 import { PaymentProofUpload, paymentProofReference } from '../payments/PaymentProofUpload'
 
@@ -57,6 +57,10 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentUploadedFiles, setPaymentUploadedFiles] = useState<string[]>(() => readStoredPaymentFiles(paymentFilesStorageKey))
   const [proofUploaded, setProofUploaded] = useState(() => readStoredPaymentFiles(paymentFilesStorageKey).length > 0)
+  // Real uploaded proof URL — previously only file NAMES were captured, so admin had nothing real to
+  // review before approving an advertising payment.
+  const [paymentProofUrls, setPaymentProofUrls] = useState<string[]>([])
+  const [proofUploadError, setProofUploadError] = useState('')
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [stripeSucceeded, setStripeSucceeded] = useState(false)
   // Real, backend-verified review status — replaces the old client-only sessionStorage proof
@@ -158,14 +162,27 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
     { label: isAr ? 'مراجعة الإدارة قبل النشر' : 'Admin review before publishing', done: false },
   ]
 
-  function addPaymentFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
-    if (names.length === 0) return
+  async function addPaymentFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    if (files.length === 0) return
 
-    const nextFiles = [...paymentUploadedFiles, ...names]
+    const nextFiles = [...paymentUploadedFiles, ...files.map((file) => file.name)]
     setPaymentUploadedFiles(nextFiles)
     setProofUploaded(true)
     window.sessionStorage.setItem(paymentFilesStorageKey, JSON.stringify(nextFiles))
+
+    const session = getStoredSellerSession()
+    if (!session) {
+      setProofUploadError(isAr ? 'سجّل الدخول أولاً لرفع إثبات الدفع.' : 'Sign in first to upload payment proof.')
+      return
+    }
+    try {
+      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
+      setPaymentProofUrls((current) => [...current, ...urls])
+      setProofUploadError('')
+    } catch (error) {
+      setProofUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
+    }
   }
 
   async function submitForReview() {
@@ -178,7 +195,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
         amountMinor,
         currency: 'USD',
         providerRef: reference,
-        proofAssetUrl: paymentProofReference('advertising-payment-proof', paymentUploadedFiles),
+        proofAssetUrl: paymentProofUrls[0] || paymentProofReference('advertising-payment-proof', paymentUploadedFiles),
         planCode: 'advertising',
         sellerType: 'advertising',
       })
@@ -332,7 +349,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
             files={paymentUploadedFiles}
             help={isAr ? 'ارفع إيصال الدفع، تأكيد Stripe، أو مستند الإعلان. يمكن رفع أكثر من ملف.' : 'Upload the receipt, Stripe confirmation, or advertising documents. Multiple files are allowed.'}
             lang={lang}
-            onAddFiles={addPaymentFiles}
+            onAddFiles={(files) => void addPaymentFiles(files)}
             title={isAr ? 'مكان رفع المستندات' : 'Document upload place'}
           />
           <div className="seller-payment-step-list">

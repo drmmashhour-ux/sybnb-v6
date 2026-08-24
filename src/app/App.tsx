@@ -58,6 +58,18 @@ export function App() {
   }, [lang])
 
   useEffect(() => {
+    // On hash-route change, reset scroll and move keyboard/screen-reader focus to the main content
+    // so navigation is announced and doesn't leave focus on the old page.
+    if (typeof window === 'undefined') return
+    window.scrollTo(0, 0)
+    const main = document.querySelector('main') as HTMLElement | null
+    if (main) {
+      if (!main.hasAttribute('tabindex')) main.setAttribute('tabindex', '-1')
+      main.focus({ preventScroll: true })
+    }
+  }, [path])
+
+  useEffect(() => {
     const sync = () => setPath(getCurrentPath())
     const syncAuth = () => setAuthVersion((version) => version + 1)
     window.addEventListener('hashchange', sync)

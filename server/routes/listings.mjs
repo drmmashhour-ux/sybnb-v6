@@ -9,6 +9,36 @@ import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.m
 // paid-plan divisions gated behind an admin-approved SellerProfile.
 const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
 
+// Project a listing to the fields safe for public/unauthenticated consumers: strip street-level
+// address (addressLine/street) and internal metadata markers (e.g. inventory_source). Only fields
+// the customer UI actually renders are returned.
+function toPublicListing(l) {
+  if (!l) return l
+  const metadata = { ...(l.metadata || {}) }
+  delete metadata.inventory_source
+  return {
+    id: l.id,
+    ownerId: l.ownerId,
+    division: l.division,
+    titleAr: l.titleAr,
+    titleEn: l.titleEn,
+    description: l.description,
+    status: l.status,
+    priceMinor: l.priceMinor,
+    currency: l.currency,
+    instantBookEnabled: l.instantBookEnabled,
+    expiresAt: l.expiresAt,
+    createdAt: l.createdAt,
+    updatedAt: l.updatedAt,
+    metadata,
+    media: l.media,
+    location: l.location
+      ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area }
+      : null,
+    owner: l.owner ? { id: l.owner.id, displayName: l.owner.displayName } : undefined,
+  }
+}
+
 export async function handleListings(req, res, url, context) {
   const quoteMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/quote$/)
   if (quoteMatch) {
@@ -105,7 +135,7 @@ export async function handleListings(req, res, url, context) {
         orderBy: { createdAt: 'desc' },
         take: 50,
       })
-      return json(res, 200, { ok: true, listings })
+      return json(res, 200, { ok: true, listings: listings.map(toPublicListing) })
     }
 
     if (req.method === 'POST') {
@@ -185,7 +215,7 @@ export async function handleListings(req, res, url, context) {
       error.expose = true
       throw error
     }
-    return json(res, 200, { ok: true, listing })
+    return json(res, 200, { ok: true, listing: toPublicListing(listing) })
   }
 
   const availabilityMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/availability$/)

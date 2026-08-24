@@ -266,7 +266,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
                     <span className="search-result-status">{statusText(listing.status, lang)}</span>
                   )}
                   <h2>{listingTitleText(listing, lang)}</h2>
-                  <p>{listingDescriptionText(listing, lang) || t.pendingOnly}</p>
+                  <p>{listingDescriptionText(listing, lang)}</p>
                   <div className="search-result-meta">
                     <span>{t.price}</span>
                     <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>

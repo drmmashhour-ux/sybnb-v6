@@ -640,11 +640,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
               <section style={styles.detailPanel}>
                 <strong>{t.detailTitle}</strong>
-                <div style={styles.trustGrid}>
-                  <span>{t.trustedOwner}</span>
-                  <span>{t.fastContact}</span>
-                  <span>{t.protected}</span>
-                </div>
                 <ol style={styles.detailSteps}>
                   {t.detailSteps.map((step) => <li key={step}>{step}</li>)}
                 </ol>

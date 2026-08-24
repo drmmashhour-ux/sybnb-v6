@@ -4,37 +4,40 @@ type Props = {
   lang: Lang
 }
 
+// This page has no live backend — there is no competitor-scraping, demand-signal, or
+// pricing-intelligence service in SYBNB today. Everything below is a labeled example of what
+// the AI Brain roadmap concept would show once that service exists. Do not swap these for
+// real listing/user names; keep them generic so nobody mistakes this for live output.
 const signals = [
-  { platform: 'Airbnb', ar: 'استراتيجية تسعير هجومية في المزة', en: 'Aggressive pricing strategy in Mazzeh', statusAr: 'يتطلب إجراء', statusEn: 'Needs action', tone: 'danger', time: '2h' },
-  { platform: 'Booking', ar: 'تحديث عمولة', en: 'Commission update', statusAr: 'مراقب', statusEn: 'Watching', tone: 'gold', time: '5h' },
-  { platform: 'Guesty', ar: 'تحديث واجهة', en: 'Interface update', statusAr: 'معتمد', statusEn: 'Approved', tone: 'green', time: '1d' },
-  { platform: 'Local', ar: 'حملة خصومات', en: 'Discount campaign', statusAr: 'جديد', statusEn: 'New', tone: 'red', time: '45m' },
+  { platform: 'Example platform A', ar: 'مثال: تغيّر تسعير في منطقة مجاورة', en: 'Example: pricing shift in a nearby area', statusAr: 'يتطلب إجراء', statusEn: 'Needs action', tone: 'danger' },
+  { platform: 'Example platform B', ar: 'مثال: تحديث عمولة', en: 'Example: commission update', statusAr: 'مراقب', statusEn: 'Watching', tone: 'gold' },
+  { platform: 'Example platform C', ar: 'مثال: تحديث واجهة', en: 'Example: interface update', statusAr: 'معتمد', statusEn: 'Approved', tone: 'green' },
+  { platform: 'Example platform D', ar: 'مثال: حملة خصومات', en: 'Example: discount campaign', statusAr: 'جديد', statusEn: 'New', tone: 'red' },
 ]
 
 const priceSignals = [
-  { ar: 'حي المالكي', en: 'Malki district', demandAr: 'مرتفع الطلب', demandEn: 'High demand', confidence: 94, nightly: '1,240', monthly: '32,000', currency: 'SAR' },
-  { ar: 'الخبر الشمالية', en: 'North Khobar', demandAr: 'متوسط الطلب', demandEn: 'Medium demand', confidence: 88, nightly: '850', monthly: '22,500', currency: 'SAR' },
-  { ar: 'وسط جدة', en: 'Central Jeddah', demandAr: 'مرتفع الطلب', demandEn: 'High demand', confidence: 91, nightly: '980', monthly: '26,000', currency: 'SAR' },
+  { ar: 'مثال: منطقة أ', en: 'Example area A', demandAr: 'مرتفع الطلب', demandEn: 'High demand', nightly: '—', monthly: '—', currency: 'SYP' },
+  { ar: 'مثال: منطقة ب', en: 'Example area B', demandAr: 'متوسط الطلب', demandEn: 'Medium demand', nightly: '—', monthly: '—', currency: 'SYP' },
+  { ar: 'مثال: منطقة ج', en: 'Example area C', demandAr: 'مرتفع الطلب', demandEn: 'High demand', nightly: '—', monthly: '—', currency: 'SYP' },
 ]
 
 const improvements = [
-  { ar: 'فيلا موردن الملقا', en: 'Modern Villa Al Malqa', actionAr: 'أضف صور احترافية', actionEn: 'Add professional photos', lift: '+24%', priorityAr: 'عالية', priorityEn: 'High', tone: 'red' },
-  { ar: 'شقة فاخرة النرجس', en: 'Luxury apartment Al Narjis', actionAr: 'شارة الثقة', actionEn: 'Trust badge', lift: '+15%', priorityAr: 'متوسطة', priorityEn: 'Medium', tone: 'gold' },
-  { ar: 'استوديو المربع', en: 'Murabba Studio', actionAr: 'تعديل السعر', actionEn: 'Adjust price', lift: '+18%', priorityAr: 'عالية', priorityEn: 'High', tone: 'red' },
-  { ar: 'قصر الحمراء', en: 'Al Hamra Palace', actionAr: 'تحسين الوصف', actionEn: 'Improve description', lift: '+12%', priorityAr: 'متوسطة', priorityEn: 'Medium', tone: 'gold' },
+  { ar: 'مثال: قائمة أ', en: 'Example listing A', actionAr: 'أضف صور احترافية', actionEn: 'Add professional photos', lift: '—', priorityAr: 'عالية', priorityEn: 'High', tone: 'red' },
+  { ar: 'مثال: قائمة ب', en: 'Example listing B', actionAr: 'شارة الثقة', actionEn: 'Trust badge', lift: '—', priorityAr: 'متوسطة', priorityEn: 'Medium', tone: 'gold' },
+  { ar: 'مثال: قائمة ج', en: 'Example listing C', actionAr: 'تعديل السعر', actionEn: 'Adjust price', lift: '—', priorityAr: 'عالية', priorityEn: 'High', tone: 'red' },
+  { ar: 'مثال: قائمة د', en: 'Example listing D', actionAr: 'تحسين الوصف', actionEn: 'Improve description', lift: '—', priorityAr: 'متوسطة', priorityEn: 'Medium', tone: 'gold' },
 ]
 
 const roadmap = [
-  { score: '9.8', ar: 'نظام دفع متكامل', en: 'Integrated payment system', tagAr: 'ابن التالي', tagEn: 'Build next', state: 'PENDING', tone: 'gold' },
-  { score: '8.5', ar: 'تحسين محرك الحجز', en: 'Improve booking engine', tagAr: 'حسّن التالي', tagEn: 'Improve next', state: 'IN PROGRESS', tone: 'green' },
-  { score: '7.2', ar: 'تنبيه مخاطر السيولة', en: 'Liquidity risk alert', tagAr: 'تنبيه مخاطر', tagEn: 'Risk alert', state: 'PENDING', tone: 'gold' },
-  { score: '6.8', ar: 'توسيع سوق جدة', en: 'Expand Jeddah market', tagAr: 'فرصة السوق', tagEn: 'Market opportunity', state: 'IN PROGRESS', tone: 'green' },
+  { score: '—', ar: 'نظام دفع متكامل', en: 'Integrated payment system', tagAr: 'ابن التالي', tagEn: 'Build next', state: 'PENDING', tone: 'gold' },
+  { score: '—', ar: 'تحسين محرك الحجز', en: 'Improve booking engine', tagAr: 'حسّن التالي', tagEn: 'Improve next', state: 'IN PROGRESS', tone: 'green' },
+  { score: '—', ar: 'تنبيه مخاطر السيولة', en: 'Liquidity risk alert', tagAr: 'تنبيه مخاطر', tagEn: 'Risk alert', state: 'PENDING', tone: 'gold' },
+  { score: '—', ar: 'توسيع سوق جدة', en: 'Expand Jeddah market', tagAr: 'فرصة السوق', tagEn: 'Market opportunity', state: 'IN PROGRESS', tone: 'green' },
 ]
 
 export function AiBrainPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const firstSignal = signals[0]
-  const firstPrice = priceSignals[0]
   const go = (route: string) => {
     window.location.hash = route
   }
@@ -47,21 +50,30 @@ export function AiBrainPage({ lang }: Props) {
           <strong>SYBNB AI BRAIN</strong>
           <small>MARKET INTELLIGENCE</small>
         </div>
-        <p>{isAr ? 'آخر تحديث:' : 'Last updated:'} <b>2024.05.24 14:02</b></p>
+        <p>{isAr ? 'معاينة توضيحية — غير متصلة ببيانات حية' : 'Illustrative preview — not connected to live data'}</p>
         <button onClick={() => (window.location.hash = '/admin/review')}>{isAr ? 'الإدارة' : 'Admin'}</button>
       </header>
+
+      <section className="ai-brain-notice">
+        <strong>{isAr ? 'مفهوم استشاري فقط' : 'Advisory concept only'}</strong>
+        <span>
+          {isAr
+            ? 'لا توجد خدمة رصد منافسين أو تسعير ذكي حقيقية بعد. كل ما يظهر هنا أمثلة توضيحية لما سيبدو عليه AI Brain عند بناء تلك الخدمة، وليس تحليلاً حياً أو قوائم أو مستخدمين حقيقيين.'
+            : 'No real competitor-monitoring or pricing-intelligence service exists yet. Everything shown here is an illustrative example of what AI Brain would look like once that service is built — not live analysis, and not real listings or users.'}
+        </span>
+      </section>
 
       <section className="ai-brain-grid">
         <aside className="ai-detail-panel">
           <SectionTitle icon="⌘" title={isAr ? 'تفاصيل الإشارة' : 'Signal Detail'} subtitle="SIGNAL DETAIL" />
           <article className="ai-signal-detail-card">
             <div>
-              <span className="ai-source">{isAr ? 'المنافسين المتأخرين' : 'Late competitors'}</span>
+              <span className="ai-source">{isAr ? 'مثال توضيحي' : 'Illustrative example'}</span>
               <strong>{isAr ? firstSignal.ar : firstSignal.en}</strong>
-              <p>{isAr ? 'لاحظت خوارزمية Airbnb انخفاضاً في أسعار منطقة المزة بنسبة 15% خلال الأسبوع الماضي. هذا يهدد حصتك السوقية في فئة الغرف الفاخرة.' : 'Airbnb-style pricing dropped in the area by 15% this week, which may pressure premium inventory.'}</p>
+              <p>{isAr ? 'مثال: عند بناء خدمة رصد المنافسين، ستظهر هنا التغيّرات المرصودة في أسعار السوق مع تقييم أثرها المحتمل على SYBNB.' : 'Example: once a competitor-monitoring service exists, observed market pricing shifts and their likely impact on SYBNB would appear here.'}</p>
             </div>
             <div className="ai-impact">
-              <b>HIGH</b>
+              <b>{isAr ? 'مثال' : 'EXAMPLE'}</b>
               <i />
               <span>{isAr ? 'تأثير SYBNB المتوقع' : 'Expected SYBNB impact'}</span>
             </div>
@@ -70,7 +82,7 @@ export function AiBrainPage({ lang }: Props) {
               <span>{isAr ? 'الأولوية' : 'Priority'} <b>{isAr ? 'عالية' : 'High'}</b></span>
               <span>{isAr ? 'الفريق المسؤول' : 'Owner team'} <b>{isAr ? 'فريق العمليات' : 'Operations team'}</b></span>
             </div>
-            <p className="ai-action-note">AI: {isAr ? 'فعّل التسعير الديناميكي فوراً لتقليل الفجوة السعرية مع المنافسين بمقدار 8%.' : 'Activate dynamic pricing now to reduce the competitor pricing gap by 8%.'}</p>
+            <p className="ai-action-note">{isAr ? 'مثال إجراء مقترح: تفعيل التسعير الديناميكي لتقليل الفجوة السعرية مع المنافسين.' : 'Example suggested action: activate dynamic pricing to reduce the competitor pricing gap.'}</p>
             <div className="ai-detail-actions">
               <button onClick={() => go('/finance')}>{isAr ? 'الموافقة على الإجراء' : 'Approve action'}</button>
               <button onClick={() => go('/operations')}>{isAr ? 'إنشاء مهمة' : 'Create task'}</button>
@@ -112,7 +124,7 @@ export function AiBrainPage({ lang }: Props) {
           <SectionTitle icon="♕" title={isAr ? 'ذكاء الأسعار' : 'Price Intelligence'} subtitle="PRICE INTELLIGENCE" />
           {priceSignals.map((item) => (
             <article className="ai-price-card" key={item.en}>
-              <div className="ai-confidence"><b>{item.confidence}%</b></div>
+              <div className="ai-confidence"><b>{isAr ? 'مثال' : 'EXAMPLE'}</b></div>
               <div>
                 <h3>{isAr ? item.ar : item.en}</h3>
                 <small>{isAr ? item.demandAr : item.demandEn}</small>
@@ -134,7 +146,7 @@ export function AiBrainPage({ lang }: Props) {
               <div>
                 <strong>{signal.platform}</strong>
                 <span>{isAr ? signal.ar : signal.en}</span>
-                <small>{signal.time} ago</small>
+                <small>{isAr ? 'مثال توضيحي' : 'Illustrative example'}</small>
               </div>
               <b className={signal.tone}>{isAr ? signal.statusAr : signal.statusEn}</b>
               <i>⌁ ◉</i>
@@ -145,14 +157,14 @@ export function AiBrainPage({ lang }: Props) {
 
       <section className="ai-summary">
         <div>☼</div>
-        <h2>{isAr ? 'ملخص اليوم' : 'Today Summary'}</h2>
-        <p>{isAr ? 'هناك زيادة ملحوظة بنسبة 12% في الطلب على العقارات الفاخرة في شمال الرياض. نقترح رفع أسعار الوحدات في حي النرجس والملقا فوراً للاستفادة من فجوة العرض لدى المنافسين.' : 'Demand for premium inventory is up 12%. Raise selected prices and create tasks for listings missing trust badges or stronger photos.'}</p>
+        <h2>{isAr ? 'ملخص اليوم (مثال)' : 'Today Summary (example)'}</h2>
+        <p>{isAr ? 'مثال: عند تشغيل خدمة ذكاء السوق، سيظهر هنا ملخص يومي حقيقي لإشارات الطلب والأسعار المقترحة بناءً على بيانات فعلية.' : 'Example: once a market-intelligence service is running, a real daily summary of demand signals and suggested prices would appear here, based on actual data.'}</p>
       </section>
 
       <section className="ai-panel-previews">
-        <PreviewPanel title={isAr ? 'اقتراح السعر الذكي' : 'Smart price suggestion'} value={firstPrice.nightly} />
-        <PreviewPanel title={isAr ? 'تحسين القائمة الذكي' : 'Smart listing improvement'} value="+109%" />
-        <PreviewPanel title={isAr ? 'لوحة اقتراحات الخارطة' : 'Roadmap suggestions'} value="9.8" />
+        <PreviewPanel title={isAr ? 'اقتراح السعر الذكي' : 'Smart price suggestion'} value={isAr ? 'مثال' : 'EXAMPLE'} />
+        <PreviewPanel title={isAr ? 'تحسين القائمة الذكي' : 'Smart listing improvement'} value={isAr ? 'مثال' : 'EXAMPLE'} />
+        <PreviewPanel title={isAr ? 'لوحة اقتراحات الخارطة' : 'Roadmap suggestions'} value={isAr ? 'مثال' : 'EXAMPLE'} />
       </section>
     </main>
   )

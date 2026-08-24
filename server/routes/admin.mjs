@@ -207,6 +207,18 @@ export async function handleAdmin(req, res, url, context) {
     }
 
     const buffer = await readIdDocument(targetUser.idDocumentRef)
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_ID_DOCUMENT_VIEWED',
+        entityType: 'user_id_document',
+        entityId: idDocumentFileMatch[1],
+        before: null,
+        after: null,
+      },
+    })
+
     res.writeHead(200, {
       'content-type': targetUser.idDocumentMimeType || 'application/octet-stream',
       'cache-control': 'private, no-store',
@@ -242,6 +254,17 @@ export async function handleAdmin(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_USER_LOOKUP',
+        entityType: 'user',
+        entityId: foundUser.id,
+        before: null,
+        after: null,
+      },
+    })
 
     return json(res, 200, { ok: true, user: foundUser })
   }

@@ -6700,6 +6700,28 @@ a {
   justify-self: end;
 }
 
+.ai-brain-notice {
+  align-items: baseline;
+  background: rgba(217, 184, 0, 0.08);
+  border: 1px solid rgba(217, 184, 0, 0.35);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: auto 1fr;
+  margin: 14px 0;
+  padding: 12px 14px;
+}
+
+.ai-brain-notice strong {
+  color: #d9b800;
+  white-space: nowrap;
+}
+
+.ai-brain-notice span {
+  color: #9aa6ba;
+  line-height: 1.55;
+}
+
 .ai-brain-grid {
   display: grid;
   gap: 14px;

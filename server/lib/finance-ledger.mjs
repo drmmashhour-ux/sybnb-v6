@@ -76,6 +76,10 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     const extraFeesMinor = expectedExtraFeesMinor || Math.max(0, staySplitBaseMinor - stayAmountMinor)
     const hostGrossMinor = Math.min(staySplitBaseMinor, stayAmountMinor + extraFeesMinor)
     const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
+    // Owner-confirmed: RENTALS/BUY/CARS/MARKETPLACE/NEW_CONSTRUCTION intentionally charge 0%
+    // booking commission — these divisions monetize via the separate seller-plan subscription fee
+    // instead (server/routes/payments.mjs's 'seller_plan' provider), not a per-booking cut. Only
+    // STR (STAYS) has a contractual per-booking commission (STR_ADMIN_COMMISSION_RATE, see below).
     return {
       stayAmountMinor,
       cleaningFeeMinor: 0,

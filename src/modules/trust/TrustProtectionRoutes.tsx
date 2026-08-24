@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
+import { disputePrototypeBooking, fetchPrototypeBooking, type PlatformBooking, type PlatformListing } from '../../shared/api/platformApi'
+import { listingTitleText } from '../../shared/i18n/display'
 export { isTrustProtectionRoute } from './trustRoutes'
 
 type Props = {
@@ -7,7 +9,6 @@ type Props = {
   path: string
 }
 
-const TRUST_SCORE = 94
 const DEFAULT_BOOKING = 'BK-2026-0042'
 
 export function TrustProtectionRoutes({ lang, path }: Props) {
@@ -15,7 +16,6 @@ export function TrustProtectionRoutes({ lang, path }: Props) {
   const bookingId = pathParts[pathParts.length - 1] || DEFAULT_BOOKING
 
   if (path === '/trust-center/verification') return <TrustVerification lang={lang} />
-  if (path === '/trust-center/score') return <TrustScoreBreakdown lang={lang} />
   if (path === '/trust-center/sos') return <TrustSos lang={lang} />
   if (path.startsWith('/booking/guarantee/')) return <GuaranteeTiers lang={lang} bookingId={bookingId} />
   if (path.startsWith('/booking/payment-status/')) return <PaymentProofStatus lang={lang} bookingId={bookingId} />
@@ -30,27 +30,21 @@ function TrustCenterHome({ lang }: { lang: Lang }) {
   return (
     <main className="trust-phone" dir={isAr ? 'rtl' : 'ltr'}>
       <TrustHeader title={isAr ? 'مركز الثقة' : 'Trust Center'} />
+      {/* No trust-score computation exists yet — a specific invented number (was hardcoded 94) would
+          be a false, unverifiable claim. Show the real, verifiable step instead: identity verification. */}
       <section className="trust-score-card">
-        <span className="trust-score-check">✓</span>
-        <strong>{TRUST_SCORE}</strong>
-        <h2>{isAr ? 'مستوى الثقة ممتاز' : 'Excellent trust level'}</h2>
-        <p>{isAr ? 'هويتك موثقة بالكامل تقريباً. أكمل الخطوات المتبقية للوصول للدرجة الكاملة.' : 'Your profile is almost fully trusted. Complete the remaining steps to reach the full score.'}</p>
+        <h2>{isAr ? 'وثّق هويتك' : 'Verify your identity'}</h2>
+        <p>{isAr ? 'رفع مستند هوية معتمد يزيد ثقة المضيفين والمشترين بحسابك.' : 'Uploading an approved ID document increases how much hosts and buyers trust your account.'}</p>
       </section>
 
       <section className="trust-list">
-        <TrustRow done label={isAr ? 'توثيق الهاتف' : 'Phone verified'} />
-        <TrustRow done label={isAr ? 'البريد الإلكتروني' : 'Email verified'} />
         <TrustRow active label={isAr ? 'الهوية الوطنية' : 'National ID'} href="/trust-center/verification" />
-        <TrustRow label={isAr ? 'بصمة الوجه' : 'Face verification'} href="/trust-center/verification" />
       </section>
 
       <section className="trust-action-grid">
-        <button className="danger" onClick={() => (window.location.hash = '/trust-center/sos')}><b>!</b>{isAr ? 'طوارئ SOS' : 'SOS'}</button>
-        <button onClick={() => (window.location.hash = '/immocontact')}><b>⚑</b>{isAr ? 'تقرير صامت' : 'Silent report'}</button>
-        <button onClick={() => (window.location.hash = '/operations')}><b>⌖</b>{isAr ? 'مشاركة الموقع' : 'Share location'}</button>
+        <button className="danger" onClick={() => (window.location.hash = '/trust-center/sos')}><b>!</b>{isAr ? 'الدعم' : 'Support'}</button>
+        <button onClick={() => (window.location.hash = '/immocontact')}><b>⚑</b>{isAr ? 'تقديم بلاغ' : 'Submit a report'}</button>
       </section>
-
-      <button className="trust-primary" onClick={() => (window.location.hash = '/trust-center/score')}>{isAr ? 'رفع درجة الثقة' : 'Improve trust score'}</button>
     </main>
   )
 }
@@ -76,54 +70,24 @@ function TrustVerification({ lang }: { lang: Lang }) {
   )
 }
 
-function TrustScoreBreakdown({ lang }: { lang: Lang }) {
-  const isAr = lang === 'ar'
-  const rows = [
-    [isAr ? 'توثيق الهوية' : 'Identity verification', 25, 25, 'green'],
-    [isAr ? 'توثيق الهاتف' : 'Phone verification', 20, 20, 'green'],
-    [isAr ? 'تاريخ الحجوزات' : 'Booking history', 18, 20, 'gold'],
-    [isAr ? 'التقييمات المستلمة' : 'Received reviews', 17, 20, 'gold'],
-    [isAr ? 'سرعة الرد' : 'Response speed', 10, 15, 'gold'],
-    [isAr ? 'إكمال الملف الشخصي' : 'Profile completion', 4, 10, 'gray'],
-  ] as const
-
-  return (
-    <main className="trust-phone" dir={isAr ? 'rtl' : 'ltr'}>
-      <TrustHeader title={isAr ? 'تفاصيل الدرجة' : 'Score Breakdown'} />
-      <section className="trust-score-break">
-        <strong>{TRUST_SCORE}<small>/ 100</small></strong>
-        <span>{isAr ? 'درجة الموثوقية الحالية' : 'Current trust score'}</span>
-      </section>
-      <section className="trust-bars">
-        {rows.map(([label, value, total, tone]) => (
-          <article key={label}>
-            <div><strong>{label}</strong><span>{value}/{total}</span></div>
-            <i><b className={tone} style={{ width: `${(value / total) * 100}%` }} /></i>
-          </article>
-        ))}
-      </section>
-      <h2 className="trust-section-title">{isAr ? 'كيف ترفع درجتك؟' : 'How to improve?'}</h2>
-      <TrustSuggestion title={isAr ? 'أكمل ملفك الشخصي' : 'Complete your profile'} body={isAr ? 'إضافة وصف شخصي وصورة واضحة يمنحك +6 نقاط إضافية.' : 'Add a personal bio and clear photo for +6 points.'} action={isAr ? 'تعديل الملف' : 'Edit profile'} />
-      <TrustSuggestion title={isAr ? 'تحسين سرعة الرد' : 'Improve response speed'} body={isAr ? 'الرد على الرسائل خلال أقل من ساعة يزيد درجتك بمقدار +5.' : 'Replying within one hour increases your score by +5.'} action={isAr ? 'عرض الإحصائيات' : 'View stats'} muted />
-    </main>
-  )
-}
 
 function TrustSos({ lang }: { lang: Lang }) {
   const isAr = lang === 'ar'
+  // IMPORTANT (safety/honesty): this screen previously claimed local authorities are contacted
+  // automatically and that precise location is sent to "AI Brain" — neither is implemented; the
+  // button only opened a support chat. A real user in danger relying on that false promise instead
+  // of calling emergency services directly would be genuinely harmful. Copy corrected to describe
+  // exactly what happens: it opens a chat with SYBNB support — nothing is dispatched automatically.
   return (
     <main className="trust-phone trust-sos-page" dir={isAr ? 'rtl' : 'ltr'}>
-      <h1>{isAr ? 'طوارئ SOS' : 'SOS Emergency'}</h1>
-      <p>{isAr ? 'هل تشعر بعدم الأمان؟ نحن هنا للمساعدة.' : 'Feeling unsafe? We are here to help.'}</p>
-      <button className="sos-pulse" onClick={() => (window.location.hash = '/immocontact')}>SOS</button>
-      <strong>{isAr ? 'اضغط مطولاً لمدة 3 ثوان' : 'Hold for 3 seconds'}</strong>
-      <span>{isAr ? 'سيتم التواصل مع السلطات المحلية فوراً' : 'Local authorities/support will be contacted.'}</span>
+      <h1>{isAr ? 'التواصل مع الدعم' : 'Contact Support'}</h1>
+      <p>{isAr ? 'إذا كنت في خطر حقيقي، اتصل بالطوارئ المحلية فوراً. هذا الزر يفتح محادثة مع فريق دعم SYBNB.' : 'If you are in real danger, call local emergency services immediately. This button opens a chat with SYBNB support.'}</p>
+      <button className="sos-pulse" onClick={() => (window.location.hash = '/immocontact')}>{isAr ? 'تواصل مع الدعم' : 'Contact support'}</button>
+      <span>{isAr ? 'لا يتم إبلاغ أي جهة تلقائياً — الزر يفتح محادثة دعم فقط.' : 'Nothing is contacted automatically — this only opens a support chat.'}</span>
       <div className="trust-sos-actions">
-        <button onClick={() => (window.location.hash = '/operations')}>{isAr ? 'مشاركة الموقع مع جهات الاتصال' : 'Share location with contacts'} <b>⌯</b></button>
-        <button onClick={() => (window.location.hash = '/immocontact')}>{isAr ? 'تقديم بلاغ صامت' : 'Submit silent report'} <b>⌁</b></button>
+        <button onClick={() => (window.location.hash = '/immocontact')}>{isAr ? 'تقديم بلاغ' : 'Submit a report'} <b>⌁</b></button>
         <button onClick={() => (window.location.hash = '/immocontact')}>{isAr ? 'تحدث مع الدعم الفني' : 'Talk to support'} <b>○</b></button>
       </div>
-      <small>{isAr ? 'سيتم إرسال موقعك بدقة إلى عقل الذكاء الاصطناعي تلقائياً لتوفير الحماية.' : 'Your precise location will be sent to AI Brain automatically for protection.'}</small>
     </main>
   )
 }
@@ -131,14 +95,31 @@ function TrustSos({ lang }: { lang: Lang }) {
 function BookingProtectionHub({ lang, bookingId }: { lang: Lang; bookingId: string }) {
   const isAr = lang === 'ar'
   const shortId = bookingIdLabel(bookingId)
+  const [booking, setBooking] = useState<(PlatformBooking & { listing?: PlatformListing }) | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPrototypeBooking(bookingId)
+      .then((result) => { if (!cancelled) setBooking(result) })
+      .catch(() => { if (!cancelled) setBooking(null) })
+    return () => {
+      cancelled = true
+    }
+  }, [bookingId])
+
+  const dateRange =
+    booking?.checkIn && booking?.checkOut
+      ? `${new Date(booking.checkIn).toLocaleDateString(isAr ? 'ar' : 'en')} - ${new Date(booking.checkOut).toLocaleDateString(isAr ? 'ar' : 'en')}`
+      : ''
+
   return (
     <main className="trust-phone" dir={isAr ? 'rtl' : 'ltr'}>
       <TrustHeader title={isAr ? 'حماية الحجز' : 'Booking Protection'} />
       <section className="booking-protected-card">
         <small>{isAr ? 'محمي' : 'Protected'}</small>
         <span>{shortId} ♢</span>
-        <h2>{isAr ? 'فيلا النخيل الملكية' : 'Royal Palm Villa'}</h2>
-        <p>15 - 22 {isAr ? 'يونيو 2026' : 'June 2026'}</p>
+        <h2>{booking?.listing ? listingTitleText(booking.listing, lang) : shortId}</h2>
+        {dateRange && <p>{dateRange}</p>}
       </section>
       <h2 className="trust-section-title">{isAr ? 'ما الذي تتم حمايته؟' : 'What is protected?'}</h2>
       <section className="protection-list">
@@ -207,23 +188,54 @@ function PaymentProofStatus({ lang, bookingId }: { lang: Lang; bookingId: string
 
 function DisputeFlow({ lang, bookingId }: { lang: Lang; bookingId: string }) {
   const isAr = lang === 'ar'
+  const [reason, setReason] = useState<'cancellation' | 'wrong-description' | 'payment-issue'>('wrong-description')
+  const [note, setNote] = useState('')
+  const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle')
+  const [error, setError] = useState('')
+  const reasonLabels: Record<typeof reason, string> = isAr
+    ? { cancellation: 'إلغاء', 'wrong-description': 'وصف غير صحيح', 'payment-issue': 'مشكلة دفع' }
+    : { cancellation: 'Cancellation', 'wrong-description': 'Wrong description', 'payment-issue': 'Payment issue' }
+
+  async function submit() {
+    if (!note.trim()) {
+      setError(isAr ? 'اكتب وصف المشكلة أولاً.' : 'Write a problem description first.')
+      return
+    }
+    setStatus('saving')
+    setError('')
+    try {
+      await disputePrototypeBooking(bookingId, `${reasonLabels[reason]}: ${note.trim()}`)
+      window.location.hash = `/booking/dispute-closed/${bookingId}`
+    } catch (e) {
+      setStatus('error')
+      setError(e instanceof Error ? e.message : (isAr ? 'تعذر إرسال النزاع.' : 'Could not submit the dispute.'))
+    }
+  }
+
   return (
     <main className="trust-phone" dir={isAr ? 'rtl' : 'ltr'}>
       <TrustHeader title={isAr ? 'فتح نزاع' : 'Open Dispute'} />
       <span className="booking-code">{bookingIdLabel(bookingId)}</span>
       <section className="dispute-chips">
-        {(isAr ? ['إلغاء', 'وصف غير صحيح', 'مشكلة دفع'] : ['Cancellation', 'Wrong description', 'Payment issue']).map((label, index) => (
-          <button className={index === 1 ? 'active' : ''} key={label} onClick={() => (window.location.hash = `/booking/dispute/${bookingId}`)}>{label}</button>
+        {(Object.keys(reasonLabels) as Array<typeof reason>).map((key) => (
+          <button className={key === reason ? 'active' : ''} key={key} onClick={() => setReason(key)}>{reasonLabels[key]}</button>
         ))}
       </section>
       <label className="dispute-field">
         <span>{isAr ? 'وصف المشكلة' : 'Problem description'}</span>
-        <textarea placeholder={isAr ? 'اشرح ما حدث بوضوح...' : 'Explain clearly what happened...'} />
+        <textarea
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder={isAr ? 'اشرح ما حدث بوضوح...' : 'Explain clearly what happened...'}
+        />
       </label>
-      <button className="trust-upload active" onClick={() => (window.location.hash = '/immocontact')}>＋<span>{isAr ? 'إضافة صورة أو إثبات' : 'Add photo or evidence'}</span></button>
-      <p className="trust-note">AI Brain: {isAr ? 'مراجعة أولية خلال 30 دقيقة.' : 'Initial review within 30 minutes.'}</p>
-      <button className="trust-danger" onClick={() => (window.location.hash = '/trust-center/sos')}>{isAr ? 'تصعيد فوري' : 'Emergency escalation'}</button>
-      <button className="trust-primary" onClick={() => (window.location.hash = `/booking/dispute-closed/${bookingId}`)}>{isAr ? 'إرسال النزاع' : 'Submit dispute'}</button>
+      {/* Real evidence-file upload isn't wired to any storage yet — direct the guest to a channel
+          that actually delivers the file, same pattern used for ID documents. */}
+      <button className="trust-upload active" onClick={() => (window.location.hash = '/immocontact')}>＋<span>{isAr ? 'أرسل صورة أو إثبات عبر المحادثة' : 'Send photo or evidence via chat'}</span></button>
+      {error && <p className="trust-note" style={{ color: '#ff5f76' }}>{error}</p>}
+      <button className="trust-primary" disabled={status === 'saving'} onClick={() => void submit()}>
+        {status === 'saving' ? (isAr ? 'جار الإرسال...' : 'Submitting...') : isAr ? 'إرسال النزاع' : 'Submit dispute'}
+      </button>
     </main>
   )
 }
@@ -286,15 +298,6 @@ function TrustRow({ label, done = false, active = false, href }: { label: string
   )
 }
 
-function TrustSuggestion({ title, body, action, muted = false }: { title: string; body: string; action: string; muted?: boolean }) {
-  return (
-    <article className="trust-suggestion">
-      <h3>{title}</h3>
-      <p>{body}</p>
-      <button className={muted ? 'muted' : ''} onClick={() => (window.location.hash = muted ? '/status' : '/dashboard')}>{action}</button>
-    </article>
-  )
-}
 
 function bookingIdLabel(id: string) {
   if (id.startsWith('BK-')) return id

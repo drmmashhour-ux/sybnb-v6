@@ -227,7 +227,7 @@ export function DashboardPage({ lang }: Props) {
             </>
           )}
           <div style={styles.tripActions}>
-            <button style={styles.sosButton} onClick={() => (window.location.hash = activeBooking ? `/booking/dispute/${activeBooking.id}` : '/immocontact')}>
+            <button style={styles.sosButton} onClick={() => (window.location.hash = '/trust-center/sos')}>
               {t.sos} ⚠
             </button>
             <button style={styles.goldButton} onClick={() => activeBooking?.payments?.[0]?.id ? (window.location.hash = `/payment/receipt/${activeBooking.payments[0].id}`) : window.print()}>

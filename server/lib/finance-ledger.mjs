@@ -364,6 +364,18 @@ export async function reverseBookingPlatformShare(tx, {
   return { split, adminRecipientId, hostClawedBack }
 }
 
+// Translates a DB unique-constraint violation on (provider, provider_ref) into a recognizable
+// signal. This is what closes the TOCTOU race on payment-proof creation: even if two concurrent
+// deliveries both pass an app-level "does a proof already exist" check, only one insert can win —
+// the other raises P2002 here, which callers use to gracefully recover (re-fetch the winner)
+// instead of surfacing a raw DB error. Shared by every payment rail that creates a PaymentProof
+// (Stripe, local wallet, PaymentIntent) so they all recognize this race the same way.
+export function isProviderRefUniqueViolation(err) {
+  const target = err?.meta?.target
+  return err?.code === 'P2002' && (target === 'payment_proofs_provider_provider_ref_key' ||
+    (Array.isArray(target) && target.includes('provider_ref')) || String(target || '').includes('provider_ref'))
+}
+
 // Picks the actor for a system/webhook-driven auto-approval that has no human context.user — e.g.
 // a Stripe or PaymentIntent webhook confirming a charge with nobody reviewing it in an admin tab.
 export async function firstAdminId(tx) {

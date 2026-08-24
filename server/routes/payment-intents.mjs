@@ -2,7 +2,13 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { verifyWebhook, targetStatusFor, canTransition, paymentWebhookSecret } from '../lib/payment-webhook.mjs'
-import { approvePaymentProof, expectedTotalMinor, firstAdminId, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
+import {
+  approvePaymentProof,
+  expectedTotalMinor,
+  firstAdminId,
+  isProviderRefUniqueViolation,
+  reverseBookingPlatformShare,
+} from '../lib/finance-ledger.mjs'
 import { log, errorSummary } from '../lib/logger.mjs'
 
 // After this many failed apply attempts on the same event, stop retrying automatically and mark it
@@ -48,42 +54,41 @@ function requirePaymentIntentsEnabled() {
 // almost exactly, keyed by intent.reference instead of a Stripe session id, so both rails create a
 // PaymentProof and confirm the booking/wallet the exact same way via approvePaymentProof.
 async function applyPaymentIntentSuccess(tx, { intent, obj }) {
+  const providerRef = obj?.id || intent.providerRef
   const existingProof = await tx.paymentProof.findFirst({
     where: { provider: 'payment_intent', providerRef: intent.reference },
   })
-  if (existingProof) {
-    return tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'SUCCEEDED', providerRef: obj?.id || intent.providerRef } })
-  }
 
-  const booking = await tx.booking.findUnique({ where: { id: intent.bookingId }, include: { listing: true } })
-  if (!booking || booking.status !== 'PAYMENT_PENDING') {
-    // Funds were genuinely captured on this intent, but there's no booking left to apply them to
-    // (e.g. a second intent for the same booking lost the race to a first one that already
+  if (!existingProof) {
+    const booking = await tx.booking.findUnique({ where: { id: intent.bookingId } })
+    if (booking && booking.status === 'PAYMENT_PENDING') {
+      const created = await tx.paymentProof.create({
+        data: {
+          bookingId: booking.id,
+          userId: booking.guestId,
+          provider: 'payment_intent',
+          status: 'PENDING_ADMIN_REVIEW',
+          amountMinor: intent.amountMinor,
+          // PaymentIntent.currency is stored lowercase (this route's own convention); PaymentProof /
+          // Wallet currency is uppercase ('SYP'/'USD') throughout the rest of the ledger.
+          currency: intent.currency.toUpperCase(),
+          providerRef: intent.reference,
+          proofAssetUrl: obj?.id ? `payment-intent://provider_refs/${obj.id}` : undefined,
+        },
+      })
+      await approvePaymentProof(tx, {
+        proofId: created.id,
+        actorUserId: await firstAdminId(tx),
+        note: 'Auto-approved: verified payment-intent webhook confirmed funds captured.',
+      })
+    }
+    // else: funds were genuinely captured on this intent, but there's no booking left to apply them
+    // to (e.g. a second intent for the same booking lost the race to a first one that already
     // finalized it). Still SUCCEEDED — surfaces via reconciliation as "no linked PaymentProof" for
     // an operator to follow up (manual refund via the provider).
-    return tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'SUCCEEDED', providerRef: obj?.id || intent.providerRef } })
   }
 
-  const created = await tx.paymentProof.create({
-    data: {
-      bookingId: booking.id,
-      userId: booking.guestId,
-      provider: 'payment_intent',
-      status: 'PENDING_ADMIN_REVIEW',
-      amountMinor: intent.amountMinor,
-      // PaymentIntent.currency is stored lowercase (this route's own convention); PaymentProof /
-      // Wallet currency is uppercase ('SYP'/'USD') throughout the rest of the ledger.
-      currency: intent.currency.toUpperCase(),
-      providerRef: intent.reference,
-      proofAssetUrl: obj?.id ? `payment-intent://provider_refs/${obj.id}` : undefined,
-    },
-  })
-  await approvePaymentProof(tx, {
-    proofId: created.id,
-    actorUserId: await firstAdminId(tx),
-    note: 'Auto-approved: verified payment-intent webhook confirmed funds captured.',
-  })
-  return tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'SUCCEEDED', providerRef: obj?.id || intent.providerRef } })
+  return tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'SUCCEEDED', providerRef } })
 }
 
 // Applies a REFUNDED transition. Deliberately does NOT credit the guest's SYBNB wallet: a
@@ -144,10 +149,23 @@ async function applyPaymentEvent({ eventId, intentId, type, obj }) {
       } else if (target === 'REFUNDED' && fresh.bookingId) {
         updated = await applyPaymentIntentRefund(tx, { intent: fresh })
       } else {
-        updated = await tx.paymentIntent.update({
-          where: { id: intentId },
+        // Claim on the status we actually read, not a blind write: two concurrent deliveries for
+        // this intent (e.g. 'processing' racing 'succeeded') can both read the same starting status
+        // and both pass canTransition against it. A plain `update` would let whichever commits last
+        // silently overwrite the other's (possibly more-advanced) status. This mirrors the claim
+        // pattern approvePaymentProof already uses for exactly this class of race.
+        const claimed = await tx.paymentIntent.updateMany({
+          where: { id: intentId, status: fresh.status },
           data: { status: target, providerRef: obj?.id || fresh.providerRef },
         })
+        if (claimed.count === 0) {
+          // Another delivery already advanced this intent's status between our read and this write —
+          // it moved on without us. Nothing to retry: record as a no-op, not a failure.
+          await tx.paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'IGNORED', appliedAt: new Date() } })
+          const current = await tx.paymentIntent.findUnique({ where: { id: intentId } })
+          return { applied: false, status: current.status, illegal: true }
+        }
+        updated = { status: target }
       }
       await tx.paymentEvent.update({
         where: { id: eventId },
@@ -157,6 +175,17 @@ async function applyPaymentEvent({ eventId, intentId, type, obj }) {
     })
     return result
   } catch (err) {
+    if (isProviderRefUniqueViolation(err)) {
+      // A concurrent delivery (redelivery of this same event racing itself, or an admin replay
+      // overlapping a live redelivery) already created+approved the PaymentProof for this exact
+      // intent and committed first — this transaction's own attempt collided with that and rolled
+      // back, but the underlying payment WAS genuinely applied, just by the sibling transaction.
+      // Mark this delivery APPLIED too (a benign duplicate), not FAILED — otherwise a normal,
+      // harmless race would dead-letter a payment that already settled correctly.
+      const fresh = await db().paymentIntent.findUnique({ where: { id: intentId } })
+      await db().paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null } })
+      return { applied: false, status: fresh?.status, duplicate: true }
+    }
     const dead = bumped.attempts >= DEAD_LETTER_THRESHOLD
     await db()
       .paymentEvent.update({
@@ -193,23 +222,71 @@ function computeDriftReasons(intent, { proof, walletEntries, latestEvent }) {
   return reasons
 }
 
+const RECONCILIATION_WALLET_REFERENCE_TYPES = [
+  'booking_payout',
+  'booking_admin_share',
+  'booking_protection_fee',
+  'booking_payout_clawback',
+  'booking_admin_share_reversal',
+]
+
 async function loadReconciliationContext(intent) {
-  let proof = null
-  let walletEntries = []
-  if (intent.bookingId) {
-    proof = await db().paymentProof.findFirst({ where: { provider: 'payment_intent', providerRef: intent.reference } })
-    walletEntries = await db().walletEntry.findMany({
-      where: {
-        referenceId: intent.bookingId,
-        referenceType: {
-          in: ['booking_payout', 'booking_admin_share', 'booking_protection_fee', 'booking_payout_clawback', 'booking_admin_share_reversal'],
-        },
-      },
-      orderBy: { createdAt: 'asc' },
-    })
-  }
-  const latestEvent = await db().paymentEvent.findFirst({ where: { intentId: intent.id }, orderBy: { receivedAt: 'desc' } })
+  const [proof, walletEntries, latestEvent] = await Promise.all([
+    intent.bookingId ? db().paymentProof.findFirst({ where: { provider: 'payment_intent', providerRef: intent.reference } }) : null,
+    intent.bookingId
+      ? db().walletEntry.findMany({
+          where: { referenceId: intent.bookingId, referenceType: { in: RECONCILIATION_WALLET_REFERENCE_TYPES } },
+          orderBy: { createdAt: 'asc' },
+        })
+      : [],
+    db().paymentEvent.findFirst({ where: { intentId: intent.id }, orderBy: { receivedAt: 'desc' } }),
+  ])
   return { proof, walletEntries, latestEvent }
+}
+
+// Batched variant for scanning many intents at once (the admin-wide reconciliation listing) — 3
+// queries total instead of up to 3 per intent, avoiding an N+1 that would otherwise issue ~600
+// sequential round-trips for 200 candidate intents.
+async function loadReconciliationContextBatch(intents) {
+  const bookingIntents = intents.filter((intent) => intent.bookingId)
+  const references = bookingIntents.map((intent) => intent.reference)
+  const bookingIds = bookingIntents.map((intent) => intent.bookingId)
+  const intentIds = intents.map((intent) => intent.id)
+
+  const [proofs, walletEntries, events] = await Promise.all([
+    references.length ? db().paymentProof.findMany({ where: { provider: 'payment_intent', providerRef: { in: references } } }) : [],
+    bookingIds.length
+      ? db().walletEntry.findMany({
+          where: { referenceId: { in: bookingIds }, referenceType: { in: RECONCILIATION_WALLET_REFERENCE_TYPES } },
+          orderBy: { createdAt: 'asc' },
+        })
+      : [],
+    intentIds.length ? db().paymentEvent.findMany({ where: { intentId: { in: intentIds } }, orderBy: { receivedAt: 'desc' } }) : [],
+  ])
+
+  const proofByRef = new Map(proofs.map((proof) => [proof.providerRef, proof]))
+  const walletEntriesByBooking = new Map()
+  for (const entry of walletEntries) {
+    const list = walletEntriesByBooking.get(entry.referenceId) || []
+    list.push(entry)
+    walletEntriesByBooking.set(entry.referenceId, list)
+  }
+  const latestEventByIntent = new Map()
+  for (const event of events) {
+    // events are ordered desc by receivedAt, so the first one seen per intentId is the latest.
+    if (!latestEventByIntent.has(event.intentId)) latestEventByIntent.set(event.intentId, event)
+  }
+
+  return new Map(
+    intents.map((intent) => [
+      intent.id,
+      {
+        proof: proofByRef.get(intent.reference) || null,
+        walletEntries: walletEntriesByBooking.get(intent.bookingId) || [],
+        latestEvent: latestEventByIntent.get(intent.id) || null,
+      },
+    ]),
+  )
 }
 
 export async function handlePaymentIntents(req, res, url, context) {
@@ -326,8 +403,10 @@ export async function handlePaymentIntents(req, res, url, context) {
       throw fail(403, 'PAYMENT_INTENT_FORBIDDEN', 'This payment intent is not available for this account.')
     }
 
-    const booking = intent.bookingId ? await db().booking.findUnique({ where: { id: intent.bookingId }, select: { id: true, status: true } }) : null
-    const ctx = await loadReconciliationContext(intent)
+    const [booking, ctx] = await Promise.all([
+      intent.bookingId ? db().booking.findUnique({ where: { id: intent.bookingId }, select: { id: true, status: true } }) : null,
+      loadReconciliationContext(intent),
+    ])
     const driftReasons = computeDriftReasons(intent, ctx)
 
     return json(res, 200, {
@@ -359,10 +438,10 @@ export async function handlePaymentIntents(req, res, url, context) {
       orderBy: { updatedAt: 'desc' },
       take: 200,
     })
+    const contextByIntentId = await loadReconciliationContextBatch(candidateIntents)
     const drifted = []
     for (const intent of candidateIntents) {
-      const ctx = await loadReconciliationContext(intent)
-      const driftReasons = computeDriftReasons(intent, ctx)
+      const driftReasons = computeDriftReasons(intent, contextByIntentId.get(intent.id))
       if (driftReasons.length) drifted.push({ intentId: intent.id, reference: intent.reference, status: intent.status, bookingId: intent.bookingId, driftReasons })
     }
 

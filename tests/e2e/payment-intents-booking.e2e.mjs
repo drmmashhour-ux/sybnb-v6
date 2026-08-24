@@ -96,14 +96,14 @@ async function verifyHostForPublishing() {
   await call('POST', '/api/legal/consent', H, { documentKey: 'listing-agreement', version: doc.version })
 }
 
-async function makeStaysListing(priceMinor) {
+async function makeStaysListing(priceMinor, instantBookEnabled = true) {
   const created = await call('POST', '/api/listings', H, {
     division: 'STAYS',
     titleAr: 'شقة اختبار PIB',
     titleEn: 'PIB test flat',
     priceMinor,
     currency: 'SYP',
-    instantBookEnabled: true,
+    instantBookEnabled,
   })
   const id = created.j?.listing?.id
   await call('PATCH', `/api/listings/${id}/submit`, H)
@@ -326,6 +326,62 @@ const shareReversalD = (await walletEntries(bookingD.id, ['booking_admin_share_r
 check('admin-share reversal DEBIT recorded (refactored shared helper)', shareReversalD?.amountMinor === splitD.adminShareMinor, JSON.stringify({ shareReversalD, expected: splitD.adminShareMinor }))
 const payoutClawbackD = (await walletEntries(bookingD.id, ['booking_payout_clawback'])).find((e) => e.type === 'DEBIT')
 check('host payout clawback DEBIT recorded (refactored shared helper)', payoutClawbackD?.amountMinor === splitD.hostGrossMinor, JSON.stringify({ payoutClawbackD, expected: splitD.hostGrossMinor }))
+
+console.log('\n=== F. CONCURRENCY REGRESSION (blind-status-write race, missing race-recovery catch, provider-blind refund) ===')
+
+const bookingE = await makeBooking(listing.id, 12, 10)
+const intentE = (await call('POST', '/api/payments/intents', G, { bookingId: bookingE.id })).j?.intent
+// Fire 'processing' and 'succeeded' for the SAME intent concurrently, different event ids, both
+// legal directly from REQUIRES_PAYMENT — the exact shape of the race that used to let whichever
+// commits last silently overwrite the other's status with a blind UPDATE.
+const [procE, succE] = await Promise.all([
+  webhook(evt('payment_intent.processing', intentE.reference, { amount_minor: intentE.amountMinor, currency: intentE.currency })),
+  webhook(evt('payment_intent.succeeded', intentE.reference, { amount_minor: intentE.amountMinor, currency: intentE.currency })),
+])
+const intentEDetail = await call('GET', `/api/payments/intents/${intentE.id}`, G)
+check(
+  'concurrent processing+succeeded never leaves the intent stuck below SUCCEEDED',
+  intentEDetail.j?.intent?.status === 'SUCCEEDED',
+  JSON.stringify({ procE: procE.j, succE: succE.j, finalStatus: intentEDetail.j?.intent?.status }),
+)
+const bookingEAfter = (await call('GET', `/api/bookings/${bookingE.id}`, G)).j?.booking
+check('the real booking-confirm side effect still landed despite the race', bookingEAfter?.status === 'CONFIRMED', bookingEAfter?.status)
+
+const bookingF = await makeBooking(listing.id, 19, 17)
+const intentF = (await call('POST', '/api/payments/intents', G, { bookingId: bookingF.id })).j?.intent
+// Two DISTINCT 'succeeded' events for the same intent, fired concurrently — the loser used to hit
+// the (provider, providerRef) unique constraint uncaught and get recorded FAILED/DEAD_LETTERED even
+// though the payment was genuinely applied once by the winner.
+await Promise.all([
+  webhook(evt('payment_intent.succeeded', intentF.reference, { amount_minor: intentF.amountMinor, currency: intentF.currency })),
+  webhook(evt('payment_intent.succeeded', intentF.reference, { amount_minor: intentF.amountMinor, currency: intentF.currency })),
+])
+const entriesF = await walletEntries(bookingF.id, ['booking_payout', 'booking_admin_share'])
+check(
+  'concurrent duplicate success events produce exactly one HOLD + one CREDIT, never two',
+  entriesF.filter((e) => e.referenceType === 'booking_payout').length === 1 && entriesF.filter((e) => e.referenceType === 'booking_admin_share').length === 1,
+  JSON.stringify(entriesF),
+)
+const eventsF = await db().paymentEvent.findMany({ where: { intentId: intentF.id } })
+check(
+  'neither concurrent delivery is left FAILED/DEAD_LETTERED — the race resolves gracefully',
+  eventsF.length === 2 && eventsF.every((e) => e.processingStatus === 'APPLIED'),
+  JSON.stringify(eventsF.map((e) => ({ id: e.providerEventId, processingStatus: e.processingStatus, attempts: e.attempts }))),
+)
+
+const nonInstantListing = await makeStaysListing(150000, false)
+check('non-instant-book listing reached APPROVED', nonInstantListing.status === 'APPROVED', nonInstantListing.status)
+const bookingG = await makeBooking(nonInstantListing.id, 5, 3)
+const intentG = (await call('POST', '/api/payments/intents', G, { bookingId: bookingG.id })).j?.intent
+await webhook(evt('payment_intent.succeeded', intentG.reference, { amount_minor: intentG.amountMinor, currency: intentG.currency }))
+const bookingGAfter = (await call('GET', `/api/bookings/${bookingG.id}`, G)).j?.booking
+check('non-instant-book payment_intent success lands the booking in REQUESTED', bookingGAfter?.status === 'REQUESTED', bookingGAfter?.status)
+const rejectG = await call('PATCH', `/api/admin/review-queue/booking/${bookingG.id}`, A, { decision: 'REJECT' })
+check('admin rejected the REQUESTED payment_intent booking -> CANCELLED', rejectG.status === 200 && rejectG.j?.entity?.status === 'CANCELLED', JSON.stringify(rejectG.j))
+const guestRefundG = await walletEntries(bookingG.id, ['booking_refund'])
+check('admin rejection of a payment_intent-sourced booking does NOT credit the guest wallet (no real card refund happened)', guestRefundG.length === 0, JSON.stringify(guestRefundG))
+const shareReversalG = (await walletEntries(bookingG.id, ['booking_admin_share_reversal'])).find((e) => e.type === 'DEBIT')
+check('admin-share reversal still happens for the payment_intent-sourced rejection', Boolean(shareReversalG), JSON.stringify(shareReversalG))
 
 console.log(`\n==== PAYMENT INTENTS BOOKING E2E: ${pass} passed, ${fail} failed ====`)
 await disconnectDb()

@@ -628,6 +628,16 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (decision !== 'APPROVED') {
     const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
     if (approvedPayment) {
+      // Card-network payments (Stripe Checkout, the electronic PaymentIntent rail) never had their
+      // money enter the platform's own wallet ledger — it went to the card network directly. This
+      // app has no real provider-side refund call anywhere, so crediting the guest's wallet here
+      // would represent money the platform doesn't actually hold for this payment, unlike a manual
+      // proof (local wallet / Sham Cash / bank transfer) where the guest's money genuinely is the
+      // platform's liability to return. Mirrors the same principle applyPaymentIntentRefund already
+      // establishes for the provider-confirmed refund path — a card payment needs a REAL refund
+      // issued through the provider directly, not a wallet credit standing in for one.
+      const isCardPayment = ['stripe', 'payment_intent'].includes(approvedPayment.provider)
+
       await tx.paymentProof.updateMany({
         where: {
           bookingId: existing.id,
@@ -635,22 +645,26 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
         },
         data: {
           status: 'REFUNDED',
-          adminNote: 'Auto-refunded after admin rejected/ruled against this booking.',
+          adminNote: isCardPayment
+            ? 'Admin rejected/ruled against this booking. Card payment — issue the real refund through the payment provider directly; no wallet credit was recorded.'
+            : 'Auto-refunded after admin rejected/ruled against this booking.',
           reviewedById: actorUserId,
           reviewedAt: new Date(),
         },
       })
 
-      await recordWalletEntry(tx, {
-        userId: existing.guestId,
-        type: 'REFUND',
-        amountMinor: approvedPayment.amountMinor,
-        currency: existing.currency,
-        referenceType: 'booking_refund',
-        referenceId: existing.id,
-        keyParts: ['booking-admin-reject-refund', existing.id, approvedPayment.id],
-        note: 'Guest refund after admin rejected/ruled against this booking.',
-      })
+      if (!isCardPayment) {
+        await recordWalletEntry(tx, {
+          userId: existing.guestId,
+          type: 'REFUND',
+          amountMinor: approvedPayment.amountMinor,
+          currency: existing.currency,
+          referenceType: 'booking_refund',
+          referenceId: existing.id,
+          keyParts: ['booking-admin-reject-refund', existing.id, approvedPayment.id],
+          note: 'Guest refund after admin rejected/ruled against this booking.',
+        })
+      }
 
       // Reverses the platform's own position (admin-share CREDIT, and a host payout clawback if
       // it was already RELEASED) — shared with the PaymentIntent refund webhook path so both

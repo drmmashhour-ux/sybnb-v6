@@ -1,7 +1,7 @@
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, expectedTotalMinor, firstAdminId } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, expectedTotalMinor, firstAdminId, isProviderRefUniqueViolation } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 
@@ -36,11 +36,6 @@ function paymentReferenceDuplicate() {
   error.code = 'PAYMENT_REFERENCE_DUPLICATE'
   error.expose = true
   return error
-}
-function isProviderRefUniqueViolation(err) {
-  const target = err?.meta?.target
-  return err?.code === 'P2002' && (target === 'payment_proofs_provider_provider_ref_key' ||
-    (Array.isArray(target) && target.includes('provider_ref')) || String(target || '').includes('provider_ref'))
 }
 
 // expectedTotalMinor and firstAdminId now live in finance-ledger.mjs (shared with the PaymentIntent

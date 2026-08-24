@@ -127,10 +127,11 @@ export function WalletPage({ lang }: Props) {
   const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [notice, setNotice] = useState('')
   const entries = wallet?.entries || []
+  // Real balance only — never substitute a fabricated number when the wallet is empty/unavailable
+  // (the page claims "real balance stored in PostgreSQL"; showing invented money there is misleading).
   const balanceMinor = wallet?.cachedBalanceMinor || 0
-  const displayAvailableMinor = balanceMinor || 124500
-  const heldMinor = balanceMinor ? Math.round(balanceMinor * 0.28) : 48000
-  const availableMinor = Math.max(displayAvailableMinor - (balanceMinor ? heldMinor : 0), 0)
+  const heldMinor = entries.reduce((sum, entry) => (String(entry.type || '') === 'HOLD' ? sum + Number(entry.amountMinor || entry.amount || 0) : sum), 0)
+  const availableMinor = Math.max(balanceMinor - heldMinor, 0)
   const refundMinor = entries.reduce((sum, entry) => {
     const type = String(entry.type || '')
     return type.includes('REFUND') ? sum + Number(entry.amountMinor || entry.amount || 0) : sum

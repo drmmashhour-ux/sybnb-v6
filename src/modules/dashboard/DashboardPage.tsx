@@ -58,7 +58,7 @@ const copy = {
     contact: 'الاتصال',
     sos: 'SOS',
     trustCopy: 'حجزك محمي بالكامل مع نظام SYBNB Trust',
-    trustScore: 'درجة الأمان 100%',
+    trustScore: 'مركز الثقة',
     currentTrip: 'رحلتي الحالية',
     previousTrips: 'رحلاتي السابقة',
     completed: 'مكتمل',
@@ -119,7 +119,7 @@ const copy = {
     contact: 'Contact',
     sos: 'SOS',
     trustCopy: 'Your booking is fully protected with SYBNB Trust',
-    trustScore: 'Safety score 100%',
+    trustScore: 'Trust Center',
     currentTrip: 'Current trip',
     previousTrips: 'Previous trips',
     completed: 'Completed',
@@ -252,7 +252,6 @@ export function DashboardPage({ lang }: Props) {
             </button>
             <button style={styles.trustTile} onClick={() => (window.location.hash = '/trust-center')}>
               <span>{t.trustScore}</span>
-              <strong>94</strong>
               <small>{isAr ? 'مركز الثقة' : 'Trust Center'}</small>
             </button>
           </section>

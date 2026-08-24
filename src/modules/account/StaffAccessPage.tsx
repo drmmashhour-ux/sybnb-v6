@@ -61,9 +61,11 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const isAr = lang === 'ar'
   const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn')
   const [status, setStatus] = useState<'idle' | 'codeSent' | 'loading' | 'error'>('idle')
-  const [email, setEmail] = useState(defaultEmail(role))
+  // HOST is a real customer-facing role (see below) — pre-filling a shared default identity risks a
+  // first-time host missing it and having their OTP sent to a mailbox they don't control. Start blank.
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [phone, setPhone] = useState(defaultPhone(role))
+  const [phone, setPhone] = useState('')
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState('')
 
@@ -188,18 +190,6 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       </section>
     </main>
   )
-}
-
-function defaultEmail(role: StaffRole) {
-  if (role === 'ADMIN') return 'admin@sybnb.local'
-  if (role === 'DRIVER') return 'driver@sybnb.local'
-  return 'host@sybnb.local'
-}
-
-function defaultPhone(role: StaffRole) {
-  if (role === 'ADMIN') return '+963900000099'
-  if (role === 'DRIVER') return '+963900000077'
-  return '+963900000050'
 }
 
 const styles: Record<string, CSSProperties> = {

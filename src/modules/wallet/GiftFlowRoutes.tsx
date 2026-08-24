@@ -105,8 +105,10 @@ async function finishGiftClaim(
   setClaimResult: (result: ClaimResult | null) => void,
 ) {
   if (!giftId) {
-    navigate('/wallet/gift/success')
-    return true
+    // Never fabricate a claim success with no real gift ID / no API call — reroute to the claim
+    // entry screen instead of a fake "redeemed" confirmation.
+    navigate('/wallet/gift/claim')
+    return false
   }
 
   try {

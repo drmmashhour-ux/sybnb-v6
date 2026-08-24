@@ -321,12 +321,6 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     setUploadedProofFiles((current) => Array.from(new Set([...current, ...names])))
   }
 
-  function addDemoProofFile() {
-    setUploadedProofFiles((current) =>
-      Array.from(new Set([...current, `SYBNB-payment-proof-${bookingId.slice(0, 8).toUpperCase()}.png`])),
-    )
-  }
-
   function paymentExportPayload() {
     return {
       exportedAt: new Date().toISOString(),
@@ -468,10 +462,6 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
             <input dir="ltr" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} />
           </label>
           <PaymentProofUpload lang={lang} files={uploadedProofFiles} onAddFiles={addProofFiles} />
-          <button type="button" className="wallet-secondary" onClick={addDemoProofFile}>
-            {t.demoProof}
-          </button>
-          <p className="wallet-note">{t.demoProofHelp}</p>
           <button className="wallet-primary" disabled={apiState === 'saving' || !canSubmitProof} onClick={submitProof}>
             {apiState === 'saving' ? t.saving : t.submit}
           </button>

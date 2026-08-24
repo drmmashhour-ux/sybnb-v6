@@ -423,9 +423,11 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setSendState('saving')
     setMessage('')
 
+    // Honest wording: only the file NAMES are captured here (no file storage is wired to this form
+    // yet) — the guest must actually send the files via WhatsApp/email, same as the ID-document flow.
     const introBody = isAr
-      ? `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nالمستندات المرفوعة: ${documents.join('، ')}`
-      : `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nUploaded documents: ${documents.join(', ')}`
+      ? `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nالمستندات المذكورة (أرسل الملفات فعلياً عبر واتساب/إيميل الدعم): ${documents.join('، ')}`
+      : `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nDocuments named (send the actual files via WhatsApp/support email): ${documents.join(', ')}`
 
     try {
       await sendListingInquiryMessage(selectedListing.id, introBody)

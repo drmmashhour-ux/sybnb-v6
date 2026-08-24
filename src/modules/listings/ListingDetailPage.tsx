@@ -538,7 +538,10 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             </div>
 
             <section style={styles.figmaTrustCard}>
-              <strong>{t.protectedTitle}</strong>
+              {/* "Protected" only applies to Stays, the one division that actually transacts through
+                  SYBNB — showing it on contact-only divisions would overclaim (matches the gating
+                  already applied to the payment-protected card further down). */}
+              {listing.division === 'STAYS' && <strong>{t.protectedTitle}</strong>}
               <small>
                 {reviewSummary.count > 0
                   ? `${t.rating} ${reviewSummary.average} ★ (${reviewSummary.count})`

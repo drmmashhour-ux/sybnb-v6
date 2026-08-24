@@ -13,6 +13,20 @@ export const CANCELLATION_ADMIN_FEE_CURRENCY = 'SYP'
 export const CANCELLATION_ADMIN_FEE_MINOR = Math.round(
   (CANCELLATION_ADMIN_FEE_USD_MINOR / 100) * Number(process.env.SYP_PER_USD || 15000),
 )
+
+// A booking's currency is whatever its listing was priced in (SYP or USD, the only two the Syria
+// country profile allows), and every wallet entry for that booking — refund, HOLD/RELEASE, admin
+// share reversal — is denominated in it. The cancellation fee must match, or it targets a wallet
+// the booking never touched: a USD-priced booking's guest has no SYP wallet activity, so debiting
+// the always-hardcoded SYP fee there fails the negative-balance guard and rolls back the guest's
+// entire (legitimate) refund along with it.
+export function cancellationAdminFee(currency) {
+  const normalized = String(currency || CANCELLATION_ADMIN_FEE_CURRENCY).toUpperCase()
+  if (normalized === 'USD') {
+    return { amountMinor: CANCELLATION_ADMIN_FEE_USD_MINOR, currency: 'USD' }
+  }
+  return { amountMinor: CANCELLATION_ADMIN_FEE_MINOR, currency: CANCELLATION_ADMIN_FEE_CURRENCY }
+}
 export const CANCELLATION_PROTECTION_RATE = 0.03
 export const STR_ADMIN_COMMISSION_RATE = 0.1
 export const STR_CLEANING_RATE = 0.05
@@ -65,12 +79,14 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   const rentMinor = metadataNumber(listingMetadata, 'rentMinor') || Math.round(staySplitBaseMinor / divisor)
   const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.round(rentMinor * STR_CLEANING_RATE)
   const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor)
-  const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
-  // rentMinor/cleaningFeeMinor come from seller-controlled listing.metadata (unvalidated) — cap the
-  // host's payout at what was actually paid (staySplitBaseMinor), same guard the non-STR branch above
-  // already has. Without this, a host could set an inflated metadata.rentMinor and be released more
-  // money than the guest ever paid.
-  const hostGrossMinor = Math.min(staySplitBaseMinor, Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor))
+  // rentMinor/cleaningFeeMinor/taxesMinor come from seller-controlled listing.metadata (unvalidated)
+  // and are informational only (the rent/cleaning/tax breakdown shown to admin/host). The actual
+  // money split is always computed from staySplitBaseMinor — the real, server-trusted paid amount —
+  // never from rentMinor. Deriving the commission from rentMinor let a host inflate it to drive
+  // hostGrossMinor toward the paid-amount cap while adminShareMinor (the platform's cut) collapsed
+  // toward zero; anchoring both to staySplitBaseMinor makes the 10% commission unconditional.
+  const adminCommissionMinor = Math.round(staySplitBaseMinor * STR_ADMIN_COMMISSION_RATE)
+  const hostGrossMinor = Math.max(0, staySplitBaseMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
 
   return {

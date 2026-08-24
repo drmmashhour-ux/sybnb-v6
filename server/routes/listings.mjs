@@ -4,6 +4,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
 import { resolveListingCityName } from '../lib/listing-location.mjs'
+import { isCurrencyAllowed } from '../lib/country.mjs'
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
 // Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
@@ -192,6 +193,15 @@ export async function handleListings(req, res, url, context) {
         locationId = location.id
       }
 
+      const currency = body.currency ? String(body.currency).toUpperCase() : 'SYP'
+      if (!isCurrencyAllowed(currency)) {
+        const error = new Error(`Currency '${currency}' is not supported for this country.`)
+        error.statusCode = 400
+        error.code = 'LISTING_CURRENCY_NOT_ALLOWED'
+        error.expose = true
+        throw error
+      }
+
       const listing = await db().listing.create({
         data: {
           ownerId: context.user.id,
@@ -201,7 +211,7 @@ export async function handleListings(req, res, url, context) {
           titleEn: body.titleEn || undefined,
           description: body.description || undefined,
           priceMinor,
-          currency: body.currency || 'SYP',
+          currency,
           instantBookEnabled: Boolean(body.instantBookEnabled),
           expiresAt,
           metadata: body.metadata || {},

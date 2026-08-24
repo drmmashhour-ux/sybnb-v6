@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
+import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
@@ -155,6 +156,7 @@ export async function handleAdmin(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     await completeExpiredBookings()
+    await expireStaleWalletGifts()
     const [listings, payments, gifts, bookings, idDocuments] = await Promise.all([
       db().listing.findMany({ where: { status: 'PENDING_REVIEW' }, take: 25 }),
       db().paymentProof.findMany({
@@ -331,7 +333,13 @@ export async function handleAdmin(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     const limit = Math.min(Number(url.searchParams.get('limit') || 50), 100)
+    const entityType = url.searchParams.get('entityType')
+    const action = url.searchParams.get('action')
     const auditLog = await db().adminAuditLog.findMany({
+      where: {
+        ...(entityType ? { entityType } : {}),
+        ...(action ? { action } : {}),
+      },
       include: {
         actor: {
           select: {
@@ -551,6 +559,21 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
       data: { status: decision === 'APPROVED' ? 'SENT' : 'ADMIN_BLOCKED' },
     })
     if (updated.count === 0) throw reviewStateError('GIFT_NOT_REVIEWABLE')
+    // The sender was debited atomically when the gift was created (server/routes/wallet.mjs). A
+    // blocked gift must never just vanish that money — refund the sender in the same transaction as
+    // the block decision, exactly like a rejected payment proof triggers a refund elsewhere.
+    if (decision !== 'APPROVED') {
+      await recordWalletEntry(tx, {
+        userId: existing.senderUserId,
+        type: 'REFUND',
+        amountMinor: existing.amountMinor,
+        currency: existing.currency,
+        referenceType: 'wallet_gift_blocked',
+        referenceId: existing.id,
+        keyParts: ['wallet-gift-blocked-refund', existing.id],
+        note: 'Wallet gift blocked by admin review; sender refunded.',
+      })
+    }
     return tx.walletGift.findUnique({ where: { id: entityId } })
   }
 

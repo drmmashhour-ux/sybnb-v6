@@ -1118,8 +1118,13 @@ export async function fetchPrototypeReviewQueue() {
   return response.queue
 }
 
-export async function fetchPrototypeAdminAuditLog(limit = 50) {
+export async function fetchPrototypeAdminAuditLog(
+  limit = 50,
+  filters?: { entityType?: string; action?: string },
+) {
   const params = new URLSearchParams({ limit: String(limit) })
+  if (filters?.entityType) params.set('entityType', filters.entityType)
+  if (filters?.action) params.set('action', filters.action)
   const response = await runAdminRequest((token) => apiRequest<{ ok: true; auditLog: PlatformAdminAuditLog[] }>(
     `/api/admin/audit-log?${params.toString()}`,
     {
@@ -1463,6 +1468,24 @@ export async function fetchPrototypeHostEarnings(mode: HostDashboardMode = 'host
   return response.earnings
 }
 
+// The KYC gate on /api/listings/:id/submit requires idDocumentStatus === 'APPROVED' for every
+// division. This is the host/seller-side counterpart to submitGuestIdDocument() — same endpoint,
+// same one-document-per-user model, just resolved through the host/seller session instead of the
+// guest one so a host actually has a way to satisfy the gate.
+export async function submitHostIdDocument(file: File, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{
+    ok: true
+    user: { id: string; idDocumentRef: string; idDocumentSubmittedAt: string; idDocumentStatus: string }
+  }>('/api/me/id-document', {
+    method: 'PATCH',
+    token: session.token,
+    body: { fileBase64, mimeType: file.type },
+  })
+  return response.user
+}
+
 export async function decidePrototypeHostRequest(
   bookingId: string,
   decision: 'CONFIRM' | 'CANCEL',
@@ -1513,6 +1536,18 @@ export async function updatePrototypeHostListingStatus(
     },
   )
   return response.listing
+}
+
+export async function deletePrototypeHostListing(listingId: string, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; deleted: string }>(
+    `/api/host/listings/${listingId}`,
+    {
+      method: 'DELETE',
+      token: session.token,
+    },
+  )
+  return response.deleted
 }
 
 export async function updatePrototypeHostInstantBook(

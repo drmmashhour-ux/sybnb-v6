@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { localeForLang } from '../../shared/country/presentation'
-import type { CSSProperties, ReactNode } from 'react'
+import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
@@ -97,10 +97,6 @@ const STR_ADMIN_COMMISSION_RATE = 0.1
 const STR_TAX_RATE = 0.02
 const STR_CLEANING_RATE = 0.05
 
-const todayStatBars = [42, 61, 51, 74, 86, 104, 64]
-
-const recentAdminUsers: Array<{ ar: string; en: string; statusAr: string; statusEn: string; tone: string; ageAr: string; ageEn: string }> = []
-
 export function AdminReviewPage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
@@ -151,37 +147,6 @@ export function AdminReviewPage({ lang }: Props) {
     () => auditLog.filter((entry) => matchesSearch([entry.action, entry.entityType, entry.entityId, entry.actor?.displayName, entry.actor?.email], normalizedSearch)),
     [auditLog, normalizedSearch],
   )
-  const activityItems = useMemo(() => {
-    const liveItems = visibleAuditLog.slice(0, 4).map((entry, index) => ({
-      label: auditActionText(entry.action, lang),
-      detail: isAr ? 'ÙÙØ° Ø¯ÙØ§Ø¦Ù' : 'Minutes ago',
-      tone: index % 3 === 0 ? 'green' : index % 3 === 1 ? 'gold' : 'red',
-    }))
-
-    if (liveItems.length >= 4) return liveItems
-
-    const fallback: Array<{ label: string; detail: string; tone: string }> = [] // no fabricated activity; show real audit items only
-
-    return [...liveItems, ...fallback].slice(0, 4)
-  }, [isAr, lang, visibleAuditLog])
-  const visibleTotal = visibleListings.length + visiblePayments.length + visibleGifts.length + visibleBookings.length
-  const nowLabel = new Intl.DateTimeFormat(localeForLang(isAr ? 'ar' : 'en'), {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date())
-  const timeLabel = new Intl.DateTimeFormat(localeForLang(isAr ? 'ar' : 'en'), {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date())
-  const filterItems: Array<{ id: AdminFilter; label: string; count: number }> = [
-    { id: 'all', label: t.all, count: visibleTotal + visibleAuditLog.length },
-    { id: 'listings', label: t.listings, count: visibleListings.length },
-    { id: 'payments', label: t.payments, count: visiblePayments.length },
-    { id: 'gifts', label: t.gifts, count: visibleGifts.length },
-    { id: 'bookings', label: t.bookings, count: visibleBookings.length },
-    { id: 'audit', label: t.audit, count: visibleAuditLog.length },
-  ]
 
   useEffect(() => {
     void loadQueue()
@@ -277,222 +242,6 @@ export function AdminReviewPage({ lang }: Props) {
       releasingPayoutId={releasingPayoutId}
       onReleasePayout={(id) => void releasePayout(id)}
     />
-  )
-
-  return (
-    <main dir={isAr ? 'rtl' : 'ltr'} className="admin-console">
-      <section className="admin-shell">
-        <aside className="admin-side">
-          <BrandLogo logo="platform" size="nav" className="admin-side-logo" />
-          <button className="active" onClick={() => setActiveFilter('all')}>{isAr ? 'ÙÙØ­Ø© Ø§ÙØªØ­ÙÙ' : 'Dashboard'} <span>â¦</span></button>
-          <button onClick={() => setActiveFilter('listings')}>{t.listings} <span>â¤</span></button>
-          <button onClick={() => setActiveFilter('payments')}>{t.payments} <span>â­</span></button>
-          <button onClick={() => (window.location.hash = '/finance')}>{isAr ? 'Ø§ÙÙØ§ÙÙØ©' : 'Finance'} <span>â¥</span></button>
-          <button onClick={() => (window.location.hash = '/ai-brain')}>AI Brain <span>â</span></button>
-          <button onClick={() => setActiveFilter('audit')}>{isAr ? 'Ø§ÙØªÙØ§Ø±ÙØ±' : 'Reports'} <span>â§</span></button>
-          <button onClick={() => (window.location.hash = '/')}>{t.back} <span>â©</span></button>
-        </aside>
-
-        <div className="admin-main">
-          <header className="admin-topbar">
-            <div className="admin-avatar" aria-hidden="true">A</div>
-            <div className="admin-language">AR <span /> EN</div>
-            <strong>{timeLabel}</strong>
-            <strong>{nowLabel}</strong>
-            <span>Platform Admin</span>
-            <BrandLogo logo="platform" size="nav" className="admin-wordmark" />
-          </header>
-
-          <section className="admin-metrics" aria-label={isAr ? 'ÙØ¤Ø´Ø±Ø§Øª Ø§ÙØ¥Ø¯Ø§Ø±Ø©' : 'Admin metrics'}>
-            <AdminMetric label={isAr ? 'ØªÙØ¨ÙÙØ§Øª' : 'Alerts'} value={String(visibleGifts.length + visibleBookings.length)} tone="red" icon="!" />
-            <AdminMetric label={isAr ? 'Ø§ÙÙØ¹Ø§ÙÙØ§Øª Ø§ÙÙÙÙ' : 'Transactions'} value={String(visiblePayments.length)} tone="gold" icon="â¡" />
-            <AdminMetric label={isAr ? 'Ø§ÙÙØ³ØªØ®Ø¯ÙÙÙ Ø§ÙÙØ´Ø·ÙÙ' : 'Active users'} value="—" tone="green" icon="â" />
-            <AdminMetric label={isAr ? 'Ø¥Ø¬ÙØ§ÙÙ Ø§ÙØ¥Ø¹ÙØ§ÙØ§Øª' : 'Total listings'} value={String(queue?.listings.length || 0)} tone="blue" icon="â£" />
-          </section>
-
-          <section className="admin-dashboard-grid">
-            <div className="admin-quick-panel">
-              <h2>{isAr ? 'Ø¥Ø¬Ø±Ø§Ø¡Ø§Øª Ø³Ø±ÙØ¹Ø©' : 'Quick actions'}</h2>
-              <button className="admin-primary-action" onClick={() => setActiveFilter('payments')}>{isAr ? 'ÙØ±Ø§Ø¬Ø¹Ø© Ø§ÙÙØ¯ÙÙØ¹Ø§Øª' : 'Review payments'} <span>â</span></button>
-              <button onClick={() => setActiveFilter('listings')}>{isAr ? 'Ø¥Ø¯Ø§Ø±Ø© Ø§ÙØ¥Ø¹ÙØ§ÙØ§Øª' : 'Manage listings'} <span>â</span></button>
-              <button className="admin-gold-action" onClick={() => setActiveFilter('audit')}>{isAr ? 'ØªÙØ±ÙØ± Ø§ÙÙÙÙ' : 'Today report'} <span>â¥</span></button>
-              <button onClick={() => void loadQueue()}>{t.refresh} <span>â»</span></button>
-              <div className="admin-ai-card">
-                <strong>{isAr ? 'ØªØ±ÙÙØ© Ø§ÙØ³ÙØ±ÙØ±' : 'Server upgrade'}</strong>
-                <p>{isAr ? 'Ø§Ø³ØªØ®Ø¯Ù Ø§ÙØ°Ø§ÙØ±Ø© Ø§ÙØ°ÙÙØ© ÙÙÙØµÙÙ Ø¥ÙÙ Ù¨Ù¥Ùª ÙÙ Ø§ÙÙØªØ§Ø¨Ø¹Ø©.' : 'Use smart memory to reach 85% platform tracking.'}</p>
-                <button onClick={() => setActiveFilter('all')}>{isAr ? 'Ø§Ø¨Ø¯Ø£ Ø§ÙØ¢Ù' : 'Start now'}</button>
-              </div>
-            </div>
-
-            <div className="admin-table-card">
-              <div className="admin-card-heading">
-                <button onClick={() => setActiveFilter('all')}>{isAr ? 'Ø¹Ø±Ø¶ Ø§ÙÙÙ' : 'View all'}</button>
-                <h2>{isAr ? 'Ø£Ø­Ø¯Ø« Ø§ÙØ¥Ø¹ÙØ§ÙØ§Øª' : 'Latest listings'}</h2>
-              </div>
-              <div className="admin-table">
-                {(visibleListings.length ? visibleListings : queue?.listings || []).length > 0 ? (
-                  (visibleListings.length ? visibleListings : queue?.listings || []).slice(0, 5).map((listing) => (
-                    <button key={listing.id} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-                      <span>{listingTitleText(listing, lang)}</span>
-                      <small>{divisionText(listing.division, lang)}</small>
-                      <strong>{statusText(listing.status, lang)}</strong>
-                    </button>
-                  ))
-                ) : (
-                  <p className="admin-empty-row">{status === 'loading' ? t.loading : t.empty}</p>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <section className="admin-activity-panel" aria-label={isAr ? 'Ø¢Ø®Ø± Ø§ÙØ£ÙØ´Ø·Ø©' : 'Latest activity'}>
-            <div className="admin-section-title">
-              <button onClick={() => setActiveFilter('audit')}>{isAr ? 'Ø´Ø§ÙØ¯ Ø§ÙØ³Ø¬Ù Ø§ÙÙØ§ÙÙ' : 'View full log'}</button>
-              <h2>{isAr ? 'Ø¢Ø®Ø± Ø§ÙØ£ÙØ´Ø·Ø©' : 'Latest Activity'}</h2>
-            </div>
-            <div className="admin-activity-strip">
-              {activityItems.map((item) => (
-                <button key={`${item.label}-${item.detail}`} className={`admin-activity-chip ${item.tone}`} onClick={() => setActiveFilter('audit')}>
-                  <span>{item.label}</span>
-                  <small>{item.detail}</small>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-insight-card admin-stats-card" aria-label={isAr ? 'Ø¥Ø­ØµØ§Ø¦ÙØ§Øª Ø§ÙÙÙÙ' : 'Today stats'}>
-            <div className="admin-section-title">
-              <span>{isAr ? 'Today Stats' : 'Today Stats'}</span>
-              <h2>{isAr ? 'Ø¥Ø­ØµØ§Ø¦ÙØ§Øª Ø§ÙÙÙÙ' : 'Today Stats'}</h2>
-            </div>
-            <div className="admin-bar-chart">
-              {todayStatBars.map((height, index) => (
-                <span key={height} className={index === 5 ? 'gold' : ''} style={{ '--bar-height': `${height}px` } as CSSProperties} />
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-insight-card admin-users-card" aria-label={isAr ? 'Ø¢Ø®Ø± Ø§ÙÙØ³ØªØ®Ø¯ÙÙÙ' : 'Recent users'}>
-            <div className="admin-section-title">
-              <span>{isAr ? 'Recent Users' : 'Recent Users'}</span>
-              <h2>{isAr ? 'Ø¢Ø®Ø± Ø§ÙÙØ³ØªØ®Ø¯ÙÙÙ' : 'Recent Users'}</h2>
-            </div>
-            <div className="admin-recent-list">
-              {recentAdminUsers.map((user) => (
-                <article key={user.en}>
-                  <strong>{isAr ? user.ar[0] : user.en[0]}</strong>
-                  <div>
-                    <b>{isAr ? user.ar : user.en}</b>
-                    <small>{isAr ? user.ageAr : user.ageEn}</small>
-                  </div>
-                  <span className={user.tone}>{isAr ? user.statusAr : user.statusEn}</span>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="admin-tools">
-            <input
-              aria-label={t.search}
-              placeholder={t.search}
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-            />
-            <div>
-              {filterItems.map((item) => (
-                <button
-                  key={item.id}
-                  className={activeFilter === item.id ? 'active' : ''}
-                  onClick={() => setActiveFilter(item.id)}
-                >
-                  {item.label} {item.count}
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
-      </section>
-
-      {status === 'error' && (
-        <section style={styles.alert}>
-          <strong>{t.error}</strong>
-          <span>{message}</span>
-        </section>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'listings') && (
-      <ReviewSection title={t.listings} empty={t.empty}>
-        {visibleListings.map((listing) => (
-          <ListingReviewCard
-            key={listing.id}
-            listing={listing}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('listings', listing.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'payments') && (
-      <ReviewSection title={t.payments} empty={t.empty}>
-        {visiblePayments.map((payment) => (
-          <PaymentReviewCard
-            key={payment.id}
-            payment={payment}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, provider: t.provider, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('payments', payment.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'gifts') && (
-      <ReviewSection title={t.gifts} empty={t.empty}>
-        {visibleGifts.map((gift) => (
-          <GiftReviewCard
-            key={gift.id}
-            gift={gift}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('gifts', gift.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'bookings') && (
-      <ReviewSection title={t.bookings} empty={t.empty}>
-        {visibleBookings.map((booking) => (
-          <BookingReviewCard
-            key={booking.id}
-            booking={booking}
-            labels={{ approve: t.approve, reject: t.reject, price: t.price, listing: t.listing, details: t.details }}
-            lang={lang}
-            disabled={status === 'saving'}
-            onDecision={(decision) => void decide('bookings', booking.id, decision)}
-          />
-        ))}
-      </ReviewSection>
-      )}
-
-      {(activeFilter === 'all' || activeFilter === 'audit') && (
-      <ReviewSection title={t.audit} empty={t.auditEmpty}>
-        {visibleAuditLog.map((entry) => (
-          <AuditLogCard
-            key={entry.id}
-            entry={entry}
-            labels={{ actor: t.actor, entity: t.entity, details: t.details }}
-            lang={lang}
-          />
-        ))}
-      </ReviewSection>
-      )}
-    </main>
   )
 }
 
@@ -1250,7 +999,7 @@ function ShortRentAdminCommandDashboard({
                 </div>
                 <div style={commandStyles.proofMoney}>
                   <strong>{moneyText(payment.amountMinor, payment.currency, lang)}</strong>
-                  <span>94% AI Confidence</span>
+                  <span>{createAiPaymentReview(payment, isAr).label}</span>
                 </div>
                 <div style={commandStyles.aiMiniDecision}>
                   <b>{createAiPaymentReview(payment, isAr).title}</b>
@@ -1337,16 +1086,16 @@ function ShortRentAdminCommandDashboard({
           <button style={commandStyles.outlineGold} onClick={() => stagePayoutDecision('HELD')}>{isAr ? 'ØªØ¹ÙÙÙ Ø§ÙØ¯ÙØ¹Ø©' : 'Hold payout'}</button>
         </article>
         <article style={commandStyles.drawerCard}>
-          <h2>{isAr ? 'Ø¥Ø´Ø§Ø±Ø§Øª AI Brain' : 'AI Brain signals'} <small>ADVISORY ONLY</small></h2>
-          {['Ø¥Ø«Ø¨Ø§Øª Ø§ÙØ¯ÙØ¹: Ø«ÙØ© 94%', 'ÙØ§ ÙÙØ¬Ø¯ ØªÙØ±Ø§Ø±', 'Ø§ÙØ¥Ø¹ÙØ§Ù ÙØ·Ø§Ø¨Ù Ø§ÙØ­Ø¬Ø²', 'ÙÙÙØ© Ø§ÙÙØ¹Ø§ÙÙØ© Ø£Ø¹ÙÙ ÙÙ Ø§ÙÙØªÙØ³Ø·', 'ÙØ§ ÙØ®Ø§Ø·Ø± Ø¹ÙÙ Ø§ÙØ§ÙØªÙØ§Ø¡ ÙÙ Ø§ÙØ±Ø­ÙØ©'].map((signal, index) => (
-            <p key={signal} style={commandStyles.signalLine}>
-              <span>{index === 3 ? 'â ' : 'â'}</span>
-              {isAr ? signal : signal.replace('Ø¥Ø«Ø¨Ø§Øª Ø§ÙØ¯ÙØ¹: Ø«ÙØ©', 'Payment proof confidence').replace('ÙØ§ ÙÙØ¬Ø¯ ØªÙØ±Ø§Ø±', 'No duplicate detected').replace('Ø§ÙØ¥Ø¹ÙØ§Ù ÙØ·Ø§Ø¨Ù Ø§ÙØ­Ø¬Ø²', 'Listing matches booking').replace('ÙÙÙØ© Ø§ÙÙØ¹Ø§ÙÙØ© Ø£Ø¹ÙÙ ÙÙ Ø§ÙÙØªÙØ³Ø·', 'Above-average transaction value').replace('ÙØ§ ÙØ®Ø§Ø·Ø± Ø¹ÙÙ Ø§ÙØ§ÙØªÙØ§Ø¡ ÙÙ Ø§ÙØ±Ø­ÙØ©', 'Low trip completion risk')}
+          <h2>{isAr ? 'إشارات AI Brain' : 'AI Brain signals'} <small>ADVISORY ONLY</small></h2>
+          {createAiPaymentReview(previewPayment, isAr).reasons.map((reason, index) => (
+            <p key={reason} style={commandStyles.signalLine}>
+              <span>{index === 0 ? '!' : '•'}</span>
+              {reason}
             </p>
           ))}
           <div style={commandStyles.riskPair}>
-            <strong>Risk Score <b>LOW</b></strong>
-            <strong>Patterns <b>NORMAL</b></strong>
+            <strong>{isAr ? 'حالة إثبات الدفع' : 'Proof status'} <b>{createAiPaymentReview(previewPayment, isAr).label}</b></strong>
+            <strong>{isAr ? 'مطابقة شام كاش' : 'Sham Cash match'} <b>{shamCashReconciliation.isMatched ? (isAr ? 'مطابق' : 'MATCHED') : (isAr ? 'غير مطابق' : 'MISMATCH')}</b></strong>
           </div>
         </article>
       </section>
@@ -1719,24 +1468,6 @@ function shortBookingReference(booking: PlatformReviewBooking | undefined) {
   return `BK-${id.slice(0, 4).toUpperCase()}-${id.slice(4, 8).toUpperCase()}`
 }
 
-function createFallbackPayments(lang: Lang): PlatformPaymentProof[] {
-  return [0, 1, 2].map((index) => ({
-    id: `STR-FALLBACK-${index}`,
-    bookingId: `97cd8153-${index}`,
-    userId: `guest-${index}`,
-    provider: 'LOCAL_WALLET',
-    status: 'PENDING',
-    amountMinor: 23540000,
-    currency: 'SYP',
-    proofAssetUrl: null,
-    providerRef: `792C79D${index}`,
-    adminNote: null,
-    reviewedById: null,
-    reviewedAt: null,
-    user: { id: `guest-${index}`, displayName: lang === 'ar' ? 'Ø¹ÙÙÙ SYBNB' : 'SYBNB Guest', email: null },
-  }))
-}
-
 function createShortRentLedger(totalMinor: number) {
   const divisor = 1 + STR_CLEANING_RATE + STR_TAX_RATE
   const rentMinor = Math.round(totalMinor / divisor)
@@ -2015,293 +1746,6 @@ const commandStyles: Record<string, CSSProperties> = {
   disputeButton: { background: 'transparent', border: '1px solid #ff744d', borderRadius: 8, color: '#ff744d', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   outlineGold: { background: 'transparent', border: '1px solid #e6b80d', borderRadius: 8, color: '#e6b80d', fontWeight: 950, minHeight: 44, padding: '0 14px' },
   secondaryCommand: { background: 'transparent', border: '1px solid rgba(255,255,255,.3)', borderRadius: 8, color: '#d9deea', fontWeight: 950, minHeight: 44, padding: '0 14px' },
-}
-
-function AdminMetric({ label, value, icon, tone }: { label: string; value: string; icon: string; tone: 'red' | 'gold' | 'green' | 'blue' }) {
-  return (
-    <article className={`admin-metric ${tone}`}>
-      <span>{icon}</span>
-      <small>{label}</small>
-      <strong>{value}</strong>
-    </article>
-  )
-}
-
-function ReviewSection({ title, empty, children }: { title: string; empty: string; children: ReactNode }) {
-  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children)
-
-  return (
-    <section style={styles.section}>
-      <h2 style={styles.sectionTitle}>{title}</h2>
-      {hasChildren ? <div style={styles.grid}>{children}</div> : <p style={styles.empty}>{empty}</p>}
-    </section>
-  )
-}
-
-function ListingReviewCard({
-  listing,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  listing: PlatformListing
-  labels: { approve: string; reject: string; price: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(listing.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{listingTitleText(listing, lang)}</h3>
-      <p style={styles.cardBody}>{listingDescriptionText(listing, lang)}</p>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
-      </div>
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-        {labels.details}
-      </button>
-      <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-    </article>
-  )
-}
-
-function PaymentReviewCard({
-  payment,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  payment: PlatformPaymentProof
-  labels: { approve: string; reject: string; price: string; provider: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  const isApproved = payment.status === 'APPROVED'
-  const isRejected = payment.status === 'REJECTED'
-  const isFinal = isApproved || isRejected
-  const confirmationText = isApproved
-    ? lang === 'ar'
-      ? 'ØªÙ Ø¥Ø±Ø³Ø§Ù ØªØ£ÙÙØ¯ Ø§ÙØ¯ÙØ¹ ÙÙØ¹ÙÙÙ'
-      : 'Payment confirmation sent to client'
-    : lang === 'ar'
-      ? 'ØªÙ Ø¥Ø±Ø³Ø§Ù ÙØªÙØ¬Ø© Ø§ÙØ±ÙØ¶ ÙÙØ¹ÙÙÙ'
-      : 'Payment rejection sent to client'
-
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(payment.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{payment.providerRef || payment.id.slice(0, 8).toUpperCase()}</h3>
-      <div style={styles.meta}>
-        <span>{labels.provider}</span>
-        <strong>{providerText(payment.provider, lang)}</strong>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(payment.amountMinor, payment.currency, lang)}</strong>
-      </div>
-      {!isFinal && (
-        <p style={styles.moneyReceivedWarning}>
-          {lang === 'ar' ? 'ÙØ§ÙÙ ÙÙØ· Ø¨Ø¹Ø¯ Ø§ÙØªØ£ÙØ¯ ÙÙ Ø§Ø³ØªÙØ§Ù Ø§ÙÙØ§Ù ÙÙØ·Ø§Ø¨ÙØ© Ø§ÙØ¥Ø«Ø¨Ø§Øª.' : 'Approve only after confirming money was received and proof matches.'}
-        </p>
-      )}
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/payment/receipt/${payment.id}`)}>
-        {labels.details}
-      </button>
-      {isFinal ? (
-        <p style={{ ...styles.confirmationNote, ...(isApproved ? styles.confirmationNoteApproved : styles.confirmationNoteRejected) }}>
-          {confirmationText}
-        </p>
-      ) : (
-        <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-      )}
-    </article>
-  )
-}
-
-function BookingReviewCard({
-  booking,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  booking: PlatformReviewBooking
-  labels: { approve: string; reject: string; price: string; listing: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  const title = booking.listing ? listingTitleText(booking.listing, lang) : booking.id.slice(0, 8).toUpperCase()
-
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(booking.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{title}</h3>
-      <div style={styles.meta}>
-        <span>{labels.listing}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{booking.listing?.division ? divisionText(booking.listing.division, lang) : booking.listingId.slice(0, 8).toUpperCase()}</strong>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(booking.amountMinor, booking.currency, lang)}</strong>
-      </div>
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/booking/${booking.id}`)}>
-        {labels.details}
-      </button>
-      <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-    </article>
-  )
-}
-
-function GiftReviewCard({
-  gift,
-  labels,
-  lang,
-  disabled,
-  onDecision,
-}: {
-  gift: PlatformWalletGift
-  labels: { approve: string; reject: string; price: string; details: string }
-  lang: Lang
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  return (
-    <article style={styles.card}>
-      <span style={styles.status}>{statusText(gift.status, lang)}</span>
-      <h3 style={styles.cardTitle}>{gift.message || gift.id.slice(0, 8).toUpperCase()}</h3>
-      <div style={styles.meta}>
-        <span>{labels.price}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(gift.amountMinor, gift.currency, lang)}</strong>
-      </div>
-      <button style={styles.secondaryButton} onClick={() => (window.location.hash = `/wallet/gift/claim/${gift.id}`)}>
-        {labels.details}
-      </button>
-      <DecisionActions labels={labels} disabled={disabled} onDecision={onDecision} />
-    </article>
-  )
-}
-
-function DecisionActions({
-  labels,
-  disabled,
-  onDecision,
-}: {
-  labels: { approve: string; reject: string }
-  disabled: boolean
-  onDecision: (decision: 'APPROVE' | 'REJECT') => void
-}) {
-  return (
-    <div style={styles.actions}>
-      <button disabled={disabled} style={styles.primaryButton} onClick={() => onDecision('APPROVE')}>
-        {labels.approve}
-      </button>
-      <button disabled={disabled} style={styles.dangerButton} onClick={() => onDecision('REJECT')}>
-        {labels.reject}
-      </button>
-    </div>
-  )
-}
-
-function AuditLogCard({
-  entry,
-  labels,
-  lang,
-}: {
-  entry: PlatformAdminAuditLog
-  labels: { actor: string; entity: string; details: string }
-  lang: Lang
-}) {
-  const date = new Intl.DateTimeFormat(localeForLang(lang), {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(entry.createdAt))
-  const actorName = entry.actor?.displayName || entry.actor?.email || entry.actorUserId?.slice(0, 8) || (lang === 'ar' ? 'Ø§ÙÙØ¸Ø§Ù' : 'System')
-  const detailRoute = auditDetailRoute(entry)
-
-  return (
-    <article style={styles.auditCard}>
-      <div style={styles.auditHeader}>
-        <strong>{auditActionText(entry.action, lang)}</strong>
-        <span>{date}</span>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.entity}</span>
-        <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>
-          {auditEntityText(entry.entityType, lang)} / {entry.entityId.slice(0, 8).toUpperCase()}
-        </strong>
-      </div>
-      <div style={styles.meta}>
-        <span>{labels.actor}</span>
-        <strong>{actorName}</strong>
-      </div>
-      {detailRoute && (
-        <button style={styles.secondaryButton} onClick={() => (window.location.hash = detailRoute)}>
-          {labels.details}
-        </button>
-      )}
-    </article>
-  )
-}
-
-function auditActionText(action: string, lang: Lang) {
-  const labels: Record<string, Record<Lang, string>> = {
-    APPROVE: { ar: 'ÙÙØ§ÙÙØ©', en: 'Approve' },
-    APPROVED: { ar: 'ØªÙØª Ø§ÙÙÙØ§ÙÙØ©', en: 'Approved' },
-    REJECT: { ar: 'Ø±ÙØ¶', en: 'Reject' },
-    REJECTED: { ar: 'ØªÙ Ø§ÙØ±ÙØ¶', en: 'Rejected' },
-    CREATE: { ar: 'Ø¥ÙØ´Ø§Ø¡', en: 'Create' },
-    CREATED: { ar: 'ØªÙ Ø§ÙØ¥ÙØ´Ø§Ø¡', en: 'Created' },
-    BOOKING_CONFIRMED: { ar: 'ØªÙ ØªØ£ÙÙØ¯ Ø§ÙØ­Ø¬Ø²', en: 'Booking confirmed' },
-    BOOKING_DISPUTED: { ar: 'ØªÙ ÙØªØ­ ÙØ²Ø§Ø¹ ÙÙØ­Ø¬Ø²', en: 'Booking disputed' },
-    DRIVER_ARRIVING: { ar: 'Ø§ÙØ³Ø§Ø¦Ù ÙÙ Ø§ÙØ·Ø±ÙÙ', en: 'Driver arriving' },
-    DRIVER_ASSIGNED: { ar: 'ØªÙ ØªØ¹ÙÙÙ Ø§ÙØ³Ø§Ø¦Ù', en: 'Driver assigned' },
-    DRIVER_COMPLETED: { ar: 'ØªÙ Ø¥ÙÙØ§Ø¡ Ø§ÙØ±Ø­ÙØ©', en: 'Driver completed' },
-    DRIVER_DRIVER_ARRIVING: { ar: 'Ø§ÙØ³Ø§Ø¦Ù ÙÙ Ø§ÙØ·Ø±ÙÙ', en: 'Driver arriving' },
-    DRIVER_IN_PROGRESS: { ar: 'Ø§ÙØ±Ø­ÙØ© ÙÙØ¯ Ø§ÙØªÙÙÙØ°', en: 'Driver in progress' },
-    HOST_CONFIRMED: { ar: 'Ø£ÙØ¯ Ø§ÙÙØ¶ÙÙ Ø§ÙØ·ÙØ¨', en: 'Host confirmed' },
-    HOST_LISTING_APPROVED: { ar: 'ØªÙ ÙØ¨ÙÙ Ø¥Ø¹ÙØ§Ù Ø§ÙÙØ¶ÙÙ', en: 'Host listing approved' },
-    HOST_LISTING_PAUSED: { ar: 'ØªÙ Ø¥ÙÙØ§Ù Ø¥Ø¹ÙØ§Ù Ø§ÙÙØ¶ÙÙ', en: 'Host listing paused' },
-    PAYMENT_APPROVED: { ar: 'ØªÙ ÙØ¨ÙÙ Ø§ÙØ¯ÙØ¹', en: 'Payment approved' },
-    PAYMENT_REJECTED: { ar: 'ØªÙ Ø±ÙØ¶ Ø§ÙØ¯ÙØ¹', en: 'Payment rejected' },
-    REVIEW_APPROVED: { ar: 'ØªÙØª Ø§ÙÙÙØ§ÙÙØ© ÙÙ Ø§ÙÙØ±Ø§Ø¬Ø¹Ø©', en: 'Review approved' },
-    REVIEW_REJECTED: { ar: 'ØªÙ Ø§ÙØ±ÙØ¶ ÙÙ Ø§ÙÙØ±Ø§Ø¬Ø¹Ø©', en: 'Review rejected' },
-    RIDE_REQUESTED: { ar: 'ØªÙ Ø·ÙØ¨ Ø±Ø­ÙØ©', en: 'Ride requested' },
-    SR_DRIVER_ASSIGNED: { ar: 'ØªÙ ØªØ¹ÙÙÙ Ø³Ø§Ø¦Ù SR', en: 'SR driver assigned' },
-    UPDATE: { ar: 'ØªØ­Ø¯ÙØ«', en: 'Update' },
-    UPDATED: { ar: 'ØªÙ Ø§ÙØªØ­Ø¯ÙØ«', en: 'Updated' },
-  }
-  return labels[action]?.[lang] || (lang === 'ar' ? action.replace(/_/g, ' ') : action.replace(/_/g, ' '))
-}
-
-function auditEntityText(entityType: string, lang: Lang) {
-  const labels: Record<string, Record<Lang, string>> = {
-    booking: { ar: 'Ø­Ø¬Ø²', en: 'Booking' },
-    bookings: { ar: 'Ø­Ø¬ÙØ²Ø§Øª', en: 'Bookings' },
-    gift: { ar: 'ÙØ¯ÙØ©', en: 'Gift' },
-    gifts: { ar: 'ÙØ¯Ø§ÙØ§', en: 'Gifts' },
-    listing: { ar: 'Ø¥Ø¹ÙØ§Ù', en: 'Listing' },
-    listings: { ar: 'Ø¥Ø¹ÙØ§ÙØ§Øª', en: 'Listings' },
-    payment: { ar: 'Ø¯ÙØ¹', en: 'Payment' },
-    payments: { ar: 'ÙØ¯ÙÙØ¹Ø§Øª', en: 'Payments' },
-    payment_proofs: { ar: 'Ø¥Ø«Ø¨Ø§Øª Ø¯ÙØ¹', en: 'Payment proof' },
-    ride_requests: { ar: 'Ø±Ø­ÙØ§Øª', en: 'Ride requests' },
-  }
-  return labels[entityType.toLowerCase()]?.[lang] || entityType.replace(/_/g, ' ')
-}
-
-function auditDetailRoute(entry: PlatformAdminAuditLog) {
-  const entityType = entry.entityType.toLowerCase()
-  if (entityType === 'listings' || entityType === 'listing') return `/listing/${entry.entityId}`
-  if (entityType === 'bookings' || entityType === 'booking') return `/booking/${entry.entityId}`
-  if (entityType === 'payments' || entityType === 'payment' || entityType === 'payment_proofs') return `/payment/receipt/${entry.entityId}`
-  if (entityType === 'ride_requests') return '/driver'
-  return ''
 }
 
 const styles: Record<string, CSSProperties> = {

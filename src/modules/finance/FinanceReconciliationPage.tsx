@@ -118,6 +118,7 @@ export function FinanceReconciliationPage({ lang }: Props) {
   const [message, setMessage] = useState('')
   const [releasingId, setReleasingId] = useState<string | null>(null)
   const [releaseError, setReleaseError] = useState('')
+  const [recentRejectionCount, setRecentRejectionCount] = useState(0)
 
   useEffect(() => {
     void loadFinance()
@@ -127,16 +128,18 @@ export function FinanceReconciliationPage({ lang }: Props) {
     setStatus('loading')
     setMessage('')
     try {
-      const [nextQueue, nextAuditLog, nextPayouts, nextMetrics] = await Promise.all([
+      const [nextQueue, nextAuditLog, nextPayouts, nextMetrics, nextRejections] = await Promise.all([
         fetchPrototypeReviewQueue(),
         fetchPrototypeAdminAuditLog(10),
         fetchAdminPayouts(),
         fetchPrototypeAdminMetrics(),
+        fetchPrototypeAdminAuditLog(100, { entityType: 'payments', action: 'REVIEW_REJECTED' }),
       ])
       setQueue(nextQueue)
       setAuditLog(nextAuditLog)
       setPayouts(nextPayouts.payouts)
       setMetrics(nextMetrics)
+      setRecentRejectionCount(nextRejections.length)
       setStatus('ready')
     } catch (error) {
       setStatus('error')
@@ -171,9 +174,6 @@ export function FinanceReconciliationPage({ lang }: Props) {
     ? payments.reduce((sum, item) => sum + item.amountMinor, 0) / payments.length
     : 0
   const aboveAverageCount = payments.filter((item) => item.amountMinor > averagePendingMinor).length
-  const recentRejectionCount = auditLog.filter(
-    (entry) => entry.entityType === 'payments' && entry.action === 'REVIEW_REJECTED',
-  ).length
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>

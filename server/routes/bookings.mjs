@@ -1,9 +1,8 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import {
-  CANCELLATION_ADMIN_FEE_CURRENCY,
-  CANCELLATION_ADMIN_FEE_MINOR,
   bookingFinanceSplit,
+  cancellationAdminFee,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
@@ -94,11 +93,12 @@ export async function handleBookings(req, res, url, context) {
         })
 
         if (!protectedByAddOn) {
+          const fee = cancellationAdminFee(existing.currency)
           await recordWalletEntry(tx, {
             userId: existing.guestId,
             type: 'DEBIT',
-            amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+            amountMinor: fee.amountMinor,
+            currency: fee.currency,
           referenceType: 'booking_guest_cancel_fee',
           referenceId: existing.id,
           keyParts: ['booking-guest-cancel-fee-guest', existing.id, approvedPayment.id],
@@ -108,8 +108,8 @@ export async function handleBookings(req, res, url, context) {
           await recordWalletEntry(tx, {
             userId: adminRecipientId,
             type: 'CREDIT',
-            amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+            amountMinor: fee.amountMinor,
+            currency: fee.currency,
           referenceType: 'booking_guest_cancel_fee',
           referenceId: existing.id,
           keyParts: ['booking-guest-cancel-fee-admin', existing.id, approvedPayment.id],
@@ -146,8 +146,8 @@ export async function handleBookings(req, res, url, context) {
           ...booking,
           cancellationNote: body.note || body.reason || undefined,
           cancellationFee: {
-            amountMinor: booking.metadata?.cancellationProtectionPurchased === true ? 0 : CANCELLATION_ADMIN_FEE_MINOR,
-            currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+            amountMinor: booking.metadata?.cancellationProtectionPurchased === true ? 0 : cancellationAdminFee(booking.currency).amountMinor,
+            currency: cancellationAdminFee(booking.currency).currency,
             chargedTo: 'GUEST',
             waivedByProtection: booking.metadata?.cancellationProtectionPurchased === true,
           },

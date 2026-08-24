@@ -62,6 +62,17 @@ export function supportedCountries() {
   return Object.keys(REGISTRY)
 }
 
+// Whether a currency code is one the active country's profile actually allows. Route handlers use
+// this to reject a client-supplied listing/booking currency before it's stored — otherwise a
+// currency with no matching wallet/FX/fee configuration anywhere in the platform (e.g. a currency
+// the country profile never enabled) could get attached to real money-moving records.
+export function isCurrencyAllowed(currency, env = process.env) {
+  const { profile } = loadCountryProfile(env)
+  if (!profile) return false
+  const allowed = profile.currencies.allowed.map((c) => String(c).toUpperCase())
+  return allowed.includes(String(currency || '').toUpperCase())
+}
+
 // Whether the ACTIVE country enables a communication channel. Defaults to false (fail-closed): a
 // channel is reachable only if the loaded profile explicitly enables it. Used to keep the SMS
 // adapter unreachable under email-only countries (Syria).

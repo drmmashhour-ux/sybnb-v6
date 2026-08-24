@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { giftClaimCode, hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 
 export async function handleWallet(req, res, url, context) {
   if (url.pathname === '/api/wallet') {
@@ -137,6 +138,7 @@ export async function handleWallet(req, res, url, context) {
     requireAuth(context)
     const body = await readJson(req)
     const phoneHash = hashPhone(body.phone)
+    await expireStaleWalletGifts()
     const gift = await db().walletGift.findUnique({
       where: { id: claimMatch[1] },
     })

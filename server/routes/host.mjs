@@ -1,11 +1,11 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { resolveListingCityName } from '../lib/listing-location.mjs'
+import { isCurrencyAllowed } from '../lib/country.mjs'
 import {
-  CANCELLATION_ADMIN_FEE_CURRENCY,
-  CANCELLATION_ADMIN_FEE_MINOR,
   bookingFinanceSplit,
   buildPayoutRow,
+  cancellationAdminFee,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
@@ -235,11 +235,12 @@ export async function handleHost(req, res, url, context) {
           note: 'Admin/SYBNB share reversed because the protected booking was refunded.',
         })
 
+        const hostCancelFee = cancellationAdminFee(existing.currency)
         await recordWalletEntry(tx, {
           userId: existing.listing.ownerId,
           type: 'DEBIT',
-          amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-          currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+          amountMinor: hostCancelFee.amountMinor,
+          currency: hostCancelFee.currency,
           referenceType: 'booking_host_cancel_fee',
           referenceId: existing.id,
           keyParts: ['booking-host-cancel-fee-host', existing.id, approvedPayment?.id],
@@ -249,8 +250,8 @@ export async function handleHost(req, res, url, context) {
         await recordWalletEntry(tx, {
           userId: adminRecipientId,
           type: 'CREDIT',
-          amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-          currency: CANCELLATION_ADMIN_FEE_CURRENCY,
+          amountMinor: hostCancelFee.amountMinor,
+          currency: hostCancelFee.currency,
           referenceType: 'booking_host_cancel_fee',
           referenceId: existing.id,
           keyParts: ['booking-host-cancel-fee-admin', existing.id, approvedPayment?.id],
@@ -459,7 +460,17 @@ export async function handleHost(req, res, url, context) {
       }
       if (body.titleEn !== undefined) data.titleEn = body.titleEn || null
       if (body.description !== undefined) data.description = body.description || null
-      if (body.currency !== undefined) data.currency = String(body.currency)
+      if (body.currency !== undefined) {
+        const currency = String(body.currency).toUpperCase()
+        if (!isCurrencyAllowed(currency)) {
+          const error = new Error(`Currency '${currency}' is not supported for this country.`)
+          error.statusCode = 400
+          error.code = 'LISTING_CURRENCY_NOT_ALLOWED'
+          error.expose = true
+          throw error
+        }
+        data.currency = currency
+      }
       if (body.metadata !== undefined) {
         data.metadata = body.metadata || {}
         // Keep the Location relation in sync if the edit changes governorate/area — otherwise city

@@ -400,19 +400,16 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    const amountMinor = Number(body.amountMinor || booking?.amountMinor || 0)
+    // When a booking is linked, its amountMinor is the real, server-computed truth — never trust a
+    // client-supplied figure here (only a floor check existed before, with no ceiling, so a guest
+    // could claim an arbitrarily inflated amountMinor and have it flow straight into the approved
+    // payment proof an admin reviews). Client input is only used for the no-booking case (e.g. a
+    // standalone seller-plan/advertising payment), which has no independent amount to check against.
+    const amountMinor = booking ? booking.amountMinor : Number(body.amountMinor || 0)
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
       const error = new Error('Payment proof amount must be greater than zero.')
       error.statusCode = 400
       error.code = 'PAYMENT_AMOUNT_INVALID'
-      error.expose = true
-      throw error
-    }
-
-    if (booking && amountMinor < booking.amountMinor) {
-      const error = new Error('Payment proof amount is lower than the booking amount.')
-      error.statusCode = 400
-      error.code = 'PAYMENT_AMOUNT_TOO_LOW'
       error.expose = true
       throw error
     }

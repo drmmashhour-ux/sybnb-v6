@@ -546,12 +546,18 @@ function ShortRentAdminCommandDashboard({
     isAr ? 'Ø¥ØºÙØ§Ù Ø§ÙÙØ¹Ø§ÙÙØ©' : 'Transaction closed',
   ]
 
+  // Real, per-host checks only — no fabricated score or unconditional "all clear" checklist next
+  // to the payout-release button. Each line is derived from data already fetched for this
+  // payment/booking, not a static claim shown identically for every host.
   const hostChecks = [
-    isAr ? 'ØµØ­Ø© Ø§ÙØ¥Ø¹ÙØ§Ù' : 'Listing health',
-    isAr ? 'Ø¬Ø§ÙØ²ÙØ© Ø§ÙØ¹ÙØ§Ø±' : 'Property ready',
-    isAr ? 'ÙØ¨ÙÙ Ø´Ø±ÙØ· SYBNB' : 'SYBNB terms accepted',
-    isAr ? 'Ø¹Ø¯Ù Ø·ÙØ¨ Ø¯ÙØ¹ Ø®Ø§Ø±Ø¬Ù' : 'No outside payment',
-    isAr ? 'Ø³ÙØ§Ø³Ø© Ø§ÙØ¥ÙØºØ§Ø¡' : 'Cancellation policy',
+    {
+      ok: previewPayment?.booking?.listing?.status === 'APPROVED',
+      label: isAr ? 'الإعلان معتمد من الإدارة' : 'Listing approved by admin',
+    },
+    {
+      ok: !(selectedBooking && isBookingDisputed(selectedBooking)),
+      label: isAr ? 'لا يوجد نزاع مفتوح' : 'No open dispute',
+    },
   ]
 
   return (
@@ -660,19 +666,18 @@ function ShortRentAdminCommandDashboard({
         <aside style={commandStyles.leftRail}>
           <article style={commandStyles.sideCard}>
             <div style={commandStyles.hostRow}>
-              <span style={commandStyles.hostAvatar}>A</span>
+              <span style={commandStyles.hostAvatar}>{(hostName || 'A').slice(0, 1).toUpperCase()}</span>
               <div>
                 <h2>{hostName}</h2>
-                <small>{isAr ? 'ÙØ¶ÙÙ ÙÙØ«ÙÙ' : 'Verified host'}</small>
+                <small>{isAr ? 'مضيف موثق' : 'Verified host'}</small>
               </div>
-              <strong style={commandTone('green')}>88</strong>
             </div>
             {hostChecks.map((check) => (
-              <p key={check} style={commandStyles.checkLine}><span>â</span>{check}</p>
+              <p key={check.label} style={commandStyles.checkLine}><span>{check.ok ? '✓' : '!'}</span>{check.label}</p>
             ))}
-            <span style={commandStyles.payoutState}>{isAr ? 'Ø¨Ø§ÙØªØ¸Ø§Ø± Ø¥Ø·ÙØ§Ù Ø§ÙØ¯ÙØ¹Ø©' : 'Waiting payout release'}</span>
+            <span style={commandStyles.payoutState}>{isAr ? 'بانتظار إطلاق الدفعة' : 'Waiting payout release'}</span>
             <button style={{ ...commandStyles.acceptButton, opacity: selectedPayoutState === 'RELEASE_STAGED' ? 1 : 0.38 }} onClick={() => stagePayoutDecision('RELEASE_STAGED')}>
-              {isAr ? 'Ø¥Ø·ÙØ§Ù Ø§ÙÙØ³ØªØ­ÙØ§Øª' : 'Release earnings'}
+              {isAr ? 'إطلاق المستحقات' : 'Release earnings'}
             </button>
           </article>
 
@@ -1041,10 +1046,10 @@ function ShortRentAdminCommandDashboard({
                 <strong>{hostName}</strong>
                 <small>Verified Host</small>
               </div>
-              <span style={commandStyles.hostAvatar}>A</span>
+              <span style={commandStyles.hostAvatar}>{(hostName || 'A').slice(0, 1).toUpperCase()}</span>
             </div>
             {hostChecks.map((check) => (
-              <p key={check} style={commandStyles.checkLine}><span>â</span>{check}</p>
+              <p key={check.label} style={commandStyles.checkLine}><span>{check.ok ? '✓' : '!'}</span>{check.label}</p>
             ))}
           </article>
 

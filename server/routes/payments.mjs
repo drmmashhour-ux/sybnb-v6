@@ -389,6 +389,7 @@ export async function handlePayments(req, res, url, context) {
             id: body.bookingId,
             guestId: context.user.id,
           },
+          include: { listing: true },
         })
       : null
 
@@ -400,12 +401,15 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    // When a booking is linked, its amountMinor is the real, server-computed truth — never trust a
-    // client-supplied figure here (only a floor check existed before, with no ceiling, so a guest
-    // could claim an arbitrarily inflated amountMinor and have it flow straight into the approved
-    // payment proof an admin reviews). Client input is only used for the no-booking case (e.g. a
-    // standalone seller-plan/advertising payment), which has no independent amount to check against.
-    const amountMinor = booking ? booking.amountMinor : Number(body.amountMinor || 0)
+    // When a booking is linked, the real amount due is the full guest total — rent plus cleaning
+    // fee, tax, extra fees, and the cancellation-protection add-on if purchased (expectedTotalMinor,
+    // the same function the Stripe path uses so both rails charge the identical figure the guest was
+    // shown) — never a client-supplied figure (only a floor check existed before, with no ceiling,
+    // so a guest could claim an arbitrarily inflated amount) and never bare booking.amountMinor
+    // (which is rent only — using it here silently dropped the cleaning/tax/protection portion of
+    // every local-wallet payment from the ledger). Client input is only used for the no-booking case
+    // (e.g. a standalone seller-plan/advertising payment), which has no independent amount to check.
+    const amountMinor = booking ? expectedTotalMinor(booking) : Number(body.amountMinor || 0)
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
       const error = new Error('Payment proof amount must be greater than zero.')
       error.statusCode = 400

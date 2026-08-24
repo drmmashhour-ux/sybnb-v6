@@ -665,6 +665,27 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
         keyParts: ['booking-admin-reject-admin-share-reversal', existing.id, approvedPayment.id],
         note: 'Admin/SYBNB share reversed because the admin rejected/ruled against this booking.',
       })
+
+      // A HOLD entry never touches cachedBalanceMinor (see recordWalletEntry's balanceDelta), so
+      // there's nothing to claw back from the host if the payout was only held. But if it was
+      // already RELEASED before this dispute was decided, the host's wallet genuinely holds that
+      // money now — without this, the host keeps the full payout AND the guest gets a full refund
+      // above, creating money out of nothing.
+      const priorRelease = await tx.walletEntry.findFirst({
+        where: { referenceType: 'booking_payout', type: 'RELEASE', referenceId: existing.id },
+      })
+      if (priorRelease) {
+        await recordWalletEntry(tx, {
+          userId: existing.listing.ownerId,
+          type: 'DEBIT',
+          amountMinor: split.hostGrossMinor,
+          currency: existing.currency,
+          referenceType: 'booking_payout_clawback',
+          referenceId: existing.id,
+          keyParts: ['booking-admin-reject-payout-clawback', existing.id, approvedPayment.id],
+          note: 'Host payout clawed back after admin rejected/ruled against this booking post-release.',
+        })
+      }
     }
   }
 

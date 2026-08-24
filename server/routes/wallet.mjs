@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { recordWalletEntry } from '../lib/finance-ledger.mjs'
 
 export async function handleWallet(req, res, url, context) {
   if (url.pathname === '/api/wallet') {
@@ -27,16 +28,33 @@ export async function handleWallet(req, res, url, context) {
       throw error
     }
 
-    const gift = await db().walletGift.create({
-      data: {
-        senderUserId: context.user.id,
-        recipientPhoneHash: hashPhone(body.recipientPhone),
+    const currency = body.currency || 'SYP'
+    // A gift must be funded from the sender's own wallet balance — debit it atomically with creating
+    // the gift, so a gift can never mint unbacked ledger money. recordWalletEntry's negative-balance
+    // guard rejects this (409 WALLET_INSUFFICIENT_FUNDS) if the sender doesn't have the funds.
+    const gift = await db().$transaction(async (tx) => {
+      const created = await tx.walletGift.create({
+        data: {
+          senderUserId: context.user.id,
+          recipientPhoneHash: hashPhone(body.recipientPhone),
+          amountMinor,
+          currency,
+          message: body.message || undefined,
+          status: amountMinor >= 100000 ? 'CLAIM_PENDING' : 'SENT',
+          expiresAt: body.expiresAt ? new Date(body.expiresAt) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
+        },
+      })
+      await recordWalletEntry(tx, {
+        userId: context.user.id,
+        type: 'DEBIT',
         amountMinor,
-        currency: body.currency || 'SYP',
-        message: body.message || undefined,
-        status: amountMinor >= 100000 ? 'CLAIM_PENDING' : 'SENT',
-        expiresAt: body.expiresAt ? new Date(body.expiresAt) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
-      },
+        currency,
+        referenceType: 'wallet_gift_sent',
+        referenceId: created.id,
+        keyParts: ['wallet-gift-sent', created.id],
+        note: 'Wallet gift sent.',
+      })
+      return created
     })
     return json(res, 201, { ok: true, gift })
   }

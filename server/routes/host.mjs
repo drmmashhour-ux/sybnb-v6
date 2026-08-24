@@ -1,5 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
+import { resolveListingCityName } from '../lib/listing-location.mjs'
 import {
   CANCELLATION_ADMIN_FEE_CURRENCY,
   CANCELLATION_ADMIN_FEE_MINOR,
@@ -459,7 +460,21 @@ export async function handleHost(req, res, url, context) {
       if (body.titleEn !== undefined) data.titleEn = body.titleEn || null
       if (body.description !== undefined) data.description = body.description || null
       if (body.currency !== undefined) data.currency = String(body.currency)
-      if (body.metadata !== undefined) data.metadata = body.metadata || {}
+      if (body.metadata !== undefined) {
+        data.metadata = body.metadata || {}
+        // Keep the Location relation in sync if the edit changes governorate/area — otherwise city
+        // browse silently goes stale after an edit (M2).
+        const govSource = data.metadata?.governorate
+        if (govSource) {
+          const cityName = resolveListingCityName(govSource)
+          if (cityName) {
+            const location = await db().location.create({
+              data: { country: 'SY', governorate: cityName, city: cityName, area: data.metadata?.area ? String(data.metadata.area) : undefined },
+            })
+            data.locationId = location.id
+          }
+        }
+      }
       if (body.priceMinor !== undefined) {
         const priceMinor = Number(body.priceMinor)
         if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
@@ -483,12 +498,17 @@ export async function handleHost(req, res, url, context) {
     }
 
     if (req.method === 'DELETE') {
-      const activeBooking = await db().booking.findFirst({
-        where: { listingId: existing.id, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] } },
+      // Booking has no onDelete cascade/restrict override on its listing relation (Prisma defaults to
+      // DB-level RESTRICT), so ANY booking history — not just active statuses — would make the delete
+      // below fail with an opaque 500 from the FK constraint. Check for any booking at all and give a
+      // clean, actionable error; this also preserves booking/financial history, which should never be
+      // silently destroyed by deleting the listing it references.
+      const anyBooking = await db().booking.findFirst({
+        where: { listingId: existing.id },
         select: { id: true },
       })
-      if (activeBooking) {
-        const error = new Error('This listing has active bookings and cannot be deleted; pause it instead.')
+      if (anyBooking) {
+        const error = new Error('This listing has booking history and cannot be deleted; pause it instead.')
         error.statusCode = 409
         error.code = 'HOST_LISTING_HAS_BOOKINGS'
         error.expose = true

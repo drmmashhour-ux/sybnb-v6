@@ -1,8 +1,18 @@
 import { idempotencyKey } from './security.mjs'
 import { isPayoutEligible, payoutEligibleAt } from './booking-lifecycle.mjs'
 
-export const CANCELLATION_ADMIN_FEE_MINOR = 1000
-export const CANCELLATION_ADMIN_FEE_CURRENCY = 'USD'
+// The cancellation admin fee is charged against a guest/host wallet, and every wallet in this
+// platform is created SYP-denominated (single-currency-per-country; see server/lib/country.mjs) —
+// nothing ever funds a USD wallet. A USD-denominated fee here meant this DEBIT always targeted a
+// fresh, always-zero USD wallet and (once the negative-balance guard was added) hard-failed every
+// cancellation's refund transaction. Express the fee in SYP, converted from the original $10 intent
+// via the same placeholder FX rate used for Stripe (SYP_PER_USD) so the real-money value is unchanged
+// once a live rate is configured.
+const CANCELLATION_ADMIN_FEE_USD_MINOR = 1000
+export const CANCELLATION_ADMIN_FEE_CURRENCY = 'SYP'
+export const CANCELLATION_ADMIN_FEE_MINOR = Math.round(
+  (CANCELLATION_ADMIN_FEE_USD_MINOR / 100) * Number(process.env.SYP_PER_USD || 15000),
+)
 export const CANCELLATION_PROTECTION_RATE = 0.03
 export const STR_ADMIN_COMMISSION_RATE = 0.1
 export const STR_CLEANING_RATE = 0.05
@@ -56,7 +66,11 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.round(rentMinor * STR_CLEANING_RATE)
   const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor)
   const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
-  const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor)
+  // rentMinor/cleaningFeeMinor come from seller-controlled listing.metadata (unvalidated) — cap the
+  // host's payout at what was actually paid (staySplitBaseMinor), same guard the non-STR branch above
+  // already has. Without this, a host could set an inflated metadata.rentMinor and be released more
+  // money than the guest ever paid.
+  const hostGrossMinor = Math.min(staySplitBaseMinor, Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor))
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
 
   return {
@@ -96,6 +110,32 @@ export async function recordWalletEntry(tx, {
     update: {},
   })
 
+  const balanceDelta =
+    type === 'CREDIT' || type === 'RELEASE' || type === 'REFUND'
+      ? normalizedAmount
+      : type === 'DEBIT'
+        ? -normalizedAmount
+        : 0
+
+  if (balanceDelta < 0) {
+    // Atomic, race-safe guard: the WHERE clause re-checks the balance at update time (not from a
+    // stale read), so two concurrent debits against the same wallet can't both pass and jointly
+    // overdraw it — mirrors the updateMany-guard pattern used elsewhere (e.g. approvePaymentProof).
+    const guarded = await tx.wallet.updateMany({
+      where: { id: wallet.id, cachedBalanceMinor: { gte: normalizedAmount } },
+      data: { cachedBalanceMinor: { decrement: normalizedAmount } },
+    })
+    if (guarded.count === 0) {
+      const error = new Error('Insufficient wallet balance for this debit.')
+      error.statusCode = 409
+      error.code = 'WALLET_INSUFFICIENT_FUNDS'
+      error.expose = true
+      throw error
+    }
+  } else if (balanceDelta > 0) {
+    await tx.wallet.update({ where: { id: wallet.id }, data: { cachedBalanceMinor: { increment: balanceDelta } } })
+  }
+
   const entry = await tx.walletEntry.create({
     data: {
       walletId: wallet.id,
@@ -108,29 +148,6 @@ export async function recordWalletEntry(tx, {
       note,
     },
   })
-
-  const balanceDelta =
-    type === 'CREDIT' || type === 'RELEASE' || type === 'REFUND'
-      ? normalizedAmount
-      : type === 'DEBIT'
-        ? -normalizedAmount
-        : 0
-
-  if (balanceDelta) {
-    // Never let a DEBIT drive a wallet negative — a book ledger must not overdraw. Guard mirrors the
-    // client walletEngine check but on the authoritative server path.
-    if (balanceDelta < 0 && (wallet.cachedBalanceMinor ?? 0) + balanceDelta < 0) {
-      const error = new Error('Insufficient wallet balance for this debit.')
-      error.statusCode = 409
-      error.code = 'WALLET_INSUFFICIENT_FUNDS'
-      error.expose = true
-      throw error
-    }
-    await tx.wallet.update({
-      where: { id: wallet.id },
-      data: { cachedBalanceMinor: { increment: balanceDelta } },
-    })
-  }
 
   return entry
 }

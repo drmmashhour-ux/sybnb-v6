@@ -3,14 +3,12 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
+import { resolveListingCityName } from '../lib/listing-location.mjs'
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
 // Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
 // paid-plan divisions gated behind an admin-approved SellerProfile.
 const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
-
-// Governorate slug -> English city name stored in location.city (must match the browse city filter).
-const GOV_SLUG_TO_CITY = { damascus: 'Damascus', aleppo: 'Aleppo', latakia: 'Latakia', homs: 'Homs', tartus: 'Tartus' }
 
 // Project a listing to the fields safe for public/unauthenticated consumers: strip street-level
 // address (addressLine/street) and internal metadata markers (e.g. inventory_source). Only fields
@@ -181,8 +179,7 @@ export async function handleListings(req, res, url, context) {
       let locationId
       const govSource = body.governorate || body.metadata?.governorate || ''
       const areaSource = body.area || body.metadata?.area
-      const govSlug = String(govSource).toLowerCase().replace(/-city$/, '')
-      const cityName = GOV_SLUG_TO_CITY[govSlug]
+      const cityName = resolveListingCityName(govSource)
       if (cityName) {
         const location = await db().location.create({
           data: {

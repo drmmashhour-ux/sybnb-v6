@@ -71,6 +71,15 @@ function expectedTotalMinor(booking) {
 function stripeChargeAmount(totalMinor) {
   const currency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
   if (currency === 'syp') return { currency, unitAmount: Math.max(100, Math.round(totalMinor)) }
+  // Fail closed on real money: a LIVE key must not silently charge real cards using the placeholder
+  // FX rate. Test keys keep working against the placeholder for sandbox/e2e.
+  if (process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_') && !process.env.SYP_PER_USD) {
+    const error = new Error('A live FX rate (SYP_PER_USD) is required before charging real cards.')
+    error.statusCode = 503
+    error.code = 'FX_RATE_NOT_CONFIGURED'
+    error.expose = true
+    throw error
+  }
   const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
   const unitAmount = Math.max(50, Math.round((totalMinor / sypPerUsd) * 100))
   return { currency, unitAmount }

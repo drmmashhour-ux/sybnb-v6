@@ -82,6 +82,13 @@ export function App() {
 
   const division = findDivisionByRoute(path)
   const bookingMatch = path.match(/^\/booking\/([^/]+)$/)
+  // These booking-detail sub-routes (protection/guarantee/payment-status/dispute) and the ID-
+  // verification screen all end up calling a requireAuth() endpoint for a specific guest's data
+  // (fetchPrototypeBooking, disputePrototypeBooking, submitGuestIdDocument) — same reasoning as the
+  // bare /booking/:id route above, just not covered by that single-segment regex. The trust-center
+  // hub and SOS screens stay ungated (informational/support entry points, no guest-specific fetch).
+  const trustBookingSubRouteMatch =
+    /^\/booking\/(protection|guarantee|payment-status|dispute|dispute-closed)\/[^/]+$/.test(path)
   const listingMatch = path.match(/^\/listing\/([^/]+)$/)
   const paymentReceiptMatch = path.match(/^\/payment\/receipt\/([^/]+)$/)
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
@@ -92,8 +99,8 @@ export function App() {
   // talks to the server.
   const giftClaimRoute = path === '/wallet/gift/claim' || /^\/wallet\/gift\/claim\/[^/]+$/.test(path)
     || path === '/wallet/gift/code' || /^\/wallet\/gift\/code\/[^/]+$/.test(path)
-  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || giftClaimRoute || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
-  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' || giftClaimRoute ? 'generic' : 'stays'
+  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
+  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch ? 'generic' : 'stays'
   const hasGuestSession = typeof window !== 'undefined' && Boolean(sessionStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
@@ -215,7 +222,8 @@ function getStaffRequiredRole(path: string): 'ADMIN' | 'HOST' | 'DRIVER' | null 
     path.startsWith('/operations') ||
     path.startsWith('/ai-brain') ||
     path.startsWith('/competitors') ||
-    path.startsWith('/status')
+    path.startsWith('/status') ||
+    path === '/wallet/admin/gift-audit'
   ) {
     return 'ADMIN'
   }

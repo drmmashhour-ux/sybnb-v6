@@ -124,6 +124,21 @@ export async function handleAdmin(req, res, url, context) {
     const split = bookingFinanceSplit(booking, approvedPayment?.amountMinor || booking.amountMinor)
 
     const entry = await db().$transaction(async (tx) => {
+      // Re-check eligibility inside the transaction against a fresh read: the outer check above ran
+      // before this transaction opened, so a dispute filed in that window (or any other status
+      // change) would otherwise still get released. This closes that race with no added cost — the
+      // idempotencyKey on recordWalletEntry already prevents an actual double-release.
+      const freshBooking = await tx.booking.findUnique({ where: { id: booking.id } })
+      if (!freshBooking || !isPayoutEligible(freshBooking)) {
+        const error = new Error(
+          `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,
+        )
+        error.statusCode = 400
+        error.code = 'PAYOUT_NOT_ELIGIBLE'
+        error.expose = true
+        throw error
+      }
+
       const released = await recordWalletEntry(tx, {
         userId: booking.listing.ownerId,
         type: 'RELEASE',

@@ -117,6 +117,15 @@ export async function recordWalletEntry(tx, {
         : 0
 
   if (balanceDelta) {
+    // Never let a DEBIT drive a wallet negative — a book ledger must not overdraw. Guard mirrors the
+    // client walletEngine check but on the authoritative server path.
+    if (balanceDelta < 0 && (wallet.cachedBalanceMinor ?? 0) + balanceDelta < 0) {
+      const error = new Error('Insufficient wallet balance for this debit.')
+      error.statusCode = 409
+      error.code = 'WALLET_INSUFFICIENT_FUNDS'
+      error.expose = true
+      throw error
+    }
     await tx.wallet.update({
       where: { id: wallet.id },
       data: { cachedBalanceMinor: { increment: balanceDelta } },

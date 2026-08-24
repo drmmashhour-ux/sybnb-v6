@@ -9,6 +9,9 @@ import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.m
 // paid-plan divisions gated behind an admin-approved SellerProfile.
 const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
 
+// Governorate slug -> English city name stored in location.city (must match the browse city filter).
+const GOV_SLUG_TO_CITY = { damascus: 'Damascus', aleppo: 'Aleppo', latakia: 'Latakia', homs: 'Homs', tartus: 'Tartus' }
+
 // Project a listing to the fields safe for public/unauthenticated consumers: strip street-level
 // address (addressLine/street) and internal metadata markers (e.g. inventory_source). Only fields
 // the customer UI actually renders are returned.
@@ -171,9 +174,29 @@ export async function handleListings(req, res, url, context) {
         error.expose = true
         throw error
       }
+      // Persist a Location relation so the listing is discoverable by the city browse filter and
+      // renders with a real location. The wizard sends a governorate slug (damascus/aleppo/…); map
+      // it to the English city name that browse filters match (location.city). Without this, host-
+      // created listings are location-less and un-findable by city.
+      let locationId
+      const govSlug = String(body.governorate || '').toLowerCase().replace(/-city$/, '')
+      const cityName = GOV_SLUG_TO_CITY[govSlug]
+      if (cityName) {
+        const location = await db().location.create({
+          data: {
+            country: 'SY',
+            governorate: cityName,
+            city: cityName,
+            area: body.area ? String(body.area) : undefined,
+          },
+        })
+        locationId = location.id
+      }
+
       const listing = await db().listing.create({
         data: {
           ownerId: context.user.id,
+          locationId,
           division,
           titleAr: String(body.titleAr).trim(),
           titleEn: body.titleEn || undefined,

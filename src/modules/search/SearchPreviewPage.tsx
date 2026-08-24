@@ -248,7 +248,13 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
       />
 
       {(state !== 'empty' || listings.length === 0) && (
-        <SearchStateCard lang={lang} state={state} onReset={() => setLastSearch(null)} />
+        <SearchStateCard
+          lang={lang}
+          state={state}
+          onReset={() => { setLastSearch(null); void runLiveSearch() }}
+          onShowAll={() => { setLastSearch(null); void runLiveSearch() }}
+          onRetry={() => void runLiveSearch(lastSearch || undefined)}
+        />
       )}
 
       <section className="search-results">
@@ -283,9 +289,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               </article>
             ))}
           </div>
-        ) : (
-          <p className="search-empty-copy" role="status">{t.noResults}</p>
-        )}
+        ) : null}
       </section>
 
       <section className="search-last">

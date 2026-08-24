@@ -7,6 +7,15 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
 function requireStripe() {
+  // Explicit kill switch: refuse to transact with a LIVE key unless payments are deliberately enabled.
+  // 'Off' must be intentional, not merely an unset env var. Test keys stay usable for sandbox/e2e.
+  if (process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_') && process.env.PAYMENTS_ENABLED !== 'true') {
+    const error = new Error('Live payments are not enabled on this server.')
+    error.statusCode = 503
+    error.code = 'PAYMENTS_DISABLED'
+    error.expose = true
+    throw error
+  }
   if (!stripe) {
     const error = new Error('Stripe is not configured on this server yet.')
     error.statusCode = 503

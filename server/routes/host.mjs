@@ -450,6 +450,20 @@ export async function handleHost(req, res, url, context) {
       throw error
     }
 
+    // A host may only toggle a LIVE listing between APPROVED (visible) and PAUSED. They must NOT be
+    // able to self-approve a DRAFT/PENDING_REVIEW/REJECTED/EXPIRED listing into APPROVED — publishing
+    // goes through admin review only. This closes a moderation-bypass hole.
+    const transitionAllowed =
+      (status === 'PAUSED' && existing.status === 'APPROVED') ||
+      (status === 'APPROVED' && existing.status === 'PAUSED')
+    if (!transitionAllowed) {
+      const error = new Error('Hosts can only pause a live listing or resume a paused one; publishing requires admin review.')
+      error.statusCode = 409
+      error.code = 'HOST_STATUS_TRANSITION_NOT_ALLOWED'
+      error.expose = true
+      throw error
+    }
+
     const listing = await db().listing.update({
       where: { id: existing.id },
       data: { status },

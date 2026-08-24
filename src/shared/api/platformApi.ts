@@ -45,6 +45,7 @@ export type PlatformPaymentProof = {
   amountMinor: number
   currency: string
   proofAssetUrl: string | null
+  proofAssetUrls?: string[]
   providerRef: string | null
   adminNote: string | null
   reviewedById: string | null
@@ -839,6 +840,7 @@ export async function submitPrototypeLocalWalletProof(input: {
   amountMinor: number
   currency: string
   proofAssetUrl?: string
+  proofAssetUrls?: string[]
   providerRef: string
 }) {
   const session = await ensurePrototypeGuestSession()
@@ -1212,6 +1214,7 @@ export async function submitSellerPlanProof(input: {
   currency?: string
   providerRef: string
   proofAssetUrl?: string
+  proofAssetUrls?: string[]
   planCode?: string
   legalName?: string
   sellerType?: string

@@ -48,6 +48,21 @@ function metadataNumber(metadata, key) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 }
 
+// Some upload flows (seller-plan documents, advertising payment files) genuinely upload several
+// real files. Only trust entries that are real object-storage references this server issued
+// (payment-proof://...) — never an arbitrary client-supplied string — and cap the count so a
+// malformed client can't stuff an unbounded array into the row.
+function normalizeProofAssetUrls(body) {
+  const raw = Array.isArray(body.proofAssetUrls) ? body.proofAssetUrls : []
+  const urls = raw
+    .filter((url) => typeof url === 'string' && url.startsWith('payment-proof://'))
+    .slice(0, 20)
+  if (urls.length) return urls
+  return typeof body.proofAssetUrl === 'string' && body.proofAssetUrl.startsWith('payment-proof://')
+    ? [body.proofAssetUrl]
+    : []
+}
+
 // Mirrors src/modules/bookings/guestFeeSummary.ts so the Stripe charge matches what the guest saw.
 function expectedTotalMinor(booking) {
   const stayAmountMinor = Math.max(0, Math.round(booking.amountMinor || 0))
@@ -361,6 +376,7 @@ export async function handlePayments(req, res, url, context) {
     const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
     const planCode = body.planCode ? String(body.planCode).trim() : undefined
 
+    const proofAssetUrls = normalizeProofAssetUrls(body)
     let proof
     try {
       const [created] = await db().$transaction([
@@ -371,7 +387,8 @@ export async function handlePayments(req, res, url, context) {
             status: 'PENDING_ADMIN_REVIEW',
             amountMinor,
             currency: body.currency || 'USD',
-            proofAssetUrl: body.proofAssetUrl || undefined,
+            proofAssetUrl: proofAssetUrls[0] || undefined,
+            proofAssetUrls,
             providerRef,
           },
         }),
@@ -454,6 +471,7 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    const walletProofAssetUrls = normalizeProofAssetUrls(body)
     let proof
     try {
       proof = await db().paymentProof.create({
@@ -464,7 +482,8 @@ export async function handlePayments(req, res, url, context) {
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
           currency: booking?.currency || body.currency || 'SYP',
-          proofAssetUrl: body.proofAssetUrl || undefined,
+          proofAssetUrl: walletProofAssetUrls[0] || undefined,
+          proofAssetUrls: walletProofAssetUrls,
           providerRef,
         },
       })

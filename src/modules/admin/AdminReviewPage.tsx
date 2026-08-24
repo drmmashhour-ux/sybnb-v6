@@ -316,6 +316,15 @@ function ShortRentAdminCommandDashboard({
   const displayPayments = payments // real payment proofs only â no fabricated fallback rows
   const primaryPayment = payments.find((payment) => payment.id === selectedPaymentId) || payments[0]
   const previewPayment = primaryPayment || displayPayments.find((payment) => payment.id === selectedPaymentId) || displayPayments[0]
+  // proofAssetUrls (the full uploaded set) with a fallback to the single legacy proofAssetUrl for
+  // records created before that field existed — real storage references only, ever.
+  const proofAssetUrlsForPreview = (
+    previewPayment?.proofAssetUrls?.length
+      ? previewPayment.proofAssetUrls
+      : previewPayment?.proofAssetUrl
+        ? [previewPayment.proofAssetUrl]
+        : []
+  ).filter((url) => url.startsWith('payment-proof://'))
   const selectedBooking = bookings.find((booking) => booking.id === selectedBookingId) || bookings.find((booking) => booking.id === previewPayment?.bookingId)
   const selectedBookingPayoutReleased = Boolean(
     selectedBooking && selectedBooking.status.toUpperCase() === 'COMPLETED' && !payouts.some((payout) => payout.bookingId === selectedBooking.id),
@@ -720,19 +729,22 @@ function ShortRentAdminCommandDashboard({
               {aiReview.reasons.slice(0, 3).map((reason) => <span key={reason}>{reason}</span>)}
             </div>
             <button style={commandStyles.linkButton} onClick={() => (window.location.hash = '/ai-brain')}>{isAr ? 'ÙØªØ­ AI Brain' : 'Open AI Brain'}</button>
-            {previewPayment?.proofAssetUrl?.startsWith('payment-proof://') && (
+            {proofAssetUrlsForPreview.map((assetUrl, index) => (
               <button
+                key={assetUrl}
                 style={commandStyles.linkButton}
                 onClick={() => {
                   setProofViewError('')
-                  fetchAdminPaymentProofUrl(previewPayment.proofAssetUrl as string)
+                  fetchAdminPaymentProofUrl(assetUrl)
                     .then((url) => window.open(url, '_blank', 'noopener,noreferrer'))
                     .catch((error) => setProofViewError(error instanceof Error ? error.message : 'Could not open proof.'))
                 }}
               >
-                {isAr ? 'عرض إثبات الدفع' : 'View payment proof'}
+                {proofAssetUrlsForPreview.length > 1
+                  ? `${isAr ? 'عرض إثبات الدفع' : 'View payment proof'} ${index + 1}/${proofAssetUrlsForPreview.length}`
+                  : (isAr ? 'عرض إثبات الدفع' : 'View payment proof')}
               </button>
-            )}
+            ))}
             {proofViewError && <small style={{ color: '#ff5f76' }}>{proofViewError}</small>}
           </section>
         </aside>

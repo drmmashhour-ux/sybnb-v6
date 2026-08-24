@@ -196,6 +196,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
         currency: 'USD',
         providerRef: reference,
         proofAssetUrl: paymentProofUrls[0] || paymentProofReference('advertising-payment-proof', paymentUploadedFiles),
+        proofAssetUrls: paymentProofUrls,
         planCode: 'advertising',
         sellerType: 'advertising',
       })

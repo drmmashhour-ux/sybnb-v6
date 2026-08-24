@@ -312,6 +312,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
         amountMinor: amountDue,
         currency,
         proofAssetUrl: proofReference,
+        proofAssetUrls: uploadedProofUrls,
         providerRef: transactionReference,
       })
 

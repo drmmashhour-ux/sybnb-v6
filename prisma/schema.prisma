@@ -325,6 +325,11 @@ model PaymentProof {
   amountMinor     Int           @map("amount_minor")
   currency        String        @default("SYP")
   proofAssetUrl   String?       @map("proof_asset_url")
+  // Full set of uploaded evidence files (seller-plan/advertising submissions can carry several —
+  // ownership proof, license, photos). proofAssetUrl stays populated with the first one for
+  // backward compatibility with every existing single-file consumer (Stripe, local-wallet, etc.,
+  // which only ever have one); this is the complete list admin should actually review.
+  proofAssetUrls  String[]      @default([]) @map("proof_asset_urls")
   providerRef     String?       @map("provider_ref")
   adminNote       String?       @map("admin_note")
   reviewedById    String?       @map("reviewed_by_id")

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
@@ -22,6 +23,19 @@ function fail(statusCode, code, message) {
   error.code = code
   error.expose = true
   return error
+}
+
+// Backstop for the "no second active intent per booking" guard: the app-level pre-check in the
+// creation route is a TOCTOU fast-path (good UX, not a real guarantee), so a double-click or retry
+// racing past it would otherwise create two simultaneously-active intents for one booking — and,
+// under sufficiently overlapping concurrent success processing, both could apply and produce
+// duplicated wallet HOLD/admin-share CREDIT entries (see migration 015's comment for the full
+// mechanism). The partial unique index it creates is the real guarantee; this recognizes a
+// violation of it the same way isProviderRefUniqueViolation recognizes the PaymentProof race.
+function isActiveBookingIntentViolation(err) {
+  const target = err?.meta?.target
+  return err?.code === 'P2002' && (target === 'payment_intents_one_active_per_booking' ||
+    (Array.isArray(target) && target.includes('booking_id')) || String(target || '').includes('booking_id'))
 }
 
 async function readRawBody(req) {
@@ -326,10 +340,27 @@ export async function handlePaymentIntents(req, res, url, context) {
       if (!/^[a-z]{3}$/.test(currency)) throw fail(400, 'PAYMENT_CURRENCY_INVALID', 'A 3-letter currency is required.')
     }
 
-    const reference = `pi_${context.user.id.slice(0, 8)}_${Date.now()}_${Math.round(amountMinor)}`
-    const intent = await db().paymentIntent.create({
-      data: { userId: context.user.id, reference, amountMinor, currency, status: 'REQUIRES_PAYMENT', bookingId },
-    })
+    // A UUID, not a timestamp+amount composite: two concurrent requests from the same user for the
+    // same booking (identical amountMinor) can land in the same millisecond under real concurrency
+    // (proven empirically — 8 concurrent creates for one booking collided on this field before this
+    // fix), which a Date.now()-based reference can't distinguish. Real randomness makes collision
+    // astronomically unlikely rather than requiring a catch-and-retry for a race that's cheap to
+    // eliminate outright.
+    const reference = `pi_${context.user.id.slice(0, 8)}_${randomUUID()}`
+    let intent
+    try {
+      intent = await db().paymentIntent.create({
+        data: { userId: context.user.id, reference, amountMinor, currency, status: 'REQUIRES_PAYMENT', bookingId },
+      })
+    } catch (err) {
+      // The app-level `active` check above is a TOCTOU fast-path, not a guarantee — this partial
+      // unique index (migration 015) is the real one. A double-click/retry racing past the
+      // pre-check lands here instead of silently creating a second simultaneously-active intent.
+      if (isActiveBookingIntentViolation(err)) {
+        throw fail(409, 'PAYMENT_INTENT_ALREADY_ACTIVE_FOR_BOOKING', 'A payment for this booking is already in progress.')
+      }
+      throw err
+    }
     return json(res, 201, {
       ok: true,
       intent: { id: intent.id, reference: intent.reference, amountMinor: intent.amountMinor, currency: intent.currency, status: intent.status, bookingId: intent.bookingId },

@@ -327,7 +327,22 @@ check('admin-share reversal DEBIT recorded (refactored shared helper)', shareRev
 const payoutClawbackD = (await walletEntries(bookingD.id, ['booking_payout_clawback'])).find((e) => e.type === 'DEBIT')
 check('host payout clawback DEBIT recorded (refactored shared helper)', payoutClawbackD?.amountMinor === splitD.hostGrossMinor, JSON.stringify({ payoutClawbackD, expected: splitD.hostGrossMinor }))
 
-console.log('\n=== F. CONCURRENCY REGRESSION (blind-status-write race, missing race-recovery catch, provider-blind refund) ===')
+console.log('\n=== F. CONCURRENCY REGRESSION (blind-status-write race, missing race-recovery catch, provider-blind refund, sibling-intent DB constraint) ===')
+
+const bookingSibling = await makeBooking(listing.id, 26, 24)
+// 8 concurrent create attempts for the SAME booking (mirrors tests/e2e/payment-proof-race.e2e.mjs's
+// proven methodology) — the app-level "no active intent" pre-check is a TOCTOU fast-path, so this
+// exercises the real backstop: the payment_intents_one_active_per_booking partial unique index
+// (migration 015). Without it, more than one of these could have won.
+const siblingAttempts = await Promise.all(
+  Array.from({ length: 8 }, () => call('POST', '/api/payments/intents', G, { bookingId: bookingSibling.id })),
+)
+const siblingCreated = siblingAttempts.filter((r) => r.status === 201)
+const siblingRejected = siblingAttempts.filter((r) => code(r) === 'PAYMENT_INTENT_ALREADY_ACTIVE_FOR_BOOKING')
+check('8 concurrent intent creations for one booking -> exactly 1 created', siblingCreated.length === 1, JSON.stringify(siblingAttempts.map((r) => ({ status: r.status, code: code(r) }))))
+check('the other 7 concurrent creations are rejected as already-active, not a raw 500', siblingRejected.length === 7, JSON.stringify(siblingAttempts.map((r) => r.status)))
+const activeSiblingIntents = await db().paymentIntent.count({ where: { bookingId: bookingSibling.id, status: { in: ['REQUIRES_PAYMENT', 'PROCESSING'] } } })
+check('exactly one active PaymentIntent row exists for the booking at the DB level', activeSiblingIntents === 1, activeSiblingIntents)
 
 const bookingE = await makeBooking(listing.id, 12, 10)
 const intentE = (await call('POST', '/api/payments/intents', G, { bookingId: bookingE.id })).j?.intent

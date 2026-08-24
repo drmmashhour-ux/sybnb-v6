@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 
 type Lang = 'ar' | 'en'
 
+type GiftClaimFailure = { code?: string; message?: string }
+
 type GiftCodeVerifyProps = {
   lang?: Lang
   phoneMasked?: string
-  onVerified?: (code: string) => void | boolean | Promise<void | boolean>
+  onVerified?: (code: string) => true | GiftClaimFailure | Promise<true | GiftClaimFailure>
   onBack?: () => void
 }
 
@@ -87,15 +89,20 @@ export function GiftCodeVerify({ lang = 'ar', phoneMasked = '+963 9•• ••
     setError('')
 
     try {
-      const accepted = await onVerified?.(code)
-      if (accepted === false) {
-        throw new Error('verification_failed')
+      const result = await onVerified?.(code)
+      if (result && result !== true) {
+        // Only a genuinely wrong code should cost the recipient an attempt. Every other real
+        // failure reason (expired, locked, gift not claimable) means retrying this same code can
+        // never succeed — show the real reason instead of the misleading "code incorrect" message.
+        if (result.code === 'GIFT_CODE_INVALID' || !result.code) {
+          setDigits(['', '', '', '', '', ''])
+          setAttempts((value) => Math.max(0, value - 1))
+          setError(attempts - 1 <= 0 ? t.locked : t.wrong)
+        } else {
+          setError(result.message || t.wrong)
+        }
+        inputs.current[0]?.focus()
       }
-    } catch {
-      setDigits(['', '', '', '', '', ''])
-      setAttempts((value) => Math.max(0, value - 1))
-      setError(attempts - 1 <= 0 ? t.locked : t.wrong)
-      inputs.current[0]?.focus()
     } finally {
       setVerifying(false)
     }

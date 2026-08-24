@@ -121,12 +121,12 @@ async function finishGiftClaim(
   phone: string,
   code: string,
   setClaimResult: (result: ClaimResult | null) => void,
-) {
+): Promise<true | { code?: string; message?: string }> {
   if (!giftId) {
     // Never fabricate a claim success with no real gift ID / no API call — reroute to the claim
     // entry screen instead of a fake "redeemed" confirmation.
     navigate('/wallet/gift/claim')
-    return false
+    return { code: 'GIFT_NOT_FOUND' }
   }
 
   try {
@@ -134,8 +134,9 @@ async function finishGiftClaim(
     setClaimResult({ gift: result.gift, wallet: result.wallet })
     navigate('/wallet/gift/success')
     return true
-  } catch {
-    return false
+  } catch (error) {
+    const err = error as (Error & { code?: string }) | undefined
+    return { code: err?.code, message: err?.message }
   }
 }
 

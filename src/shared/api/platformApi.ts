@@ -1549,8 +1549,10 @@ async function apiRequest<T>(
   const payload = (await response.json()) as unknown
   if (!response.ok || isApiErrorBody(payload)) {
     const message = isApiErrorBody(payload) ? payload.error?.message : undefined
-    const error = new Error(message || `SYBNB API request failed: ${response.status}`) as Error & { status?: number }
+    const code = isApiErrorBody(payload) ? payload.error?.code : undefined
+    const error = new Error(message || `SYBNB API request failed: ${response.status}`) as Error & { status?: number; code?: string }
     error.status = response.status
+    if (code) error.code = code
     throw error
   }
 

@@ -95,7 +95,10 @@ type ShamCashApprovalPayload = {
 }
 
 const SHAM_CASH_ACCOUNT_BALANCE_KEY = 'sybnb_v6_sham_cash_account_minor'
-const STR_ADMIN_COMMISSION_RATE = 0.1
+// Contractual STR commission — owner-confirmed at 12%. Must match server/lib/finance-ledger.mjs's
+// STR_ADMIN_COMMISSION_RATE (this is a display-only preview computed client-side; the real charge
+// is always computed server-side, but a stale rate here would show admins the wrong preview).
+const STR_ADMIN_COMMISSION_RATE = 0.12
 const STR_TAX_RATE = 0.02
 const STR_CLEANING_RATE = 0.05
 

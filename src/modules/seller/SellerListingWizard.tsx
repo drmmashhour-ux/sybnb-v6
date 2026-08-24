@@ -548,8 +548,8 @@ export function SellerListingWizard({ lang }: Props) {
               {division === 'STAYS' && (
                 <div className="seller-wide-field seller-money-note">
                   {isAr
-                    ? 'تخصم SYBNB عمولة خدمة 10% من قيمة الإيجار (لا تشمل رسوم التنظيف والضريبة) من مستحقاتك عند كل حجز مكتمل.'
-                    : 'SYBNB deducts a 10% service commission from the rent amount (not the cleaning fee or tax) from your payout on every completed booking.'}
+                    ? 'تخصم SYBNB عمولة خدمة 12% من قيمة الإيجار (لا تشمل رسوم التنظيف والضريبة) من مستحقاتك عند كل حجز مكتمل.'
+                    : 'SYBNB deducts a 12% service commission from the rent amount (not the cleaning fee or tax) from your payout on every completed booking.'}
                 </div>
               )}
               <div className="seller-wide-field">

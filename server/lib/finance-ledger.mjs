@@ -42,7 +42,8 @@ export function giftReviewThresholdMinor(currency) {
 }
 
 export const CANCELLATION_PROTECTION_RATE = 0.03
-export const STR_ADMIN_COMMISSION_RATE = 0.1
+// Contractual STR (STAYS/short-term-rental) platform commission — owner-confirmed at 12%.
+export const STR_ADMIN_COMMISSION_RATE = 0.12
 export const STR_CLEANING_RATE = 0.05
 export const STR_TAX_RATE = 0.02
 
@@ -98,7 +99,7 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   // money split is always computed from staySplitBaseMinor — the real, server-trusted paid amount —
   // never from rentMinor. Deriving the commission from rentMinor let a host inflate it to drive
   // hostGrossMinor toward the paid-amount cap while adminShareMinor (the platform's cut) collapsed
-  // toward zero; anchoring both to staySplitBaseMinor makes the 10% commission unconditional.
+  // toward zero; anchoring both to staySplitBaseMinor makes the commission unconditional.
   const adminCommissionMinor = Math.round(staySplitBaseMinor * STR_ADMIN_COMMISSION_RATE)
   const hostGrossMinor = Math.max(0, staySplitBaseMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)

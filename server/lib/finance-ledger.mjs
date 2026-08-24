@@ -27,6 +27,20 @@ export function cancellationAdminFee(currency) {
   }
   return { amountMinor: CANCELLATION_ADMIN_FEE_MINOR, currency: CANCELLATION_ADMIN_FEE_CURRENCY }
 }
+// Gifts at/above this real value require admin review before they can be claimed (server/routes/
+// wallet.mjs). The threshold has to be expressed in whatever currency the gift was actually sent
+// in — a flat "100000 minor units" cutoff meant a ~$1,000 USD gift auto-sent with no review while
+// a few-dollar SYP gift already needed one, since SYP minor units are 1:1 (not cents) and USD
+// minor units are cents.
+const GIFT_REVIEW_THRESHOLD_SYP_MINOR = 100000
+export function giftReviewThresholdMinor(currency) {
+  const normalized = String(currency || CANCELLATION_ADMIN_FEE_CURRENCY).toUpperCase()
+  if (normalized === 'USD') {
+    return Math.round((GIFT_REVIEW_THRESHOLD_SYP_MINOR / Number(process.env.SYP_PER_USD || 15000)) * 100)
+  }
+  return GIFT_REVIEW_THRESHOLD_SYP_MINOR
+}
+
 export const CANCELLATION_PROTECTION_RATE = 0.03
 export const STR_ADMIN_COMMISSION_RATE = 0.1
 export const STR_CLEANING_RATE = 0.05

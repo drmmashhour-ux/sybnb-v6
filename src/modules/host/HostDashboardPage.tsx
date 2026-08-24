@@ -334,10 +334,12 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   function addHostDocumentFiles(fileList: FileList | null) {
     const files = Array.from(fileList || [])
     if (!files.length) return
-    setHostDocumentFiles((current) => Array.from(new Set([...current, ...files.map((file) => file.name)])))
-    // The backend stores one ID document per user; the first file selected is what actually gets
-    // submitted for verification, matching the guest upload flow (submitGuestIdDocument).
-    setHostDocumentPendingFile((current) => current || files[0])
+    // The backend stores exactly one ID document per user (server/routes/me.mjs), so only the most
+    // recently selected file is ever actually uploaded — replace, not accumulate, so the displayed
+    // file list never shows files as "added" that will silently never be sent.
+    const file = files[files.length - 1]
+    setHostDocumentFiles([file.name])
+    setHostDocumentPendingFile(file)
     setHostDocumentUploadStatus('idle')
     setHostDocumentUploadError('')
   }

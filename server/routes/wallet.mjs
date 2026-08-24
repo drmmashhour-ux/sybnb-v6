@@ -2,8 +2,9 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { giftClaimCode, hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-import { recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { giftReviewThresholdMinor, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
+import { isCurrencyAllowed } from '../lib/country.mjs'
 
 export async function handleWallet(req, res, url, context) {
   if (url.pathname === '/api/wallet') {
@@ -29,7 +30,15 @@ export async function handleWallet(req, res, url, context) {
       throw error
     }
 
-    const currency = body.currency || 'SYP'
+    const currency = body.currency ? String(body.currency).toUpperCase() : 'SYP'
+    if (!isCurrencyAllowed(currency)) {
+      const error = new Error(`Currency '${currency}' is not supported for this country.`)
+      error.statusCode = 400
+      error.code = 'GIFT_CURRENCY_NOT_ALLOWED'
+      error.expose = true
+      throw error
+    }
+
     // A gift must be funded from the sender's own wallet balance — debit it atomically with creating
     // the gift, so a gift can never mint unbacked ledger money. recordWalletEntry's negative-balance
     // guard rejects this (409 WALLET_INSUFFICIENT_FUNDS) if the sender doesn't have the funds.
@@ -41,7 +50,7 @@ export async function handleWallet(req, res, url, context) {
           amountMinor,
           currency,
           message: body.message || undefined,
-          status: amountMinor >= 100000 ? 'CLAIM_PENDING' : 'SENT',
+          status: amountMinor >= giftReviewThresholdMinor(currency) ? 'CLAIM_PENDING' : 'SENT',
           expiresAt: body.expiresAt ? new Date(body.expiresAt) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
         },
       })

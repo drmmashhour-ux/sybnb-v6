@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
-import { acceptListingAgreement, createAndSubmitPrototypeListing } from '../../shared/api/platformApi'
+import { acceptListingAgreement, createAndSubmitPrototypeListing, getStoredSellerSession, uploadPaymentProofFile } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
@@ -188,6 +188,8 @@ export function SellerListingWizard({ lang }: Props) {
   const [adDuration, setAdDuration] = useState(isAr ? 'أسبوع واحد' : 'One week')
   const [uploadedAdFiles, setUploadedAdFiles] = useState<string[]>([])
   const [uploadedDocumentFiles, setUploadedDocumentFiles] = useState<string[]>([])
+  const [uploadedDocumentUrls, setUploadedDocumentUrls] = useState<string[]>([])
+  const [documentUploadError, setDocumentUploadError] = useState('')
   const [adFilesSent, setAdFilesSent] = useState(false)
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>(
     draft.visualFilters || {
@@ -250,12 +252,12 @@ export function SellerListingWizard({ lang }: Props) {
 
   const next = async () => {
     if (isLast) {
-      if (isAdvertisingFlow && (!adFilesSent || !uploadedDocumentFiles.length)) {
+      if (isAdvertisingFlow && (!adFilesSent || !uploadedDocumentUrls.length)) {
         setSubmitState('error')
         setSubmitError(isAr ? 'ارفع مستندات الإعلان وأرسل الصور والملفات للإدارة قبل المتابعة.' : 'Upload ad documents and send photos/files to admin before continuing.')
         return
       }
-      if (!isAdvertisingFlow && !uploadedDocumentFiles.length) {
+      if (!isAdvertisingFlow && !uploadedDocumentUrls.length) {
         setSubmitState('error')
         setSubmitError(isAr ? 'ارفع مستندات البائع أو إثبات الملكية قبل إرسال الإعلان للمراجعة.' : 'Upload seller documents or ownership proof before sending the listing for review.')
         return
@@ -274,8 +276,7 @@ export function SellerListingWizard({ lang }: Props) {
         // required by /api/listings/:id/submit before the listing can go to review.
         await acceptListingAgreement()
         // Attach a real, viewable gallery image so buyer browse/detail shows the listing with a
-        // photo (matching the division assets sample listings use). Uploaded document filenames
-        // stay in metadata; hosted binary upload is a production-hardening item, out of scope here.
+        // photo (matching the division assets sample listings use).
         const listingMedia = [{ url: DIVISION_MEDIA[division], kind: 'image', sortOrder: 0 }]
         await createAndSubmitPrototypeListing({
           division,
@@ -293,6 +294,7 @@ export function SellerListingWizard({ lang }: Props) {
             adDuration,
             uploadedAdFiles,
             uploadedDocumentFiles,
+            uploadedDocumentUrls,
             propertyType: selectedType,
             governorate,
             city,
@@ -319,12 +321,25 @@ export function SellerListingWizard({ lang }: Props) {
     setStepIndex((current) => Math.min(current + 1, steps.length - 1))
   }
 
-  function addListingDocumentFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
-    if (!names.length) return
+  async function addListingDocumentFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
 
-    setUploadedDocumentFiles((current) => Array.from(new Set([...current, ...names])))
+    setUploadedDocumentFiles((current) => Array.from(new Set([...current, ...files.map((file) => file.name)])))
     setAdFilesSent(false)
+    setDocumentUploadError('')
+
+    const session = getStoredSellerSession()
+    if (!session) {
+      setDocumentUploadError(isAr ? 'سجّل الدخول أولاً لرفع المستندات.' : 'Sign in first to upload documents.')
+      return
+    }
+    try {
+      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
+      setUploadedDocumentUrls((current) => [...current, ...urls])
+    } catch (error) {
+      setDocumentUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
+    }
   }
 
   const back = () => {
@@ -592,11 +607,11 @@ export function SellerListingWizard({ lang }: Props) {
                   <strong>{adPlan === 'premium' ? (isAr ? 'خطة Premium' : 'Premium plan') : isAr ? 'خطة Plus' : 'Plus plan'}</strong>
                   <span>
                     {isAr
-                      ? `تمت إضافة ${uploadedAdFiles.length} من ${adFileSlots.length} ملفات مطلوبة ورفع ${uploadedDocumentFiles.length} مستند.`
-                      : `${uploadedAdFiles.length} of ${adFileSlots.length} required files added and ${uploadedDocumentFiles.length} document uploaded.`}
+                      ? `تمت إضافة ${uploadedAdFiles.length} من ${adFileSlots.length} ملفات مطلوبة ورفع ${uploadedDocumentUrls.length} مستند.`
+                      : `${uploadedAdFiles.length} of ${adFileSlots.length} required files added and ${uploadedDocumentUrls.length} document uploaded.`}
                   </span>
                   <button
-                    disabled={uploadedAdFiles.length < adFileSlots.length || uploadedDocumentFiles.length < 1}
+                    disabled={uploadedAdFiles.length < adFileSlots.length || uploadedDocumentUrls.length < 1}
                     onClick={() => setAdFilesSent(true)}
                   >
                     {adFilesSent ? (isAr ? 'تم إرسال الملفات للإدارة' : 'Files sent to admin') : isAr ? 'إرسال الملفات للإدارة' : 'Send files to admin'}
@@ -617,9 +632,10 @@ export function SellerListingWizard({ lang }: Props) {
                       : 'Upload ownership proof, authorization, plans, property photos, or car/project files.'
                 }
                 lang={lang}
-                onAddFiles={addListingDocumentFiles}
+                onAddFiles={(files) => void addListingDocumentFiles(files)}
                 title={isAdvertisingFlow ? (isAr ? 'مستندات الإعلان والخطة' : 'Ad and plan documents') : isAr ? 'مستندات البائع' : 'Seller documents'}
               />
+              {documentUploadError && <p className="seller-note-line" style={{ color: '#ff5f7d' }}>{documentUploadError}</p>}
               <p className="seller-note-line">
                 {isAdvertisingFlow
                   ? isAr
@@ -645,7 +661,7 @@ export function SellerListingWizard({ lang }: Props) {
                       ? isAr
                         ? 'تم تجهيز طلب الإعلان من مسار الدفع والإرسال.'
                         : 'The advertising request was prepared through the payment and submission flow.'
-                      : uploadedDocumentFiles.length
+                      : uploadedDocumentUrls.length
                         ? isAr
                           ? 'تم رفع مستندات البائع المطلوبة قبل الإرسال.'
                           : 'Required seller documents were uploaded before submission.'
@@ -662,10 +678,10 @@ export function SellerListingWizard({ lang }: Props) {
                         : isAr
                           ? 'أرسل الصور والمستندات قبل الإرسال النهائي'
                           : 'Send photos and documents before final submission'
-                      : uploadedDocumentFiles.length
+                      : uploadedDocumentUrls.length
                         ? isAr
-                          ? `تم رفع ${uploadedDocumentFiles.length} مستند للبائع`
-                          : `${uploadedDocumentFiles.length} seller document uploaded`
+                          ? `تم رفع ${uploadedDocumentUrls.length} مستند للبائع`
+                          : `${uploadedDocumentUrls.length} seller document uploaded`
                         : isAr
                           ? 'ارفع مستندات البائع قبل الإرسال النهائي'
                           : 'Upload seller documents before final submission'}

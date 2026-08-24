@@ -156,6 +156,18 @@ export async function handlePayments(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     const url_ = signObjectUrl('payment-proof', proofViewMatch[1], 300)
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_PAYMENT_PROOF_VIEWED',
+        entityType: 'payment_proof_file',
+        entityId: proofViewMatch[1],
+        before: null,
+        after: null,
+      },
+    })
+
     return json(res, 200, { ok: true, url: url_ })
   }
 

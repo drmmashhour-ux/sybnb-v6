@@ -124,7 +124,7 @@ export function SrRidePage({ lang }: Props) {
     return lowDataMode ? base : base + 2500
   }, [category, lowDataMode])
 
-  const fareMinor = quote?.fareMinor ?? fallbackFareMinor
+  const fareMinor = ride?.fareMinor ?? quote?.fareMinor ?? fallbackFareMinor
 
   useEffect(() => {
     if (ride) return

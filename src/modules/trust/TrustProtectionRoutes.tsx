@@ -168,24 +168,28 @@ function BookingProtectionHub({ lang, bookingId }: { lang: Lang; bookingId: stri
 
 function GuaranteeTiers({ lang, bookingId }: { lang: Lang; bookingId: string }) {
   const isAr = lang === 'ar'
+  // Only two protection levels actually exist server-side: every booking gets free Standard
+  // protection, and cancellationProtectionPurchased is a single optional paid add-on (see
+  // server/lib/finance-ledger.mjs CANCELLATION_PROTECTION_RATE) — there is no third "Premium"
+  // tier or per-tier pricing anywhere in the backend, so it was removed rather than shown as if
+  // it were a real, selectable product.
   const tiers = [
-    { title: isAr ? 'Standard' : 'Standard', body: isAr ? 'حماية أساسية مجانية' : 'Free basic protection', tone: 'gray' },
-    { title: isAr ? 'Protected' : 'Protected', body: isAr ? 'حماية دفع ونزاع محسّنة' : 'Enhanced payment and dispute protection', tone: 'blue' },
-    { title: isAr ? 'Premium' : 'Premium', body: isAr ? 'حماية كاملة مع أولوية دعم' : 'Full protection with priority support', tone: 'gold' },
+    { title: isAr ? 'Standard' : 'Standard', body: isAr ? 'حماية أساسية مجانية لكل الحجوزات' : 'Free basic protection on every booking', tone: 'gray' },
+    { title: isAr ? 'Protected' : 'Protected', body: isAr ? 'إضافة حماية إلغاء اختيارية بمقابل رسوم' : 'Optional paid cancellation-protection add-on', tone: 'blue' },
   ]
   return (
     <main className="trust-phone" dir={isAr ? 'rtl' : 'ltr'}>
       <TrustHeader title={isAr ? 'ضمان الحجز' : 'Booking Guarantee'} />
       <section className="guarantee-tiers">
-        {tiers.map((tier, index) => (
-          <button className={`${tier.tone} ${index === 1 ? 'active' : ''}`} key={tier.title} onClick={() => (window.location.hash = `/booking/protection/${bookingId}`)}>
+        {tiers.map((tier) => (
+          <article className={tier.tone} key={tier.title}>
             <strong>{tier.title}</strong>
             <span>{tier.body}</span>
-          </button>
+          </article>
         ))}
       </section>
-      <p className="trust-note">{isAr ? 'الحماية الأساسية مجانية لكل حجوزات SYBNB. يمكنك الترقية للحماية الكاملة قبل الدفع.' : 'Standard protection is free for every SYBNB booking. Upgrade before payment for full coverage.'}</p>
-      <button className="trust-primary" onClick={() => (window.location.hash = `/booking/protection/${bookingId}`)}>{isAr ? 'تأكيد الحماية' : 'Confirm protection'}</button>
+      <p className="trust-note">{isAr ? 'الحماية الأساسية مجانية لكل حجوزات SYBNB. حماية الإلغاء الاختيارية تُختار عند الدفع.' : 'Standard protection is free for every SYBNB booking. The optional cancellation-protection add-on is chosen at payment time.'}</p>
+      <button className="trust-primary" onClick={() => (window.location.hash = `/booking/protection/${bookingId}`)}>{isAr ? 'عرض حماية حجزي' : 'View my booking protection'}</button>
     </main>
   )
 }
@@ -275,8 +279,8 @@ function DisputeFlow({ lang, bookingId }: { lang: Lang; bookingId: string }) {
 function DisputeClosedFeedback({ lang, bookingId }: { lang: Lang; bookingId: string }) {
   const isAr = lang === 'ar'
   const steps = isAr
-    ? ['فتح النزاع', 'جمع الأدلة', 'قرار SYBNB', 'إغلاق الحالة', 'تقييم العميل']
-    : ['Dispute opened', 'Evidence collected', 'SYBNB decision', 'Case closed', 'Client feedback']
+    ? ['فتح النزاع', 'جمع الأدلة', 'قرار SYBNB', 'إغلاق الحالة']
+    : ['Dispute opened', 'Evidence collected', 'SYBNB decision', 'Case closed']
 
   return (
     <main className="trust-phone" dir={isAr ? 'rtl' : 'ltr'}>
@@ -287,8 +291,8 @@ function DisputeClosedFeedback({ lang, bookingId }: { lang: Lang; bookingId: str
         <h2>{isAr ? 'تمت معالجة النزاع' : 'Dispute handled'}</h2>
         <p>
           {isAr
-            ? 'تم إغلاق الحالة وحفظ القرار في سجل الحجز. يمكنك تقييم تجربة المعالجة الآن.'
-            : 'The case is closed and the decision was saved to the booking record. You can now rate the handling experience.'}
+            ? 'تم إغلاق الحالة وحفظ القرار في سجل الحجز.'
+            : 'The case is closed and the decision was saved to the booking record.'}
         </p>
       </section>
       <section className="case-timeline">
@@ -296,16 +300,7 @@ function DisputeClosedFeedback({ lang, bookingId }: { lang: Lang; bookingId: str
           <span key={step}>✓ {step}</span>
         ))}
       </section>
-      <section className="feedback-card">
-        <h2>{isAr ? 'كيف كانت معالجة النزاع؟' : 'How was the dispute handling?'}</h2>
-        <div className="feedback-stars" aria-label={isAr ? 'تقييم المعالجة' : 'Handling rating'}>
-          {[1, 2, 3, 4, 5].map((star) => (
-            <button key={star} onClick={() => (window.location.hash = '/dashboard')}>★</button>
-          ))}
-        </div>
-        <textarea placeholder={isAr ? 'اكتب ملاحظتك لتحسين الخدمة...' : 'Write feedback to improve the service...'} />
-      </section>
-      <button className="trust-primary" onClick={() => (window.location.hash = '/dashboard')}>{isAr ? 'إرسال التقييم والعودة لرحلتي' : 'Submit feedback and return to my trip'}</button>
+      <button className="trust-primary" onClick={() => (window.location.hash = '/dashboard')}>{isAr ? 'العودة لرحلتي' : 'Return to my trip'}</button>
     </main>
   )
 }

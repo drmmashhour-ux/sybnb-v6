@@ -5658,7 +5658,8 @@ a {
 .trust-list button,
 .protection-list article,
 .trust-selfie,
-.guarantee-tiers button {
+.guarantee-tiers button,
+.guarantee-tiers article {
   align-items: center;
   background: #12131b;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -6004,12 +6005,12 @@ a {
   gap: 12px;
 }
 
-.guarantee-tiers button {
+.guarantee-tiers button,
+.guarantee-tiers article {
   grid-template-columns: 1fr;
   min-height: 88px;
 }
 
-.guarantee-tiers button.active,
 .guarantee-tiers .blue {
   border-color: #526cff;
 }

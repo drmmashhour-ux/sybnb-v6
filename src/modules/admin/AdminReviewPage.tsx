@@ -236,6 +236,7 @@ export function AdminReviewPage({ lang }: Props) {
       onBookingDecision={(id, decision) => void decide('bookings', id, decision)}
       onPaymentDecision={(id, decision, shamCashReconciliation) => void decide('payments', id, decision, { shamCashReconciliation })}
       onIdDocumentDecision={(id, decision) => void decide('iddocuments', id, decision)}
+      onListingDecision={(id, decision) => void decide('listings', id, decision)}
       bookings={visibleBookings}
       payouts={payouts}
       payoutHoldDays={payoutHoldDays}
@@ -265,6 +266,7 @@ function ShortRentAdminCommandDashboard({
   onBookingDecision,
   onPaymentDecision,
   onIdDocumentDecision,
+  onListingDecision,
   payouts,
   payoutHoldDays,
   releasingPayoutId,
@@ -284,6 +286,7 @@ function ShortRentAdminCommandDashboard({
   onBookingDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
   onPaymentDecision: (id: string, decision: 'APPROVE' | 'REJECT', shamCashReconciliation?: ShamCashApprovalPayload) => void
   onIdDocumentDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
+  onListingDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
   payouts: AdminPayout[]
   payoutHoldDays: number
   releasingPayoutId: string
@@ -906,11 +909,15 @@ function ShortRentAdminCommandDashboard({
             {(listings.length ? listings : []).length === 0 ? (
               <AdminEmptyLine text={isAr ? 'ÙØ§ ØªÙØ¬Ø¯ Ø¹ÙØ§Ø±Ø§Øª ÙÙ ÙØ§Ø¦ÙØ© Ø§ÙØ¥Ø¯Ø§Ø±Ø© Ø§ÙØ­Ø§ÙÙØ©.' : 'No stays are in the current admin inventory.'} />
             ) : listings.map((listing) => (
-              <button key={listing.id} style={commandStyles.managementRow} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>
-                <span>{listingTitleText(listing, lang)}</span>
-                <small>{divisionText(listing.division, lang)}</small>
-                <strong>{statusText(listing.status, lang)}</strong>
-              </button>
+              <AdminListingLine
+                key={listing.id}
+                listing={listing}
+                disabled={disabled}
+                isAr={isAr}
+                lang={lang}
+                onApprove={() => onListingDecision(listing.id, 'APPROVE')}
+                onReject={() => onListingDecision(listing.id, 'REJECT')}
+              />
             ))}
           </div>
         )}
@@ -1443,6 +1450,38 @@ function AdminBookingLine({
         {!disabled && <button style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); onApprove() }}>{isAr ? 'ØªØ£ÙÙØ¯' : 'Confirm'}</button>}
         {!disabled && <button style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); onReject() }}>{isAr ? 'Ø±ÙØ¶' : 'Reject'}</button>}
         <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); window.location.hash = `/booking/${booking.id}` }}>{isAr ? 'ØªÙØ§ØµÙÙ' : 'Details'}</button>
+      </div>
+    </article>
+  )
+}
+
+function AdminListingLine({
+  listing,
+  disabled,
+  isAr,
+  lang,
+  onApprove,
+  onReject,
+}: {
+  listing: PlatformListing
+  disabled: boolean
+  isAr: boolean
+  lang: Lang
+  onApprove: () => void
+  onReject: () => void
+}) {
+  const reviewable = listing.status === 'PENDING_REVIEW'
+  return (
+    <article style={commandStyles.managementRow}>
+      <div>
+        <strong>{listingTitleText(listing, lang)}</strong>
+        <small>{divisionText(listing.division, lang)}</small>
+      </div>
+      <span>{statusText(listing.status, lang)}</span>
+      <div style={commandStyles.managementRowActions}>
+        {reviewable && !disabled && <button style={commandStyles.acceptButton} onClick={onApprove}>{isAr ? 'موافقة' : 'Approve'}</button>}
+        {reviewable && !disabled && <button style={commandStyles.rejectButton} onClick={onReject}>{isAr ? 'رفض' : 'Reject'}</button>}
+        <button style={commandStyles.blueButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>{isAr ? 'تفاصيل' : 'Details'}</button>
       </div>
     </article>
   )

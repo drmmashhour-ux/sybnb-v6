@@ -5,7 +5,7 @@
 // booking_id relation — independent review correctly found this: a durable financial webhook inbox
 // must not disappear when its parent Booking/PaymentIntent is deleted. Migration 017 fixes both
 // relations to ON DELETE SET NULL and adds permanent, non-FK snapshot columns (originalIntentId/
-// originalBookingId/provider/providerAccount/environment/subjectType) that are never cleared by any
+// originalBookingId/provider/providerEndpointKey/environment/subjectType) that are never cleared by any
 // deletion. This file proves that fix directly against a real database — a real DELETE, not a
 // simulation — for both rails, plus the specific "cannot apply to an unrelated/gone record" and
 // "orphan replay fails safely and is still audited" properties the review asked to be shown.
@@ -119,7 +119,7 @@ console.log('\n=== A. PAYMENT_INTENT RAIL — deleting the linked PaymentIntent 
   // here is event-row survival, not re-testing application, which other suites already cover).
   const seededEventId = `evt_ped_dl_${Date.now()}`
   const seedFields = {
-    rail: 'payment_intent', provider: 'sandbox', providerAccount: 'sandbox-test-account',
+    rail: 'payment_intent', provider: 'sandbox', providerEndpointKey: 'sandbox-test-account',
     environment: 'test', subjectType: 'PAYMENT_INTENT', providerReference: intentA.reference,
     providerEventId: seededEventId, type: 'payment_intent.succeeded',
     amountMinor: intentA.amountMinor, currency: intentA.currency,
@@ -149,7 +149,7 @@ console.log('\n=== A. PAYMENT_INTENT RAIL — deleting the linked PaymentIntent 
 
   // Queryable/reconcilable: fetch it back by its natural identity, not just by internal id.
   // providerEventId is no longer independently unique (migration 018 — canonical identity is now
-  // (provider, providerAccount, environment, providerEventId)), so this uses findFirst.
+  // (provider, providerEndpointKey, environment, providerEventId)), so this uses findFirst.
   const byProviderEventId = await db().paymentEvent.findFirst({ where: { providerEventId: seededEventId } })
   check('the orphaned event remains queryable by providerEventId', byProviderEventId?.id === seeded.id, JSON.stringify(byProviderEventId))
 

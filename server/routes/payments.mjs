@@ -316,12 +316,12 @@ export async function handlePayments(req, res, url, context) {
 
     // Durable intake -- this rail's own PaymentEvent row (previously nonexistent entirely; this
     // table could not hold a stripe_checkout event at all before migration 016). Race-safe under
-    // concurrent redelivery via the canonical (provider, providerAccount, environment,
+    // concurrent redelivery via the canonical (provider, providerEndpointKey, environment,
     // providerEventId) unique constraint, mirroring payment-intents.mjs exactly.
     const { eventRow: intaken, conflict } = await intakeEvent({
       rail: 'stripe_checkout',
       provider: 'stripe',
-      providerAccount: 'stripe-checkout',
+      providerEndpointKey: 'stripe-checkout',
       environment: policyEnvironment(),
       subjectType: 'BOOKING',
       providerReference,

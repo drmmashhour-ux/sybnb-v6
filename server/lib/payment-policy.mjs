@@ -187,21 +187,27 @@ function evaluate({ operation, rail, provider, division, country, environment, a
     return { allowed: false, reason: 'EMERGENCY_STOP', message: 'Payments are under an emergency stop.' }
   }
 
-  // Gate 2: environment.
-  if (!RECOGNIZED_ENVIRONMENTS.has(environment)) {
-    return { allowed: false, reason: 'ENVIRONMENT_NOT_PERMITTED', message: 'Unrecognized environment.' }
-  }
-
-  // webhook_intake takes a narrower path from here: it must never depend on whether ordinary money
-  // operations are enabled (country rollout, rail flag, operation flag) — only on whether this
-  // policy layer recognizes the provider string at all (routing/configuration validation, NOT
-  // authentication — the signature was already verified upstream, before this function was ever
-  // called). Gates 3/5/6/7 below never run for this operation.
+  // webhook_intake takes a narrower path from here, run BEFORE gate 2: it must never depend on
+  // whether ordinary money operations are enabled (country rollout, rail flag, operation flag) OR on
+  // whether this deployment's environment label happens to be one of the recognized strings — only
+  // on whether this policy layer recognizes the PROVIDER at all (routing/configuration validation,
+  // NOT authentication — the signature was already verified upstream, before this function was ever
+  // called). Independent review correctly found that gate 2 running before this branch meant an
+  // unrecognized/misconfigured NODE_ENV value could discard an already-authenticated, validly-signed
+  // event before it was ever durably stored — the same class of defect the original webhook-intake
+  // fix closed for the rail flag, just via a different gate. Gates 2/3/5/6/7 below never run for
+  // this operation; environment is still recorded on the durable row as plain informational metadata
+  // by the caller, just never used to REFUSE intake.
   if (INTAKE_EXEMPT_OPERATIONS.has(operation)) {
     if (!RECOGNIZED_WEBHOOK_PROVIDERS.has(provider)) {
       return { allowed: false, reason: 'PROVIDER_NOT_RECOGNIZED', message: 'Unrecognized webhook provider.' }
     }
     return { allowed: true }
+  }
+
+  // Gate 2: environment.
+  if (!RECOGNIZED_ENVIRONMENTS.has(environment)) {
+    return { allowed: false, reason: 'ENVIRONMENT_NOT_PERMITTED', message: 'Unrecognized environment.' }
   }
 
   // Gate 3: country/division eligibility — this is where gates.payments is finally enforced,

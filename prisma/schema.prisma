@@ -502,14 +502,14 @@ model PaymentEvent {
   // APPROVED_PROVIDER_CONFIGS in payment-policy.mjs) -- e.g. 'stripe' or 'sandbox'. Permanent: never
   // cleared by any deletion, unlike intentId/bookingId below.
   provider         String
-  // A stable label for which provider account/environment configuration received this event (e.g.
-  // 'sandbox-test-account', 'stripe-checkout') -- receipt-time metadata, not derived from
-  // APPROVED_PROVIDER_CONFIGS (which may have no entry for this provider at all, by design, e.g.
-  // stripe today -- see the Stripe/Syria compliance finding).
-  // Receipt-time provider-account label (e.g. 'sandbox-test-account', 'stripe-checkout'). Required
-  // -- part of the canonical event identity (migration 018) that replaces the old provider-blind
-  // global uniqueness on providerEventId alone.
-  providerAccount  String                       @map("provider_account")
+  // A static, per-rail configuration label (e.g. 'sandbox-test-account', 'stripe-checkout') -- part
+  // of the canonical event identity (migration 018) that replaces the old provider-blind global
+  // uniqueness on providerEventId alone. Named honestly (migration 019, renamed from
+  // providerAccount): this is NOT an identity derived from any verified provider/account context --
+  // this codebase has no multi-account or Stripe Connect support, so there is only ever one possible
+  // value per rail. If real multi-account support is ever added, this field must be derived from the
+  // verified account context at that time (e.g. Stripe Connect's event.account), never a literal.
+  providerEndpointKey String                     @map("provider_endpoint_key")
   // policyEnvironment() at receipt time (e.g. 'development', 'production'). 'unknown' for rows
   // received before this column existed (migration 017's backfill) -- an honest gap, not a guess.
   // Also part of the canonical event identity.
@@ -560,13 +560,44 @@ model PaymentEvent {
 
   intent  PaymentIntent? @relation(fields: [intentId], references: [id], onDelete: SetNull)
   booking Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  // Append-only record of every conflicting delivery under this event's canonical identity (same
+  // (provider, providerEndpointKey, environment, providerEventId), different immutable content).
+  // This event row's own fields (processingStatus/lastError/attempts/etc.) are NEVER written on a
+  // conflict -- see intakeEvent() in payment-event-pipeline.mjs and this relation's own model comment.
+  conflicts PaymentEventConflict[]
 
-  @@unique([provider, providerAccount, environment, providerEventId], name: "eventIdentity", map: "payment_events_identity_key")
+  @@unique([provider, providerEndpointKey, environment, providerEventId], name: "eventIdentity", map: "payment_events_identity_key")
   @@index([intentId])
   @@index([rail])
   @@index([bookingId])
   @@index([processingStatus])
   @@map("payment_events")
+}
+
+// Append-only audit trail of conflicting deliveries — a delivery whose canonical identity
+// (provider, providerEndpointKey, environment, providerEventId) matches an existing PaymentEvent but
+// whose immutable content (payload digest, type, reference, subject, amounts) does not. Recording
+// this here, in a separate child table, is what makes it structurally impossible for a conflicting
+// delivery to ever overwrite the original event's own authoritative outcome (independent review
+// found intakeEvent() doing exactly that in the prior round — this table is the fix). Stores only
+// non-sensitive, already-authenticated metadata: a digest and the immutable-field snapshot, never
+// the raw payload, never secrets.
+model PaymentEventConflict {
+  id                String   @id @default(uuid())
+  paymentEventId    String   @map("payment_event_id")
+  receivedAt        DateTime @default(now()) @map("received_at")
+  payloadDigest     String   @map("payload_digest")
+  type              String
+  providerReference String   @map("provider_reference")
+  subjectType       String   @map("subject_type")
+  providerObjectId  String?  @map("provider_object_id")
+  amountMinor       Int?     @map("amount_minor")
+  currency          String?
+
+  event PaymentEvent @relation(fields: [paymentEventId], references: [id], onDelete: Cascade)
+
+  @@index([paymentEventId])
+  @@map("payment_event_conflicts")
 }
 
 enum PaymentIntentStatus {

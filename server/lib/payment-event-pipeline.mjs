@@ -35,14 +35,19 @@ export function isPaymentEventIdentityConflict(err) {
 // constraint itself is what makes N concurrent identical deliveries resolve to exactly one row.
 //
 // On a genuine identity collision (a redelivery, or — the defect this closes — two DIFFERENT events
-// that happen to share a raw provider_event_id string across providers/accounts/environments, which
+// that happen to share a raw provider_event_id string across providers/endpoints/environments, which
 // can no longer collide at all since the constraint is now scoped by all four), the existing row's
 // IMMUTABLE fields are compared against this freshly-authenticated delivery:
 //   - a match is an ordinary duplicate — the existing row is returned unchanged, `conflict: false`;
-//   - a mismatch is a genuine conflict — never applied, the ORIGINAL row is never overwritten, it is
-//     marked QUARANTINED with a typed reason, and this is logged for operational visibility.
+//   - a mismatch is a genuine conflict. The ORIGINAL EVENT ROW IS NEVER WRITTEN TO, in ANY field,
+//     for ANY reason — independent review correctly found an earlier version of this function
+//     overwriting processingStatus/lastError here, which could silently destroy a legitimate
+//     APPLIED/FAILED/DEAD_LETTERED row's true, authoritative outcome. Instead, the conflicting
+//     delivery's safe, non-sensitive metadata (a digest + the immutable-field snapshot — never the
+//     raw payload) is recorded in a SEPARATE, append-only PaymentEventConflict row referencing the
+//     original by id, and the ORIGINAL, UNCHANGED row is returned.
 //
-// `fields` must include every column in the eventIdentity key (provider, providerAccount,
+// `fields` must include every column in the eventIdentity key (provider, providerEndpointKey,
 // environment, providerEventId) plus every other immutable column this function compares.
 export async function intakeEvent(fields) {
   try {
@@ -53,7 +58,7 @@ export async function intakeEvent(fields) {
       where: {
         eventIdentity: {
           provider: fields.provider,
-          providerAccount: fields.providerAccount,
+          providerEndpointKey: fields.providerEndpointKey,
           environment: fields.environment,
           providerEventId: fields.providerEventId,
         },
@@ -67,12 +72,20 @@ export async function intakeEvent(fields) {
       eventRow.amountMinor === fields.amountMinor &&
       eventRow.currency === fields.currency
     if (matches) return { eventRow, conflict: false }
-    log.error('payment_event_identity_conflict', { eventId: eventRow.id, providerEventId: fields.providerEventId, rail: fields.rail })
-    const quarantined = await db().paymentEvent.update({
-      where: { id: eventRow.id },
-      data: { processingStatus: 'QUARANTINED', lastError: 'IDENTITY_CONFLICT: redelivered event with the same identity but different immutable fields' },
+    log.error('payment_event_identity_conflict', { eventId: eventRow.id, providerEventId: fields.providerEventId, rail: fields.rail, originalStatus: eventRow.processingStatus })
+    await db().paymentEventConflict.create({
+      data: {
+        paymentEventId: eventRow.id,
+        payloadDigest: fields.payloadDigest,
+        type: fields.type,
+        providerReference: fields.providerReference,
+        subjectType: fields.subjectType,
+        providerObjectId: fields.providerObjectId,
+        amountMinor: fields.amountMinor,
+        currency: fields.currency,
+      },
     })
-    return { eventRow: quarantined, conflict: true }
+    return { eventRow, conflict: true }
   }
 }
 

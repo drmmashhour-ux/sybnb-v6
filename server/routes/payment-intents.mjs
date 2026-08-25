@@ -403,7 +403,7 @@ export async function handlePaymentIntents(req, res, url, context) {
     const { eventRow: intaken, conflict } = await intakeEvent({
       rail: 'payment_intent',
       provider: 'sandbox',
-      providerAccount: 'sandbox-test-account',
+      providerEndpointKey: 'sandbox-test-account',
       environment: policyEnvironment(),
       subjectType: 'PAYMENT_INTENT',
       providerReference,

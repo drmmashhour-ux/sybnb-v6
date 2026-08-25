@@ -242,9 +242,18 @@ withPermissiveEnv({}, () => {
     deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', provider: 'totally_unknown_processor' })),
   )
   check(
-    'webhook_intake in an unrecognized environment still denies (ENVIRONMENT_NOT_PERMITTED) -- gate 2 still applies to intake',
-    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', environment: 'not_a_real_env' })) === 'ENVIRONMENT_NOT_PERMITTED',
+    // Corrective-round fix: an unrecognized/misconfigured environment label must never discard an
+    // already-authenticated event -- gate 2 is now ALSO bypassed for webhook_intake (previously only
+    // gates 3/5/6/7 were exempt), closing the same class of defect as the rail-flag fix, just via a
+    // different gate. Non-intake operations still correctly enforce gate 2 (see the next check).
+    'webhook_intake with an unrecognized environment label still succeeds -- an authenticated event must never be discarded for this reason',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', environment: 'not_a_real_env' })) === null,
     deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', environment: 'not_a_real_env' })),
+  )
+  check(
+    'a NON-intake operation (create) still correctly denies for an unrecognized environment (ENVIRONMENT_NOT_PERMITTED) -- the exemption is scoped to webhook_intake only',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'create', environment: 'not_a_real_env' })) === 'ENVIRONMENT_NOT_PERMITTED',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'create', environment: 'not_a_real_env' })),
   )
 })
 

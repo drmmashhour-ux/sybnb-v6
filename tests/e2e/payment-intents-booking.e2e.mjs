@@ -248,7 +248,7 @@ const seeded = await db().paymentEvent.create({
   data: {
     rail: 'payment_intent',
     provider: 'sandbox',
-    providerAccount: 'sandbox-test-account',
+    providerEndpointKey: 'sandbox-test-account',
     environment: policyEnvironment(),
     subjectType: 'PAYMENT_INTENT',
     providerReference: intentC.reference,

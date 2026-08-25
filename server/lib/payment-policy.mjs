@@ -20,6 +20,13 @@ export const PAYMENT_OPERATIONS = Object.freeze([
   'webhook_intake',
   'webhook_apply',
   'reconciliation_read',
+  // Paying the HOST out (a booking_payout RELEASE wallet entry) is a distinct operation from
+  // capturing/refunding the GUEST's payment — it moves money in the opposite direction, to a
+  // different party, and was previously left as a documented, unfixed gap because it didn't fit
+  // any of the other 6 types. Stretching 'capture' or 'refund' to also mean "pay the host" would
+  // have made those types ambiguous for every other call site; a distinct type keeps each
+  // operation meaning exactly one thing.
+  'payout_release',
 ])
 
 // An emergency stop pauses everything EXCEPT durable, authenticated webhook intake and read-only
@@ -38,6 +45,7 @@ const RECOGNIZED_ENVIRONMENTS = new Set(['development', 'test', 'staging', 'prod
 const OPERATION_ACTOR_ROLES = {
   replay: ['ADMIN'],
   refund: ['ADMIN'],
+  payout_release: ['ADMIN'],
 }
 
 // A payment rail's configuration must be an explicitly approved record, not merely "an env var is

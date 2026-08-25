@@ -36,6 +36,13 @@ export const PAYMENT_POLICY_ROUTES = Object.freeze([
 
   // --- bookings.mjs (guest-initiated cancellation, moves money) ---
   { method: 'PATCH', pathPattern: '^/api/bookings/[^/]+/cancel$', operation: 'refund', file: 'server/routes/bookings.mjs', rail: 'manual_proof' },
+
+  // --- admin.mjs (paying the host out — the owner-authorized 8th operation type) ---
+  { method: 'PATCH', pathPattern: '^/api/admin/payouts/[^/]+/release$', operation: 'payout_release', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
+
+  // --- host.mjs (host-initiated cancellation, reverses an approved payment — found by the
+  // all-routers enforcement scan, not the original hand-survey; see the implementation report) ---
+  { method: 'PATCH', pathPattern: '^/api/host/requests/[^/]+$', operation: 'refund', file: 'server/routes/host.mjs', rail: 'manual_proof' },
 ])
 
 // Routes deliberately excluded from the registry — documented so the enforcement audit's static
@@ -50,17 +57,7 @@ export const PAYMENT_POLICY_EXCLUDED_ROUTES = Object.freeze([
   { method: '*', pathPattern: '^/api/admin/id-document', file: 'server/routes/admin.mjs', reason: 'KYC documents, unrelated to payments' },
 ])
 
-// Known, explicitly flagged gap — NOT wired into the policy this commit, NOT silently omitted
-// either. See the implementation report's "limitations" section for the owner decision needed:
-// this route moves real money (a host payout RELEASE wallet entry) but doesn't map cleanly onto
-// any of the 7 approved operation types (create/capture/refund/replay/webhook_intake/
-// webhook_apply/reconciliation_read). Stretching an existing type or unilaterally adding an 8th
-// beyond what was authorized both seemed worse than surfacing the gap explicitly.
-export const PAYMENT_POLICY_KNOWN_GAPS = Object.freeze([
-  {
-    method: 'PATCH',
-    pathPattern: '^/api/admin/payouts/[^/]+/release$',
-    file: 'server/routes/admin.mjs',
-    reason: 'moves real money (payout RELEASE) but has no operation type in the current 7-item taxonomy that fits it — needs an owner decision before wiring',
-  },
-])
+// No known gaps remain — payout_release (below) closed the one previously-documented gap. Kept as
+// an explicit, empty export (rather than removed) so the enforcement test's reconciliation logic
+// and any future gap never need special-casing "this export might not exist".
+export const PAYMENT_POLICY_KNOWN_GAPS = Object.freeze([])

@@ -12,6 +12,7 @@ import {
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 
 export async function handleHost(req, res, url, context) {
   if (url.pathname === '/api/host/earnings') {
@@ -188,6 +189,20 @@ export async function handleHost(req, res, url, context) {
       error.code = 'HOST_TERMS_REQUIRED'
       error.expose = true
       throw error
+    }
+
+    // Only money-moving when the host is CANCELLING (reverses a real, already-approved payment) —
+    // confirming is a pure status change (the payout stays held either way; see the comment below).
+    if (status === 'CANCELLED' && existing.payments.some((payment) => payment.status === 'APPROVED')) {
+      authorizePaymentOperation({
+        operation: 'refund',
+        rail: 'manual_proof',
+        provider: 'manual',
+        division: existing.listing.division,
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+        actor: { roles: context.roles },
+      })
     }
 
     const booking = await db().$transaction(async (tx) => {

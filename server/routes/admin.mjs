@@ -111,6 +111,20 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
 
+    // Paying the host out is its own operation (payout_release), distinct from capturing or
+    // refunding the guest's payment — no third-party disbursement processor is called anywhere in
+    // this codebase, so it's classified under the same 'manual'/internal-ledger provider as the
+    // other admin-driven wallet operations.
+    authorizePaymentOperation({
+      operation: 'payout_release',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: booking.listing.division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
     if (!isPayoutEligible(booking)) {
       const error = new Error(
         `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,

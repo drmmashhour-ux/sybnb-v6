@@ -54,6 +54,7 @@
   },
   "devDependencies": {
     "@prisma/client": "^6.19.3",
+    "acorn": "^8.18.0",
     "prisma": "^6.19.3"
   }
 }

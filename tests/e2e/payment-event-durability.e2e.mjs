@@ -19,6 +19,7 @@
 import { createSessionToken } from '../../server/lib/security.mjs'
 import { signWebhook } from '../../server/lib/payment-webhook.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
+import { intakeEvent } from '../../server/lib/payment-event-pipeline.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
 const PI_SECRET = process.env.PAYMENT_WEBHOOK_SECRET || 'whsec_sandbox_test'
@@ -117,14 +118,17 @@ console.log('\n=== A. PAYMENT_INTENT RAIL — deleting the linked PaymentIntent 
   // create a PaymentProof FK-linked to the booking and complicate a clean delete below -- the point
   // here is event-row survival, not re-testing application, which other suites already cover).
   const seededEventId = `evt_ped_dl_${Date.now()}`
+  const seedFields = {
+    rail: 'payment_intent', provider: 'sandbox', providerAccount: 'sandbox-test-account',
+    environment: 'test', subjectType: 'PAYMENT_INTENT', providerReference: intentA.reference,
+    providerEventId: seededEventId, type: 'payment_intent.succeeded',
+    amountMinor: intentA.amountMinor, currency: intentA.currency,
+    providerObjectId: `pi_prov_ped_${Date.now()}`, payloadDigest: 'synthetic-digest-for-test',
+  }
   const seeded = await db().paymentEvent.create({
     data: {
-      rail: 'payment_intent', provider: 'sandbox', providerAccount: 'sandbox-test-account',
-      environment: 'test', subjectType: 'PAYMENT_INTENT',
+      ...seedFields,
       intentId: intentA.id, originalIntentId: intentA.id, originalBookingId: bookingA.id,
-      providerEventId: seededEventId, type: 'payment_intent.succeeded',
-      amountMinor: intentA.amountMinor, currency: intentA.currency,
-      providerObjectId: `pi_prov_ped_${Date.now()}`,
       processingStatus: 'DEAD_LETTERED', attempts: 3, lastError: 'synthetic seed for destructive-parent test',
     },
   })
@@ -143,21 +147,21 @@ console.log('\n=== A. PAYMENT_INTENT RAIL — deleting the linked PaymentIntent 
   check('dead-letter history survives: attempts unchanged', after?.attempts === before.attempts, after?.attempts)
   check('dead-letter history survives: lastError unchanged', after?.lastError === before.lastError, after?.lastError)
 
-  // Queryable/reconcilable: fetch it back by its natural unique key, not just by internal id.
-  const byProviderEventId = await db().paymentEvent.findUnique({ where: { providerEventId: seededEventId } })
+  // Queryable/reconcilable: fetch it back by its natural identity, not just by internal id.
+  // providerEventId is no longer independently unique (migration 018 — canonical identity is now
+  // (provider, providerAccount, environment, providerEventId)), so this uses findFirst.
+  const byProviderEventId = await db().paymentEvent.findFirst({ where: { providerEventId: seededEventId } })
   check('the orphaned event remains queryable by providerEventId', byProviderEventId?.id === seeded.id, JSON.stringify(byProviderEventId))
 
   // Duplicate-delivery dedup still resolves to the SAME row, even orphaned -- proven at the exact
-  // mechanism the webhook routes use (upsert keyed on providerEventId), not re-derived from HTTP
-  // (a live redelivery for this specific rail would 404 earlier, at the now-gone intent's reference
-  // lookup -- a separate, expected, unrelated behavior; this proves the DEDUP mechanism itself).
-  const dupUpsert = await db().paymentEvent.upsert({
-    where: { providerEventId: seededEventId },
-    create: { rail: 'payment_intent', provider: 'sandbox', environment: 'test', subjectType: 'PAYMENT_INTENT', providerEventId: seededEventId, type: 'should_not_be_used', originalIntentId: 'should-not-be-used', processingStatus: 'RECEIVED' },
-    update: {},
-  })
-  check('a duplicate upsert on the same providerEventId resolves to the SAME orphaned row, not a new one', dupUpsert.id === seeded.id, `${seeded.id} vs ${dupUpsert.id}`)
-  check('the duplicate upsert did not corrupt the dead-letter history (update: {} is truly a no-op)', dupUpsert.attempts === before.attempts && dupUpsert.lastError === before.lastError, JSON.stringify(dupUpsert))
+  // mechanism both webhook routes now share (intakeEvent's create-then-catch-P2002-then-compare
+  // pattern), not re-derived from HTTP (a live redelivery for this specific rail would 404 earlier,
+  // at the now-gone intent's reference lookup -- a separate, expected, unrelated behavior; this
+  // proves the DEDUP mechanism itself, with immutable fields matching -> an ordinary duplicate).
+  const dup = await intakeEvent(seedFields)
+  check('a duplicate intake on the same canonical identity resolves to the SAME orphaned row, not a new one', dup.eventRow.id === seeded.id, `${seeded.id} vs ${dup.eventRow.id}`)
+  check('the duplicate intake is recognized as an ordinary match, not a conflict (immutable fields identical)', dup.conflict === false, JSON.stringify(dup))
+  check('the duplicate intake did not corrupt the dead-letter history', dup.eventRow.attempts === before.attempts && dup.eventRow.lastError === before.lastError, JSON.stringify(dup.eventRow))
 
   // Orphan replay: must fail SAFELY (a governed error, not a raw crash) and remain audited.
   const auditCountBefore = await db().adminAuditLog.count({ where: { entityType: 'payment_event', entityId: seeded.id } })
@@ -177,13 +181,13 @@ console.log('\n=== B. STRIPE_CHECKOUT RAIL — deleting the linked Booking must 
   const r1 = await stripeWebhook(evt)
   check('setup: a real webhook durably received for booking B', r1.status === 200, JSON.stringify(r1))
 
-  const beforeRow = await db().paymentEvent.findUnique({ where: { providerEventId: eventId } })
+  const beforeRow = await db().paymentEvent.findFirst({ where: { providerEventId: eventId } })
   const before = { originalBookingId: beforeRow?.originalBookingId, providerEventId: beforeRow?.providerEventId, processingStatus: beforeRow?.processingStatus }
   check('setup: the durable row correctly snapshots originalBookingId', before.originalBookingId === bookingB.id, before.originalBookingId)
 
   await db().booking.delete({ where: { id: bookingB.id } })
 
-  const afterRow = await db().paymentEvent.findUnique({ where: { providerEventId: eventId } })
+  const afterRow = await db().paymentEvent.findFirst({ where: { providerEventId: eventId } })
   check('the PaymentEvent row still exists after its Booking is deleted', Boolean(afterRow), 'row is gone')
   check('the live bookingId FK is cleared to null (SET NULL)', afterRow?.bookingId === null, afterRow?.bookingId)
   check('originalBookingId (permanent snapshot) is UNCHANGED', afterRow?.originalBookingId === before.originalBookingId, `${before.originalBookingId} -> ${afterRow?.originalBookingId}`)

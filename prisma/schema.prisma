@@ -493,8 +493,10 @@ model PaymentIntent {
 model PaymentEvent {
   id               String                       @id @default(uuid())
   // Which webhook rail produced this event -- 'payment_intent' (the events below reference intent)
-  // or 'stripe_checkout' (the events below reference booking instead). See the traceability CHECK
-  // constraint (migration 017) -- not expressible in this schema DSL, DB-only.
+  // or 'stripe_checkout' (the events below reference booking instead). Traceability is guaranteed by
+  // providerReference (below) being required, not by a rail-conditional CHECK -- migration 017's
+  // CHECK on original_intent_id/original_booking_id was dropped in migration 018, since it was too
+  // strict once durable intake had to succeed even for an unresolvable local reference.
   rail             String
   // Structural authentication identity, NOT the money-movement-approval question (that stays
   // APPROVED_PROVIDER_CONFIGS in payment-policy.mjs) -- e.g. 'stripe' or 'sandbox'. Permanent: never
@@ -504,26 +506,42 @@ model PaymentEvent {
   // 'sandbox-test-account', 'stripe-checkout') -- receipt-time metadata, not derived from
   // APPROVED_PROVIDER_CONFIGS (which may have no entry for this provider at all, by design, e.g.
   // stripe today -- see the Stripe/Syria compliance finding).
-  providerAccount  String?                      @map("provider_account")
+  // Receipt-time provider-account label (e.g. 'sandbox-test-account', 'stripe-checkout'). Required
+  // -- part of the canonical event identity (migration 018) that replaces the old provider-blind
+  // global uniqueness on providerEventId alone.
+  providerAccount  String                       @map("provider_account")
   // policyEnvironment() at receipt time (e.g. 'development', 'production'). 'unknown' for rows
   // received before this column existed (migration 017's backfill) -- an honest gap, not a guess.
+  // Also part of the canonical event identity.
   environment      String
   // What kind of internal record this event was originally about -- 'PAYMENT_INTENT' or 'BOOKING'.
   // Permanent, set once at receipt, independent of whether intentId/bookingId later become null.
   subjectType      String                       @map("subject_type")
+  // The RAW, unvalidated local reference from the payload (an intent's own `reference` string for
+  // the payment_intent rail; `metadata.bookingId` for stripe_checkout) -- populated UNCONDITIONALLY
+  // at intake, before any local lookup is attempted. This is what lets an authenticated event with
+  // an unresolvable, malformed, or since-deleted local reference still be durably stored (migration
+  // 018, closing a real "authenticated events silently dropped before persistence" defect an
+  // independent review found). Immutable once set -- part of the conflict-detection comparison.
+  providerReference String                      @map("provider_reference")
   // LIVE foreign keys -- nullable, ON DELETE SET NULL (migration 017; previously CASCADE on intent
   // and undeclared/NO ACTION on booking -- both wrong for a durable audit table, fixed after
   // independent review found this exact defect). Deleting the parent clears these, NOT the event row.
+  // Populated once local resolution (via providerReference) succeeds -- may be null at intake time
+  // and filled in by a later processing step, not necessarily set atomically with the row's creation.
   intentId         String?                      @map("intent_id")
   bookingId        String?                      @map("booking_id")
-  // PERMANENT snapshots of the same two ids, populated once at receipt and NEVER cleared by any
-  // deletion -- what makes an orphaned event (its live FK now null) still fully self-describing and
-  // reconcilable. "Where available" per rail: payment_intent rows populate originalIntentId always
-  // and originalBookingId when the intent had one; stripe_checkout rows populate originalBookingId
-  // only (this rail has no PaymentIntent to reference at all).
+  // PERMANENT snapshots of the same two ids, populated once resolution succeeds and NEVER cleared by
+  // any deletion -- what makes an orphaned event (its live FK now null) still fully self-describing
+  // and reconcilable. "Where available" per rail: payment_intent rows populate originalIntentId
+  // once resolved, and originalBookingId when the resolved intent had one; stripe_checkout rows
+  // populate originalBookingId only (this rail has no PaymentIntent to reference at all).
   originalIntentId  String?                     @map("original_intent_id")
   originalBookingId String?                     @map("original_booking_id")
-  providerEventId  String                       @unique @map("provider_event_id")
+  // No longer independently unique -- see the composite @@unique below (migration 018). A bare
+  // provider-event-id string is only unique WITHIN one provider/account/environment; the same
+  // string from a different provider must never collide with it.
+  providerEventId  String                       @map("provider_event_id")
   type             String
   amountMinor      Int?                         @map("amount_minor")
   currency         String?
@@ -543,6 +561,7 @@ model PaymentEvent {
   intent  PaymentIntent? @relation(fields: [intentId], references: [id], onDelete: SetNull)
   booking Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
 
+  @@unique([provider, providerAccount, environment, providerEventId], name: "eventIdentity", map: "payment_events_identity_key")
   @@index([intentId])
   @@index([rail])
   @@index([bookingId])
@@ -575,6 +594,14 @@ enum PaymentEventProcessingStatus {
   IGNORED
   FAILED
   DEAD_LETTERED
+  // Authenticated but locally unresolvable: an unknown/malformed local reference, an amount/currency
+  // conflict against the resolved local record, or a genuine identity conflict on redelivery
+  // (same canonical identity, different immutable fields). Migration 018.
+  QUARANTINED
+  // The webhook_apply policy denied application. A real, queryable status -- previously this case
+  // silently left the row at RECEIVED, which conflated "not yet attempted" with "explicitly
+  // deferred by policy". Migration 018.
+  POLICY_DEFERRED
 
   @@map("payment_event_processing_status")
 }

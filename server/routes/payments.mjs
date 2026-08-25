@@ -8,7 +8,7 @@ import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { log } from '../lib/logger.mjs'
 import { finalizeStripeSession, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
-import { applyPaymentEvent } from '../lib/payment-event-pipeline.mjs'
+import { applyPaymentEvent, intakeEvent } from '../lib/payment-event-pipeline.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
@@ -306,44 +306,38 @@ export async function handlePayments(req, res, url, context) {
       environment: policyEnvironment(),
     })
 
-    if (event.type !== 'checkout.session.completed') {
-      // Unrecognized/unhandled event type -- acknowledged, not durably tracked. Matches the
-      // payment_intent rail's own scope: only event types with a real target mapping are recorded.
-      return json(res, 200, { ok: true, ignored: event.type })
-    }
-
-    const session = event.data.object
-    const bookingId = session.metadata?.bookingId || null
     const payloadDigest = createHash('sha256').update(rawBody).digest('hex')
+    const obj = event.data?.object || {}
+    // The RAW, unvalidated local reference -- may be an empty string for an event type this rail
+    // doesn't otherwise track (its shape isn't a Checkout Session at all). Stored unconditionally
+    // below, before any interpretation, so an unresolvable/malformed/irrelevant event still leaves a
+    // durable, authenticated trace.
+    const providerReference = String(obj.metadata?.bookingId || '')
 
-    // Durable intake -- this rail's own PaymentEvent row, previously nonexistent (this table could
-    // not hold a stripe_checkout event at all before migration 016, since intent_id was NOT NULL).
-    // A stripe_checkout event is traced to its booking (not a PaymentIntent, which doesn't exist for
-    // this rail) via the Checkout Session's own metadata.bookingId. Postgres ON CONFLICT makes this
-    // atomic under concurrent redelivery, mirroring payment-intents.mjs exactly.
-    const eventRow = await db().paymentEvent.upsert({
-      where: { providerEventId: event.id },
-      create: {
-        rail: 'stripe_checkout',
-        provider: 'stripe',
-        providerAccount: 'stripe-checkout',
-        environment: policyEnvironment(),
-        subjectType: 'BOOKING',
-        bookingId,
-        // Permanent snapshot -- survives a later deletion of the booking row itself (ON DELETE
-        // SET NULL only clears bookingId above, never this). This rail has no PaymentIntent to
-        // reference at all, so originalIntentId stays null (matches PaymentEvent's own comment).
-        originalBookingId: bookingId,
-        providerEventId: event.id,
-        type: event.type,
-        amountMinor: session.metadata?.sypTotalMinor ? Number(session.metadata.sypTotalMinor) : null,
-        currency: session.currency ?? null,
-        providerObjectId: session.id ?? null,
-        payloadDigest,
-        processingStatus: 'RECEIVED',
-      },
-      update: {},
+    // Durable intake -- this rail's own PaymentEvent row (previously nonexistent entirely; this
+    // table could not hold a stripe_checkout event at all before migration 016). Race-safe under
+    // concurrent redelivery via the canonical (provider, providerAccount, environment,
+    // providerEventId) unique constraint, mirroring payment-intents.mjs exactly.
+    const { eventRow: intaken, conflict } = await intakeEvent({
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      providerAccount: 'stripe-checkout',
+      environment: policyEnvironment(),
+      subjectType: 'BOOKING',
+      providerReference,
+      providerEventId: event.id,
+      type: event.type,
+      amountMinor: obj.metadata?.sypTotalMinor ? Number(obj.metadata.sypTotalMinor) : null,
+      currency: obj.currency ?? null,
+      providerObjectId: obj.id ?? null,
+      payloadDigest,
+      processingStatus: 'RECEIVED',
     })
+    if (conflict) {
+      log.warn('payment_webhook_identity_conflict', { eventId: event.id, rail: 'stripe_checkout' })
+      return json(res, 200, { ok: true, conflict: true, received: true })
+    }
+    let eventRow = intaken
 
     if (['APPLIED', 'IGNORED'].includes(eventRow.processingStatus)) {
       return json(res, 200, { ok: true, applied: false, duplicate: true, received: true })
@@ -352,13 +346,37 @@ export async function handlePayments(req, res, url, context) {
       // Don't auto-reprocess a known-broken event on provider redelivery -- needs a human via the
       // admin replay endpoint (payment-intents.mjs, generalized to accept either rail). Still
       // acknowledge with 200 so Stripe stops retrying.
-      log.warn('payment_webhook_dead_lettered_redelivery', { eventId: event.id, rail: 'stripe_checkout', bookingId })
+      log.warn('payment_webhook_dead_lettered_redelivery', { eventId: event.id, rail: 'stripe_checkout' })
       return json(res, 200, { ok: true, applied: false, deadLettered: true, received: true })
     }
 
-    const division = bookingId
-      ? (await db().booking.findUnique({ where: { id: bookingId }, select: { listing: { select: { division: true } } } }))?.listing?.division || 'PLATFORM'
-      : 'PLATFORM'
+    // Interpretation, entirely AFTER durable persistence.
+    if (event.type !== 'checkout.session.completed') {
+      // Unrecognized/unhandled event type -- durably recorded above, now marked as a deterministic
+      // no-op rather than silently unpersisted (the defect an independent review found: this rail
+      // previously returned before ever reaching the durable insert for exactly this case).
+      eventRow = await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'IGNORED' } })
+      return json(res, 200, { ok: true, ignored: event.type })
+    }
+
+    const session = obj
+    // Resolve via the DURABLY STORED reference, not a fresh payload read, so a later redelivery or
+    // reconciliation pass always resolves consistently against what was actually authenticated.
+    const bookingId = eventRow.providerReference || null
+    const bookingRecord = bookingId
+      ? await db().booking.findUnique({ where: { id: bookingId }, select: { id: true, listing: { select: { division: true } } } })
+      : null
+    if (!bookingRecord) {
+      await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: bookingId ? 'BOOKING_NOT_FOUND' : 'BOOKING_REFERENCE_MISSING' } })
+      return json(res, 200, { ok: true, quarantined: true, received: true })
+    }
+    if (eventRow.bookingId !== bookingRecord.id) {
+      eventRow = await db().paymentEvent.update({
+        where: { id: eventRow.id },
+        data: { bookingId: bookingRecord.id, originalBookingId: bookingRecord.id },
+      })
+    }
+    const division = bookingRecord.listing?.division || 'PLATFORM'
 
     try {
       authorizePaymentOperation({
@@ -371,10 +389,11 @@ export async function handlePayments(req, res, url, context) {
       })
     } catch (denied) {
       if (denied?.code !== 'PAYMENT_POLICY_DENIED') throw denied
-      // Durably received (the upsert above already committed), application paused. Zero attempts
-      // consumed -- an intentional policy pause, not a processing failure. The row stays RECEIVED; a
-      // later redelivery or an explicit reconciliation pass applies it once policy allows.
+      // Durably received, application paused. Zero attempts consumed -- an intentional policy pause,
+      // not a processing failure. A later redelivery or an explicit reconciliation pass applies it
+      // once policy allows.
       log.warn('payment_webhook_apply_denied', { rail: 'stripe_checkout', eventId: event.id, reason: denied.reason })
+      await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'POLICY_DEFERRED' } })
       return json(res, 200, { ok: true, applied: false, policyDeferred: true, received: true })
     }
 

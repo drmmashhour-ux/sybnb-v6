@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
@@ -11,7 +11,7 @@ import {
 } from '../lib/finance-ledger.mjs'
 import { log } from '../lib/logger.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
-import { applyPaymentEvent as applyPaymentEventPipeline } from '../lib/payment-event-pipeline.mjs'
+import { applyPaymentEvent as applyPaymentEventPipeline, intakeEvent } from '../lib/payment-event-pipeline.mjs'
 import { applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
 
 function fail(statusCode, code, message) {
@@ -358,19 +358,34 @@ export async function handlePaymentIntents(req, res, url, context) {
     })
   }
 
-  // Provider webhook — public, authenticated by the signature (NOT a session). Idempotent by event
-  // id; a redelivery of an already-APPLIED/IGNORED event is a no-op, a redelivery of a
-  // FAILED/RECEIVED event retries, and a DEAD_LETTERED event is logged and left for admin replay.
+  // Provider webhook — public, authenticated by the signature (NOT a session). Idempotent by
+  // canonical identity; a redelivery of an already-APPLIED/IGNORED event is a no-op, a redelivery of
+  // a FAILED/RECEIVED/QUARANTINED/POLICY_DEFERRED event retries, and a DEAD_LETTERED event is logged
+  // and left for admin replay.
+  //
+  // Durable-intake ordering, precisely (independent review found the previous version violated this
+  // in four ways -- see the corrective commit message): verify signature -> compute payload digest
+  // -> authorize webhook_intake -> durably persist/dedupe the RAW authenticated event (before ANY
+  // local interpretation) -> THEN interpret event type, resolve the local intent, validate
+  // amount/currency -> THEN authorize webhook_apply -> THEN apply. Every one of those interpretation
+  // steps can now fail WITHOUT losing the durable record: an unsupported type is marked IGNORED, an
+  // unresolvable/conflicting reference or amount/currency mismatch is marked QUARANTINED, a
+  // policy-denied apply is marked POLICY_DEFERRED -- never a pre-persistence throw.
+  //
+  // requirePaymentIntentsEnabled() is NOT called anywhere in this handler -- with the flag off,
+  // intake must still succeed, and webhook_apply is already correctly gated by the policy's own
+  // gate 5 (isRailEnabled('payment_intent') reads this exact flag) inside the try block below, which
+  // — unlike a separate outer call — degrades gracefully to POLICY_DEFERRED instead of a raw 503.
   if (url.pathname === '/api/payments/webhook') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
-    requirePaymentIntentsEnabled()
     const raw = await readRawBody(req)
     const event = verifyWebhook(raw, req.headers['stripe-signature'], paymentWebhookSecret())
+    const payloadDigest = createHash('sha256').update(raw).digest('hex')
 
     // webhook_intake is deliberately division-blind: it runs before we've even looked up which
     // intent (and therefore which booking/division) this event is for. An authenticated event must
-    // still be authenticatable, durably storable, and dedupable even when the rest of the policy
-    // would deny — see the design doc's "separate webhook intake from webhook effects" correction.
+    // still be durably storable and dedupable even when the rest of the policy would deny — see the
+    // design doc's "separate webhook intake from webhook effects" correction.
     authorizePaymentOperation({
       operation: 'webhook_intake',
       rail: 'payment_intent',
@@ -381,57 +396,83 @@ export async function handlePaymentIntents(req, res, url, context) {
     })
 
     const obj = event.data?.object || {}
-    const target = targetStatusFor(event.type)
-    if (!target) return json(res, 200, { ok: true, ignored: event.type }) // unhandled event types are acknowledged, not applied
+    // The RAW, unvalidated local reference -- stored unconditionally below, before any lookup is
+    // attempted, so an unresolvable/malformed reference still leaves a durable trace.
+    const providerReference = String(obj.reference || '')
 
-    const intent = await db().paymentIntent.findUnique({ where: { reference: String(obj.reference || '') } })
-    if (!intent) throw fail(404, 'PAYMENT_INTENT_NOT_FOUND', 'No matching payment intent.')
-
-    // Authoritative amount/currency: a webhook claiming a different amount/currency than the
-    // server-created intent is rejected — the provider event cannot redefine the price.
-    if (obj.amount_minor != null && Math.round(Number(obj.amount_minor)) !== intent.amountMinor) {
-      throw fail(400, 'PAYMENT_AMOUNT_MISMATCH', 'Event amount does not match the intent.')
-    }
-    if (obj.currency != null && String(obj.currency).toLowerCase() !== intent.currency) {
-      throw fail(400, 'PAYMENT_CURRENCY_MISMATCH', 'Event currency does not match the intent.')
-    }
-
-    // Durable intake — its own statement, deliberately outside the risky apply transaction below,
-    // so a delivery is recorded even if applying its side effects later fails and rolls back.
-    // Postgres ON CONFLICT makes this atomic under concurrent redelivery.
-    const eventRow = await db().paymentEvent.upsert({
-      where: { providerEventId: event.id },
-      create: {
-        rail: 'payment_intent',
-        provider: 'sandbox',
-        providerAccount: 'sandbox-test-account',
-        environment: policyEnvironment(),
-        subjectType: 'PAYMENT_INTENT',
-        intentId: intent.id,
-        // Permanent snapshot -- survives a later deletion of the intent row itself (ON DELETE
-        // SET NULL only clears intentId above, never this).
-        originalIntentId: intent.id,
-        originalBookingId: intent.bookingId ?? null,
-        providerEventId: event.id,
-        type: event.type,
-        amountMinor: obj.amount_minor ?? null,
-        currency: obj.currency ?? null,
-        providerObjectId: obj.id ?? null,
-        processingStatus: 'RECEIVED',
-      },
-      update: {},
+    const { eventRow: intaken, conflict } = await intakeEvent({
+      rail: 'payment_intent',
+      provider: 'sandbox',
+      providerAccount: 'sandbox-test-account',
+      environment: policyEnvironment(),
+      subjectType: 'PAYMENT_INTENT',
+      providerReference,
+      providerEventId: event.id,
+      type: event.type,
+      amountMinor: obj.amount_minor ?? null,
+      currency: obj.currency ?? null,
+      providerObjectId: obj.id ?? null,
+      payloadDigest,
+      processingStatus: 'RECEIVED',
     })
+    if (conflict) {
+      log.warn('payment_webhook_identity_conflict', { eventId: event.id, rail: 'payment_intent' })
+      return json(res, 200, { ok: true, conflict: true })
+    }
+    let eventRow = intaken
 
     if (['APPLIED', 'IGNORED'].includes(eventRow.processingStatus)) {
-      return json(res, 200, { ok: true, applied: false, duplicate: true, status: intent.status })
+      return json(res, 200, { ok: true, applied: false, duplicate: true })
     }
     if (eventRow.processingStatus === 'DEAD_LETTERED') {
       // Don't auto-reprocess a known-broken event on provider redelivery — that needs a human via
       // the admin replay endpoint. Still acknowledge with 200 so the provider stops retrying.
-      log.warn('payment_webhook_dead_lettered_redelivery', { eventId: event.id, intentId: intent.id, type: event.type })
-      return json(res, 200, { ok: true, applied: false, deadLettered: true, status: intent.status })
+      log.warn('payment_webhook_dead_lettered_redelivery', { eventId: event.id, type: event.type })
+      return json(res, 200, { ok: true, applied: false, deadLettered: true })
     }
 
+    // Interpretation, entirely AFTER durable persistence.
+    const target = targetStatusFor(event.type)
+    if (!target) {
+      eventRow = await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'IGNORED' } })
+      return json(res, 200, { ok: true, ignored: event.type })
+    }
+
+    const intent = await db().paymentIntent.findUnique({ where: { reference: providerReference } })
+    if (!intent) {
+      await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: 'PAYMENT_INTENT_NOT_FOUND' } })
+      return json(res, 200, { ok: true, quarantined: true })
+    }
+    if (eventRow.intentId !== intent.id) {
+      // Attach the live FK + permanent snapshot now that resolution has succeeded -- may not have
+      // been known at intake time (e.g. a fresh event whose reference just now resolved).
+      eventRow = await db().paymentEvent.update({
+        where: { id: eventRow.id },
+        data: { intentId: intent.id, originalIntentId: intent.id, originalBookingId: intent.bookingId ?? null },
+      })
+    }
+
+    // Authoritative amount/currency: a webhook claiming a different amount/currency than the
+    // server-created intent is quarantined, not applied — the provider event cannot redefine the
+    // price, but the authenticated event itself stays durably on record either way.
+    if (obj.amount_minor != null && Math.round(Number(obj.amount_minor)) !== intent.amountMinor) {
+      await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: 'PAYMENT_AMOUNT_MISMATCH' } })
+      return json(res, 200, { ok: true, quarantined: true })
+    }
+    if (obj.currency != null && String(obj.currency).toLowerCase() !== intent.currency) {
+      await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: 'PAYMENT_CURRENCY_MISMATCH' } })
+      return json(res, 200, { ok: true, quarantined: true })
+    }
+
+    // No separate requirePaymentIntentsEnabled() call here (deliberately) -- an earlier version of
+    // this fix added one as "defense in depth", matching the admin replay endpoint's own pattern for
+    // this flag, but that was a real bug in a different shape: thrown OUTSIDE this try block, it
+    // propagated as a raw uncaught 503, bypassing the graceful POLICY_DEFERRED path entirely (caught
+    // empirically via tests/e2e/payment-webhook-default-deny.e2e.mjs). Unlike admin replay (an
+    // explicit admin action with no "public webhook must degrade gracefully" concern), this route's
+    // whole point is that a policy-denied apply still returns 200 and durably preserves the event.
+    // authorizePaymentOperation's own gate 5 (isRailEnabled('payment_intent') reads this exact same
+    // PAYMENT_INTENTS_ENABLED flag) already gates webhook_apply correctly, inside the try below.
     try {
       authorizePaymentOperation({
         operation: 'webhook_apply',
@@ -442,11 +483,11 @@ export async function handlePaymentIntents(req, res, url, context) {
         environment: policyEnvironment(),
       })
     } catch (denied) {
-      // Durably received (the upsert above already committed), application paused. Zero attempts
-      // consumed — this is an intentional policy pause, not a processing failure, so it must not
-      // count toward DEAD_LETTER_THRESHOLD. The row stays RECEIVED; a later redelivery or an
-      // explicit reconciliation pass applies it once policy allows.
+      // Durably received, application paused. Zero attempts consumed — this is an intentional
+      // policy pause, not a processing failure, so it must not count toward DEAD_LETTER_THRESHOLD.
+      // A later redelivery or an explicit reconciliation pass applies it once policy allows.
       log.warn('payment_webhook_apply_denied', { eventId: event.id, intentId: intent.id, reason: denied.reason })
+      await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'POLICY_DEFERRED' } })
       return json(res, 200, { ok: true, applied: false, policyDeferred: true, status: intent.status })
     }
 

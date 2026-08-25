@@ -20,6 +20,62 @@ import { isProviderRefUniqueViolation } from './finance-ledger.mjs'
 // DEAD_LETTERED — it needs a human via the admin replay endpoint instead of an unbounded retry loop.
 export const DEAD_LETTER_THRESHOLD = 5
 
+// The canonical event-identity unique constraint (migration 018) — mirrors the shape of
+// isProviderRefUniqueViolation in finance-ledger.mjs (same P2002-recognition pattern), scoped to
+// PaymentEvent's own composite key instead of PaymentProof's (provider, providerRef).
+export function isPaymentEventIdentityConflict(err) {
+  const target = err?.meta?.target
+  return err?.code === 'P2002' && (target === 'payment_events_identity_key' ||
+    (Array.isArray(target) && target.includes('provider_event_id')) || String(target || '').includes('provider_event_id'))
+}
+
+// Durable intake with atomic, race-safe conflict detection — the single entry point BOTH webhook
+// rails use to persist an authenticated event before any local interpretation is attempted. A real
+// INSERT is tried first (not upsert+compare, which has a TOCTOU gap under concurrency): the unique
+// constraint itself is what makes N concurrent identical deliveries resolve to exactly one row.
+//
+// On a genuine identity collision (a redelivery, or — the defect this closes — two DIFFERENT events
+// that happen to share a raw provider_event_id string across providers/accounts/environments, which
+// can no longer collide at all since the constraint is now scoped by all four), the existing row's
+// IMMUTABLE fields are compared against this freshly-authenticated delivery:
+//   - a match is an ordinary duplicate — the existing row is returned unchanged, `conflict: false`;
+//   - a mismatch is a genuine conflict — never applied, the ORIGINAL row is never overwritten, it is
+//     marked QUARANTINED with a typed reason, and this is logged for operational visibility.
+//
+// `fields` must include every column in the eventIdentity key (provider, providerAccount,
+// environment, providerEventId) plus every other immutable column this function compares.
+export async function intakeEvent(fields) {
+  try {
+    return { eventRow: await db().paymentEvent.create({ data: fields }), conflict: false }
+  } catch (err) {
+    if (!isPaymentEventIdentityConflict(err)) throw err
+    const eventRow = await db().paymentEvent.findUniqueOrThrow({
+      where: {
+        eventIdentity: {
+          provider: fields.provider,
+          providerAccount: fields.providerAccount,
+          environment: fields.environment,
+          providerEventId: fields.providerEventId,
+        },
+      },
+    })
+    const matches = eventRow.payloadDigest === fields.payloadDigest &&
+      eventRow.type === fields.type &&
+      eventRow.providerReference === fields.providerReference &&
+      eventRow.subjectType === fields.subjectType &&
+      eventRow.providerObjectId === fields.providerObjectId &&
+      eventRow.amountMinor === fields.amountMinor &&
+      eventRow.currency === fields.currency
+    if (matches) return { eventRow, conflict: false }
+    log.error('payment_event_identity_conflict', { eventId: eventRow.id, providerEventId: fields.providerEventId, rail: fields.rail })
+    const quarantined = await db().paymentEvent.update({
+      where: { id: eventRow.id },
+      data: { processingStatus: 'QUARANTINED', lastError: 'IDENTITY_CONFLICT: redelivered event with the same identity but different immutable fields' },
+    })
+    return { eventRow: quarantined, conflict: true }
+  }
+}
+
 export async function applyPaymentEvent({ eventId, rail, apply }) {
   const bumped = await db().paymentEvent.update({
     where: { id: eventId },

@@ -18,9 +18,11 @@
 //      node tests/e2e/payment-intents-booking.e2e.mjs   (server must run with PAYMENT_INTENTS_ENABLED=true
 //      and the SAME PAYMENT_WEBHOOK_SECRET)
 
+import { createHash } from 'node:crypto'
 import { createSessionToken } from '../../server/lib/security.mjs'
 import { signWebhook } from '../../server/lib/payment-webhook.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
+import { policyEnvironment } from '../../server/lib/payment-policy.mjs'
 import { expectedTotalMinor, bookingFinanceSplit } from '../../server/lib/finance-ledger.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
@@ -231,14 +233,25 @@ const intentC = (await call('POST', '/api/payments/intents', G, { bookingId: boo
 // Seed a synthetic DEAD_LETTERED delivery directly (simulating an event that already failed 5 real
 // attempts, e.g. a transient DB blip during those windows) — the underlying booking/business data
 // is entirely valid, so replay is expected to genuinely succeed once retried.
+//
+// The seed's identity/immutable fields (environment, payloadDigest, providerObjectId) must exactly
+// match what a REAL redelivery of "the same" event would compute server-side (policyEnvironment(),
+// a SHA-256 of the real raw body) -- otherwise the corrective round's canonical-identity conflict
+// detection correctly treats it as a DIFFERENT event, not a redelivery, which is exactly the
+// behavior that change exists to guarantee. Constructing deadEventObj first and deriving both the
+// digest and the seed's own fields from it (rather than two independently-typed literals) keeps
+// this test's fixture consistent with reality instead of asserting against a synthetic mismatch.
 const seededEventId = `evt_pib_seed_dl_${Date.now()}`
+const deadEventObj = { id: seededEventId, type: 'payment_intent.succeeded', data: { object: { reference: intentC.reference, id: 'pi_prov_seed', amount_minor: intentC.amountMinor, currency: intentC.currency } } }
+const deadEventPayloadDigest = createHash('sha256').update(JSON.stringify(deadEventObj)).digest('hex')
 const seeded = await db().paymentEvent.create({
   data: {
     rail: 'payment_intent',
     provider: 'sandbox',
     providerAccount: 'sandbox-test-account',
-    environment: 'test',
+    environment: policyEnvironment(),
     subjectType: 'PAYMENT_INTENT',
+    providerReference: intentC.reference,
     intentId: intentC.id,
     originalIntentId: intentC.id,
     originalBookingId: intentC.bookingId ?? null,
@@ -246,15 +259,14 @@ const seeded = await db().paymentEvent.create({
     type: 'payment_intent.succeeded',
     amountMinor: intentC.amountMinor,
     currency: intentC.currency,
-    providerObjectId: `pi_prov_seed_${Date.now()}`,
+    providerObjectId: 'pi_prov_seed',
+    payloadDigest: deadEventPayloadDigest,
     processingStatus: 'DEAD_LETTERED',
     attempts: 5,
     lastAttemptAt: new Date(),
     lastError: '{"code":"SIMULATED_TEST_FAILURE","statusCode":500,"message":"internal error"}',
   },
 })
-
-const deadEventObj = { id: seededEventId, type: 'payment_intent.succeeded', data: { object: { reference: intentC.reference, id: `pi_prov_seed`, amount_minor: intentC.amountMinor, currency: intentC.currency } } }
 const redeliverDead = await webhook(deadEventObj)
 check('redelivering an already DEAD_LETTERED event is a safe no-op, not reprocessed', redeliverDead.status === 200 && redeliverDead.j?.deadLettered === true, JSON.stringify(redeliverDead.j))
 const seededAfterRedelivery = await db().paymentEvent.findUnique({ where: { id: seeded.id } })

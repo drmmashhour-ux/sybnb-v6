@@ -55,8 +55,11 @@ check('tampered signature rejected (PAYMENT_SIGNATURE_INVALID)', code(await webh
 check('stale timestamp rejected (replay window, PAYMENT_SIGNATURE_EXPIRED)', code(await webhook(evt('payment_intent.succeeded', ref), { timestamp: Math.floor(Date.now() / 1000) - 3600 })) === 'PAYMENT_SIGNATURE_EXPIRED', 'accepted')
 
 console.log('\n=== 3. AMOUNT / CURRENCY AUTHORITY ===')
-check('wrong amount rejected (PAYMENT_AMOUNT_MISMATCH)', code(await webhook(evt('payment_intent.succeeded', ref, { amount_minor: 999999, currency: 'usd' }))) === 'PAYMENT_AMOUNT_MISMATCH', 'accepted')
-check('wrong currency rejected (PAYMENT_CURRENCY_MISMATCH)', code(await webhook(evt('payment_intent.succeeded', ref, { amount_minor: 5000, currency: 'eur' }))) === 'PAYMENT_CURRENCY_MISMATCH', 'accepted')
+// Corrective-round behavior: a mismatch no longer throws a pre-persistence 400 -- the authenticated
+// event is durably persisted (200) and QUARANTINED instead (see payment-event-identity.e2e.mjs for
+// the direct row-level proof of this). Checked here via the response body's `quarantined` flag.
+check('wrong amount is durably received but quarantined, not applied', (await webhook(evt('payment_intent.succeeded', ref, { amount_minor: 999999, currency: 'usd' }))).j?.quarantined === true, 'not quarantined')
+check('wrong currency is durably received but quarantined, not applied', (await webhook(evt('payment_intent.succeeded', ref, { amount_minor: 5000, currency: 'eur' }))).j?.quarantined === true, 'not quarantined')
 
 console.log('\n=== 4. SUCCESS + IDEMPOTENCY / REPLAY ===')
 const succ = evt('payment_intent.succeeded', ref, { amount_minor: 5000, currency: 'usd' })
@@ -65,7 +68,17 @@ check('valid signed success applies -> SUCCEEDED', s1.status === 200 && s1.j?.ap
 const s2 = await webhook(succ) // same event id
 check('duplicate event id is a no-op (idempotent)', s2.status === 200 && s2.j?.duplicate === true, JSON.stringify(s2.j))
 const detail = await call('GET', `/api/payments/intents/${intentId}`, B)
-check('intent is SUCCEEDED with exactly one applied success event', detail.j?.intent?.status === 'SUCCEEDED' && detail.j.intent.events.filter(e => e.type === 'payment_intent.succeeded').length === 1, 'double effect?')
+// Corrective-round behavior: section 3's two amount/currency-mismatched events are now ALSO
+// durably persisted (QUARANTINED, not silently rejected pre-persistence) -- so the event history
+// now correctly has 3 'payment_intent.succeeded'-type rows total (2 quarantined + 1 applied), not 1.
+// The real invariant (no double-effect) is that exactly ONE of them ever reached APPLIED.
+check(
+  'intent is SUCCEEDED with exactly one APPLIED success event (2 earlier quarantined mismatches are durably tracked too, correctly, not applied)',
+  detail.j?.intent?.status === 'SUCCEEDED' &&
+    detail.j.intent.events.filter(e => e.type === 'payment_intent.succeeded' && e.processingStatus === 'APPLIED').length === 1 &&
+    detail.j.intent.events.filter(e => e.type === 'payment_intent.succeeded' && e.processingStatus === 'QUARANTINED').length === 2,
+  JSON.stringify(detail.j?.intent?.events?.map(e => ({ type: e.type, status: e.processingStatus }))),
+)
 
 console.log('\n=== 5. ILLEGAL TRANSITIONS BLOCKED ===')
 check('cannot go SUCCEEDED -> FAILED', (await webhook(evt('payment_intent.payment_failed', ref, { amount_minor: 5000 }))).j?.applied === false, 'applied illegal')

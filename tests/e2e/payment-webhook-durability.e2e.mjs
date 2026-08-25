@@ -202,12 +202,12 @@ console.log('--- Fresh valid delivery: durably stored even though APPLICATION is
   const r2 = await stripeWebhook(evt) // duplicate redelivery of the same event id
   const after = await db().paymentEvent.count({ where: { rail: 'stripe_checkout', providerEventId: eventId } })
   const afterProofs = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
-  const eventRow = await db().paymentEvent.findUnique({ where: { providerEventId: eventId } })
+  const eventRow = await db().paymentEvent.findFirst({ where: { providerEventId: eventId } })
   check('first delivery is durably received but application is correctly policy-deferred (provider=stripe has no approved config yet — intentional)', r1.status === 200 && r1.j?.policyDeferred === true, JSON.stringify(r1))
   check('redelivery of the same event is also policy-deferred, not silently dropped', r2.status === 200 && r2.j?.policyDeferred === true, JSON.stringify(r2))
   check('exactly one durable stripe_checkout PaymentEvent row for this event id, despite two deliveries (upsert dedup works before any policy decision)', before === 0 && after === 1, `${before} -> ${after}`)
   check('the durable row is correctly traced to the real booking (not intent -- this rail has none)', eventRow?.bookingId === bookingB.id && eventRow?.intentId === null, JSON.stringify(eventRow))
-  check('the row correctly stays RECEIVED (never silently marked applied/ignored) while application is deferred', eventRow?.processingStatus === 'RECEIVED', eventRow?.processingStatus)
+  check('the row is correctly marked POLICY_DEFERRED (a real, queryable status — not silently marked applied/ignored, and not conflated with "not yet attempted")', eventRow?.processingStatus === 'POLICY_DEFERRED', eventRow?.processingStatus)
   check('zero real effects while deferred -- no PaymentProof created for either delivery', beforeProofs === 0 && afterProofs === 0, `${beforeProofs} -> ${afterProofs}`)
 }
 
@@ -219,7 +219,7 @@ console.log('\n--- In-process: the APPLY MECHANISM itself (not the policy decisi
   const eventRow = await db().paymentEvent.create({
     data: {
       rail: 'stripe_checkout', provider: 'stripe', providerAccount: 'stripe-checkout', environment: 'test', subjectType: 'BOOKING',
-      bookingId: bookingB.id, originalBookingId: bookingB.id, providerEventId: eventId, type: 'checkout.session.completed',
+      providerReference: bookingB.id, bookingId: bookingB.id, originalBookingId: bookingB.id, providerEventId: eventId, type: 'checkout.session.completed',
       amountMinor: 150000, currency: 'syp', providerObjectId: sessionId, processingStatus: 'RECEIVED',
     },
   })

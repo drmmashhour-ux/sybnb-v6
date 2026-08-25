@@ -16,6 +16,7 @@
 //      (server must run with PAYMENT_INTENTS_ENABLED=true, PAYMENTS_ENABLED=true, and the SAME
 //      PAYMENT_WEBHOOK_SECRET / STRIPE_WEBHOOK_SECRET / STRIPE_SECRET_KEY)
 
+import { randomUUID } from 'node:crypto'
 import { createSessionToken } from '../../server/lib/security.mjs'
 import { signWebhook } from '../../server/lib/payment-webhook.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
@@ -204,10 +205,20 @@ console.log('\n=== B. STRIPE_CHECKOUT RAIL — deleting the linked Booking must 
   // Cannot apply effects to a gone record: prove the underlying apply MECHANISM itself refuses,
   // in-process (bypassing the intentionally-closed stripe policy gate, same technique as
   // payment-webhook-durability.e2e.mjs) -- finalizeStripeSession's own existence check must hold.
+  // applyStripeCheckoutEvent now requires a real, genuinely-held claim (round 8 -- independent review
+  // found the previous nullish-token bypass a real defect, not a harmless test convenience), so this
+  // test seeds one directly, matching exactly what applyPaymentEvent's own outer claim would have
+  // done had this gone through the full pipeline instead of calling the rail function directly.
   const { applyStripeCheckoutEvent } = await import('../../server/lib/stripe-checkout-apply.mjs')
+  const claimToken = randomUUID()
+  await db().paymentEvent.update({
+    where: { id: afterRow.id },
+    data: { processingStatus: 'APPLYING', claimToken, attempts: { increment: 1 }, lastAttemptAt: new Date(), claimExpiresAt: new Date(Date.now() + 60_000) },
+  })
   const proofCountBefore = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
   const applyResult = await applyStripeCheckoutEvent({
     eventId: afterRow.id,
+    claimToken,
     session: { id: sessionId, payment_status: 'paid', metadata: { bookingId: bookingB.id, sypTotalMinor: '180000' } }, // bookingB no longer exists
   })
   const proofCountAfter = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })

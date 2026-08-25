@@ -213,23 +213,22 @@ console.log('--- Fresh valid delivery: durably stored even though APPLICATION is
 
 console.log('\n--- In-process: the APPLY MECHANISM itself (not the policy decision, which is intentionally closed for stripe above) produces exactly one effect ---')
 {
-  const { applyStripeCheckoutEvent } = await import('../../server/lib/stripe-checkout-apply.mjs')
+  // Calls finalizeStripeSession directly, NOT applyStripeCheckoutEvent -- round 8: independent review
+  // found applyStripeCheckoutEvent's previous nullish-claimToken bypass let this call proceed with no
+  // claim at all, which is now correctly refused (CLAIM_TOKEN_REQUIRED). finalizeStripeSession itself
+  // has no claim concept whatsoever by design (the non-webhook /stripe/confirm route already calls it
+  // exactly this way, with no options object at all) -- calling it directly here is not a workaround,
+  // it is testing the actual idempotent mechanism this section has always claimed to test ("the apply
+  // MECHANISM itself"), one layer below the claim-gated webhook wrapper.
+  const { finalizeStripeSession } = await import('../../server/lib/stripe-checkout-apply.mjs')
   const sessionId = `cs_test_wd_mech_${Date.now()}`
-  const eventId = `evt_wd_stripe_mech_${Date.now()}`
-  const eventRow = await db().paymentEvent.create({
-    data: {
-      rail: 'stripe_checkout', provider: 'stripe', providerEndpointKey: 'stripe-checkout', environment: 'test', subjectType: 'BOOKING',
-      providerReference: bookingB.id, bookingId: bookingB.id, originalBookingId: bookingB.id, providerEventId: eventId, type: 'checkout.session.completed',
-      amountMinor: 150000, currency: 'syp', providerObjectId: sessionId, processingStatus: 'RECEIVED',
-    },
-  })
   const session = { id: sessionId, payment_status: 'paid', metadata: { bookingId: bookingB.id, sypTotalMinor: '150000' } }
-  const r1 = await applyStripeCheckoutEvent({ eventId: eventRow.id, session })
-  const r2 = await applyStripeCheckoutEvent({ eventId: eventRow.id, session }) // re-apply the same session id
+  const proof1 = await finalizeStripeSession(session)
+  const proof2 = await finalizeStripeSession(session) // re-apply the same session id
   const proofCount = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
   const proof = await db().paymentProof.findFirst({ where: { provider: 'stripe', providerRef: sessionId } })
-  check('the apply mechanism reports applied:true on a genuine first application', r1.applied === true, JSON.stringify(r1))
-  check('re-running the same apply is idempotent (finalizeStripeSession\'s own existingProof check)', r2.applied === true, JSON.stringify(r2))
+  check('the apply mechanism produces a real proof on a genuine first application', Boolean(proof1?.id), JSON.stringify(proof1))
+  check('re-running the same apply is idempotent (finalizeStripeSession\'s own existingProof check) -- the same proof id, not a new one', proof2?.id === proof1?.id, JSON.stringify({ proof1, proof2 }))
   check('exactly one real PaymentProof row exists after two apply calls (never doubled)', proofCount === 1, proofCount)
   check('the PaymentProof was auto-approved (booking confirmed, matching the payment_intent rail\'s own behavior)', proof?.status === 'APPROVED', proof?.status)
 }

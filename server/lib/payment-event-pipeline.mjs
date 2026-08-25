@@ -125,15 +125,21 @@ export class ClaimLostError extends Error {
 // Postgres rolls back anything this statement itself touched (nothing, since it only ever WRITES
 // meaningful new data as a SIDE EFFECT of the caller's later statements) the moment the thrown error
 // propagates out of the transaction callback.
-// A nullish `claimToken` means the caller isn't going through applyPaymentEvent()'s claim mechanism at
-// all -- true ONLY for direct test calls that deliberately bypass the claim layer to exercise a rail's
-// raw, idempotent apply logic on its own (an established pattern throughout this test suite since
-// round 4, e.g. calling applyStripeCheckoutEvent directly against a synthetic RECEIVED row). Every
-// PRODUCTION call site (both webhook routes, admin replay) always supplies a real token minted by
-// applyPaymentEvent's own claim -- there is no code path in this codebase that reaches here with a
-// real event ID and an accidentally-missing token.
+// Fails CLOSED on a missing token -- round 8: independent review found the previous version treated a
+// nullish `claimToken` as "no check needed" (a deliberate carve-out for direct test calls that bypass
+// the claim layer entirely). That is a real security defect, not a harmless test convenience: it means
+// ownership verification could be silently skipped by ANY caller simply by omitting the argument,
+// production code included, with nothing enforcing that only tests take that path. There is no
+// legitimate reason for a caller with a real event ID to lack a real token — every production call
+// site (both webhook routes, admin replay) always supplies one, minted by applyPaymentEvent's own
+// claim. A missing token is now always refused; direct idempotency tests seed and acquire a genuine
+// claim first instead (see tests/e2e/payment-event-claim-recovery.e2e.mjs).
 export async function verifyAndLockClaim(tx, { eventId, claimToken }) {
-  if (claimToken == null) return
+  if (claimToken == null) {
+    const err = new Error(`verifyAndLockClaim requires a real claimToken for event ${eventId} -- a missing token is refused, never treated as "no check needed".`)
+    err.code = 'CLAIM_TOKEN_REQUIRED'
+    throw err
+  }
   const locked = await tx.paymentEvent.updateMany({
     where: { id: eventId, claimToken, processingStatus: 'APPLYING' },
     data: { lastAttemptAt: new Date() },
@@ -146,10 +152,23 @@ export async function verifyAndLockClaim(tx, { eventId, claimToken }) {
 // "not yet applied / a previous attempt failed, retryable" states; DEAD_LETTERED is claimable too
 // because admin replay is explicitly allowed to retry a dead-lettered event (the live webhook path
 // never reaches applyPaymentEvent for a DEAD_LETTERED row at all -- both routes check and
-// short-circuit before calling this function). APPLIED/IGNORED/QUARANTINED/POLICY_DEFERRED (terminal
-// or not-this-function's-job states) are always excluded. APPLYING is claimable ONLY when its
-// existing claim has expired -- see CLAIM_DURATION_MS below.
-const CLAIMABLE_STATUSES = ['RECEIVED', 'FAILED', 'DEAD_LETTERED']
+// short-circuit before calling this function).
+//
+// POLICY_DEFERRED is claimable too (round 8) -- independent review found it had NO recovery path at
+// all: excluded from this list, a later redelivery whose OWN policy check now passes still lost the
+// claim (nothing here matched it) and got 409 forever; admin replay only accepted FAILED/
+// DEAD_LETTERED/expired-APPLYING. An authenticated payment received while the rail was disabled could
+// stay permanently unprocessed even after the rail was re-enabled. It is safe to add unconditionally
+// (no "was a crash mid-effect possible" ambiguity the way an expired APPLYING claim has -- reaching
+// POLICY_DEFERRED means interpretation already completed cleanly and durably, including, for
+// stripe_checkout, its own stored payment_status; no apply attempt was ever made). Both callers only
+// ever reach applyPaymentEvent for a POLICY_DEFERRED row AFTER re-checking authorizePaymentOperation('
+// webhook_apply', ...) themselves, so a claim only succeeds once policy genuinely allows it again --
+// this list controls whether a row CAN be reclaimed, not whether a specific attempt is authorized to.
+//
+// APPLIED/IGNORED/QUARANTINED (terminal or not-this-function's-job states) are always excluded.
+// APPLYING is claimable ONLY when its existing claim has expired -- see CLAIM_DURATION_MS below.
+const CLAIMABLE_STATUSES = ['RECEIVED', 'FAILED', 'DEAD_LETTERED', 'POLICY_DEFERRED']
 
 // How long a claim is honored before it is considered abandoned and safe to reclaim. Generously long
 // relative to any real apply() (a single DB transaction, well under a second normally) so a claim

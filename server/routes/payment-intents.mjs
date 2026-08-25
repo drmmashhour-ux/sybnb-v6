@@ -669,14 +669,27 @@ export async function handlePaymentIntents(req, res, url, context) {
     // independently re-checks the expiry and will safely reclaim it -- this check only decides
     // whether the route is willing to ATTEMPT a replay, not whether the claim itself succeeds.
     //
+    // Also replayable (round 8): POLICY_DEFERRED, both rails -- independent review found this state
+    // had NO recovery path at all (excluded from CLAIMABLE_STATUSES, and admin replay never accepted
+    // it), so an authenticated payment received while the rail was disabled could stay permanently
+    // unprocessed even after the rail was re-enabled, unless a provider happened to redeliver again
+    // (live redelivery is the OTHER, non-admin recovery path -- see CLAIMABLE_STATUSES's own comment).
+    // No reconstruction-safety caveat applies here the way it did for the expired-APPLYING case:
+    // reaching POLICY_DEFERRED means interpretation already completed cleanly and durably (including
+    // stripe_checkout's own stored payment_status) -- no apply attempt, and therefore no possible
+    // mid-effect crash, ever happened for this row. The 'replay' operation's own policy gate below
+    // (authorizePaymentOperation, a SEPARATE operation type from webhook_apply, with its own
+    // independently-configurable enablement) still governs whether THIS admin action is itself
+    // authorized -- this only decides whether the row is in a state worth attempting.
+    //
     // stripe_checkout rail's admin-replay reconstruction is now safe regardless of when a crash
     // happened too, since migration 022 durably stores the raw, authenticated payment_status at
     // intake time -- closing the exact gap round 6 disclosed (the reconstruction previously had
     // nothing but a guess of 'paid' to fall back on for a row that might have crashed before paid-ness
     // was ever established).
     const hasExpiredClaim = eventRow.processingStatus === 'APPLYING' && eventRow.claimExpiresAt && eventRow.claimExpiresAt < new Date()
-    if (!['FAILED', 'DEAD_LETTERED'].includes(eventRow.processingStatus) && !hasExpiredClaim) {
-      throw fail(409, 'PAYMENT_EVENT_NOT_REPLAYABLE', 'This event is not in a failed/dead-lettered state, and is not a stuck claim past its expiry.')
+    if (!['FAILED', 'DEAD_LETTERED', 'POLICY_DEFERRED'].includes(eventRow.processingStatus) && !hasExpiredClaim) {
+      throw fail(409, 'PAYMENT_EVENT_NOT_REPLAYABLE', 'This event is not in a failed/dead-lettered/policy-deferred state, and is not a stuck claim past its expiry.')
     }
     // Defense in depth for the reconstruction below: a stripe_checkout row from before migration 022
     // existed has no durably-stored payment_status. FAILED/DEAD_LETTERED rows from that era are still

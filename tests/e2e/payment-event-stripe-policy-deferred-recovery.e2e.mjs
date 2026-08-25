@@ -14,10 +14,17 @@
 //   - "unapproved" (API_BASE_UNAPPROVED, default :3051): the real, permanent production
 //     configuration — APPROVED_PROVIDER_CONFIGS has no 'stripe' entry, full stop.
 //   - "approved" (API_BASE_APPROVED, default :3052): the SAME configuration PLUS
-//     PAYMENT_POLICY_TEST_STRIPE_APPROVED=true — a narrow, explicitly-named, non-production-only test
-//     override (see resolveApprovedProviderConfig() in server/lib/payment-policy.mjs) that exists
-//     ONLY so this exact end-to-end proof is possible; production reads
-//     APPROVED_PROVIDER_CONFIGS.stripe directly (always undefined) regardless of this env var's value.
+//     NODE_ENV=test AND PAYMENT_POLICY_TEST_STRIPE_APPROVED=true — a narrow, explicitly-named,
+//     test-runtime-only override (see resolveApprovedProviderConfig() in
+//     server/lib/payment-policy.mjs) that exists ONLY so this exact end-to-end proof is possible.
+//     Independent review's Round 9 response found the guard's prior condition
+//     (`environment !== 'production'`) also activated in `development`/`staging`, not only a genuine
+//     test runtime; the guard now requires environment === 'test' exactly (NODE_ENV=test), proven
+//     exhaustively against every other environment value — including production, staging,
+//     development, and malformed/near-miss variants — by the dedicated, server-free
+//     payment-policy-stripe-approval-guard.e2e.mjs, which also runs a mutation probe against the
+//     guard's prior, weaker condition. Production reads APPROVED_PROVIDER_CONFIGS.stripe directly
+//     (always undefined) regardless of this env var's value or NODE_ENV.
 //
 // Proves:
 //   - Phase A (unapproved server): a correctly signed Stripe webhook is durably received (200),
@@ -40,7 +47,7 @@
 //      node tests/e2e/payment-event-stripe-policy-deferred-recovery.e2e.mjs
 //      (two servers must already be running against the SAME database: one with the standard
 //      permissive test env (PAYMENTS_ENABLED=true, stripe genuinely unapproved) on port 3051, and a
-//      SECOND with the SAME env plus PAYMENT_POLICY_TEST_STRIPE_APPROVED=true and
+//      SECOND with the SAME env plus NODE_ENV=test, PAYMENT_POLICY_TEST_STRIPE_APPROVED=true, and
 //      PAYMENT_OPERATION_STRIPE_CHECKOUT_REPLAY_ENABLED=true on port 3052)
 
 import { createHash } from 'node:crypto'

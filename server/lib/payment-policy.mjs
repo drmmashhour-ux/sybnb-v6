@@ -122,24 +122,30 @@ const APPROVED_PROVIDER_CONFIGS = {
 }
 
 // Resolves the approved config a real request would use -- the object above, untouched, for every
-// provider except a narrow, explicitly-named, non-production-only 'stripe' test override (mirrors
-// countryDivisionEligible()'s own established test-override pattern below). This exists ONLY so
-// integration tests can prove the stripe_checkout rail's own recovery mechanisms (e.g. POLICY_DEFERRED
-// reclaim) genuinely work through the real HTTP route + policy pipeline, not just at the library layer
-// -- independent review correctly found that without this, that rail's route-and-policy wiring could
-// never be verified end-to-end at all, since 'stripe' having no real legal/compliance approval yet
-// would otherwise also mean "this mechanism is permanently unverifiable by anything above direct
-// library calls". Gated on BOTH environment !== 'production' AND an explicit, off-by-default env var:
-// production reads APPROVED_PROVIDER_CONFIGS.stripe directly (always undefined, unconditionally, since
-// the object above is never mutated) and this function is never reached with environment ===
-// 'production' returning anything but that same undefined -- the production default-deny guarantee is
-// untouched regardless of any env var's value.
-function resolveApprovedProviderConfig(provider, environment) {
+// provider except a narrow, explicitly-named, test-runtime-only 'stripe' test override. This exists
+// ONLY so integration tests can prove the stripe_checkout rail's own recovery mechanisms (e.g.
+// POLICY_DEFERRED reclaim) genuinely work through the real HTTP route + policy pipeline, not just at
+// the library layer -- independent review correctly found that without this, that rail's
+// route-and-policy wiring could never be verified end-to-end at all, since 'stripe' having no real
+// legal/compliance approval yet would otherwise also mean "this mechanism is permanently unverifiable
+// by anything above direct library calls".
+//
+// Gated on BOTH environment === 'test' (an earlier version of this guard used `environment !==
+// 'production'`, which independent review correctly found also let the override activate in
+// `development` and `staging` -- unequivocally test-runtime-only now, not merely non-production) AND
+// an explicit, off-by-default env var. Production reads APPROVED_PROVIDER_CONFIGS.stripe directly
+// (always undefined, unconditionally, since the object above is never mutated) and this function
+// returns that same undefined for every environment value except the exact string 'test', regardless
+// of the env var -- exhaustively proven, including a mutation probe against exactly this guard
+// shrinking back to its prior, weaker form, by tests/e2e/payment-policy-stripe-approval-guard.e2e.mjs.
+// Exported (not otherwise needed outside this module) specifically so that test file can call it
+// directly rather than needing one live server process per environment/override-value combination.
+export function resolveApprovedProviderConfig(provider, environment) {
   if (APPROVED_PROVIDER_CONFIGS[provider]) return APPROVED_PROVIDER_CONFIGS[provider]
-  if (provider === 'stripe' && environment !== 'production' && process.env.PAYMENT_POLICY_TEST_STRIPE_APPROVED === 'true') {
+  if (provider === 'stripe' && environment === 'test' && process.env.PAYMENT_POLICY_TEST_STRIPE_APPROVED === 'true') {
     return {
       providerAccount: 'stripe-test-approved',
-      environments: ['development', 'test', 'staging'],
+      environments: ['test'],
       businessCountry: 'CA',
       permittedCustomerCountries: ['SY'],
       permittedPayoutCountries: ['CA'],

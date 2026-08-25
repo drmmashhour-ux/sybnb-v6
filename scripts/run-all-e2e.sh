@@ -4,6 +4,13 @@
 #
 # Prereqs: local Postgres with the schema-correct `sybnb_v6` DB, and the synthetic user ids below.
 # Usage:  bash scripts/run-all-e2e.sh
+#         PAYMENT_ONLY=1 bash scripts/run-all-e2e.sh   -- runs ONLY the 13 payment suites; exits 0 iff
+#         all 13 pass, independent of the other (pre-existing, unrelated) suites this script also runs
+#         in full mode. Use this as the actual green/red gate for payment work -- the full-mode run
+#         stays honestly non-zero while marketplace/cars/buy/rentals/new-construction/sell/advertising/
+#         wallet have their own pre-existing, undiagnosed failures (confirmed via `git diff` against the
+#         full payment-remediation commit range that none of their files were ever touched by that
+#         work) that remain separately visible here, not silently dropped.
 # Env (override as needed):
 #   DB_URL, AUTH_SECRET, PHONE_HASH_SECRET, PAYMENT_WEBHOOK_SECRET, STRIPE_WEBHOOK_SECRET,
 #   STRIPE_SECRET_KEY, SELLER1, SELLER2, BUYER, ADMIN, HOST, GUEST
@@ -86,6 +93,7 @@ API_PID=$!
 sleep 3
 
 fails=0
+PAYMENT_ONLY="${PAYMENT_ONLY:-}"
 run() { # name script [needs_reset]
   [ "${3:-}" = "reset" ] && psql_reset
   node "tests/e2e/$2" > /tmp/sybnb-e2e-out.log 2>&1
@@ -93,35 +101,40 @@ run() { # name script [needs_reset]
   printf "  %-18s %s  (exit %s)\n" "$1:" "$(tail -1 /tmp/sybnb-e2e-out.log)" "$rc"
   [ "$rc" -ne 0 ] && { fails=$((fails+1)); tail -5 /tmp/sybnb-e2e-out.log; }
 }
+# Same as run(), but skipped entirely in PAYMENT_ONLY mode -- for every suite NOT part of the payment
+# regression, so $fails only ever reflects payment-suite outcomes when PAYMENT_ONLY=1.
+run_full() { [ -n "$PAYMENT_ONLY" ] && return 0; run "$@"; }
 
-echo "== country isolation check (static) =="
-bash scripts/check-country-isolation.sh > /tmp/sybnb-iso.log 2>&1
-iso_rc=$?; printf "  %-18s %s  (exit %s)\n" "isolation:" "$(tail -1 /tmp/sybnb-iso.log)" "$iso_rc"
-[ "$iso_rc" -ne 0 ] && { fails=$((fails+1)); tail -8 /tmp/sybnb-iso.log; }
+if [ -z "$PAYMENT_ONLY" ]; then
+  echo "== country isolation check (static) =="
+  bash scripts/check-country-isolation.sh > /tmp/sybnb-iso.log 2>&1
+  iso_rc=$?; printf "  %-18s %s  (exit %s)\n" "isolation:" "$(tail -1 /tmp/sybnb-iso.log)" "$iso_rc"
+  [ "$iso_rc" -ne 0 ] && { fails=$((fails+1)); tail -8 /tmp/sybnb-iso.log; }
+fi
 
 echo "== self-contained integration certs =="
-run "storage-s3" storage-s3-integration.e2e.mjs
-run "sms"        sms-integration.e2e.mjs
-run "country" country-selection.e2e.mjs
-run "syria-wallet" syria-wallet.e2e.mjs
-run "sr-geocoding" sr-geocoding.e2e.mjs
-run "presentation" presentation.e2e.mjs
-run "cars-title"   cars-title-display.e2e.mjs
-run "calendar-guard" calendar-date-guard.e2e.mjs
+run_full "storage-s3" storage-s3-integration.e2e.mjs
+run_full "sms"        sms-integration.e2e.mjs
+run_full "country" country-selection.e2e.mjs
+run_full "syria-wallet" syria-wallet.e2e.mjs
+run_full "sr-geocoding" sr-geocoding.e2e.mjs
+run_full "presentation" presentation.e2e.mjs
+run_full "cars-title"   cars-title-display.e2e.mjs
+run_full "calendar-guard" calendar-date-guard.e2e.mjs
 run "payment-guard" payment-policy-stripe-approval-guard.e2e.mjs
 
 echo "== api-backed governed suites =="
-run "otp"              otp-identity.e2e.mjs
-  run "email-otp"        email-otp.e2e.mjs
-  run "email-security"   email-security.e2e.mjs
-  run "signup-journey"   signup-journey.e2e.mjs
-  run "seller-signup"    seller-signup-journey.e2e.mjs
-  run "host-login"       host-login-journey.e2e.mjs
-  run "resend-webhook"   resend-webhook.e2e.mjs
-run "storage"          storage.e2e.mjs
-run "legal"            legal-consent.e2e.mjs
-run "operations"       operations.e2e.mjs
-run "wallet"           wallet-gift.e2e.mjs
+run_full "otp"              otp-identity.e2e.mjs
+  run_full "email-otp"        email-otp.e2e.mjs
+  run_full "email-security"   email-security.e2e.mjs
+  run_full "signup-journey"   signup-journey.e2e.mjs
+  run_full "seller-signup"    seller-signup-journey.e2e.mjs
+  run_full "host-login"       host-login-journey.e2e.mjs
+  run_full "resend-webhook"   resend-webhook.e2e.mjs
+run_full "storage"          storage.e2e.mjs
+run_full "legal"            legal-consent.e2e.mjs
+run_full "operations"       operations.e2e.mjs
+run_full "wallet"           wallet-gift.e2e.mjs
 run "payment"          payment-sandbox.e2e.mjs
 run "payment-race"     payment-proof-race.e2e.mjs
 run "payment-intents"  payment-intents-booking.e2e.mjs
@@ -132,14 +145,14 @@ run "payment-evt-dur"  payment-event-durability.e2e.mjs
 run "payment-evt-id"   payment-event-identity.e2e.mjs
 run "payment-evt-claim" payment-event-claim-recovery.e2e.mjs
 run "payment-evt-supr" payment-event-supersession.e2e.mjs
-run "marketplace"      marketplace.e2e.mjs      reset
-run "cars"             cars.e2e.mjs             reset
-run "buy"              buy.e2e.mjs              reset
-run "rentals"          rentals.e2e.mjs          reset
-run "new-construction" new-construction.e2e.mjs reset
-run "sell"             sell.e2e.mjs             reset
-run "advertising"      advertising-payment-tunnel.e2e.mjs reset
-run "sr-ride"          sr-ride.e2e.mjs
+run_full "marketplace"      marketplace.e2e.mjs      reset
+run_full "cars"             cars.e2e.mjs             reset
+run_full "buy"              buy.e2e.mjs              reset
+run_full "rentals"          rentals.e2e.mjs          reset
+run_full "new-construction" new-construction.e2e.mjs reset
+run_full "sell"             sell.e2e.mjs             reset
+run_full "advertising"      advertising-payment-tunnel.e2e.mjs reset
+run_full "sr-ride"          sr-ride.e2e.mjs
 
 kill "$API_PID" 2>/dev/null
 sleep 1

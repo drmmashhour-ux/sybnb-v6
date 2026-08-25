@@ -38,7 +38,16 @@
     "test:e2e:payment-race": "node tests/e2e/payment-proof-race.e2e.mjs",
     "test:e2e:payment-intents-booking": "node tests/e2e/payment-intents-booking.e2e.mjs",
     "test:e2e:payment-policy": "node tests/e2e/payment-policy.e2e.mjs",
-    "test:e2e:payment-policy-enforcement": "node tests/e2e/payment-policy-enforcement.e2e.mjs"
+    "test:e2e:payment-policy-enforcement": "node tests/e2e/payment-policy-enforcement.e2e.mjs",
+    "test:e2e:payment-webhook-durability": "node tests/e2e/payment-webhook-durability.e2e.mjs",
+    "test:e2e:payment-event-durability": "node tests/e2e/payment-event-durability.e2e.mjs",
+    "test:e2e:payment-event-identity": "node tests/e2e/payment-event-identity.e2e.mjs",
+    "test:e2e:payment-event-claim-recovery": "node tests/e2e/payment-event-claim-recovery.e2e.mjs",
+    "test:e2e:payment-event-supersession": "node tests/e2e/payment-event-supersession.e2e.mjs",
+    "test:e2e:payment-webhook-default-deny": "node tests/e2e/payment-webhook-default-deny.e2e.mjs",
+    "test:e2e:payment-stripe-policy-deferred-recovery": "node tests/e2e/payment-event-stripe-policy-deferred-recovery.e2e.mjs",
+    "test:e2e:payment-policy-stripe-approval-guard": "node tests/e2e/payment-policy-stripe-approval-guard.e2e.mjs",
+    "test:e2e:all": "bash scripts/run-all-e2e.sh"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.6",

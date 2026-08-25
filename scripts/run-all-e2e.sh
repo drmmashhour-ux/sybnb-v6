@@ -5,21 +5,72 @@
 # Prereqs: local Postgres with the schema-correct `sybnb_v6` DB, and the synthetic user ids below.
 # Usage:  bash scripts/run-all-e2e.sh
 # Env (override as needed):
-#   DB_URL, AUTH_SECRET, PHONE_HASH_SECRET, PAYMENT_WEBHOOK_SECRET, SELLER1, SELLER2, BUYER, ADMIN
+#   DB_URL, AUTH_SECRET, PHONE_HASH_SECRET, PAYMENT_WEBHOOK_SECRET, STRIPE_WEBHOOK_SECRET,
+#   STRIPE_SECRET_KEY, SELLER1, SELLER2, BUYER, ADMIN, HOST, GUEST
+#
+# Runs 3 server phases in sequence for the payment-policy suites (see server/lib/payment-policy.mjs):
+# the main permissive server (most suites), a separate default-deny server (PAYMENT_INTENTS_ENABLED
+# unset), and two simultaneous servers (stripe-unapproved + stripe-approved via NODE_ENV=test) for
+# the stripe_checkout POLICY_DEFERRED recovery proof -- these three configurations are mutually
+# exclusive and cannot be collapsed into one server.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 DB_URL="${DB_URL:-postgresql://$(whoami)@127.0.0.1:5432/sybnb_v6?schema=public}"
+# Several of the newer payment e2e suites import Prisma directly (seeding/asserting DB state, not
+# just calling the HTTP API), so DATABASE_URL must be visible to the `run()` function's own `node`
+# invocations too, not just the server process it starts. Same reasoning applies to SYBNB_COUNTRY --
+# payment-policy.e2e.mjs calls authorizePaymentOperation() (and therefore loadCountryProfile())
+# in-process for a large share of its own assertions, not only via HTTP.
+export DATABASE_URL="$DB_URL"
+export SYBNB_COUNTRY="${SYBNB_COUNTRY:-syria}"
 export AUTH_SECRET="${AUTH_SECRET:-dev-e2e-secret}"
 export PHONE_HASH_SECRET="${PHONE_HASH_SECRET:-dev-e2e-phone}"
 export PAYMENT_WEBHOOK_SECRET="${PAYMENT_WEBHOOK_SECRET:-whsec_sandbox_test}"
+export STRIPE_WEBHOOK_SECRET="${STRIPE_WEBHOOK_SECRET:-whsec_stripe_test}"
+export STRIPE_SECRET_KEY="${STRIPE_SECRET_KEY:-sk_test_fake_for_e2e_only}"
 export RESEND_WEBHOOK_SECRET="${RESEND_WEBHOOK_SECRET:-whsec_dGVzdC13ZWJob29rLXNlY3JldA==}"
 export SELLER1="${SELLER1:-1fdde54d-20f1-41ae-9f9a-2a4482f13c69}"
 export SELLER2="${SELLER2:-f845e528-dff8-404f-b9ef-6f096fefd9c5}"
 export BUYER="${BUYER:-b2cf0295-8b24-4be0-a014-8b9321c44e0a}"
 export ADMIN="${ADMIN:-c6b57605-18aa-4093-bd99-264185de4b26}"
+export HOST="${HOST:-480b860e-f32f-4089-a34b-5bbeec33952f}"
+export GUEST="${GUEST:-e14887c6-6fff-4cab-bcea-62e1b976ea61}"
 export SENDER="$SELLER1" RECIPIENT="$BUYER" OTHER="$SELLER2"
 export DRIVER_ID="${DRIVER_ID:-$(psql -d sybnb_v6 -tAc "SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role='DRIVER' AND u.status='ACTIVE' LIMIT 1;" 2>/dev/null | tr -d '[:space:]')}"
+
+# Payment-policy env: every gate the milestone-2 authorizePaymentOperation() chain needs (see
+# server/lib/payment-policy.mjs), plus the two rail-level flags that predate it. None of this existed
+# when this script was first written -- added because the payment e2e suites were silently failing
+# under this script's server (default-deny with nothing configured), never caught since every
+# corrective round's own verification always started its server directly instead of through here.
+# Exported (not just passed to the server subprocess) because several of the newer suites --
+# payment-policy.e2e.mjs, payment-policy-stripe-approval-guard.e2e.mjs -- call
+# authorizePaymentOperation()/resolveApprovedProviderConfig() directly, in-process, and read these
+# same env vars for themselves; passing them only as an `env` prefix to the server command left the
+# TEST process's own environment unset, silently producing wrong (but plausible-looking) denials.
+export PAYMENTS_ENABLED=true
+export PAYMENT_INTENTS_ENABLED=true
+export PAYMENT_RAIL_MANUAL_PROOF_ENABLED=true
+export PAYMENT_POLICY_TEST_COUNTRY_ELIGIBLE=true
+export PAYMENT_POLICY_ELIGIBLE_DIVISIONS=STAYS,RENTALS,BUY,CARS,MARKETPLACE,NEW_CONSTRUCTION,PLATFORM
+export PAYMENT_OPERATION_PAYMENT_INTENT_CREATE_ENABLED=true
+export PAYMENT_OPERATION_PAYMENT_INTENT_CAPTURE_ENABLED=true
+export PAYMENT_OPERATION_PAYMENT_INTENT_REFUND_ENABLED=true
+export PAYMENT_OPERATION_PAYMENT_INTENT_REPLAY_ENABLED=true
+export PAYMENT_OPERATION_PAYMENT_INTENT_WEBHOOK_INTAKE_ENABLED=true
+export PAYMENT_OPERATION_PAYMENT_INTENT_WEBHOOK_APPLY_ENABLED=true
+export PAYMENT_OPERATION_PAYMENT_INTENT_RECONCILIATION_READ_ENABLED=true
+export PAYMENT_OPERATION_STRIPE_CHECKOUT_CREATE_ENABLED=true
+export PAYMENT_OPERATION_STRIPE_CHECKOUT_CAPTURE_ENABLED=true
+export PAYMENT_OPERATION_STRIPE_CHECKOUT_WEBHOOK_INTAKE_ENABLED=true
+export PAYMENT_OPERATION_STRIPE_CHECKOUT_WEBHOOK_APPLY_ENABLED=true
+export PAYMENT_OPERATION_STRIPE_CHECKOUT_RECONCILIATION_READ_ENABLED=true
+export PAYMENT_OPERATION_MANUAL_PROOF_CREATE_ENABLED=true
+export PAYMENT_OPERATION_MANUAL_PROOF_CAPTURE_ENABLED=true
+export PAYMENT_OPERATION_MANUAL_PROOF_REFUND_ENABLED=true
+export PAYMENT_OPERATION_MANUAL_PROOF_PAYOUT_RELEASE_ENABLED=true
+export PAYMENT_OPERATION_MANUAL_PROOF_RECONCILIATION_READ_ENABLED=true
 
 psql_reset() { psql -d sybnb_v6 -tAc "DELETE FROM seller_profiles WHERE user_id IN ('$SELLER1','$SELLER2'); DELETE FROM payment_proofs WHERE provider='seller_plan';" >/dev/null 2>&1; }
 
@@ -27,9 +78,9 @@ echo "== build + schema =="
 npm run build 2>&1 | grep -oE "built in [0-9.]+s|error TS" || true
 DATABASE_URL="postgresql://x@127.0.0.1:5432/x" npx prisma validate 2>&1 | grep -oE "is valid|error" || true
 
-echo "== start API (OTP_EXPOSE_FOR_TEST + sandbox payment secret) =="
+echo "== start API (OTP_EXPOSE_FOR_TEST + sandbox payment secret + full payment-policy config) =="
 pkill -9 -f "server/index.mjs" 2>/dev/null; sleep 1
-DATABASE_URL="$DB_URL" API_HOST=127.0.0.1 API_PORT=3051 OTP_EXPOSE_FOR_TEST=true SYBNB_COUNTRY=syria \
+API_HOST=127.0.0.1 API_PORT=3051 OTP_EXPOSE_FOR_TEST=true SYBNB_COUNTRY=syria \
   node server/index.mjs > /tmp/sybnb-e2e-api.log 2>&1 &
 API_PID=$!
 sleep 3
@@ -57,6 +108,7 @@ run "sr-geocoding" sr-geocoding.e2e.mjs
 run "presentation" presentation.e2e.mjs
 run "cars-title"   cars-title-display.e2e.mjs
 run "calendar-guard" calendar-date-guard.e2e.mjs
+run "payment-guard" payment-policy-stripe-approval-guard.e2e.mjs
 
 echo "== api-backed governed suites =="
 run "otp"              otp-identity.e2e.mjs
@@ -72,6 +124,14 @@ run "operations"       operations.e2e.mjs
 run "wallet"           wallet-gift.e2e.mjs
 run "payment"          payment-sandbox.e2e.mjs
 run "payment-race"     payment-proof-race.e2e.mjs
+run "payment-intents"  payment-intents-booking.e2e.mjs
+run "payment-policy"   payment-policy.e2e.mjs
+run "payment-policy-enf" payment-policy-enforcement.e2e.mjs
+run "payment-webhook"  payment-webhook-durability.e2e.mjs
+run "payment-evt-dur"  payment-event-durability.e2e.mjs
+run "payment-evt-id"   payment-event-identity.e2e.mjs
+run "payment-evt-claim" payment-event-claim-recovery.e2e.mjs
+run "payment-evt-supr" payment-event-supersession.e2e.mjs
 run "marketplace"      marketplace.e2e.mjs      reset
 run "cars"             cars.e2e.mjs             reset
 run "buy"              buy.e2e.mjs              reset
@@ -82,5 +142,34 @@ run "advertising"      advertising-payment-tunnel.e2e.mjs reset
 run "sr-ride"          sr-ride.e2e.mjs
 
 kill "$API_PID" 2>/dev/null
+sleep 1
+
+echo "== default-deny server (PAYMENT_INTENTS_ENABLED genuinely unset) =="
+# -u unsets PAYMENT_INTENTS_ENABLED just for this one subprocess -- the test file itself
+# (payment-webhook-default-deny.e2e.mjs) only ever asserts via HTTP against this server, never reads
+# the flag in-process, so the script's own still-exported PAYMENT_INTENTS_ENABLED=true is harmless to
+# the `run()` invocation that follows.
+env -u PAYMENT_INTENTS_ENABLED \
+  API_HOST=127.0.0.1 API_PORT=3051 OTP_EXPOSE_FOR_TEST=true SYBNB_COUNTRY=syria \
+  node server/index.mjs > /tmp/sybnb-e2e-api-default-deny.log 2>&1 &
+DEFAULT_DENY_PID=$!
+sleep 3
+run "payment-default-deny" payment-webhook-default-deny.e2e.mjs
+kill "$DEFAULT_DENY_PID" 2>/dev/null
+sleep 1
+
+echo "== two simultaneous servers (stripe-unapproved :3051 + stripe-approved :3052, NODE_ENV=test) =="
+API_HOST=127.0.0.1 API_PORT=3051 OTP_EXPOSE_FOR_TEST=true SYBNB_COUNTRY=syria \
+  node server/index.mjs > /tmp/sybnb-e2e-api-stripe-unapproved.log 2>&1 &
+STRIPE_UNAPPROVED_PID=$!
+API_HOST=127.0.0.1 API_PORT=3052 OTP_EXPOSE_FOR_TEST=true SYBNB_COUNTRY=syria \
+  NODE_ENV=test PAYMENT_POLICY_TEST_STRIPE_APPROVED=true PAYMENT_OPERATION_STRIPE_CHECKOUT_REPLAY_ENABLED=true \
+  node server/index.mjs > /tmp/sybnb-e2e-api-stripe-approved.log 2>&1 &
+STRIPE_APPROVED_PID=$!
+sleep 3
+API_BASE_UNAPPROVED=http://127.0.0.1:3051 API_BASE_APPROVED=http://127.0.0.1:3052 \
+  run "payment-stripe-recovery" payment-event-stripe-policy-deferred-recovery.e2e.mjs
+kill "$STRIPE_UNAPPROVED_PID" "$STRIPE_APPROVED_PID" 2>/dev/null
+
 echo "== suites with failures: $fails =="
 exit "$fails"

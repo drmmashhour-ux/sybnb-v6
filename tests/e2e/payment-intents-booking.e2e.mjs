@@ -234,6 +234,7 @@ const intentC = (await call('POST', '/api/payments/intents', G, { bookingId: boo
 const seededEventId = `evt_pib_seed_dl_${Date.now()}`
 const seeded = await db().paymentEvent.create({
   data: {
+    rail: 'payment_intent',
     intentId: intentC.id,
     providerEventId: seededEventId,
     type: 'payment_intent.succeeded',

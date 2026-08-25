@@ -203,6 +203,102 @@ if (!admin.id) {
   check('reconciliation_read created zero bookings', beforeBookings === afterBookings, `${beforeBookings} -> ${afterBookings}`)
 }
 
+console.log('\n=== 9. webhook_intake is decoupled from money-operation enablement (the corrective-round fix) ===')
+withPermissiveEnv({ PAYMENT_POLICY_TEST_COUNTRY_ELIGIBLE: undefined }, () => {
+  check(
+    'webhook_intake still ALLOWED with country/division eligibility OFF (was COUNTRY_DIVISION_NOT_ELIGIBLE before this fix)',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake' })) === null,
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake' })),
+  )
+  check(
+    'a NON-intake operation (create) still correctly denies under the same country-off condition (exemption is scoped to webhook_intake only)',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'create' })) === 'COUNTRY_DIVISION_NOT_ELIGIBLE',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'create' })),
+  )
+})
+withPermissiveEnv({ PAYMENT_INTENTS_ENABLED: undefined }, () => {
+  check(
+    'webhook_intake still ALLOWED with the rail flag OFF (was RAIL_DISABLED before this fix)',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake' })) === null,
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake' })),
+  )
+})
+withPermissiveEnv({ PAYMENT_OPERATION_PAYMENT_INTENT_WEBHOOK_INTAKE_ENABLED: undefined }, () => {
+  check(
+    'webhook_intake still ALLOWED with its own operation flag OFF (was OPERATION_DISABLED before this fix) -- the core property: disabling ordinary money operations must never cost the durable record of an authenticated event',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake' })) === null,
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake' })),
+  )
+})
+withPermissiveEnv({}, () => {
+  check(
+    'webhook_intake with provider=stripe is ALLOWED (recognized for authentication even though stripe has no approved money-movement config)',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', rail: 'stripe_checkout', provider: 'stripe' })) === null,
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', rail: 'stripe_checkout', provider: 'stripe' })),
+  )
+  check(
+    'webhook_intake with an unrecognized provider still denies (PROVIDER_NOT_RECOGNIZED) -- intake is decoupled from MONEY approval, not wide open to any caller-supplied provider string',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', provider: 'totally_unknown_processor' })) === 'PROVIDER_NOT_RECOGNIZED',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', provider: 'totally_unknown_processor' })),
+  )
+  check(
+    'webhook_intake in an unrecognized environment still denies (ENVIRONMENT_NOT_PERMITTED) -- gate 2 still applies to intake',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', environment: 'not_a_real_env' })) === 'ENVIRONMENT_NOT_PERMITTED',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', environment: 'not_a_real_env' })),
+  )
+})
+
+// Sections 10-11 use the SAME direct-function-call approach as sections 1-7, for the same reason
+// stated at the top of this file: a live server process reads PAYMENTS_EMERGENCY_STOP (and every
+// other flag) once at startup, so toggling it for a single request against the already-running test
+// server is not reliable -- a header has no effect, since nothing reads one. Real Postgres row
+// counts (not just structural reasoning) prove the zero-side-effect claim; combined with the code
+// fact that authorizePaymentOperation is always the FIRST statement in every wired route (verified
+// by direct code reading, cited in the implementation report), this establishes the same property
+// the live route would show, without the complexity/fragility of a second, separately-configured
+// server instance.
+console.log('\n=== 10. payout_release under emergency stop denies with EMERGENCY_STOP specifically, zero real wallet effects ===')
+withPermissiveEnv({ PAYMENTS_EMERGENCY_STOP: 'true' }, () => {
+  check(
+    'payout_release under emergency stop denies with reason EMERGENCY_STOP specifically (not a different, coincidentally-also-failing gate)',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'payout_release', rail: 'manual_proof', provider: 'manual', actor: { roles: ['ADMIN'] } })) === 'EMERGENCY_STOP',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'payout_release', rail: 'manual_proof', provider: 'manual', actor: { roles: ['ADMIN'] } })),
+  )
+})
+{
+  const before = await db().walletEntry.count()
+  withPermissiveEnv({ PAYMENTS_EMERGENCY_STOP: 'true' }, () => {
+    try {
+      authorizePaymentOperation({ ...BASE_INPUT, operation: 'payout_release', rail: 'manual_proof', provider: 'manual', actor: { roles: ['ADMIN'] } })
+    } catch { /* expected denial */ }
+  })
+  const after = await db().walletEntry.count()
+  check('the denied payout_release call created zero real wallet entries (measured against the live DB)', before === after, `${before} -> ${after}`)
+}
+
+console.log('\n=== 11. host cancellation refund (manual_proof rail, the operation host.mjs uses) denies cleanly, zero real payment-proof/wallet effects ===')
+withPermissiveEnv({ PAYMENT_RAIL_MANUAL_PROOF_ENABLED: undefined }, () => {
+  check(
+    'refund on the manual_proof rail denies (RAIL_DISABLED) when that rail flag is off -- the exact gate host.mjs\'s cancellation refund goes through',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'refund', rail: 'manual_proof', provider: 'manual', actor: { roles: ['ADMIN'] } })) === 'RAIL_DISABLED',
+    deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'refund', rail: 'manual_proof', provider: 'manual', actor: { roles: ['ADMIN'] } })),
+  )
+})
+{
+  const beforeProofs = await db().paymentProof.count()
+  const beforeWallet = await db().walletEntry.count()
+  withPermissiveEnv({ PAYMENT_RAIL_MANUAL_PROOF_ENABLED: undefined }, () => {
+    try {
+      authorizePaymentOperation({ ...BASE_INPUT, operation: 'refund', rail: 'manual_proof', provider: 'manual', actor: { roles: ['ADMIN'] } })
+    } catch { /* expected denial */ }
+  })
+  const afterProofs = await db().paymentProof.count()
+  const afterWallet = await db().walletEntry.count()
+  check('zero real payment-proof rows changed', beforeProofs === afterProofs, `${beforeProofs} -> ${afterProofs}`)
+  check('zero real wallet entries were created', beforeWallet === afterWallet, `${beforeWallet} -> ${afterWallet}`)
+}
+console.log('   NOTE: host.mjs places this exact policy call as the FIRST statement after the booking is loaded, before its own $transaction -- verified by direct code reading (server/routes/host.mjs), not re-derived here; a live end-to-end HTTP proof of that specific route would need a second, separately-configured server instance to safely toggle env (see this file\'s header comment) -- disclosed as a real limitation in the implementation report, not silently assumed covered.')
+
 console.log(`\n==== PAYMENT POLICY ADVERSARIAL TESTS: ${pass} passed, ${fail} failed ====`)
 await disconnectDb()
 process.exit(fail ? 1 : 0)

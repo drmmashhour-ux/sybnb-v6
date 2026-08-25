@@ -309,6 +309,7 @@ model Booking {
   guest    User          @relation("BookingGuest", fields: [guestId], references: [id])
   payments PaymentProof[]
   paymentIntents PaymentIntent[]
+  paymentEvents PaymentEvent[]
   review   ListingReview?
   messageThread MessageThread?
 
@@ -491,7 +492,16 @@ model PaymentIntent {
 // which is exactly the case this split exists to make visible instead of silently vanishing.
 model PaymentEvent {
   id               String                       @id @default(uuid())
-  intentId         String                       @map("intent_id")
+  // Which webhook rail produced this event -- 'payment_intent' (the events below reference intent)
+  // or 'stripe_checkout' (the events below reference booking instead). Every existing row is
+  // 'payment_intent' (migration 016 backfilled it via DEFAULT). See the traceability CHECK
+  // constraint added in that same migration -- not expressible in this schema DSL, DB-only.
+  rail             String
+  intentId         String?                      @map("intent_id")
+  // Populated for the stripe_checkout rail, which has no PaymentIntent row to reference -- traced to
+  // the booking instead, via the Checkout Session's own metadata.bookingId (server-derived, not
+  // client-supplied trust -- see server/routes/payments.mjs's finalizeStripeSession).
+  bookingId        String?                      @map("booking_id")
   providerEventId  String                       @unique @map("provider_event_id")
   type             String
   amountMinor      Int?                         @map("amount_minor")
@@ -500,6 +510,8 @@ model PaymentEvent {
   // Non-sensitive metadata, stored alongside amountMinor/currency for the same reason: it lets an
   // admin replay reconstruct the event snapshot without needing (or storing) the raw webhook payload.
   providerObjectId String?                      @map("provider_object_id")
+  // SHA-256 of the raw, already-signature-verified webhook body. Never the raw payload itself.
+  payloadDigest    String?                      @map("payload_digest")
   processingStatus PaymentEventProcessingStatus @default(RECEIVED) @map("processing_status")
   attempts         Int                          @default(0)
   lastAttemptAt    DateTime?                    @map("last_attempt_at")
@@ -507,9 +519,12 @@ model PaymentEvent {
   appliedAt        DateTime?                     @map("applied_at")
   receivedAt       DateTime                      @default(now()) @map("received_at")
 
-  intent PaymentIntent @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  intent  PaymentIntent? @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  booking Booking?       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([intentId])
+  @@index([rail])
+  @@index([bookingId])
   @@index([processingStatus])
   @@map("payment_events")
 }

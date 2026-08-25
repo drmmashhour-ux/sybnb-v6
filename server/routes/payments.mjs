@@ -1,11 +1,14 @@
+import { createHash } from 'node:crypto'
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, expectedTotalMinor, firstAdminId, isProviderRefUniqueViolation } from '../lib/finance-ledger.mjs'
+import { expectedTotalMinor, isProviderRefUniqueViolation } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { log } from '../lib/logger.mjs'
+import { finalizeStripeSession, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
+import { applyPaymentEvent } from '../lib/payment-event-pipeline.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
@@ -77,49 +80,6 @@ function stripeChargeAmount(totalMinor) {
   const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
   const unitAmount = Math.max(50, Math.round((totalMinor / sypPerUsd) * 100))
   return { currency, unitAmount }
-}
-
-async function finalizeStripeSession(session) {
-  const bookingId = session.metadata?.bookingId
-  if (!bookingId || session.payment_status !== 'paid') return null
-
-  try {
-   return await db().$transaction(async (tx) => {
-    const existingProof = await tx.paymentProof.findFirst({
-      where: { provider: 'stripe', providerRef: session.id },
-    })
-    if (existingProof) return existingProof
-
-    const booking = await tx.booking.findUnique({ where: { id: bookingId } })
-    if (!booking || booking.status !== 'PAYMENT_PENDING') return null
-
-    const created = await tx.paymentProof.create({
-      data: {
-        bookingId: booking.id,
-        userId: booking.guestId,
-        provider: 'stripe',
-        status: 'PENDING_ADMIN_REVIEW',
-        amountMinor: Number(session.metadata?.sypTotalMinor || booking.amountMinor),
-        currency: booking.currency,
-        providerRef: session.id,
-        proofAssetUrl: session.payment_intent ? `stripe://payment_intents/${session.payment_intent}` : undefined,
-      },
-    })
-
-    return approvePaymentProof(tx, {
-      proofId: created.id,
-      actorUserId: await firstAdminId(tx),
-      note: 'Auto-approved: Stripe confirmed the card charge was captured.',
-    })
-   })
-  } catch (err) {
-    // Concurrent webhook delivery may have finalized first — the unique constraint rejects the
-    // second insert; return the already-created proof so finalization stays idempotent.
-    if (isProviderRefUniqueViolation(err)) {
-      return db().paymentProof.findFirst({ where: { provider: 'stripe', providerRef: session.id } })
-    }
-    throw err
-  }
 }
 
 export async function handlePayments(req, res, url, context) {
@@ -307,13 +267,25 @@ export async function handlePayments(req, res, url, context) {
     }
 
     const chunks = []
-    for await (const chunk of req) chunks.push(chunk)
+    let totalBytes = 0
+    for await (const chunk of req) {
+      totalBytes += chunk.length
+      if (totalBytes > 1_000_000) {
+        const error = new Error('Webhook body too large.')
+        error.statusCode = 413
+        error.code = 'PAYLOAD_TOO_LARGE'
+        error.expose = true
+        throw error
+      }
+      chunks.push(chunk)
+    }
     const rawBody = Buffer.concat(chunks)
 
     let event
     try {
       event = stripe.webhooks.constructEvent(rawBody, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET)
     } catch {
+      // Invalid signature: never persisted, by construction -- nothing below this line executes.
       const error = new Error('Invalid Stripe webhook signature.')
       error.statusCode = 400
       error.code = 'STRIPE_WEBHOOK_INVALID_SIGNATURE'
@@ -321,11 +293,10 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    // Authenticated; durably received in the sense that Stripe itself retries delivery until it
-    // gets a 2xx. NOTE (limitation, tracked in the implementation report): this rail predates the
-    // PaymentEvent-style durable-intake table the newer payment-intents.mjs rail has, so unlike
-    // that rail, a webhook_apply denial below is not separately, durably recorded beyond the log
-    // line — this route has no intake/apply seam of its own to defer into yet.
+    // webhook_intake is deliberately division-blind, same as the payment_intent rail's own intake
+    // seam (server/routes/payment-intents.mjs) -- an authenticated event must be durably storable
+    // even when the rest of the policy would deny (country rollout off, the rail flag off, an
+    // emergency stop). See payment-policy.mjs's INTAKE_EXEMPT_OPERATIONS / RECOGNIZED_WEBHOOK_PROVIDERS.
     authorizePaymentOperation({
       operation: 'webhook_intake',
       rail: 'stripe_checkout',
@@ -335,24 +306,76 @@ export async function handlePayments(req, res, url, context) {
       environment: policyEnvironment(),
     })
 
-    if (event.type === 'checkout.session.completed') {
-      try {
-        authorizePaymentOperation({
-          operation: 'webhook_apply',
-          rail: 'stripe_checkout',
-          provider: 'stripe',
-          division: 'PLATFORM',
-          country: activePolicyCountryKey(),
-          environment: policyEnvironment(),
-        })
-        await finalizeStripeSession(event.data.object)
-      } catch (denied) {
-        if (denied?.code !== 'PAYMENT_POLICY_DENIED') throw denied
-        log.warn('payment_webhook_apply_denied', { rail: 'stripe_checkout', eventType: event.type, reason: denied.reason })
-      }
+    if (event.type !== 'checkout.session.completed') {
+      // Unrecognized/unhandled event type -- acknowledged, not durably tracked. Matches the
+      // payment_intent rail's own scope: only event types with a real target mapping are recorded.
+      return json(res, 200, { ok: true, ignored: event.type })
     }
 
-    return json(res, 200, { ok: true, received: true })
+    const session = event.data.object
+    const bookingId = session.metadata?.bookingId || null
+    const payloadDigest = createHash('sha256').update(rawBody).digest('hex')
+
+    // Durable intake -- this rail's own PaymentEvent row, previously nonexistent (this table could
+    // not hold a stripe_checkout event at all before migration 016, since intent_id was NOT NULL).
+    // A stripe_checkout event is traced to its booking (not a PaymentIntent, which doesn't exist for
+    // this rail) via the Checkout Session's own metadata.bookingId. Postgres ON CONFLICT makes this
+    // atomic under concurrent redelivery, mirroring payment-intents.mjs exactly.
+    const eventRow = await db().paymentEvent.upsert({
+      where: { providerEventId: event.id },
+      create: {
+        rail: 'stripe_checkout',
+        bookingId,
+        providerEventId: event.id,
+        type: event.type,
+        amountMinor: session.metadata?.sypTotalMinor ? Number(session.metadata.sypTotalMinor) : null,
+        currency: session.currency ?? null,
+        providerObjectId: session.id ?? null,
+        payloadDigest,
+        processingStatus: 'RECEIVED',
+      },
+      update: {},
+    })
+
+    if (['APPLIED', 'IGNORED'].includes(eventRow.processingStatus)) {
+      return json(res, 200, { ok: true, applied: false, duplicate: true, received: true })
+    }
+    if (eventRow.processingStatus === 'DEAD_LETTERED') {
+      // Don't auto-reprocess a known-broken event on provider redelivery -- needs a human via the
+      // admin replay endpoint (payment-intents.mjs, generalized to accept either rail). Still
+      // acknowledge with 200 so Stripe stops retrying.
+      log.warn('payment_webhook_dead_lettered_redelivery', { eventId: event.id, rail: 'stripe_checkout', bookingId })
+      return json(res, 200, { ok: true, applied: false, deadLettered: true, received: true })
+    }
+
+    const division = bookingId
+      ? (await db().booking.findUnique({ where: { id: bookingId }, select: { listing: { select: { division: true } } } }))?.listing?.division || 'PLATFORM'
+      : 'PLATFORM'
+
+    try {
+      authorizePaymentOperation({
+        operation: 'webhook_apply',
+        rail: 'stripe_checkout',
+        provider: 'stripe',
+        division,
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+      })
+    } catch (denied) {
+      if (denied?.code !== 'PAYMENT_POLICY_DENIED') throw denied
+      // Durably received (the upsert above already committed), application paused. Zero attempts
+      // consumed -- an intentional policy pause, not a processing failure. The row stays RECEIVED; a
+      // later redelivery or an explicit reconciliation pass applies it once policy allows.
+      log.warn('payment_webhook_apply_denied', { rail: 'stripe_checkout', eventId: event.id, reason: denied.reason })
+      return json(res, 200, { ok: true, applied: false, policyDeferred: true, received: true })
+    }
+
+    const result = await applyPaymentEvent({
+      eventId: eventRow.id,
+      rail: 'stripe_checkout',
+      apply: () => applyStripeCheckoutEvent({ eventId: eventRow.id, session }),
+    })
+    return json(res, 200, { ok: true, received: true, ...result })
   }
 
   if (url.pathname === '/api/payments/stripe/status') {

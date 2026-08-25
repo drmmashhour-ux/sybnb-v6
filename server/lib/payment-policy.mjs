@@ -36,6 +36,21 @@ export const PAYMENT_OPERATIONS = Object.freeze([
 // split in server/routes/payment-intents.mjs and server/routes/payments.mjs.
 const EMERGENCY_STOP_EXEMPT_OPERATIONS = new Set(['webhook_intake', 'reconciliation_read'])
 
+// webhook_intake is exempt from every MONEY-OPERATION gate, not just emergency stop. Disabling
+// creation/capture/refund (country rollout, a rail flag, an operation flag) must never cost the
+// platform the durable record of an authenticated event — those flags govern whether we act on an
+// event, not whether we're allowed to know it happened. Intake asks a narrower question instead:
+// "is this a provider whose signature scheme we can verify?" — see RECOGNIZED_WEBHOOK_PROVIDERS.
+const INTAKE_EXEMPT_OPERATIONS = new Set(['webhook_intake'])
+
+// Providers whose webhook signature scheme this codebase can verify — a structural, authentication
+// question, deliberately separate from APPROVED_PROVIDER_CONFIGS (which answers "is this provider
+// approved to MOVE money"). 'stripe' belongs here even though it is absent from
+// APPROVED_PROVIDER_CONFIGS: SYBNB can authenticate a real Stripe webhook today (verifyWebhook's
+// scheme is Stripe-compatible) even though no Stripe money-movement is approved yet. Authenticating
+// and durably storing an event is not the same claim as being allowed to act on it.
+const RECOGNIZED_WEBHOOK_PROVIDERS = new Set(['stripe', 'sandbox'])
+
 const RECOGNIZED_ENVIRONMENTS = new Set(['development', 'test', 'staging', 'production'])
 
 // Who may perform an operation that needs a human actor, centralized here instead of each route
@@ -161,6 +176,16 @@ function evaluate({ operation, rail, provider, division, country, environment, a
   // Gate 2: environment.
   if (!RECOGNIZED_ENVIRONMENTS.has(environment)) {
     return { allowed: false, reason: 'ENVIRONMENT_NOT_PERMITTED', message: 'Unrecognized environment.' }
+  }
+
+  // webhook_intake takes a narrower path from here: it must never depend on whether ordinary money
+  // operations are enabled (country rollout, rail flag, operation flag) — only on whether this is a
+  // provider we can authenticate at all. Gates 3/5/6/7 below never run for this operation.
+  if (INTAKE_EXEMPT_OPERATIONS.has(operation)) {
+    if (!RECOGNIZED_WEBHOOK_PROVIDERS.has(provider)) {
+      return { allowed: false, reason: 'PROVIDER_NOT_RECOGNIZED', message: 'Unrecognized webhook provider.' }
+    }
+    return { allowed: true }
   }
 
   // Gate 3: country/division eligibility — this is where gates.payments is finally enforced,

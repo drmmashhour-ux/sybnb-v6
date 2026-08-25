@@ -7,16 +7,12 @@ import {
   approvePaymentProof,
   expectedTotalMinor,
   firstAdminId,
-  isProviderRefUniqueViolation,
   reverseBookingPlatformShare,
 } from '../lib/finance-ledger.mjs'
-import { log, errorSummary } from '../lib/logger.mjs'
+import { log } from '../lib/logger.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
-
-// After this many failed apply attempts on the same event, stop retrying automatically and mark it
-// DEAD_LETTERED — it needs a human via the admin replay endpoint instead of an unbounded retry loop.
-// Mirrors the MAX_ATTEMPTS=5 precedent already used for OTP lockout (server/routes/otp.mjs).
-const DEAD_LETTER_THRESHOLD = 5
+import { applyPaymentEvent as applyPaymentEventPipeline } from '../lib/payment-event-pipeline.mjs'
+import { applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
 
 function fail(statusCode, code, message) {
   const error = new Error(message)
@@ -133,93 +129,65 @@ async function applyPaymentIntentRefund(tx, { intent }) {
   return tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'REFUNDED' } })
 }
 
-// The single implementation of "apply this event's side effects" — called from BOTH the live
+// This rail's own "apply this event's side effects" business logic — called from BOTH the live
 // webhook handler (fresh delivery or provider redelivery) and the admin replay endpoint, so there
-// is never a second copy that can drift. Durably records every attempt (even failures) on the
-// PaymentEvent row itself, separately from the risky booking/wallet transaction: if that
-// transaction fails, Postgres rolls it back entirely, but the attempt/failure record here is a
-// plain follow-up statement outside that transaction, so it survives regardless.
-async function applyPaymentEvent({ eventId, intentId, type, obj }) {
-  const bumped = await db().paymentEvent.update({
-    where: { id: eventId },
-    data: { attempts: { increment: 1 }, lastAttemptAt: new Date(), processingStatus: 'APPLYING' },
-  })
+// is never a second copy that can drift. Wrapped by the shared payment-event-pipeline.mjs, which
+// owns the attempts/dead-letter/duplicate-collision bookkeeping common to every rail (see that
+// module's own comment for why the outer wrapper doesn't own this function's transaction boundary).
+// This function stays responsible for marking eventId APPLIED/IGNORED itself, atomically with its
+// own booking/wallet transaction, exactly as before this extraction — no behavior change here.
+async function applyPaymentIntentEvent({ eventId, intentId, type, obj }) {
   const target = targetStatusFor(type)
-  try {
-    const result = await db().$transaction(async (tx) => {
-      const fresh = await tx.paymentIntent.findUnique({ where: { id: intentId } })
-      if (!fresh) throw fail(404, 'PAYMENT_INTENT_NOT_FOUND', 'No matching payment intent.')
+  return db().$transaction(async (tx) => {
+    const fresh = await tx.paymentIntent.findUnique({ where: { id: intentId } })
+    if (!fresh) throw fail(404, 'PAYMENT_INTENT_NOT_FOUND', 'No matching payment intent.')
 
-      if (!target || !canTransition(fresh.status, target)) {
-        // Deterministic no-op: an illegal/out-of-order transition (e.g. a refund before success, or
-        // a second terminal transition) will never succeed no matter how many times it's retried —
-        // record it as IGNORED, not FAILED, so it never enters the dead-letter retry path.
-        await tx.paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'IGNORED', appliedAt: new Date() } })
-        return { applied: false, status: fresh.status, illegal: true }
-      }
-
-      let updated
-      if (target === 'SUCCEEDED' && fresh.bookingId) {
-        updated = await applyPaymentIntentSuccess(tx, { intent: fresh, obj })
-      } else if (target === 'REFUNDED' && fresh.bookingId) {
-        updated = await applyPaymentIntentRefund(tx, { intent: fresh })
-      } else {
-        // Claim on the status we actually read, not a blind write: two concurrent deliveries for
-        // this intent (e.g. 'processing' racing 'succeeded') can both read the same starting status
-        // and both pass canTransition against it. A plain `update` would let whichever commits last
-        // silently overwrite the other's (possibly more-advanced) status. This mirrors the claim
-        // pattern approvePaymentProof already uses for exactly this class of race.
-        const claimed = await tx.paymentIntent.updateMany({
-          where: { id: intentId, status: fresh.status },
-          data: { status: target, providerRef: obj?.id || fresh.providerRef },
-        })
-        if (claimed.count === 0) {
-          // Another delivery already advanced this intent's status between our read and this write —
-          // it moved on without us. Nothing to retry: record as a no-op, not a failure.
-          await tx.paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'IGNORED', appliedAt: new Date() } })
-          const current = await tx.paymentIntent.findUnique({ where: { id: intentId } })
-          return { applied: false, status: current.status, illegal: true }
-        }
-        updated = { status: target }
-      }
-      await tx.paymentEvent.update({
-        where: { id: eventId },
-        data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null },
-      })
-      return { applied: true, status: updated.status }
-    })
-    return result
-  } catch (err) {
-    if (isProviderRefUniqueViolation(err)) {
-      // A concurrent delivery (redelivery of this same event racing itself, or an admin replay
-      // overlapping a live redelivery) already created+approved the PaymentProof for this exact
-      // intent and committed first — this transaction's own attempt collided with that and rolled
-      // back, but the underlying payment WAS genuinely applied, just by the sibling transaction.
-      // Mark this delivery APPLIED too (a benign duplicate), not FAILED — otherwise a normal,
-      // harmless race would dead-letter a payment that already settled correctly.
-      const fresh = await db().paymentIntent.findUnique({ where: { id: intentId } })
-      await db().paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null } })
-      return { applied: false, status: fresh?.status, duplicate: true }
+    if (!target || !canTransition(fresh.status, target)) {
+      // Deterministic no-op: an illegal/out-of-order transition (e.g. a refund before success, or
+      // a second terminal transition) will never succeed no matter how many times it's retried —
+      // record it as IGNORED, not FAILED, so it never enters the dead-letter retry path.
+      await tx.paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'IGNORED', appliedAt: new Date() } })
+      return { applied: false, status: fresh.status, illegal: true }
     }
-    const dead = bumped.attempts >= DEAD_LETTER_THRESHOLD
-    await db()
-      .paymentEvent.update({
-        where: { id: eventId },
-        data: {
-          processingStatus: dead ? 'DEAD_LETTERED' : 'FAILED',
-          // Pre-sanitized at write time (never the raw error) — a DB column is a permanent record,
-          // stronger guarantee needed than key-based log redaction alone.
-          lastError: JSON.stringify(errorSummary(err)).slice(0, 2000),
-          lastAttemptAt: new Date(),
-        },
+
+    let updated
+    if (target === 'SUCCEEDED' && fresh.bookingId) {
+      updated = await applyPaymentIntentSuccess(tx, { intent: fresh, obj })
+    } else if (target === 'REFUNDED' && fresh.bookingId) {
+      updated = await applyPaymentIntentRefund(tx, { intent: fresh })
+    } else {
+      // Claim on the status we actually read, not a blind write: two concurrent deliveries for
+      // this intent (e.g. 'processing' racing 'succeeded') can both read the same starting status
+      // and both pass canTransition against it. A plain `update` would let whichever commits last
+      // silently overwrite the other's (possibly more-advanced) status. This mirrors the claim
+      // pattern approvePaymentProof already uses for exactly this class of race.
+      const claimed = await tx.paymentIntent.updateMany({
+        where: { id: intentId, status: fresh.status },
+        data: { status: target, providerRef: obj?.id || fresh.providerRef },
       })
-      .catch((e2) => log.error('payment_event_failure_record_failed', { eventId, err: errorSummary(e2) }))
-    log.error('payment_webhook_apply_failed', { eventId, intentId, type, attempts: bumped.attempts, dead, err: errorSummary(err) })
-    // Never re-annotate err with a bare statusCode here — handleRouteError (responses.mjs) exposes
-    // .message whenever .statusCode is set even without .expose. Re-throwing unannotated lets a
-    // genuine infra failure fall through to the safe generic 500.
-    throw err
-  }
+      if (claimed.count === 0) {
+        // Another delivery already advanced this intent's status between our read and this write —
+        // it moved on without us. Nothing to retry: record as a no-op, not a failure.
+        await tx.paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'IGNORED', appliedAt: new Date() } })
+        const current = await tx.paymentIntent.findUnique({ where: { id: intentId } })
+        return { applied: false, status: current.status, illegal: true }
+      }
+      updated = { status: target }
+    }
+    await tx.paymentEvent.update({
+      where: { id: eventId },
+      data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null },
+    })
+    return { applied: true, status: updated.status }
+  })
+}
+
+async function applyPaymentEvent({ eventId, intentId, type, obj }) {
+  return applyPaymentEventPipeline({
+    eventId,
+    rail: 'payment_intent',
+    apply: () => applyPaymentIntentEvent({ eventId, intentId, type, obj }),
+  })
 }
 
 // Resolves the division a policy check should evaluate for an intent that's already known (i.e.
@@ -434,6 +402,7 @@ export async function handlePaymentIntents(req, res, url, context) {
     const eventRow = await db().paymentEvent.upsert({
       where: { providerEventId: event.id },
       create: {
+        rail: 'payment_intent',
         intentId: intent.id,
         providerEventId: event.id,
         type: event.type,
@@ -531,8 +500,13 @@ export async function handlePaymentIntents(req, res, url, context) {
       actor: { roles: context.roles },
     })
 
+    // Scoped to this rail only — this is the payment_intent-rail reconciliation view specifically
+    // (see its own policy declaration above). stripe_checkout-rail dead-lettered events are equally
+    // durable and equally replayable via the same admin replay endpoint by id, but are not yet
+    // surfaced in an admin-facing listing of their own — a disclosed, real gap, not silently assumed
+    // covered by this query (which would otherwise crash on e.intent being null for that rail).
     const deadLetteredEvents = await db().paymentEvent.findMany({
-      where: { processingStatus: { in: ['FAILED', 'DEAD_LETTERED'] } },
+      where: { rail: 'payment_intent', processingStatus: { in: ['FAILED', 'DEAD_LETTERED'] } },
       include: { intent: true },
       orderBy: { lastAttemptAt: 'desc' },
       take: 25,
@@ -566,28 +540,42 @@ export async function handlePaymentIntents(req, res, url, context) {
     })
   }
 
-  // Admin replay of a FAILED/DEAD_LETTERED event. Trusts the already-persisted, already-verified
-  // event snapshot rather than re-verifying a signature — authenticity was established once, at
-  // first receipt; replay retries the platform's own previously-authenticated processing of data
-  // already at rest, not new untrusted input. Reconstructs the minimal {id, amount, currency}
-  // snapshot from the PaymentEvent row itself — no raw payload is ever stored to enable this.
+  // Admin replay of a FAILED/DEAD_LETTERED event — shared across BOTH webhook rails (the durable
+  // inbox itself is shared, see migration 016; this is the "one replay pipeline" that goes with it).
+  // Trusts the already-persisted, already-verified event snapshot rather than re-verifying a
+  // signature — authenticity was established once, at first receipt; replay retries the platform's
+  // own previously-authenticated processing of data already at rest, not new untrusted input.
+  // Reconstructs a minimal snapshot from the PaymentEvent row itself — no raw payload is ever stored
+  // to enable this.
   const replayMatch = url.pathname.match(/^\/api\/admin\/payment-events\/([^/]+)\/replay$/)
   if (replayMatch) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['ADMIN'])
-    requirePaymentIntentsEnabled()
 
-    const eventRow = await db().paymentEvent.findUnique({ where: { id: replayMatch[1] }, include: { intent: true } })
+    const eventRow = await db().paymentEvent.findUnique({
+      where: { id: replayMatch[1] },
+      include: { intent: true, booking: { include: { listing: true } } },
+    })
     if (!eventRow) throw fail(404, 'PAYMENT_EVENT_NOT_FOUND', 'Payment event not found.')
+    // payment_intent rail keeps its own explicit kill switch as an outer, redundant guard (defense
+    // in depth, matching every other route on this rail) — stripe_checkout rail has no equivalent
+    // switch of its own; authorizePaymentOperation below is its sole, sufficient gate (and today
+    // denies it unconditionally, since 'stripe' has no approved provider configuration yet).
+    if (eventRow.rail === 'payment_intent') requirePaymentIntentsEnabled()
     if (!['FAILED', 'DEAD_LETTERED'].includes(eventRow.processingStatus)) {
       throw fail(409, 'PAYMENT_EVENT_NOT_REPLAYABLE', 'This event is not in a failed/dead-lettered state.')
     }
 
+    const division = eventRow.rail === 'payment_intent'
+      ? await eventDivision(eventRow.intent)
+      : eventRow.booking?.listing?.division || 'PLATFORM'
+    const provider = eventRow.rail === 'payment_intent' ? 'sandbox' : 'stripe'
+
     authorizePaymentOperation({
       operation: 'replay',
-      rail: 'payment_intent',
-      provider: 'sandbox',
-      division: await eventDivision(eventRow.intent),
+      rail: eventRow.rail,
+      provider,
+      division,
       country: activePolicyCountryKey(),
       environment: policyEnvironment(),
       actor: { roles: context.roles },
@@ -597,12 +585,32 @@ export async function handlePaymentIntents(req, res, url, context) {
     let result
     let replayError
     try {
-      result = await applyPaymentEvent({
-        eventId: eventRow.id,
-        intentId: eventRow.intentId,
-        type: eventRow.type,
-        obj: { id: eventRow.providerObjectId, amount_minor: eventRow.amountMinor, currency: eventRow.currency },
-      })
+      if (eventRow.rail === 'payment_intent') {
+        result = await applyPaymentEvent({
+          eventId: eventRow.id,
+          intentId: eventRow.intentId,
+          type: eventRow.type,
+          obj: { id: eventRow.providerObjectId, amount_minor: eventRow.amountMinor, currency: eventRow.currency },
+        })
+      } else {
+        // A row only ever reaches FAILED/DEAD_LETTERED via a thrown exception during apply — the
+        // deterministic "session not paid / booking not payable" no-op path marks IGNORED instead
+        // (see applyStripeCheckoutEvent), never throws. So a replayable stripe_checkout row is
+        // provably one whose original delivery had payment_status: 'paid' — safe to reconstruct here.
+        result = await applyPaymentEventPipeline({
+          eventId: eventRow.id,
+          rail: 'stripe_checkout',
+          apply: () => applyStripeCheckoutEvent({
+            eventId: eventRow.id,
+            session: {
+              id: eventRow.providerObjectId,
+              payment_status: 'paid',
+              currency: eventRow.currency,
+              metadata: { bookingId: eventRow.bookingId, sypTotalMinor: eventRow.amountMinor },
+            },
+          }),
+        })
+      }
     } catch (err) {
       replayError = err
     }

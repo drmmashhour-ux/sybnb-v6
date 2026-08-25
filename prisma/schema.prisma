@@ -512,7 +512,16 @@ model PaymentEvent {
   providerEndpointKey String                     @map("provider_endpoint_key")
   // policyEnvironment() at receipt time (e.g. 'development', 'production'). 'unknown' for rows
   // received before this column existed (migration 017's backfill) -- an honest gap, not a guess.
-  // Also part of the canonical event identity.
+  // PLAIN INFORMATIONAL METADATA ONLY (migration 020) -- deliberately NOT part of the canonical event
+  // identity. It was, until independent review correctly found that using a mutable, ambient runtime
+  // label (process.env.NODE_ENV) as part of an identity key let the exact same event delivered to the
+  // exact same endpoint under two different environment labels (a deploy config change, or two
+  // processes with different NODE_ENV, e.g. a test script vs the live server it drives) create two
+  // independent rows and be applied twice -- confirmed as a real, already-manifested defect in this
+  // codebase's own data, not just a theoretical one (see migration 020's comment). providerEndpointKey
+  // already uniquely identifies the endpoint/mode in this codebase (there is exactly one static
+  // endpoint key per rail today), so environment added no genuine distinguishing identity information
+  // on top of it and is never used to fork identity again.
   environment      String
   // What kind of internal record this event was originally about -- 'PAYMENT_INTENT' or 'BOOKING'.
   // Permanent, set once at receipt, independent of whether intentId/bookingId later become null.
@@ -561,12 +570,13 @@ model PaymentEvent {
   intent  PaymentIntent? @relation(fields: [intentId], references: [id], onDelete: SetNull)
   booking Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
   // Append-only record of every conflicting delivery under this event's canonical identity (same
-  // (provider, providerEndpointKey, environment, providerEventId), different immutable content).
-  // This event row's own fields (processingStatus/lastError/attempts/etc.) are NEVER written on a
-  // conflict -- see intakeEvent() in payment-event-pipeline.mjs and this relation's own model comment.
+  // (provider, providerEndpointKey, providerEventId), different immutable content). This event row's
+  // own fields (processingStatus/lastError/attempts/etc.) are NEVER written on a conflict -- see
+  // intakeEvent() in payment-event-pipeline.mjs and this relation's own model comment.
   conflicts PaymentEventConflict[]
 
-  @@unique([provider, providerEndpointKey, environment, providerEventId], name: "eventIdentity", map: "payment_events_identity_key")
+  // environment is deliberately NOT part of this key (migration 020) -- see that field's own comment.
+  @@unique([provider, providerEndpointKey, providerEventId], name: "eventIdentity", map: "payment_events_identity_key")
   @@index([intentId])
   @@index([rail])
   @@index([bookingId])
@@ -575,8 +585,8 @@ model PaymentEvent {
 }
 
 // Append-only audit trail of conflicting deliveries — a delivery whose canonical identity
-// (provider, providerEndpointKey, environment, providerEventId) matches an existing PaymentEvent but
-// whose immutable content (payload digest, type, reference, subject, amounts) does not. Recording
+// (provider, providerEndpointKey, providerEventId) matches an existing PaymentEvent but whose
+// immutable content (payload digest, type, reference, subject, amounts) does not. Recording
 // this here, in a separate child table, is what makes it structurally impossible for a conflicting
 // delivery to ever overwrite the original event's own authoritative outcome (independent review
 // found intakeEvent() doing exactly that in the prior round — this table is the fix). Stores only

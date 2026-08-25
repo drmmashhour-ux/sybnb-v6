@@ -35,9 +35,9 @@ export function isPaymentEventIdentityConflict(err) {
 // constraint itself is what makes N concurrent identical deliveries resolve to exactly one row.
 //
 // On a genuine identity collision (a redelivery, or — the defect this closes — two DIFFERENT events
-// that happen to share a raw provider_event_id string across providers/endpoints/environments, which
-// can no longer collide at all since the constraint is now scoped by all four), the existing row's
-// IMMUTABLE fields are compared against this freshly-authenticated delivery:
+// that happen to share a raw provider_event_id string across providers/endpoints, which can no longer
+// collide at all since the constraint is now scoped by both), the existing row's IMMUTABLE fields are
+// compared against this freshly-authenticated delivery:
 //   - a match is an ordinary duplicate — the existing row is returned unchanged, `conflict: false`;
 //   - a mismatch is a genuine conflict. The ORIGINAL EVENT ROW IS NEVER WRITTEN TO, in ANY field,
 //     for ANY reason — independent review correctly found an earlier version of this function
@@ -48,7 +48,9 @@ export function isPaymentEventIdentityConflict(err) {
 //     original by id, and the ORIGINAL, UNCHANGED row is returned.
 //
 // `fields` must include every column in the eventIdentity key (provider, providerEndpointKey,
-// environment, providerEventId) plus every other immutable column this function compares.
+// providerEventId) plus every other immutable column this function compares. `environment` is still
+// accepted and stored (informational metadata only, since migration 020) but is deliberately never
+// part of the identity lookup or the match comparison below -- see the field's own schema comment.
 export async function intakeEvent(fields) {
   try {
     return { eventRow: await db().paymentEvent.create({ data: fields }), conflict: false }
@@ -59,7 +61,6 @@ export async function intakeEvent(fields) {
         eventIdentity: {
           provider: fields.provider,
           providerEndpointKey: fields.providerEndpointKey,
-          environment: fields.environment,
           providerEventId: fields.providerEventId,
         },
       },
@@ -89,28 +90,75 @@ export async function intakeEvent(fields) {
   }
 }
 
+// A row may only be CLAIMED for an apply attempt from one of these statuses. RECEIVED and FAILED are
+// the ordinary "not yet applied / a previous attempt failed, retryable" states; DEAD_LETTERED is
+// claimable too because admin replay is explicitly allowed to retry a dead-lettered event (the live
+// webhook path never reaches applyPaymentEvent for a DEAD_LETTERED row at all -- both routes check
+// and short-circuit before calling this function). APPLYING (a sibling delivery currently holds the
+// claim) and APPLIED/IGNORED/QUARANTINED/POLICY_DEFERRED (terminal or not-this-function's-job states)
+// are deliberately excluded -- there is no status a second concurrent delivery can observe that lets
+// it also enter apply().
+const CLAIMABLE_STATUSES = ['RECEIVED', 'FAILED', 'DEAD_LETTERED']
+
+// Atomically claims eventId for an apply attempt, then runs it. Independent review found the previous
+// version bumped attempts/wrote APPLYING with a blind, unconditional `update` -- every one of N
+// concurrent deliveries for the same event would win that write, so all N incremented attempts and
+// all N called apply(), relying entirely on a downstream DB unique constraint (which only some
+// effects have) to avoid double-applying, and leaving open a real race: a LATE-failing worker could
+// overwrite a row a sibling had already, correctly, moved to APPLIED, silently downgrading a
+// genuinely successful payment back to FAILED/DEAD_LETTERED.
+//
+// Fixed with a real compare-and-swap: the claim is a single conditional `updateMany` scoped to
+// CLAIMABLE_STATUSES. Postgres serializes concurrent UPDATEs against the same row via its row lock —
+// the first to commit flips the row to APPLYING; every other concurrent claim attempt then evaluates
+// its WHERE clause against that already-committed APPLYING status, matches zero rows, and returns
+// immediately WITHOUT EVER CALLING apply() at all. This makes the old bug structurally impossible
+// rather than merely less likely: at most one caller can be inside apply() for a given eventId at any
+// time, so attempts increments exactly once per genuine claim (never once per concurrent deliverer),
+// and there is no window in which a second, later-failing worker could run at all, let alone downgrade
+// a state a sibling already committed.
 export async function applyPaymentEvent({ eventId, rail, apply }) {
-  const bumped = await db().paymentEvent.update({
-    where: { id: eventId },
+  const claim = await db().paymentEvent.updateMany({
+    where: { id: eventId, processingStatus: { in: CLAIMABLE_STATUSES } },
     data: { attempts: { increment: 1 }, lastAttemptAt: new Date(), processingStatus: 'APPLYING' },
   })
+  if (claim.count === 0) {
+    // Lost the claim race (or arrived after the winner already finished) — acknowledge without ever
+    // running apply(). Report duplicate:true only once we can actually see the terminal APPLIED
+    // outcome; a sibling that's still mid-flight (APPLYING) reports its current status instead of
+    // guessing at an outcome that hasn't happened yet — callers already treat any non-error result as
+    // a safe 200 acknowledgement (see both webhook routes and the admin replay endpoint).
+    const current = await db().paymentEvent.findUnique({ where: { id: eventId } })
+    if (current?.processingStatus === 'APPLIED') return { applied: false, duplicate: true, claimed: false }
+    return { applied: false, duplicate: false, claimed: false, status: current?.processingStatus ?? null }
+  }
   try {
     // apply() is trusted to mark the row APPLIED or IGNORED itself on success — see module comment.
     return await apply()
   } catch (err) {
     if (isProviderRefUniqueViolation(err)) {
-      // A concurrent delivery (redelivery racing itself, or an admin replay overlapping a live
-      // redelivery) already applied this exact event and committed first — this attempt collided
-      // with that and rolled back, but the underlying payment WAS genuinely applied by the sibling.
-      // Mark this delivery APPLIED too (a benign duplicate), not FAILED — otherwise a normal,
-      // harmless race would dead-letter a payment that already settled correctly.
-      await db().paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null } })
+      // A SEPARATE claim round (a genuinely later redelivery or replay, not a concurrent one — those
+      // are now impossible per the comment above) already applied this exact event and committed
+      // first — this attempt collided with that and rolled back, but the underlying payment WAS
+      // genuinely applied by the sibling round. Mark this delivery APPLIED too (a benign duplicate),
+      // not FAILED — otherwise a normal, harmless race would dead-letter a payment that already
+      // settled correctly. Guarded (`not: 'APPLIED'`) so this can only ever set the row TO applied,
+      // never touch it if it's already there — belt-and-braces on top of a race that CAS has already
+      // made structurally impossible to concurrently double-execute.
+      await db().paymentEvent.updateMany({ where: { id: eventId, processingStatus: { not: 'APPLIED' } }, data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null } })
       return { applied: false, duplicate: true }
     }
-    const dead = bumped.attempts >= DEAD_LETTER_THRESHOLD
+    // Re-read this claim's own freshly-incremented attempts value rather than trusting a stale local
+    // variable — with the CAS claim above, `claim` doesn't carry the row's new field values (updateMany
+    // only returns a count), so the post-claim attempts figure must be read back explicitly.
+    const claimed = await db().paymentEvent.findUnique({ where: { id: eventId } })
+    const dead = (claimed?.attempts ?? 0) >= DEAD_LETTER_THRESHOLD
+    // Guarded to only affect the row while it's still in the APPLYING state THIS call put it in — if
+    // it somehow moved on already (e.g. an out-of-band admin action), a stale failure must never
+    // downgrade whatever it moved to.
     await db()
-      .paymentEvent.update({
-        where: { id: eventId },
+      .paymentEvent.updateMany({
+        where: { id: eventId, processingStatus: 'APPLYING' },
         data: {
           processingStatus: dead ? 'DEAD_LETTERED' : 'FAILED',
           // Pre-sanitized at write time (never the raw error) — a DB column is a permanent record,
@@ -120,7 +168,7 @@ export async function applyPaymentEvent({ eventId, rail, apply }) {
         },
       })
       .catch((e2) => log.error('payment_event_failure_record_failed', { eventId, err: errorSummary(e2) }))
-    log.error('payment_webhook_apply_failed', { eventId, rail, attempts: bumped.attempts, dead, err: errorSummary(err) })
+    log.error('payment_webhook_apply_failed', { eventId, rail, attempts: claimed?.attempts, dead, err: errorSummary(err) })
     // Never re-annotate err with a bare statusCode here — handleRouteError (responses.mjs) exposes
     // .message whenever .statusCode is set even without .expose. Re-throwing unannotated lets a
     // genuine infra failure fall through to the safe generic 500.

@@ -9,29 +9,39 @@
 //   - an authenticated event whose amount/currency conflicts with the resolved local record is
 //     persisted and marked QUARANTINED, zero effects (previously threw a 400 before persistence);
 //   - an exact duplicate delivery resolves to the same row, at most one effect;
-//   - the SAME literal event-id string delivered under two different (provider, providerEndpointKey,
-//     environment) identities produces two INDEPENDENT rows, never a collision — the direct proof
-//     providerEventId is no longer globally unique;
+//   - the SAME literal event-id string delivered under two different providers (payment_intent rail's
+//     sandbox vs stripe_checkout rail's stripe) produces two INDEPENDENT rows, never a collision — the
+//     direct proof providerEventId is no longer globally unique;
 //   - a redelivery under the same canonical identity but with an ALTERED payload (different digest)
 //     is a genuine conflict, recorded in a SEPARATE, append-only PaymentEventConflict row — the
 //     ORIGINAL event row is proven byte-for-byte unchanged (not just its identity fields), including
 //     the critical case where the original had already reached APPLIED (an earlier version of this
 //     fix overwrote exactly this — independent review found it, this file now proves it can't recur);
 //   - 20 REPETITIONS of 20 concurrent identical deliveries, each against FRESH booking/intent state,
-//     produce at most one real financial effect (a PaymentProof row) every time, on BOTH rails —
-//     not just "one PaymentEvent row" (a status-only 'processing' event has nothing to duplicate in
-//     the first place, which independent review correctly flagged as not actually proving anything
-//     about effect-duplication);
-//   - a live redelivery racing an admin replay of the same event produces exactly one effect, never
-//     two.
+//     produce EXACTLY one real financial effect (a PaymentProof row), one PaymentEvent row, one
+//     consumed attempt, and a final APPLIED status — asserted INDIVIDUALLY on every one of the 20
+//     repetitions, on BOTH rails, the stripe_checkout rail routed through the real shared pipeline
+//     function (not a direct bypass, which the previous version of this test used and so never
+//     actually exercised the claim logic for that rail at all) — a run-wide "never more than one"
+//     maximum (this suite's previous methodology) can pass even when most repetitions produce ZERO
+//     effects, which independent review correctly flagged as not actually proving "exactly one effect
+//     every time";
+//   - a live redelivery racing an admin replay of the same event produces exactly one effect, every
+//     time, repeated 20 times with fresh state;
+//   - the canonical event identity no longer forks on the mutable, ambient environment label
+//     (process.env.NODE_ENV) — the same event delivered under several different environment strings
+//     still resolves to one row and one effect, both before and after it has applied;
+//   - the atomic claim (compare-and-swap) that guards apply() makes double-execution and a late
+//     failure downgrading an already-committed APPLIED row structurally impossible, proven directly:
+//     a claim attempt against an already-APPLIED or currently-APPLYING row never even invokes apply().
 //
 // Run: AUTH_SECRET=<secret> PAYMENT_WEBHOOK_SECRET=<secret> STRIPE_WEBHOOK_SECRET=<secret>
 //      STRIPE_SECRET_KEY=sk_test_fake HOST=<uuid> GUEST=<uuid> ADMIN=<uuid>
 //      node tests/e2e/payment-event-identity.e2e.mjs
 //      (server must run with PAYMENT_INTENTS_ENABLED=true, PAYMENTS_ENABLED=true, and the SAME
 //      PAYMENT_WEBHOOK_SECRET / STRIPE_WEBHOOK_SECRET / STRIPE_SECRET_KEY — this suite is slower than
-//      most others in this repo, since section 7 alone issues 800 real HTTP requests across 40
-//      repetitions)
+//      most others in this repo: sections 7 and 8 alone issue several hundred real HTTP requests
+//      across their repetitions)
 
 import { createHash } from 'node:crypto'
 import { createSessionToken } from '../../server/lib/security.mjs'
@@ -256,14 +266,16 @@ console.log('\n=== 6b. Conflict against an ALREADY-APPLIED original -- the criti
   check('the conflict is still durably recorded as its own audit entry, referencing the original', Boolean(conflictRecord), 'no conflict record created')
 }
 
-console.log('\n=== 7. Financial-effect concurrency: 20 repetitions x 20 simultaneous deliveries, fresh state each time, both rails ===')
+console.log('\n=== 7. Financial-effect concurrency: 20 repetitions x 20 simultaneous deliveries, fresh state each time, EVERY repetition asserted individually, both rails ===')
 {
-  // payment_intent rail, live HTTP: a REAL succeeded event (a genuine effect to duplicate, unlike
-  // the earlier version of this test which used 'processing' -- a status-only transition with
-  // nothing to duplicate in the first place). Fresh booking+intent every repetition.
-  let piMaxRowsPerEvent = 0
-  let piMaxProofsPerRef = 0
-  let piAnyBadStatus = false
+  // payment_intent rail, live HTTP: a REAL succeeded event (a genuine effect to duplicate, unlike an
+  // earlier version of this test which used 'processing' -- a status-only transition with nothing to
+  // duplicate in the first place). Fresh booking+intent every repetition. Every one of the 20
+  // repetitions is checked and recorded on its own -- a run-wide "never more than one" maximum (this
+  // suite's earlier methodology) can pass even when most repetitions produce ZERO effects, as long as
+  // none ever produces two, which independent review correctly flagged as not actually proving
+  // "exactly one effect every time".
+  const piBadReps = []
   for (let rep = 0; rep < 20; rep++) {
     const b = await makeBooking(listing, 40 + rep * 4, 37 + rep * 4) // 4-day spacing > the 3-day booking window, so consecutive repetitions never overlap
     const iRes = await call('POST', '/api/payments/intents', G, { bookingId: b.id })
@@ -271,25 +283,30 @@ console.log('\n=== 7. Financial-effect concurrency: 20 repetitions x 20 simultan
     const eventId = `evt_pei_conc_pi_${rep}_${Date.now()}`
     const evt = { id: eventId, type: 'payment_intent.succeeded', data: { object: { reference: i.reference, id: `pi_prov_conc_${rep}`, amount_minor: i.amountMinor, currency: i.currency } } }
     const results = await Promise.all(Array.from({ length: 20 }, () => piWebhook(evt)))
-    if (!results.every((r) => r.status === 200)) piAnyBadStatus = true
     const rowCount = await db().paymentEvent.count({ where: { providerEventId: eventId, rail: 'payment_intent' } })
     const proofCount = await db().paymentProof.count({ where: { provider: 'payment_intent', providerRef: i.reference } })
-    piMaxRowsPerEvent = Math.max(piMaxRowsPerEvent, rowCount)
-    piMaxProofsPerRef = Math.max(piMaxProofsPerRef, proofCount)
+    const eventRow = await db().paymentEvent.findFirst({ where: { providerEventId: eventId, rail: 'payment_intent' } })
+    const ok = results.every((r) => r.status === 200) && rowCount === 1 && proofCount === 1 && eventRow?.processingStatus === 'APPLIED' && eventRow?.attempts === 1
+    if (!ok) piBadReps.push({ rep, statuses: results.map((r) => r.status), rowCount, proofCount, processingStatus: eventRow?.processingStatus, attempts: eventRow?.attempts })
   }
-  check('payment_intent rail: all 400 concurrent deliveries (20 reps x 20) returned 200, no raw errors under the race', !piAnyBadStatus, 'some non-200 response seen')
-  check('payment_intent rail: never more than one PaymentEvent row per event id, across all 20 repetitions', piMaxRowsPerEvent === 1, piMaxRowsPerEvent)
-  check('payment_intent rail: never more than one PaymentProof (the real financial effect) per intent reference, across all 20 repetitions', piMaxProofsPerRef === 1, piMaxProofsPerRef)
+  check(
+    'payment_intent rail: EVERY one of the 20 repetitions independently produced exactly 1 event row, exactly 1 real financial effect (PaymentProof), settled APPLIED, and consumed exactly 1 attempt -- not merely "never more than one" across the whole run',
+    piBadReps.length === 0,
+    JSON.stringify(piBadReps),
+  )
 
   // stripe_checkout rail: webhook_apply is intentionally, permanently policy-deferred on this server
   // (stripe has no approved provider config -- see payment-policy.mjs), so a live-HTTP concurrency
   // test would trivially show zero effects for the wrong reason (never reaching apply at all, not
   // because concurrency was handled safely). Proving the APPLY MECHANISM's own concurrency safety
-  // therefore uses the same direct in-process technique established in earlier rounds
-  // (payment-webhook-durability.e2e.mjs), bypassing only the policy gate, never the DB-level race.
+  // routes through the real shared pipeline function (applyPaymentEvent -- the exact function the
+  // live webhook route and admin replay both call), bypassing only the policy gate, never the
+  // pipeline's own claim logic -- an earlier version of this test called applyStripeCheckoutEvent
+  // directly, which bypassed the pipeline (and therefore its CAS claim) entirely, so it never actually
+  // exercised the claim logic under review for this rail at all.
+  const { applyPaymentEvent } = await import('../../server/lib/payment-event-pipeline.mjs')
   const { applyStripeCheckoutEvent } = await import('../../server/lib/stripe-checkout-apply.mjs')
-  let stripeMaxProofsPerSession = 0
-  let stripeAnyThrew = false
+  const stripeBadReps = []
   for (let rep = 0; rep < 20; rep++) {
     const b = await makeBooking(listing, 200 + rep * 4, 197 + rep * 4) // far enough from the payment_intent-rail loop's own date range above, 4-day spacing avoids self-overlap too
     const sessionId = `cs_test_conc_${rep}_${Date.now()}`
@@ -302,50 +319,190 @@ console.log('\n=== 7. Financial-effect concurrency: 20 repetitions x 20 simultan
       },
     })
     const session = { id: sessionId, payment_status: 'paid', metadata: { bookingId: b.id, sypTotalMinor: '160000' } }
-    try {
-      await Promise.all(Array.from({ length: 20 }, () => applyStripeCheckoutEvent({ eventId: eventRow.id, session })))
-    } catch {
-      stripeAnyThrew = true
-    }
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        applyPaymentEvent({ eventId: eventRow.id, rail: 'stripe_checkout', apply: () => applyStripeCheckoutEvent({ eventId: eventRow.id, session }) }).catch((e) => ({ threw: true, message: e?.message })),
+      ),
+    )
     const proofCount = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
-    stripeMaxProofsPerSession = Math.max(stripeMaxProofsPerSession, proofCount)
+    const finalRow = await db().paymentEvent.findUnique({ where: { id: eventRow.id } })
+    const ok = !results.some((r) => r?.threw) && proofCount === 1 && finalRow?.processingStatus === 'APPLIED' && finalRow?.attempts === 1
+    if (!ok) stripeBadReps.push({ rep, proofCount, processingStatus: finalRow?.processingStatus, attempts: finalRow?.attempts })
   }
-  check('stripe_checkout rail: 20 concurrent apply calls never throw an unhandled error, across all 20 repetitions', !stripeAnyThrew, 'an apply call threw')
-  check('stripe_checkout rail: never more than one PaymentProof per session, across all 20 repetitions of 20 concurrent applies', stripeMaxProofsPerSession === 1, stripeMaxProofsPerSession)
+  check(
+    'stripe_checkout rail, through the REAL pipeline (not a direct bypass): EVERY one of the 20 repetitions independently produced exactly 1 real financial effect, settled APPLIED, and consumed exactly 1 attempt',
+    stripeBadReps.length === 0,
+    JSON.stringify(stripeBadReps),
+  )
 }
 
-console.log('\n=== 8. Concurrency between a LIVE redelivery and an ADMIN REPLAY of the same event -> exactly one effect, never two ===')
+console.log('\n=== 8. Concurrency between a LIVE redelivery and an ADMIN REPLAY of the same event -> exactly one effect, every repetition, 20 repetitions with fresh state ===')
 {
-  const bookingReplay = await makeBooking(listing, 130, 127) // comfortably past the loop above's date range (up to ~119 days ago)
-  const intentReplayRes = await call('POST', '/api/payments/intents', G, { bookingId: bookingReplay.id })
-  const intentReplay = intentReplayRes.j?.intent
-  const eventId = `evt_pei_replay_race_${Date.now()}`
-  const evtObj = { id: eventId, type: 'payment_intent.succeeded', data: { object: { reference: intentReplay.reference, id: 'pi_prov_replay_race', amount_minor: intentReplay.amountMinor, currency: intentReplay.currency } } }
-  // Seed a FAILED (not DEAD_LETTERED) delivery directly -- eligible for both admin replay and a live
-  // redelivery falling through to re-attempt, exactly the two paths this test races against each other.
-  const payloadDigest = createHash('sha256').update(JSON.stringify(evtObj)).digest('hex')
-  const seeded = await db().paymentEvent.create({
+  const replayBadReps = []
+  for (let rep = 0; rep < 20; rep++) {
+    const bookingReplay = await makeBooking(listing, 400 + rep * 4, 397 + rep * 4) // comfortably past every other loop's date range in this file
+    const intentReplayRes = await call('POST', '/api/payments/intents', G, { bookingId: bookingReplay.id })
+    const intentReplay = intentReplayRes.j?.intent
+    const eventId = `evt_pei_replay_race_${rep}_${Date.now()}`
+    const evtObj = { id: eventId, type: 'payment_intent.succeeded', data: { object: { reference: intentReplay.reference, id: `pi_prov_replay_race_${rep}`, amount_minor: intentReplay.amountMinor, currency: intentReplay.currency } } }
+    // Seed a FAILED (not DEAD_LETTERED) delivery directly -- eligible for both admin replay and a live
+    // redelivery falling through to re-attempt, exactly the two paths this test races against each other.
+    const payloadDigest = createHash('sha256').update(JSON.stringify(evtObj)).digest('hex')
+    const seeded = await db().paymentEvent.create({
+      data: {
+        rail: 'payment_intent', provider: 'sandbox', providerEndpointKey: 'sandbox-test-account', environment: policyEnvironment(),
+        subjectType: 'PAYMENT_INTENT', providerReference: intentReplay.reference, intentId: intentReplay.id,
+        originalIntentId: intentReplay.id, originalBookingId: intentReplay.bookingId ?? null,
+        providerEventId: eventId, type: 'payment_intent.succeeded', amountMinor: intentReplay.amountMinor, currency: intentReplay.currency,
+        providerObjectId: `pi_prov_replay_race_${rep}`, payloadDigest, processingStatus: 'FAILED', attempts: 2, lastError: 'synthetic seed for replay-vs-redelivery race test',
+      },
+    })
+    const proofCountBefore = await db().paymentProof.count({ where: { provider: 'payment_intent', providerRef: intentReplay.reference } })
+
+    const [replayRes, webhookRes] = await Promise.all([
+      call('POST', `/api/admin/payment-events/${seeded.id}/replay`, A, {}),
+      piWebhook(evtObj),
+    ])
+
+    const proofCountAfter = await db().paymentProof.count({ where: { provider: 'payment_intent', providerRef: intentReplay.reference } })
+    const finalRow = await db().paymentEvent.findUnique({ where: { id: seeded.id } })
+    // attempts must land at exactly 3 (seeded at 2, exactly one winning claim adds 1) -- proving the
+    // CAS claim let only ONE of the two racing paths (live redelivery, admin replay) actually execute,
+    // never both.
+    const ok =
+      (replayRes.status === 200 || replayRes.status === 409) &&
+      webhookRes.status === 200 &&
+      proofCountAfter === proofCountBefore + 1 &&
+      finalRow?.processingStatus === 'APPLIED' &&
+      finalRow?.attempts === 3
+    if (!ok) {
+      replayBadReps.push({
+        rep,
+        replayStatus: replayRes.status,
+        webhookStatus: webhookRes.status,
+        proofCountBefore,
+        proofCountAfter,
+        finalStatus: finalRow?.processingStatus,
+        attempts: finalRow?.attempts,
+      })
+    }
+  }
+  check(
+    'live-webhook-vs-admin-replay race: EVERY one of 20 repetitions with fresh state produced exactly one real financial effect, settled APPLIED, and consumed exactly one MORE attempt (2 -> 3) -- never two concurrent claims both executing',
+    replayBadReps.length === 0,
+    JSON.stringify(replayBadReps),
+  )
+}
+
+console.log('\n=== 9. Canonical identity no longer forks on the mutable environment label -> one event row, one effect, across several different NODE_ENV/environment strings ===')
+{
+  const { intakeEvent, applyPaymentEvent } = await import('../../server/lib/payment-event-pipeline.mjs')
+  const { applyStripeCheckoutEvent } = await import('../../server/lib/stripe-checkout-apply.mjs')
+
+  const bookingEnv = await makeBooking(listing, 300, 297)
+  const sessionId = `cs_test_envfork_${Date.now()}`
+  const eventIdEnv = `evt_pei_envfork_${Date.now()}`
+  const payloadDigest = createHash('sha256').update(sessionId).digest('hex')
+  const baseFields = {
+    rail: 'stripe_checkout', provider: 'stripe', providerEndpointKey: 'stripe-checkout',
+    subjectType: 'BOOKING', providerReference: bookingEnv.id, bookingId: bookingEnv.id, originalBookingId: bookingEnv.id,
+    providerEventId: eventIdEnv, type: 'checkout.session.completed', amountMinor: 160000, currency: 'syp',
+    providerObjectId: sessionId, payloadDigest, processingStatus: 'RECEIVED',
+  }
+
+  // Same event, same endpoint, delivered under THREE different environment labels -- simulating
+  // exactly the scenario independent review named: a deploy config change, or two processes (e.g. a
+  // test script and the live server it drives) observing different process.env.NODE_ENV values for
+  // what is genuinely the same authenticated delivery.
+  const first = await intakeEvent({ ...baseFields, environment: 'test' })
+  const second = await intakeEvent({ ...baseFields, environment: 'staging' })
+  const third = await intakeEvent({ ...baseFields, environment: 'production' })
+  const rowCountEnv = await db().paymentEvent.count({ where: { providerEventId: eventIdEnv } })
+
+  check(
+    'the same event delivered under 3 different environment labels resolves to the SAME row id every time',
+    first.eventRow.id === second.eventRow.id && second.eventRow.id === third.eventRow.id,
+    JSON.stringify({ first: first.eventRow.id, second: second.eventRow.id, third: third.eventRow.id }),
+  )
+  check('none of the 3 environment-varied deliveries were classified as a genuine conflict', first.conflict === false && second.conflict === false && third.conflict === false, JSON.stringify({ a: first.conflict, b: second.conflict, c: third.conflict }))
+  check('exactly ONE PaymentEvent row exists for this event id despite 3 different environment labels -- the exact defect independent review found', rowCountEnv === 1, rowCountEnv)
+
+  // Apply it once (through the real shared pipeline), then redeliver under a FOURTH environment label
+  // after it has already applied -- proving "one event, one effect" survives environment drift both
+  // BEFORE and AFTER application, not only at the intake step.
+  const session = { id: sessionId, payment_status: 'paid', metadata: { bookingId: bookingEnv.id, sypTotalMinor: '160000' } }
+  await applyPaymentEvent({ eventId: first.eventRow.id, rail: 'stripe_checkout', apply: () => applyStripeCheckoutEvent({ eventId: first.eventRow.id, session }) })
+  const fourth = await intakeEvent({ ...baseFields, environment: 'development' })
+  const proofCountEnv = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
+  const rowCountEnvAfter = await db().paymentEvent.count({ where: { providerEventId: eventIdEnv } })
+
+  check('a 4th delivery under yet another environment label, after the event already applied, still resolves to the SAME row', fourth.eventRow.id === first.eventRow.id, JSON.stringify({ first: first.eventRow.id, fourth: fourth.eventRow.id }))
+  check('still exactly ONE PaymentEvent row after 4 total environment-varied deliveries', rowCountEnvAfter === 1, rowCountEnvAfter)
+  check('exactly ONE real financial effect resulted, despite delivery under 4 different environment labels total spanning both before and after application', proofCountEnv === 1, proofCountEnv)
+}
+
+console.log('\n=== 10. Direct proof: the CAS claim makes double-execution and a late failure downgrading a committed state structurally impossible, not just improbable ===')
+{
+  const { applyPaymentEvent } = await import('../../server/lib/payment-event-pipeline.mjs')
+
+  // 10a. A row already APPLIED must never be re-claimed, and a "late failure" attempting to act on it
+  // must never even run, let alone downgrade it -- the exact scenario independent review named
+  // ("ensure a late failing worker cannot overwrite a committed APPLIED state").
+  const bookingCasApplied = await makeBooking(listing, 500, 497) // comfortably past every loop's date range in this file
+  const eventCasApplied = await db().paymentEvent.create({
     data: {
-      rail: 'payment_intent', provider: 'sandbox', providerEndpointKey: 'sandbox-test-account', environment: policyEnvironment(),
-      subjectType: 'PAYMENT_INTENT', providerReference: intentReplay.reference, intentId: intentReplay.id,
-      originalIntentId: intentReplay.id, originalBookingId: intentReplay.bookingId ?? null,
-      providerEventId: eventId, type: 'payment_intent.succeeded', amountMinor: intentReplay.amountMinor, currency: intentReplay.currency,
-      providerObjectId: 'pi_prov_replay_race', payloadDigest, processingStatus: 'FAILED', attempts: 2, lastError: 'synthetic seed for replay-vs-redelivery race test',
+      rail: 'stripe_checkout', provider: 'stripe', providerEndpointKey: 'stripe-checkout', environment: 'test', subjectType: 'BOOKING',
+      providerReference: bookingCasApplied.id, bookingId: bookingCasApplied.id, originalBookingId: bookingCasApplied.id,
+      providerEventId: `evt_pei_cas_applied_${Date.now()}`, type: 'checkout.session.completed',
+      amountMinor: 160000, currency: 'syp', providerObjectId: 'cs_test_cas_applied', payloadDigest: 'd',
+      processingStatus: 'APPLIED', attempts: 1, appliedAt: new Date(),
     },
   })
-  const proofCountBefore = await db().paymentProof.count({ where: { provider: 'payment_intent', providerRef: intentReplay.reference } })
+  let spyInvokedApplied = false
+  const resultApplied = await applyPaymentEvent({
+    eventId: eventCasApplied.id,
+    rail: 'stripe_checkout',
+    apply: async () => {
+      spyInvokedApplied = true
+      throw new Error('this must never run -- forced late failure')
+    },
+  })
+  const rowAfterApplied = await db().paymentEvent.findUnique({ where: { id: eventCasApplied.id } })
+  check('a claim attempt against an already-APPLIED row never invokes apply() at all', spyInvokedApplied === false, 'apply() was called')
+  check('the claim call itself does not throw even though the (never-invoked) apply() would have', resultApplied?.duplicate === true, JSON.stringify(resultApplied))
+  check(
+    'the row stays byte-identical -- a late failure cannot downgrade an already-committed APPLIED state',
+    JSON.stringify(rowAfterApplied) === JSON.stringify(eventCasApplied),
+    JSON.stringify({ before: eventCasApplied, after: rowAfterApplied }),
+  )
 
-  const [replayRes, webhookRes] = await Promise.all([
-    call('POST', `/api/admin/payment-events/${seeded.id}/replay`, A, {}),
-    piWebhook(evtObj),
-  ])
-
-  const proofCountAfter = await db().paymentProof.count({ where: { provider: 'payment_intent', providerRef: intentReplay.reference } })
-  const finalRow = await db().paymentEvent.findUnique({ where: { id: seeded.id } })
-  check('the admin replay call completed without a raw server error', replayRes.status === 200 || replayRes.status === 409, JSON.stringify(replayRes))
-  check('the concurrent live redelivery call completed without a raw server error', webhookRes.status === 200, JSON.stringify(webhookRes))
-  check('exactly one real financial effect resulted from the two racing attempts, never two', proofCountAfter === proofCountBefore + 1, `${proofCountBefore} -> ${proofCountAfter}`)
-  check('the event settled at APPLIED, not left FAILED/DEAD_LETTERED by the race', finalRow?.processingStatus === 'APPLIED', finalRow?.processingStatus)
+  // 10b. A row currently APPLYING (a sibling delivery mid-flight) must also never be re-claimed by a
+  // second delivery -- exactly the state two concurrent deliveries would both have observed and both
+  // acted on under the old unconditional-update bug.
+  const bookingCasApplying = await makeBooking(listing, 510, 507)
+  const eventCasApplying = await db().paymentEvent.create({
+    data: {
+      rail: 'stripe_checkout', provider: 'stripe', providerEndpointKey: 'stripe-checkout', environment: 'test', subjectType: 'BOOKING',
+      providerReference: bookingCasApplying.id, bookingId: bookingCasApplying.id, originalBookingId: bookingCasApplying.id,
+      providerEventId: `evt_pei_cas_applying_${Date.now()}`, type: 'checkout.session.completed',
+      amountMinor: 160000, currency: 'syp', providerObjectId: 'cs_test_cas_applying', payloadDigest: 'd',
+      processingStatus: 'APPLYING', attempts: 1, lastAttemptAt: new Date(),
+    },
+  })
+  let spyInvokedApplying = false
+  const resultApplying = await applyPaymentEvent({
+    eventId: eventCasApplying.id,
+    rail: 'stripe_checkout',
+    apply: async () => {
+      spyInvokedApplying = true
+      return { applied: true }
+    },
+  })
+  const rowAfterApplying = await db().paymentEvent.findUnique({ where: { id: eventCasApplying.id } })
+  check('a second claim attempt against a row a sibling currently holds (APPLYING) never invokes apply()', spyInvokedApplying === false, 'apply() was called')
+  check('the loser reports claimed:false, not a false APPLIED/duplicate claim', resultApplying?.claimed === false && resultApplying?.duplicate === false, JSON.stringify(resultApplying))
+  check('attempts is NOT incremented by the losing claim attempt', rowAfterApplying?.attempts === 1, rowAfterApplying?.attempts)
+  check('the row is untouched -- still APPLYING, exactly as the sibling left it', rowAfterApplying?.processingStatus === 'APPLYING', rowAfterApplying?.processingStatus)
 }
 
 console.log(`\n==== PAYMENT EVENT CANONICAL IDENTITY: ${pass} passed, ${fail} failed ====`)

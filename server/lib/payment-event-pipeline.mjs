@@ -11,7 +11,10 @@
 // apply is one transaction; the stripe_checkout rail's apply delegates to finalizeStripeSession,
 // which manages its own transaction and is also called synchronously from a non-webhook route). This
 // module only owns: bumping attempts before the attempt, and recording FAILED/DEAD_LETTERED/a benign
-// duplicate collision after — the part that must behave identically regardless of rail.
+// duplicate collision after — the part that must behave identically regardless of rail. Each rail's
+// apply() transaction MUST call verifyAndLockClaim() (below) as its own first statement, before any
+// business-effect write — see that function's comment for why (round 7: a worker whose claim has
+// already been reclaimed must never be able to execute, let alone commit, a real financial effect).
 import { randomUUID } from 'node:crypto'
 import { db } from './prisma.mjs'
 import { log, errorSummary } from './logger.mjs'
@@ -94,6 +97,50 @@ export async function intakeEvent(fields) {
   }
 }
 
+// Thrown when a rail's own apply() transaction discovers -- having verified AND LOCKED ownership as
+// the FIRST statement inside its own transaction, via verifyAndLockClaim() below -- that claim
+// ownership has already moved on to a newer claimant. This is NOT a processing failure: it must never
+// increment toward the dead-letter threshold, write a lastError, or touch the row in any way -- the
+// newer claimant is the one that owns settling this event, and this attempt did (and commits) nothing.
+export class ClaimLostError extends Error {
+  constructor(eventId) {
+    super(`Claim ownership for payment event ${eventId} was lost before this attempt could safely act.`)
+    this.name = 'ClaimLostError'
+    this.claimLost = true
+  }
+}
+
+// Verifies -- and, being a real UPDATE inside the CALLER's own open transaction, LOCKS via Postgres's
+// row lock -- that `claimToken` is still this event's current claim. Throws ClaimLostError (rolling
+// back the ENTIRE enclosing transaction, since this must be the FIRST statement in a rail's apply()
+// transaction, before any business-effect write) if it is not.
+//
+// Independent review found a real defect here: the round-6 version bound the pipeline's OWN
+// bookkeeping writes to the claim token, but each rail's actual business effect (PaymentProof
+// creation, wallet/ledger entries, the booking/intent status transition) ran BEFORE that check, inside
+// the same transaction -- so a worker whose claim had already been reclaimed by someone else could
+// still execute AND COMMIT a real financial effect; only its own final bookkeeping write silently
+// no-op'd afterward. Calling this FIRST, inside the SAME transaction as every effect that follows,
+// makes that structurally impossible: if ownership is gone, nothing after this line ever runs, and
+// Postgres rolls back anything this statement itself touched (nothing, since it only ever WRITES
+// meaningful new data as a SIDE EFFECT of the caller's later statements) the moment the thrown error
+// propagates out of the transaction callback.
+// A nullish `claimToken` means the caller isn't going through applyPaymentEvent()'s claim mechanism at
+// all -- true ONLY for direct test calls that deliberately bypass the claim layer to exercise a rail's
+// raw, idempotent apply logic on its own (an established pattern throughout this test suite since
+// round 4, e.g. calling applyStripeCheckoutEvent directly against a synthetic RECEIVED row). Every
+// PRODUCTION call site (both webhook routes, admin replay) always supplies a real token minted by
+// applyPaymentEvent's own claim -- there is no code path in this codebase that reaches here with a
+// real event ID and an accidentally-missing token.
+export async function verifyAndLockClaim(tx, { eventId, claimToken }) {
+  if (claimToken == null) return
+  const locked = await tx.paymentEvent.updateMany({
+    where: { id: eventId, claimToken, processingStatus: 'APPLYING' },
+    data: { lastAttemptAt: new Date() },
+  })
+  if (locked.count === 0) throw new ClaimLostError(eventId)
+}
+
 // A row may only be CLAIMED for an apply attempt from one of these statuses (with no active,
 // unexpired claim already held — see the claim query below). RECEIVED and FAILED are the ordinary
 // "not yet applied / a previous attempt failed, retryable" states; DEAD_LETTERED is claimable too
@@ -137,8 +184,17 @@ export const CLAIM_DURATION_MS = 120_000
 // has expired, not just FAILED/DEAD_LETTERED) is already the established human-triggered recovery path
 // for a stuck event -- the same mechanism that already exists for FAILED/DEAD_LETTERED events, just now
 // reachable for an abandoned claim too. A losing claim attempt against a row with an ACTIVE (unexpired)
-// claim never reports a false success -- it returns `retryable: true`, explicitly not a final outcome,
-// so a caller can never mistake "someone else currently owns this" for "this is settled".
+// claim never reports a false success -- it sets `retryable: true`, explicitly not a final outcome.
+//
+// (round 7) Independent review correctly found that `retryable: true` alone was not enough: both
+// webhook routes still returned a bare HTTP 200 regardless, and a payment provider acts on the HTTP
+// status, not on a private JSON field it never inspects -- an active-claim loser's 200 could make a
+// provider stop retrying a webhook whose original claimant then genuinely never finishes, with no
+// automatic path back. See webhookAcknowledgeStatus() below, which BOTH webhook routes now call to
+// decide their actual HTTP status: `retryable: true` becomes a real non-2xx response, so the provider
+// keeps redelivering (its own retry schedule is what makes recovery automatic once the abandoned
+// claim's expiry passes -- no new background worker needed) instead of ever being told this delivery
+// is done when it might not be.
 export async function applyPaymentEvent({ eventId, rail, apply }) {
   const token = randomUUID()
   const now = new Date()
@@ -169,6 +225,14 @@ export async function applyPaymentEvent({ eventId, rail, apply }) {
     // applyStripeCheckoutEvent).
     return await apply(token)
   } catch (err) {
+    if (err?.claimLost) {
+      // verifyAndLockClaim() (called first, inside apply()'s own transaction, before any business
+      // effect) found this claim already reclaimed -- the transaction rolled back on its own, nothing
+      // committed. Never touch attempts/lastError/processingStatus here: whatever the newer claimant
+      // has established (or is still establishing) is authoritative, and this attempt genuinely did
+      // nothing to it.
+      return { applied: false, duplicate: false, claimLost: true, retryable: true }
+    }
     if (isProviderRefUniqueViolation(err)) {
       // A SEPARATE claim round (a genuinely later redelivery or replay, not a concurrent one — those
       // are impossible per the comment above) already applied this exact event and committed first —
@@ -211,4 +275,19 @@ export async function applyPaymentEvent({ eventId, rail, apply }) {
     // genuine infra failure fall through to the safe generic 500.
     throw err
   }
+}
+
+// Both webhook routes call this to decide their ACTUAL HTTP status from an applyPaymentEvent() result
+// — a bare 200 regardless of outcome (round 6's behavior) is exactly what independent review flagged
+// as unsafe: a payment provider decides whether to keep retrying based on the HTTP status, never on a
+// private JSON field. `retryable: true` (an active, unexpired claim held by someone else, or this
+// specific attempt's own claim having been lost mid-transaction) becomes a real non-2xx, so the
+// provider's own retry schedule keeps delivering until the event reaches a genuinely settled outcome
+// (APPLIED/IGNORED/a terminal duplicate) or the abandoned claim expires and a later retry reclaims it
+// — this is what makes recovery automatic without a new background worker. 409 (not 503): this is not
+// the SERVER being unavailable, it's a specific, expected, temporary ownership conflict on this one
+// event — semantically the same "come back later, someone else has this" signal 409 already carries
+// elsewhere in this codebase (e.g. PAYMENT_EVENT_NOT_REPLAYABLE).
+export function webhookAcknowledgeStatus(result) {
+  return result?.retryable ? 409 : 200
 }

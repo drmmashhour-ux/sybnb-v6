@@ -11,7 +11,7 @@ import {
 } from '../lib/finance-ledger.mjs'
 import { log } from '../lib/logger.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
-import { applyPaymentEvent as applyPaymentEventPipeline, intakeEvent } from '../lib/payment-event-pipeline.mjs'
+import { applyPaymentEvent as applyPaymentEventPipeline, intakeEvent, verifyAndLockClaim, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
 import { applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
 
 function fail(statusCode, code, message) {
@@ -135,18 +135,22 @@ async function applyPaymentIntentRefund(tx, { intent }) {
 // owns the attempts/dead-letter/duplicate-collision bookkeeping common to every rail (see that
 // module's own comment for why the outer wrapper doesn't own this function's transaction boundary).
 // This function stays responsible for marking eventId APPLIED/IGNORED itself, atomically with its
-// own booking/wallet transaction — every one of those writes is now bound to `claimToken` (round 6):
-// if a newer claimant has since taken ownership of this event (this attempt's own claim expired while
-// this transaction was still running -- an extreme, defense-in-depth case, since a normal transaction
-// completes in well under CLAIM_DURATION_MS), the write correctly matches zero rows instead of
-// overwriting the newer claimant's bookkeeping. The business-state effect itself (PaymentProof/wallet
-// via applyPaymentIntentSuccess/Refund, or the intent-status claim below) already has its own
-// idempotency protection independent of this token, so a stale worker that still manages to run the
-// effect never duplicates it -- this token only governs which claimant's bookkeeping records the
-// outcome on the PaymentEvent row, never whether the underlying effect itself is safe to have run.
+// own booking/wallet transaction.
+//
+// verifyAndLockClaim() is called FIRST, before any business-effect write (round 7) -- independent
+// review found that round 6's token-bound writes only protected the FINAL bookkeeping update, while
+// the actual financial effect (applyPaymentIntentSuccess/Refund, or the intent-status claim below) ran
+// BEFORE that check and could still commit even after ownership had already moved on to a newer
+// claimant; only the stale worker's own bookkeeping write silently no-op'd afterward. Calling
+// verifyAndLockClaim() first, inside this SAME transaction, makes that impossible: if a newer claimant
+// already owns this event, verifyAndLockClaim() throws immediately, before applyPaymentIntentSuccess/
+// Refund or the intent-status claim ever runs, and Postgres rolls back the whole transaction -- there
+// is no window in which a stale worker can execute, let alone commit, a real effect.
 async function applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToken }) {
   const target = targetStatusFor(type)
   return db().$transaction(async (tx) => {
+    await verifyAndLockClaim(tx, { eventId, claimToken })
+
     const fresh = await tx.paymentIntent.findUnique({ where: { id: intentId } })
     if (!fresh) throw fail(404, 'PAYMENT_INTENT_NOT_FOUND', 'No matching payment intent.')
 
@@ -154,8 +158,8 @@ async function applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToke
       // Deterministic no-op: an illegal/out-of-order transition (e.g. a refund before success, or
       // a second terminal transition) will never succeed no matter how many times it's retried —
       // record it as IGNORED, not FAILED, so it never enters the dead-letter retry path.
-      const marked = await tx.paymentEvent.updateMany({ where: { id: eventId, claimToken }, data: { processingStatus: 'IGNORED', appliedAt: new Date(), claimToken: null, claimExpiresAt: null } })
-      return { applied: false, status: fresh.status, illegal: true, claimLost: marked.count === 0 }
+      await tx.paymentEvent.updateMany({ where: { id: eventId, claimToken }, data: { processingStatus: 'IGNORED', appliedAt: new Date(), claimToken: null, claimExpiresAt: null } })
+      return { applied: false, status: fresh.status, illegal: true }
     }
 
     let updated
@@ -176,17 +180,22 @@ async function applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToke
       if (claimed.count === 0) {
         // Another delivery already advanced this intent's status between our read and this write —
         // it moved on without us. Nothing to retry: record as a no-op, not a failure.
-        const marked = await tx.paymentEvent.updateMany({ where: { id: eventId, claimToken }, data: { processingStatus: 'IGNORED', appliedAt: new Date(), claimToken: null, claimExpiresAt: null } })
+        await tx.paymentEvent.updateMany({ where: { id: eventId, claimToken }, data: { processingStatus: 'IGNORED', appliedAt: new Date(), claimToken: null, claimExpiresAt: null } })
         const current = await tx.paymentIntent.findUnique({ where: { id: intentId } })
-        return { applied: false, status: current.status, illegal: true, claimLost: marked.count === 0 }
+        return { applied: false, status: current.status, illegal: true }
       }
       updated = { status: target }
     }
-    const marked = await tx.paymentEvent.updateMany({
+    // Bound to claimToken, same as every other write in this transaction -- with verifyAndLockClaim()
+    // already having proven (and, via its own UPDATE's row lock, held for this transaction's entire
+    // duration -- no other transaction can touch this row until this one commits or rolls back)
+    // ownership at the very start, this can only ever fail if something is deeply wrong; still guarded
+    // rather than a bare `update`, for the same reason every other write here is.
+    await tx.paymentEvent.updateMany({
       where: { id: eventId, claimToken },
       data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null, claimToken: null, claimExpiresAt: null },
     })
-    return { applied: true, status: updated.status, claimLost: marked.count === 0 }
+    return { applied: true, status: updated.status }
   })
 }
 
@@ -197,6 +206,11 @@ async function applyPaymentEvent({ eventId, intentId, type, obj }) {
     apply: (claimToken) => applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToken }),
   })
 }
+
+// Exported for direct testing of the claim-locking transaction boundary (payment-event-claim-recovery
+// e2e tests call this directly, mirroring the established pattern for applyStripeCheckoutEvent) --
+// never imported by any other route; production code always goes through applyPaymentEvent above.
+export { applyPaymentIntentEvent }
 
 // Resolves the division a policy check should evaluate for an intent that's already known (i.e.
 // past the intake seam) — 'PLATFORM' for a standalone, non-booking-linked intent, otherwise the
@@ -500,7 +514,7 @@ export async function handlePaymentIntents(req, res, url, context) {
     }
 
     const result = await applyPaymentEvent({ eventId: eventRow.id, intentId: intent.id, type: event.type, obj })
-    return json(res, 200, { ok: true, ...result })
+    return json(res, webhookAcknowledgeStatus(result), { ok: true, ...result })
   }
 
   // Intent status + auditable event history (owner or admin). Includes a reconciliation view
@@ -562,10 +576,26 @@ export async function handlePaymentIntents(req, res, url, context) {
     // durable and equally replayable via the same admin replay endpoint by id, but are not yet
     // surfaced in an admin-facing listing of their own — a disclosed, real gap, not silently assumed
     // covered by this query (which would otherwise crash on e.intent being null for that rail).
+    //
+    // Also surfaces events stuck at APPLYING past their claim expiry (round 7) -- the monitoring
+    // surface for the recovery capability applyPaymentEvent()'s claim expiry / the admin replay
+    // endpoint's expired-claim eligibility (both in payment-event-pipeline.mjs) provide: this table
+    // has no background alerting of any kind, so an admin finding a stuck claim here (instead of
+    // discovering it by accident) IS the monitoring for this condition.
     const deadLetteredEvents = await db().paymentEvent.findMany({
-      where: { rail: 'payment_intent', processingStatus: { in: ['FAILED', 'DEAD_LETTERED'] } },
+      where: {
+        rail: 'payment_intent',
+        OR: [
+          { processingStatus: { in: ['FAILED', 'DEAD_LETTERED'] } },
+          { processingStatus: 'APPLYING', claimExpiresAt: { lt: new Date() } },
+        ],
+      },
       include: { intent: true },
-      orderBy: { lastAttemptAt: 'desc' },
+      // Explicit nulls:'last' -- Postgres's own default for DESC is NULLS FIRST, which would let rows
+      // with no lastAttemptAt at all (e.g. a stuck-APPLYING row surfaced above whose very first claim
+      // attempt hasn't been recorded there yet) silently crowd out genuinely-recent events out of the
+      // `take: 25` window. Found as a real, reproducing failure while extending this query.
+      orderBy: { lastAttemptAt: { sort: 'desc', nulls: 'last' } },
       take: 25,
     })
 
@@ -598,6 +628,12 @@ export async function handlePaymentIntents(req, res, url, context) {
         attempts: e.attempts,
         lastAttemptAt: e.lastAttemptAt,
         lastError: e.lastError,
+        processingStatus: e.processingStatus,
+        // true for a row surfaced here because of an expired claim (a crashed/killed/disconnected
+        // worker), not a genuine FAILED/DEAD_LETTERED outcome -- distinguishes the two causes an
+        // admin needs to react to differently.
+        stuckClaim: e.processingStatus === 'APPLYING',
+        claimExpiresAt: e.claimExpiresAt,
       })),
       drifted,
     })
@@ -625,28 +661,32 @@ export async function handlePaymentIntents(req, res, url, context) {
     // switch of its own; authorizePaymentOperation below is its sole, sufficient gate (and today
     // denies it unconditionally, since 'stripe' has no approved provider configuration yet).
     if (eventRow.rail === 'payment_intent') requirePaymentIntentsEnabled()
-    // Also replayable, payment_intent rail ONLY: a row stuck at APPLYING whose claim has expired
-    // (round 6) -- a crashed, killed, or disconnected worker that claimed this event and never
-    // finished leaves it here forever otherwise, since APPLYING is not itself in
+    // Also replayable, BOTH rails (round 7 -- round 6 scoped this to payment_intent only): a row stuck
+    // at APPLYING whose claim has expired -- a crashed, killed, or disconnected worker that claimed
+    // this event and never finished leaves it here forever otherwise, since APPLYING is not itself in
     // applyPaymentEvent()'s CLAIMABLE_STATUSES. This is the human-triggered recovery path for exactly
     // that scenario: applyPaymentEvent()'s own claim query (in payment-event-pipeline.mjs)
     // independently re-checks the expiry and will safely reclaim it -- this check only decides
     // whether the route is willing to ATTEMPT a replay, not whether the claim itself succeeds.
     //
-    // Scoped to payment_intent rail specifically: that rail's replay reconstruction below is provably
-    // safe regardless of when the crash happened, since `type`/`obj` are read from columns durably
-    // populated at INTAKE time, before any claim/apply logic ever runs (targetStatusFor(type) alone
-    // determines the correct outcome). stripe_checkout rail's LIVE webhook path reconstructs `session`
-    // from the actual incoming payload (also safe), but this ADMIN REPLAY path has no durably-stored
-    // payment_status to reconstruct from and would otherwise have to blindly assume 'paid' for a row
-    // that might have crashed before that was ever established -- a real risk of confirming a booking
-    // that was never actually paid. A stuck stripe_checkout event still recovers safely via a live
-    // provider redelivery (which reclaims the expired claim with the real payload); closing this gap
-    // for admin replay too would need a durably-stored payment_status column, a disclosed, deliberate
-    // scope boundary for this round rather than a silent gap.
-    const hasExpiredClaim = eventRow.rail === 'payment_intent' && eventRow.processingStatus === 'APPLYING' && eventRow.claimExpiresAt && eventRow.claimExpiresAt < new Date()
+    // stripe_checkout rail's admin-replay reconstruction is now safe regardless of when a crash
+    // happened too, since migration 022 durably stores the raw, authenticated payment_status at
+    // intake time -- closing the exact gap round 6 disclosed (the reconstruction previously had
+    // nothing but a guess of 'paid' to fall back on for a row that might have crashed before paid-ness
+    // was ever established).
+    const hasExpiredClaim = eventRow.processingStatus === 'APPLYING' && eventRow.claimExpiresAt && eventRow.claimExpiresAt < new Date()
     if (!['FAILED', 'DEAD_LETTERED'].includes(eventRow.processingStatus) && !hasExpiredClaim) {
-      throw fail(409, 'PAYMENT_EVENT_NOT_REPLAYABLE', 'This event is not in a failed/dead-lettered state, and is not a payment_intent-rail stuck claim past its expiry.')
+      throw fail(409, 'PAYMENT_EVENT_NOT_REPLAYABLE', 'This event is not in a failed/dead-lettered state, and is not a stuck claim past its expiry.')
+    }
+    // Defense in depth for the reconstruction below: a stripe_checkout row from before migration 022
+    // existed has no durably-stored payment_status. FAILED/DEAD_LETTERED rows from that era are still
+    // safe to reconstruct as 'paid' (the same reasoning round 6 relied on: the only path to those
+    // statuses is a thrown exception during apply(), which only ever runs past finalizeStripeSession's
+    // own early "not paid" return) -- but an APPLYING-past-expiry row with no stored payment_status
+    // must never be guessed at; refuse cleanly rather than risk confirming a booking that was never
+    // actually paid.
+    if (eventRow.rail === 'stripe_checkout' && eventRow.paymentStatus == null && !['FAILED', 'DEAD_LETTERED'].includes(eventRow.processingStatus)) {
+      throw fail(409, 'PAYMENT_EVENT_REPLAY_STATUS_UNKNOWN', 'This event predates durable payment_status tracking and cannot be safely replayed automatically.')
     }
 
     // Orphan guard: the parent this event referenced may have since been deleted (ON DELETE SET
@@ -703,10 +743,14 @@ export async function handlePaymentIntents(req, res, url, context) {
           obj: { id: eventRow.providerObjectId, amount_minor: eventRow.amountMinor, currency: eventRow.currency },
         })
       } else {
-        // A row only ever reaches FAILED/DEAD_LETTERED via a thrown exception during apply — the
-        // deterministic "session not paid / booking not payable" no-op path marks IGNORED instead
-        // (see applyStripeCheckoutEvent), never throws. So a replayable stripe_checkout row is
-        // provably one whose original delivery had payment_status: 'paid' — safe to reconstruct here.
+        // payment_status comes from the durably-stored, authenticated value (migration 022) --
+        // falling back to 'paid' ONLY for a pre-migration-022 FAILED/DEAD_LETTERED row (the guard
+        // above already refused any other case with no stored value): a row only ever reaches
+        // FAILED/DEAD_LETTERED via a thrown exception during apply -- the deterministic "session not
+        // paid / booking not payable" no-op path marks IGNORED instead (see applyStripeCheckoutEvent),
+        // never throws -- so a replayable FAILED/DEAD_LETTERED stripe_checkout row is provably one
+        // whose original delivery had payment_status: 'paid', even without the column.
+        const paymentStatus = eventRow.paymentStatus ?? 'paid'
         result = await applyPaymentEventPipeline({
           eventId: eventRow.id,
           rail: 'stripe_checkout',
@@ -714,7 +758,7 @@ export async function handlePaymentIntents(req, res, url, context) {
             eventId: eventRow.id,
             session: {
               id: eventRow.providerObjectId,
-              payment_status: 'paid',
+              payment_status: paymentStatus,
               currency: eventRow.currency,
               metadata: { bookingId: eventRow.bookingId, sypTotalMinor: eventRow.amountMinor },
             },

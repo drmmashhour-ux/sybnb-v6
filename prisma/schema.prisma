@@ -563,6 +563,16 @@ model PaymentEvent {
   // Non-sensitive metadata, stored alongside amountMinor/currency for the same reason: it lets an
   // admin replay reconstruct the event snapshot without needing (or storing) the raw webhook payload.
   providerObjectId String?                      @map("provider_object_id")
+  // The RAW event.data.object.payment_status string (e.g. Stripe's own 'paid'/'unpaid'/'no_payment_
+  // required'), populated UNCONDITIONALLY at intake for the stripe_checkout rail (migration 022) --
+  // null for payment_intent rail, where this concept doesn't apply. Closes a real gap independent
+  // review found: without this, reconstructing a stripe_checkout session for admin replay of an event
+  // stuck at APPLYING past its claim expiry had no durable source of truth for paid-ness and would
+  // have had to assume 'paid' -- a real risk of confirming a booking that was never actually paid for
+  // a row that crashed before that was ever established. Never used to gate the LIVE webhook path
+  // (which always reconstructs `session` from the actual incoming payload, already accurate) -- only
+  // by admin replay's reconstruction, once resolution has happened (see the replay route).
+  paymentStatus    String?                      @map("payment_status")
   // SHA-256 of the raw, already-signature-verified webhook body. Never the raw payload itself.
   payloadDigest    String?                      @map("payload_digest")
   processingStatus PaymentEventProcessingStatus @default(RECEIVED) @map("processing_status")

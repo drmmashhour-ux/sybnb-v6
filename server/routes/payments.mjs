@@ -8,7 +8,7 @@ import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { log } from '../lib/logger.mjs'
 import { finalizeStripeSession, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
-import { applyPaymentEvent, intakeEvent } from '../lib/payment-event-pipeline.mjs'
+import { applyPaymentEvent, intakeEvent, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
@@ -330,6 +330,9 @@ export async function handlePayments(req, res, url, context) {
       amountMinor: obj.metadata?.sypTotalMinor ? Number(obj.metadata.sypTotalMinor) : null,
       currency: obj.currency ?? null,
       providerObjectId: obj.id ?? null,
+      // The real, authenticated payment_status -- durably stored so admin replay can reconstruct this
+      // session accurately later without guessing (migration 022; see that field's own schema comment).
+      paymentStatus: obj.payment_status ?? null,
       payloadDigest,
       processingStatus: 'RECEIVED',
     })
@@ -402,7 +405,7 @@ export async function handlePayments(req, res, url, context) {
       rail: 'stripe_checkout',
       apply: (claimToken) => applyStripeCheckoutEvent({ eventId: eventRow.id, session, claimToken }),
     })
-    return json(res, 200, { ok: true, received: true, ...result })
+    return json(res, webhookAcknowledgeStatus(result), { ok: true, received: true, ...result })
   }
 
   if (url.pathname === '/api/payments/stripe/status') {

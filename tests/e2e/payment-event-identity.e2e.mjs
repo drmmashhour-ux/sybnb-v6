@@ -286,11 +286,21 @@ console.log('\n=== 7. Financial-effect concurrency: 20 repetitions x 20 simultan
     const rowCount = await db().paymentEvent.count({ where: { providerEventId: eventId, rail: 'payment_intent' } })
     const proofCount = await db().paymentProof.count({ where: { provider: 'payment_intent', providerRef: i.reference } })
     const eventRow = await db().paymentEvent.findFirst({ where: { providerEventId: eventId, rail: 'payment_intent' } })
-    const ok = results.every((r) => r.status === 200) && rowCount === 1 && proofCount === 1 && eventRow?.processingStatus === 'APPLIED' && eventRow?.attempts === 1
+    // 200 or 409: round 7 made an active-claim loser return a real non-2xx (409) instead of a bare 200
+    // — a genuinely concurrent loser observing the claim still actively held (not yet settled) by the
+    // winner is an EXPECTED, correct outcome now, not a bug; the winner's own response is always 200.
+    // At least one 200 must exist (the eventual winner).
+    const ok =
+      results.every((r) => r.status === 200 || r.status === 409) &&
+      results.some((r) => r.status === 200) &&
+      rowCount === 1 &&
+      proofCount === 1 &&
+      eventRow?.processingStatus === 'APPLIED' &&
+      eventRow?.attempts === 1
     if (!ok) piBadReps.push({ rep, statuses: results.map((r) => r.status), rowCount, proofCount, processingStatus: eventRow?.processingStatus, attempts: eventRow?.attempts })
   }
   check(
-    'payment_intent rail: EVERY one of the 20 repetitions independently produced exactly 1 event row, exactly 1 real financial effect (PaymentProof), settled APPLIED, and consumed exactly 1 attempt -- not merely "never more than one" across the whole run',
+    'payment_intent rail: EVERY one of the 20 repetitions independently produced exactly 1 event row, exactly 1 real financial effect (PaymentProof), settled APPLIED, and consumed exactly 1 attempt -- every response was 200 or a genuine active-claim 409, never anything else',
     piBadReps.length === 0,
     JSON.stringify(piBadReps),
   )
@@ -368,10 +378,12 @@ console.log('\n=== 8. Concurrency between a LIVE redelivery and an ADMIN REPLAY 
     const finalRow = await db().paymentEvent.findUnique({ where: { id: seeded.id } })
     // attempts must land at exactly 3 (seeded at 2, exactly one winning claim adds 1) -- proving the
     // CAS claim let only ONE of the two racing paths (live redelivery, admin replay) actually execute,
-    // never both.
+    // never both. webhookRes may be 409 (round 7: a genuine active-claim loser now gets a real
+    // non-2xx, never a bare 200 that could be mistaken for "delivered, stop retrying") if the webhook
+    // lost the race to the admin replay while replay's own claim was still active.
     const ok =
       (replayRes.status === 200 || replayRes.status === 409) &&
-      webhookRes.status === 200 &&
+      (webhookRes.status === 200 || webhookRes.status === 409) &&
       proofCountAfter === proofCountBefore + 1 &&
       finalRow?.processingStatus === 'APPLIED' &&
       finalRow?.attempts === 3

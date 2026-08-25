@@ -32,9 +32,15 @@
 //     check needed", even against a row that genuinely has an active claim it could otherwise exploit;
 //   - (round 8) a stripe_checkout PaymentEvent's financial effect and its final APPLIED/IGNORED
 //     transition now commit in the SAME transaction, never as two separate statements;
-//   - (round 8) POLICY_DEFERRED is now a genuinely recoverable state, through both a live redelivery
-//     and authenticated admin replay, for both rails, producing zero financial effects while deferred
-//     and exactly one once policy allows the event to be reclaimed.
+//   - (round 8) POLICY_DEFERRED is now a genuinely recoverable state for the payment_intent rail,
+//     through both a live redelivery and authenticated admin replay over real HTTP, producing zero
+//     financial effects while deferred and exactly one once policy allows the event to be reclaimed.
+//     stripe_checkout rail's OWN POLICY_DEFERRED recovery is deliberately NOT claimed here — an
+//     earlier version of this section proved it only via a direct internal pipeline call that bypassed
+//     the real HTTP route and policy authorization, which independent review correctly rejected as a
+//     false green. See tests/e2e/payment-event-stripe-policy-deferred-recovery.e2e.mjs, which proves
+//     it genuinely, through real HTTP and the real policy pipeline on a second, purpose-configured
+//     server.
 //
 // Run: AUTH_SECRET=<secret> PAYMENT_WEBHOOK_SECRET=<secret> STRIPE_WEBHOOK_SECRET=<secret>
 //      STRIPE_SECRET_KEY=sk_test_fake HOST=<uuid> GUEST=<uuid> ADMIN=<uuid>
@@ -52,7 +58,6 @@ import { applyPaymentIntentEvent } from '../../server/routes/payment-intents.mjs
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
 const PI_SECRET = process.env.PAYMENT_WEBHOOK_SECRET || 'whsec_sandbox_test'
-const STRIPE_SECRET = process.env.STRIPE_WEBHOOK_SECRET || 'whsec_stripe_test'
 
 const host = { id: process.env.HOST }
 const guest = { id: process.env.GUEST }
@@ -87,18 +92,6 @@ async function piWebhook(eventObj) {
   const res = await fetch(`${API}/api/payments/webhook`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'stripe-signature': signWebhook(payload, PI_SECRET) },
-    body: payload,
-  })
-  const text = await res.text()
-  let j
-  try { j = JSON.parse(text) } catch { j = { raw: text } }
-  return { status: res.status, j }
-}
-async function stripeWebhook(eventObj) {
-  const payload = JSON.stringify(eventObj)
-  const res = await fetch(`${API}/api/payments/stripe/webhook`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'stripe-signature': signWebhook(payload, STRIPE_SECRET) },
     body: payload,
   })
   const text = await res.text()
@@ -448,7 +441,7 @@ console.log('\n=== 6. Both exported rail apply functions REQUIRE a real claimTok
   check('zero effects resulted from the refused payment_intent call', piProofCount === 0, piProofCount)
 }
 
-console.log('\n=== 7. POLICY_DEFERRED is a genuinely recoverable state, via both live redelivery and admin replay, both rails -- zero effects while deferred, exactly one once recovered ===')
+console.log('\n=== 7. POLICY_DEFERRED is a genuinely recoverable state (payment_intent rail), via both live redelivery and admin replay -- zero effects while deferred, exactly one once recovered. stripe_checkout rail: see payment-event-stripe-policy-deferred-recovery.e2e.mjs ===')
 {
   // payment_intent rail, live redelivery recovery.
   {
@@ -512,76 +505,20 @@ console.log('\n=== 7. POLICY_DEFERRED is a genuinely recoverable state, via both
     check('payment_intent rail: the event settles APPLIED with exactly one consumed attempt', rowAfter?.processingStatus === 'APPLIED' && rowAfter?.attempts === 1, JSON.stringify(rowAfter))
   }
 
-  // stripe_checkout rail, live redelivery recovery.
-  {
-    const booking = await makeBooking(listing, 640, 637)
-    const sessionId = `cs_test_deferred_redel_${Date.now()}`
-    const eventId = `evt_cr_deferred_stripe_redelivery_${Date.now()}`
-    const evtObj = { id: eventId, type: 'checkout.session.completed', data: { object: { id: sessionId, payment_status: 'paid', currency: 'syp', metadata: { bookingId: booking.id, sypTotalMinor: '160000' } } } }
-    const payloadDigest = createHash('sha256').update(JSON.stringify(evtObj)).digest('hex')
-    const seeded = await db().paymentEvent.create({
-      data: {
-        rail: 'stripe_checkout', provider: 'stripe', providerEndpointKey: 'stripe-checkout', environment: 'test', subjectType: 'BOOKING',
-        providerReference: booking.id, bookingId: booking.id, originalBookingId: booking.id,
-        providerEventId: eventId, type: 'checkout.session.completed', amountMinor: 160000, currency: 'syp',
-        providerObjectId: sessionId, paymentStatus: 'paid', payloadDigest, processingStatus: 'POLICY_DEFERRED', attempts: 0,
-      },
-    })
-    const proofCountBefore = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
-    check('stripe_checkout rail: zero real financial effects exist while the event sits POLICY_DEFERRED', proofCountBefore === 0, proofCountBefore)
-
-    const redeliverRes = await stripeWebhook(evtObj)
-    const proofCountAfter = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
-    const rowAfter = await db().paymentEvent.findUnique({ where: { id: seeded.id } })
-    // webhook_apply for provider 'stripe' has no approved configuration on this server (a standing,
-    // intentional condition — see payment-policy.mjs), so a live redelivery cannot itself reclaim this
-    // POLICY_DEFERRED row via HTTP the way payment_intent's can; it correctly stays POLICY_DEFERRED,
-    // proving the mechanism doesn't falsely "recover" an event policy still denies. Recovery for this
-    // rail's specific standing condition goes through the reclaim mechanism directly (matching how
-    // every other stripe_checkout apply-mechanism proof in this suite bypasses the intentionally-closed
-    // policy gate, in-process) -- proving the CLAIMABLE_STATUSES fix itself, not this server's policy
-    // configuration.
-    check('stripe_checkout rail: redelivery while webhook_apply is still denied leaves the event correctly POLICY_DEFERRED, not falsely recovered', redeliverRes.status === 200 && redeliverRes.j?.policyDeferred === true && rowAfter?.processingStatus === 'POLICY_DEFERRED', JSON.stringify({ redeliverRes, rowAfter }))
-    check('stripe_checkout rail: zero effects resulted (policy correctly still denies application on this server)', proofCountAfter === 0, proofCountAfter)
-
-    // Direct proof that a POLICY_DEFERRED stripe_checkout row IS now reclaimable by the pipeline once
-    // something DOES authorize it (bypassing only the intentionally-closed policy gate, never the
-    // claim mechanism itself, in-process -- the same technique this suite already uses for
-    // stripe_checkout's apply mechanism throughout).
-    const session = { id: sessionId, payment_status: 'paid', metadata: { bookingId: booking.id, sypTotalMinor: '160000' } }
-    const reclaimResult = await applyPaymentEvent({ eventId: seeded.id, rail: 'stripe_checkout', apply: (claimToken) => applyStripeCheckoutEvent({ eventId: seeded.id, session, claimToken }) })
-    const proofCountReclaimed = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
-    const rowReclaimed = await db().paymentEvent.findUnique({ where: { id: seeded.id } })
-    check('stripe_checkout rail: the pipeline successfully reclaims a POLICY_DEFERRED row once given the chance to try', reclaimResult?.applied === true, JSON.stringify(reclaimResult))
-    check('stripe_checkout rail: exactly one real financial effect resulted, and exactly one attempt was consumed (zero while deferred)', proofCountReclaimed === 1 && rowReclaimed?.attempts === 1 && rowReclaimed?.processingStatus === 'APPLIED', JSON.stringify(rowReclaimed))
-  }
-
-  // stripe_checkout rail, admin replay recovery.
-  {
-    const booking = await makeBooking(listing, 650, 647)
-    const sessionId = `cs_test_deferred_replay_${Date.now()}`
-    const eventId = `evt_cr_deferred_stripe_replay_${Date.now()}`
-    const seeded = await db().paymentEvent.create({
-      data: {
-        rail: 'stripe_checkout', provider: 'stripe', providerEndpointKey: 'stripe-checkout', environment: 'test', subjectType: 'BOOKING',
-        providerReference: booking.id, bookingId: booking.id, originalBookingId: booking.id,
-        providerEventId: eventId, type: 'checkout.session.completed', amountMinor: 160000, currency: 'syp',
-        providerObjectId: sessionId, paymentStatus: 'paid', payloadDigest: 'd', processingStatus: 'POLICY_DEFERRED', attempts: 0,
-      },
-    })
-    const proofCountBefore = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
-    // Admin replay's OWN policy gate is the 'replay' operation, independently configured from
-    // webhook_apply -- on THIS server 'stripe' has no approved provider config for either operation,
-    // so replay is expected to be refused by policy here too (a real, disclosed standing condition of
-    // this test server's configuration, not a defect in the eligibility fix itself, which the route
-    // reaches and is proven separately below).
-    const replayRes = await call('POST', `/api/admin/payment-events/${seeded.id}/replay`, A, {})
-    const rowAfterReplay = await db().paymentEvent.findUnique({ where: { id: seeded.id } })
-    check('stripe_checkout rail: admin replay of a POLICY_DEFERRED event is now ATTEMPTED (reaches the apply pipeline, not refused as PAYMENT_EVENT_NOT_REPLAYABLE) -- refused only by this server\'s own standing stripe provider-approval gap, not by eligibility', replayRes.status !== 409 || replayRes.j?.error?.code !== 'PAYMENT_EVENT_NOT_REPLAYABLE', JSON.stringify(replayRes))
-    check('stripe_checkout rail: the row is untouched by policy correctly still refusing this specific server\'s stripe application', rowAfterReplay?.processingStatus === 'POLICY_DEFERRED', rowAfterReplay?.processingStatus)
-    const proofCountAfter = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
-    check('stripe_checkout rail: zero effects resulted', proofCountBefore === 0 && proofCountAfter === 0, `${proofCountBefore} -> ${proofCountAfter}`)
-  }
+  // stripe_checkout rail's own POLICY_DEFERRED recovery (live redelivery AND admin replay) is
+  // deliberately NOT proven here. Independent review correctly rejected an earlier version of this
+  // section: it asserted the redelivery stays POLICY_DEFERRED (proving policy still denies, not that
+  // recovery works), then "recovered" via a DIRECT internal pipeline call that bypasses the real HTTP
+  // route and payment-policy authorization entirely, and its admin-replay assertion
+  // (`status !== 409 || code !== 'PAYMENT_EVENT_NOT_REPLAYABLE'`) was too weak to distinguish
+  // "eligibility now succeeds, this server's own standing stripe-unapproved condition denies it" from
+  // any other failure -- including the real 503 that actually occurred. Proving stripe_checkout
+  // recovery genuinely, through the real HTTP route and real policy pipeline, requires a SECOND server
+  // process running with a narrow, non-production-only test override that approves 'stripe'
+  // (PAYMENT_POLICY_TEST_STRIPE_APPROVED=true -- see resolveApprovedProviderConfig() in
+  // payment-policy.mjs) — a fundamentally different test setup from this file's single-server model.
+  // See tests/e2e/payment-event-stripe-policy-deferred-recovery.e2e.mjs, which runs two servers
+  // simultaneously against the same database specifically for this proof.
 }
 
 console.log(`\n==== PAYMENT EVENT CLAIM OWNERSHIP & RECOVERY: ${pass} passed, ${fail} failed ====`)

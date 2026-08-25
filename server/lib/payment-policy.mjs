@@ -121,6 +121,36 @@ const APPROVED_PROVIDER_CONFIGS = {
   },
 }
 
+// Resolves the approved config a real request would use -- the object above, untouched, for every
+// provider except a narrow, explicitly-named, non-production-only 'stripe' test override (mirrors
+// countryDivisionEligible()'s own established test-override pattern below). This exists ONLY so
+// integration tests can prove the stripe_checkout rail's own recovery mechanisms (e.g. POLICY_DEFERRED
+// reclaim) genuinely work through the real HTTP route + policy pipeline, not just at the library layer
+// -- independent review correctly found that without this, that rail's route-and-policy wiring could
+// never be verified end-to-end at all, since 'stripe' having no real legal/compliance approval yet
+// would otherwise also mean "this mechanism is permanently unverifiable by anything above direct
+// library calls". Gated on BOTH environment !== 'production' AND an explicit, off-by-default env var:
+// production reads APPROVED_PROVIDER_CONFIGS.stripe directly (always undefined, unconditionally, since
+// the object above is never mutated) and this function is never reached with environment ===
+// 'production' returning anything but that same undefined -- the production default-deny guarantee is
+// untouched regardless of any env var's value.
+function resolveApprovedProviderConfig(provider, environment) {
+  if (APPROVED_PROVIDER_CONFIGS[provider]) return APPROVED_PROVIDER_CONFIGS[provider]
+  if (provider === 'stripe' && environment !== 'production' && process.env.PAYMENT_POLICY_TEST_STRIPE_APPROVED === 'true') {
+    return {
+      providerAccount: 'stripe-test-approved',
+      environments: ['development', 'test', 'staging'],
+      businessCountry: 'CA',
+      permittedCustomerCountries: ['SY'],
+      permittedPayoutCountries: ['CA'],
+      supportedDivisions: DIVISIONS,
+      approvalReference: 'test-only-synthetic-approval-for-integration-testing-never-a-real-approval',
+      effectiveDate: '2026-01-01',
+    }
+  }
+  return null
+}
+
 function denial(reason, message) {
   const error = new Error(message)
   error.statusCode = reason === 'ACTOR_UNAUTHORIZED' ? 403 : 503
@@ -218,8 +248,9 @@ function evaluate({ operation, rail, provider, division, country, environment, a
 
   // Gate 4: provider configuration approval — separate from, and stricter than, credential
   // presence. See APPROVED_PROVIDER_CONFIGS' own comment for why this stays empty for real
-  // processors today.
-  const approvedConfig = APPROVED_PROVIDER_CONFIGS[provider]
+  // processors today, and resolveApprovedProviderConfig()'s own comment for its narrow,
+  // non-production-only 'stripe' test override.
+  const approvedConfig = resolveApprovedProviderConfig(provider, environment)
   if (
     !approvedConfig ||
     !approvedConfig.environments.includes(environment) ||

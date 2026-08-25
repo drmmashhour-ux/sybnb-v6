@@ -403,7 +403,15 @@ export async function handlePaymentIntents(req, res, url, context) {
       where: { providerEventId: event.id },
       create: {
         rail: 'payment_intent',
+        provider: 'sandbox',
+        providerAccount: 'sandbox-test-account',
+        environment: policyEnvironment(),
+        subjectType: 'PAYMENT_INTENT',
         intentId: intent.id,
+        // Permanent snapshot -- survives a later deletion of the intent row itself (ON DELETE
+        // SET NULL only clears intentId above, never this).
+        originalIntentId: intent.id,
+        originalBookingId: intent.bookingId ?? null,
         providerEventId: event.id,
         type: event.type,
         amountMinor: obj.amount_minor ?? null,
@@ -529,8 +537,14 @@ export async function handlePaymentIntents(req, res, url, context) {
       deadLettered: deadLetteredEvents.map((e) => ({
         eventId: e.id,
         intentId: e.intentId,
-        reference: e.intent.reference,
-        bookingId: e.intent.bookingId,
+        // The linked intent may since have been deleted (ON DELETE SET NULL, migration 017 --
+        // deliberately preserves this row rather than cascading it away). e.intent is then null;
+        // fall back to the event's own permanent, never-cleared snapshot so a genuinely-orphaned
+        // dead-lettered event still shows up here instead of crashing this whole view.
+        orphaned: !e.intent,
+        reference: e.intent?.reference ?? null,
+        bookingId: e.intent?.bookingId ?? e.originalBookingId ?? null,
+        originalIntentId: e.originalIntentId,
         type: e.type,
         attempts: e.attempts,
         lastAttemptAt: e.lastAttemptAt,
@@ -564,6 +578,33 @@ export async function handlePaymentIntents(req, res, url, context) {
     if (eventRow.rail === 'payment_intent') requirePaymentIntentsEnabled()
     if (!['FAILED', 'DEAD_LETTERED'].includes(eventRow.processingStatus)) {
       throw fail(409, 'PAYMENT_EVENT_NOT_REPLAYABLE', 'This event is not in a failed/dead-lettered state.')
+    }
+
+    // Orphan guard: the parent this event referenced may have since been deleted (ON DELETE SET
+    // NULL, migration 017 — deliberately preserves the event row itself, unlike the CASCADE this
+    // replaced). There is nothing legitimate to apply effects to any more — refuse cleanly rather
+    // than let eventDivision(null)/a null-id lookup crash with a raw, unaudited exception. The event
+    // row's own history (attempts/lastError/processingStatus) and its permanent originalIntentId/
+    // originalBookingId snapshot remain fully intact and queryable regardless of this refusal.
+    const orphaned = (eventRow.rail === 'payment_intent' && !eventRow.intentId) ||
+      (eventRow.rail === 'stripe_checkout' && !eventRow.bookingId)
+    if (orphaned) {
+      const orphanError = fail(
+        409,
+        'PAYMENT_EVENT_ORPHANED',
+        `The ${eventRow.rail === 'payment_intent' ? 'payment intent' : 'booking'} this event referenced no longer exists; this event cannot be replayed.`,
+      )
+      await db().adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'ADMIN_PAYMENT_EVENT_REPLAYED',
+          entityType: 'payment_event',
+          entityId: eventRow.id,
+          before: { processingStatus: eventRow.processingStatus, attempts: eventRow.attempts },
+          after: { processingStatus: eventRow.processingStatus, attempts: eventRow.attempts, refused: 'PAYMENT_EVENT_ORPHANED' },
+        },
+      })
+      throw orphanError
     }
 
     const division = eventRow.rail === 'payment_intent'

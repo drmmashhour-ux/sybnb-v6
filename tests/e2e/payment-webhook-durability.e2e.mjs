@@ -218,7 +218,8 @@ console.log('\n--- In-process: the APPLY MECHANISM itself (not the policy decisi
   const eventId = `evt_wd_stripe_mech_${Date.now()}`
   const eventRow = await db().paymentEvent.create({
     data: {
-      rail: 'stripe_checkout', bookingId: bookingB.id, providerEventId: eventId, type: 'checkout.session.completed',
+      rail: 'stripe_checkout', provider: 'stripe', providerAccount: 'stripe-checkout', environment: 'test', subjectType: 'BOOKING',
+      bookingId: bookingB.id, originalBookingId: bookingB.id, providerEventId: eventId, type: 'checkout.session.completed',
       amountMinor: 150000, currency: 'syp', providerObjectId: sessionId, processingStatus: 'RECEIVED',
     },
   })

@@ -235,7 +235,13 @@ const seededEventId = `evt_pib_seed_dl_${Date.now()}`
 const seeded = await db().paymentEvent.create({
   data: {
     rail: 'payment_intent',
+    provider: 'sandbox',
+    providerAccount: 'sandbox-test-account',
+    environment: 'test',
+    subjectType: 'PAYMENT_INTENT',
     intentId: intentC.id,
+    originalIntentId: intentC.id,
+    originalBookingId: intentC.bookingId ?? null,
     providerEventId: seededEventId,
     type: 'payment_intent.succeeded',
     amountMinor: intentC.amountMinor,

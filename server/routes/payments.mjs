@@ -325,7 +325,15 @@ export async function handlePayments(req, res, url, context) {
       where: { providerEventId: event.id },
       create: {
         rail: 'stripe_checkout',
+        provider: 'stripe',
+        providerAccount: 'stripe-checkout',
+        environment: policyEnvironment(),
+        subjectType: 'BOOKING',
         bookingId,
+        // Permanent snapshot -- survives a later deletion of the booking row itself (ON DELETE
+        // SET NULL only clears bookingId above, never this). This rail has no PaymentIntent to
+        // reference at all, so originalIntentId stays null (matches PaymentEvent's own comment).
+        originalBookingId: bookingId,
         providerEventId: event.id,
         type: event.type,
         amountMinor: session.metadata?.sypTotalMinor ? Number(session.metadata.sypTotalMinor) : null,

@@ -493,15 +493,36 @@ model PaymentIntent {
 model PaymentEvent {
   id               String                       @id @default(uuid())
   // Which webhook rail produced this event -- 'payment_intent' (the events below reference intent)
-  // or 'stripe_checkout' (the events below reference booking instead). Every existing row is
-  // 'payment_intent' (migration 016 backfilled it via DEFAULT). See the traceability CHECK
-  // constraint added in that same migration -- not expressible in this schema DSL, DB-only.
+  // or 'stripe_checkout' (the events below reference booking instead). See the traceability CHECK
+  // constraint (migration 017) -- not expressible in this schema DSL, DB-only.
   rail             String
+  // Structural authentication identity, NOT the money-movement-approval question (that stays
+  // APPROVED_PROVIDER_CONFIGS in payment-policy.mjs) -- e.g. 'stripe' or 'sandbox'. Permanent: never
+  // cleared by any deletion, unlike intentId/bookingId below.
+  provider         String
+  // A stable label for which provider account/environment configuration received this event (e.g.
+  // 'sandbox-test-account', 'stripe-checkout') -- receipt-time metadata, not derived from
+  // APPROVED_PROVIDER_CONFIGS (which may have no entry for this provider at all, by design, e.g.
+  // stripe today -- see the Stripe/Syria compliance finding).
+  providerAccount  String?                      @map("provider_account")
+  // policyEnvironment() at receipt time (e.g. 'development', 'production'). 'unknown' for rows
+  // received before this column existed (migration 017's backfill) -- an honest gap, not a guess.
+  environment      String
+  // What kind of internal record this event was originally about -- 'PAYMENT_INTENT' or 'BOOKING'.
+  // Permanent, set once at receipt, independent of whether intentId/bookingId later become null.
+  subjectType      String                       @map("subject_type")
+  // LIVE foreign keys -- nullable, ON DELETE SET NULL (migration 017; previously CASCADE on intent
+  // and undeclared/NO ACTION on booking -- both wrong for a durable audit table, fixed after
+  // independent review found this exact defect). Deleting the parent clears these, NOT the event row.
   intentId         String?                      @map("intent_id")
-  // Populated for the stripe_checkout rail, which has no PaymentIntent row to reference -- traced to
-  // the booking instead, via the Checkout Session's own metadata.bookingId (server-derived, not
-  // client-supplied trust -- see server/routes/payments.mjs's finalizeStripeSession).
   bookingId        String?                      @map("booking_id")
+  // PERMANENT snapshots of the same two ids, populated once at receipt and NEVER cleared by any
+  // deletion -- what makes an orphaned event (its live FK now null) still fully self-describing and
+  // reconcilable. "Where available" per rail: payment_intent rows populate originalIntentId always
+  // and originalBookingId when the intent had one; stripe_checkout rows populate originalBookingId
+  // only (this rail has no PaymentIntent to reference at all).
+  originalIntentId  String?                     @map("original_intent_id")
+  originalBookingId String?                     @map("original_booking_id")
   providerEventId  String                       @unique @map("provider_event_id")
   type             String
   amountMinor      Int?                         @map("amount_minor")
@@ -519,8 +540,8 @@ model PaymentEvent {
   appliedAt        DateTime?                     @map("applied_at")
   receivedAt       DateTime                      @default(now()) @map("received_at")
 
-  intent  PaymentIntent? @relation(fields: [intentId], references: [id], onDelete: Cascade)
-  booking Booking?       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  intent  PaymentIntent? @relation(fields: [intentId], references: [id], onDelete: SetNull)
+  booking Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
 
   @@index([intentId])
   @@index([rail])

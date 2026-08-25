@@ -232,7 +232,7 @@ withPermissiveEnv({ PAYMENT_OPERATION_PAYMENT_INTENT_WEBHOOK_INTAKE_ENABLED: und
 })
 withPermissiveEnv({}, () => {
   check(
-    'webhook_intake with provider=stripe is ALLOWED (recognized for authentication even though stripe has no approved money-movement config)',
+    'webhook_intake with provider=stripe is ALLOWED (this policy layer recognizes stripe for routing even though it has no approved money-movement config -- authentication itself already happened upstream via signature verification, before this call)',
     deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', rail: 'stripe_checkout', provider: 'stripe' })) === null,
     deniedReason(() => authorizePaymentOperation({ ...BASE_INPUT, operation: 'webhook_intake', rail: 'stripe_checkout', provider: 'stripe' })),
   )

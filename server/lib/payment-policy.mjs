@@ -39,16 +39,29 @@ const EMERGENCY_STOP_EXEMPT_OPERATIONS = new Set(['webhook_intake', 'reconciliat
 // webhook_intake is exempt from every MONEY-OPERATION gate, not just emergency stop. Disabling
 // creation/capture/refund (country rollout, a rail flag, an operation flag) must never cost the
 // platform the durable record of an authenticated event — those flags govern whether we act on an
-// event, not whether we're allowed to know it happened. Intake asks a narrower question instead:
-// "is this a provider whose signature scheme we can verify?" — see RECOGNIZED_WEBHOOK_PROVIDERS.
+// event, not whether we're allowed to know it happened.
+//
+// IMPORTANT layering, stated precisely (an earlier version of these comments conflated two
+// different things — corrected after review): AUTHENTICATION of the webhook — verifying the
+// provider's cryptographic signature — happens entirely BEFORE this policy is ever called (see
+// verifyWebhook()/stripe.webhooks.constructEvent() in the two webhook routes). By the time
+// authorizePaymentOperation({ operation: 'webhook_intake', ... }) runs, the event is already
+// authenticated. RECOGNIZED_WEBHOOK_PROVIDERS below is a DIFFERENT, later question: does this
+// POLICY LAYER have a configured routing/recognition path for this provider string at all — pure
+// input validation/configuration selection, not a cryptographic check of any kind. A third,
+// separate question (is this provider APPROVED to move money) stays APPROVED_PROVIDER_CONFIGS,
+// evaluated only for non-intake operations.
 const INTAKE_EXEMPT_OPERATIONS = new Set(['webhook_intake'])
 
-// Providers whose webhook signature scheme this codebase can verify — a structural, authentication
-// question, deliberately separate from APPROVED_PROVIDER_CONFIGS (which answers "is this provider
-// approved to MOVE money"). 'stripe' belongs here even though it is absent from
-// APPROVED_PROVIDER_CONFIGS: SYBNB can authenticate a real Stripe webhook today (verifyWebhook's
-// scheme is Stripe-compatible) even though no Stripe money-movement is approved yet. Authenticating
-// and durably storing an event is not the same claim as being allowed to act on it.
+// Provider strings this policy layer recognizes and can route intake through — a routing/
+// configuration-selection check, NOT authentication (the signature was already verified upstream,
+// before this policy is ever reached — see the comment above). Deliberately separate from
+// APPROVED_PROVIDER_CONFIGS (which answers "is this provider approved to MOVE money"). 'stripe'
+// belongs here even though it is absent from APPROVED_PROVIDER_CONFIGS: this codebase already has
+// working Stripe-signature-verification code (verifyWebhook()'s scheme is Stripe-compatible; the
+// real route also uses the actual `stripe` SDK's own constructEvent) even though no Stripe
+// money-movement is approved yet. A durably-stored, already-authenticated event is not the same
+// claim as being allowed to act on it.
 const RECOGNIZED_WEBHOOK_PROVIDERS = new Set(['stripe', 'sandbox'])
 
 const RECOGNIZED_ENVIRONMENTS = new Set(['development', 'test', 'staging', 'production'])
@@ -80,8 +93,9 @@ const OPERATION_ACTOR_ROLES = {
 // intentionally absent.
 // 'PLATFORM' is a division-neutral sentinel for operations that are structurally division-blind —
 // most importantly webhook_intake, which by design runs BEFORE the matching intent (and therefore
-// its booking/listing/division) is even looked up, since intake must authenticate and durably store
-// an event before any content-dependent decision is made.
+// its booking/listing/division) is even looked up, since intake must durably store an
+// already-authenticated event (the signature was verified upstream, before this call) before any
+// content-dependent decision is made.
 const DIVISIONS = ['STAYS', 'RENTALS', 'BUY', 'CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION', 'PLATFORM']
 
 const APPROVED_PROVIDER_CONFIGS = {
@@ -179,8 +193,10 @@ function evaluate({ operation, rail, provider, division, country, environment, a
   }
 
   // webhook_intake takes a narrower path from here: it must never depend on whether ordinary money
-  // operations are enabled (country rollout, rail flag, operation flag) — only on whether this is a
-  // provider we can authenticate at all. Gates 3/5/6/7 below never run for this operation.
+  // operations are enabled (country rollout, rail flag, operation flag) — only on whether this
+  // policy layer recognizes the provider string at all (routing/configuration validation, NOT
+  // authentication — the signature was already verified upstream, before this function was ever
+  // called). Gates 3/5/6/7 below never run for this operation.
   if (INTAKE_EXEMPT_OPERATIONS.has(operation)) {
     if (!RECOGNIZED_WEBHOOK_PROVIDERS.has(provider)) {
       return { allowed: false, reason: 'PROVIDER_NOT_RECOGNIZED', message: 'Unrecognized webhook provider.' }

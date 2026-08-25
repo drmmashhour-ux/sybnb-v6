@@ -547,9 +547,14 @@ model PaymentEvent {
   // populate originalBookingId only (this rail has no PaymentIntent to reference at all).
   originalIntentId  String?                     @map("original_intent_id")
   originalBookingId String?                     @map("original_booking_id")
-  // No longer independently unique -- see the composite @@unique below (migration 018). A bare
-  // provider-event-id string is only unique WITHIN one provider/account/environment; the same
-  // string from a different provider must never collide with it.
+  // No longer independently unique -- see the partial unique index migration 021 creates (not
+  // representable as a Prisma @@unique, since it is scoped to canonical rows only -- see
+  // supersededByEventId below). A bare provider-event-id string is only unique WITHIN one
+  // provider/endpoint among CANONICAL rows; the same string from a different provider must never
+  // collide with it, and a superseded historical duplicate legitimately shares it with its survivor.
+  // NEVER rewritten once set, for any reason, including duplicate resolution (migration 021 -- an
+  // earlier version of migration 020 rewrote a losing duplicate's value here, which independent
+  // review correctly found destroyed the provider's own evidence; that rewrite was undone).
   providerEventId  String                       @map("provider_event_id")
   type             String
   amountMinor      Int?                         @map("amount_minor")
@@ -566,6 +571,32 @@ model PaymentEvent {
   lastError        String?                      @map("last_error")
   appliedAt        DateTime?                     @map("applied_at")
   receivedAt       DateTime                      @default(now()) @map("received_at")
+  // Claim ownership for the apply phase (migration 021). NULL means no active claim. A claim is a
+  // random per-attempt identity (applyPaymentEvent() mints a fresh one every time it wins the CAS
+  // race) plus a bounded expiry -- what makes a crashed/killed/disconnected worker's stuck APPLYING
+  // row safely reclaimable by a LATER call instead of lost forever (independent review found the
+  // prior CAS-only claim, with no token or expiry, had no recovery path at all: APPLYING is excluded
+  // from CLAIMABLE_STATUSES by design, so nothing could ever reclaim a row stuck there). Every write
+  // this event's own apply() closure or applyPaymentEvent()'s own success/failure handling makes is
+  // bound to the exact token it was issued -- a stale worker that wakes up after its claim expired and
+  // a newer claimant has already taken over matches zero rows on its own write, never corrupting the
+  // newer claimant's state. Cleared to null on every terminal outcome (APPLIED/IGNORED/FAILED/
+  // DEAD_LETTERED).
+  claimToken       String?                      @map("claim_token")
+  claimExpiresAt   DateTime?                    @map("claim_expires_at")
+  // Duplicate-resolution (migration 021), NOT the conflict-audit relation below -- a fundamentally
+  // different concept. A PaymentEventConflict record documents a REDELIVERY whose CONTENT didn't
+  // match an existing row (no second full row is ever created for that). supersededByEventId instead
+  // records that THIS entire, independently-durable row and another row are the SAME real event,
+  // discovered identical only after the fact (e.g. migration 020's environment-forking bug durably
+  // stored the one real event as two full historical rows before that bug was fixed) -- both rows keep
+  // their own complete lifecycle (attempts/status/timestamps) and their real, unaltered
+  // providerEventId; this column just records which one is canonical going forward and NEVER rewrites
+  // either row's provider-originated data to do so. RESTRICT (not SET NULL/CASCADE like intent/
+  // booking): a canonical row must never be deletable while a superseded duplicate still points to it.
+  supersededByEventId String?  @map("superseded_by_event_id")
+  supersededAt         DateTime? @map("superseded_at")
+  supersededReason     String?   @map("superseded_reason")
 
   intent  PaymentIntent? @relation(fields: [intentId], references: [id], onDelete: SetNull)
   booking Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
@@ -574,9 +605,18 @@ model PaymentEvent {
   // own fields (processingStatus/lastError/attempts/etc.) are NEVER written on a conflict -- see
   // intakeEvent() in payment-event-pipeline.mjs and this relation's own model comment.
   conflicts PaymentEventConflict[]
+  supersededByEvent    PaymentEvent?  @relation("PaymentEventSupersession", fields: [supersededByEventId], references: [id], onDelete: Restrict)
+  supersededDuplicates PaymentEvent[] @relation("PaymentEventSupersession")
 
-  // environment is deliberately NOT part of this key (migration 020) -- see that field's own comment.
-  @@unique([provider, providerEndpointKey, providerEventId], name: "eventIdentity", map: "payment_events_identity_key")
+  // Uniqueness among CANONICAL (non-superseded) rows only is enforced by a raw PARTIAL unique index
+  // (migration 021, name payment_events_identity_key kept for isPaymentEventIdentityConflict()'s
+  // P2002 target check) -- NOT representable here as a Prisma @@unique, since @@unique has no WHERE
+  // clause support and a superseded historical duplicate legitimately shares its identity triple with
+  // its survivor. Lookups use findFirst scoped to supersededByEventId: null (see intakeEvent()), not
+  // findUnique against a compound key Prisma itself cannot actually guarantee is unique table-wide.
+  @@index([provider, providerEndpointKey, providerEventId])
+  @@index([providerEventId])
+  @@index([supersededByEventId])
   @@index([intentId])
   @@index([rail])
   @@index([bookingId])

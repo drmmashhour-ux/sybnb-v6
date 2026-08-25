@@ -400,7 +400,7 @@ export async function handlePayments(req, res, url, context) {
     const result = await applyPaymentEvent({
       eventId: eventRow.id,
       rail: 'stripe_checkout',
-      apply: () => applyStripeCheckoutEvent({ eventId: eventRow.id, session }),
+      apply: (claimToken) => applyStripeCheckoutEvent({ eventId: eventRow.id, session, claimToken }),
     })
     return json(res, 200, { ok: true, received: true, ...result })
   }

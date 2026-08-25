@@ -321,7 +321,7 @@ console.log('\n=== 7. Financial-effect concurrency: 20 repetitions x 20 simultan
     const session = { id: sessionId, payment_status: 'paid', metadata: { bookingId: b.id, sypTotalMinor: '160000' } }
     const results = await Promise.all(
       Array.from({ length: 20 }, () =>
-        applyPaymentEvent({ eventId: eventRow.id, rail: 'stripe_checkout', apply: () => applyStripeCheckoutEvent({ eventId: eventRow.id, session }) }).catch((e) => ({ threw: true, message: e?.message })),
+        applyPaymentEvent({ eventId: eventRow.id, rail: 'stripe_checkout', apply: (claimToken) => applyStripeCheckoutEvent({ eventId: eventRow.id, session, claimToken }) }).catch((e) => ({ threw: true, message: e?.message })),
       ),
     )
     const proofCount = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
@@ -431,7 +431,7 @@ console.log('\n=== 9. Canonical identity no longer forks on the mutable environm
   // after it has already applied -- proving "one event, one effect" survives environment drift both
   // BEFORE and AFTER application, not only at the intake step.
   const session = { id: sessionId, payment_status: 'paid', metadata: { bookingId: bookingEnv.id, sypTotalMinor: '160000' } }
-  await applyPaymentEvent({ eventId: first.eventRow.id, rail: 'stripe_checkout', apply: () => applyStripeCheckoutEvent({ eventId: first.eventRow.id, session }) })
+  await applyPaymentEvent({ eventId: first.eventRow.id, rail: 'stripe_checkout', apply: (claimToken) => applyStripeCheckoutEvent({ eventId: first.eventRow.id, session, claimToken }) })
   const fourth = await intakeEvent({ ...baseFields, environment: 'development' })
   const proofCountEnv = await db().paymentProof.count({ where: { provider: 'stripe', providerRef: sessionId } })
   const rowCountEnvAfter = await db().paymentEvent.count({ where: { providerEventId: eventIdEnv } })

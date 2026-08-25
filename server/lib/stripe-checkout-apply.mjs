@@ -60,12 +60,17 @@ export async function finalizeStripeSession(session) {
 // window between the two is self-healing: a later redelivery finds the already-created PaymentProof
 // via finalizeStripeSession's own idempotent existingProof check and simply re-marks APPLIED, so
 // nothing is silently lost, only (at worst) briefly stuck at APPLYING until redelivered or replayed.
-export async function applyStripeCheckoutEvent({ eventId, session }) {
+// Both writes are bound to `claimToken` (round 6): if a newer claimant has since taken ownership of
+// this event (this attempt's own claim expired while still in flight -- an extreme, defense-in-depth
+// case), the write correctly matches zero rows instead of overwriting the newer claimant's
+// bookkeeping. finalizeStripeSession's own idempotency (isProviderRefUniqueViolation / its
+// existingProof check) already protects the underlying effect independent of this token.
+export async function applyStripeCheckoutEvent({ eventId, session, claimToken }) {
   const proof = await finalizeStripeSession(session)
   if (!proof) {
-    await db().paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'IGNORED', appliedAt: new Date() } })
-    return { applied: false, illegal: true }
+    const marked = await db().paymentEvent.updateMany({ where: { id: eventId, claimToken }, data: { processingStatus: 'IGNORED', appliedAt: new Date(), claimToken: null, claimExpiresAt: null } })
+    return { applied: false, illegal: true, claimLost: marked.count === 0 }
   }
-  await db().paymentEvent.update({ where: { id: eventId }, data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null } })
-  return { applied: true, status: proof.status }
+  const marked = await db().paymentEvent.updateMany({ where: { id: eventId, claimToken }, data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null, claimToken: null, claimExpiresAt: null } })
+  return { applied: true, status: proof.status, claimLost: marked.count === 0 }
 }

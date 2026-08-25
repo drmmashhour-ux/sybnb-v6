@@ -12,6 +12,7 @@
 // which manages its own transaction and is also called synchronously from a non-webhook route). This
 // module only owns: bumping attempts before the attempt, and recording FAILED/DEAD_LETTERED/a benign
 // duplicate collision after — the part that must behave identically regardless of rail.
+import { randomUUID } from 'node:crypto'
 import { db } from './prisma.mjs'
 import { log, errorSummary } from './logger.mjs'
 import { isProviderRefUniqueViolation } from './finance-ledger.mjs'
@@ -56,13 +57,16 @@ export async function intakeEvent(fields) {
     return { eventRow: await db().paymentEvent.create({ data: fields }), conflict: false }
   } catch (err) {
     if (!isPaymentEventIdentityConflict(err)) throw err
-    const eventRow = await db().paymentEvent.findUniqueOrThrow({
+    // findFirst, not findUnique: since migration 021, uniqueness is scoped to CANONICAL rows only (a
+    // superseded historical duplicate can legitimately share this exact triple with its survivor), so
+    // Prisma can no longer type this as a compound-unique lookup. supersededByEventId: null is what
+    // actually narrows this to at most one row -- the same guarantee the partial index enforces.
+    const eventRow = await db().paymentEvent.findFirstOrThrow({
       where: {
-        eventIdentity: {
-          provider: fields.provider,
-          providerEndpointKey: fields.providerEndpointKey,
-          providerEventId: fields.providerEventId,
-        },
+        provider: fields.provider,
+        providerEndpointKey: fields.providerEndpointKey,
+        providerEventId: fields.providerEventId,
+        supersededByEventId: null,
       },
     })
     const matches = eventRow.payloadDigest === fields.payloadDigest &&
@@ -90,62 +94,94 @@ export async function intakeEvent(fields) {
   }
 }
 
-// A row may only be CLAIMED for an apply attempt from one of these statuses. RECEIVED and FAILED are
-// the ordinary "not yet applied / a previous attempt failed, retryable" states; DEAD_LETTERED is
-// claimable too because admin replay is explicitly allowed to retry a dead-lettered event (the live
-// webhook path never reaches applyPaymentEvent for a DEAD_LETTERED row at all -- both routes check
-// and short-circuit before calling this function). APPLYING (a sibling delivery currently holds the
-// claim) and APPLIED/IGNORED/QUARANTINED/POLICY_DEFERRED (terminal or not-this-function's-job states)
-// are deliberately excluded -- there is no status a second concurrent delivery can observe that lets
-// it also enter apply().
+// A row may only be CLAIMED for an apply attempt from one of these statuses (with no active,
+// unexpired claim already held — see the claim query below). RECEIVED and FAILED are the ordinary
+// "not yet applied / a previous attempt failed, retryable" states; DEAD_LETTERED is claimable too
+// because admin replay is explicitly allowed to retry a dead-lettered event (the live webhook path
+// never reaches applyPaymentEvent for a DEAD_LETTERED row at all -- both routes check and
+// short-circuit before calling this function). APPLIED/IGNORED/QUARANTINED/POLICY_DEFERRED (terminal
+// or not-this-function's-job states) are always excluded. APPLYING is claimable ONLY when its
+// existing claim has expired -- see CLAIM_DURATION_MS below.
 const CLAIMABLE_STATUSES = ['RECEIVED', 'FAILED', 'DEAD_LETTERED']
 
-// Atomically claims eventId for an apply attempt, then runs it. Independent review found the previous
-// version bumped attempts/wrote APPLYING with a blind, unconditional `update` -- every one of N
-// concurrent deliveries for the same event would win that write, so all N incremented attempts and
-// all N called apply(), relying entirely on a downstream DB unique constraint (which only some
-// effects have) to avoid double-applying, and leaving open a real race: a LATE-failing worker could
-// overwrite a row a sibling had already, correctly, moved to APPLIED, silently downgrading a
-// genuinely successful payment back to FAILED/DEAD_LETTERED.
+// How long a claim is honored before it is considered abandoned and safe to reclaim. Generously long
+// relative to any real apply() (a single DB transaction, well under a second normally) so a claim
+// never expires out from under genuinely in-flight work, while still bounding how long a crashed,
+// killed, or disconnected worker can leave an event stuck.
+export const CLAIM_DURATION_MS = 120_000
+
+// Atomically claims eventId for an apply attempt, then runs it, binding every write this claim makes
+// to a fresh, random ownership token. Independent review found two successive real defects here:
 //
-// Fixed with a real compare-and-swap: the claim is a single conditional `updateMany` scoped to
-// CLAIMABLE_STATUSES. Postgres serializes concurrent UPDATEs against the same row via its row lock —
-// the first to commit flips the row to APPLYING; every other concurrent claim attempt then evaluates
-// its WHERE clause against that already-committed APPLYING status, matches zero rows, and returns
-// immediately WITHOUT EVER CALLING apply() at all. This makes the old bug structurally impossible
-// rather than merely less likely: at most one caller can be inside apply() for a given eventId at any
-// time, so attempts increments exactly once per genuine claim (never once per concurrent deliverer),
-// and there is no window in which a second, later-failing worker could run at all, let alone downgrade
-// a state a sibling already committed.
+// (round 5) the previous version bumped attempts/wrote APPLYING with a blind, unconditional `update`
+// -- every one of N concurrent deliveries for the same event would win that write, all N would
+// increment attempts and call apply(), and a late-failing worker could downgrade a row a sibling had
+// already committed to APPLIED. Fixed with a compare-and-swap `updateMany` scoped to
+// CLAIMABLE_STATUSES: Postgres serializes concurrent UPDATEs against the same row via its row lock, so
+// at most one caller can be inside apply() for a given event at any time.
+//
+// (round 6, THIS fix) that CAS claim had no ownership token or expiry: a crashed, killed, or
+// disconnected worker leaves the row at APPLYING forever, since APPLYING was excluded from
+// CLAIMABLE_STATUSES with no path back out -- a payment-loss condition, because the provider may have
+// already received the durable-intake HTTP 200 and stopped retrying. Fixed by minting a fresh
+// `claimToken` on every successful claim (fresh OR reclaimed) and a bounded `claimExpiresAt`. A claim
+// is now acquirable when the row is CLAIMABLE with no active claim, OR when it's APPLYING but the
+// existing claim has expired -- the SAME atomic `updateMany`, so a stale worker waking up late can
+// never win a race against a legitimate reclaim: by the time it tries to write anything, the token it
+// holds is no longer the row's current token, so every one of its own writes (below, and inside the
+// rail-specific apply() closures, which now thread `token` through to their own conditional writes)
+// matches zero rows instead of corrupting the newer claimant's state.
+//
+// Recovery is intentionally lazy, not a background sweeper: this codebase has no job runner, and the
+// existing admin replay endpoint (extended alongside this fix to accept an APPLYING row once its claim
+// has expired, not just FAILED/DEAD_LETTERED) is already the established human-triggered recovery path
+// for a stuck event -- the same mechanism that already exists for FAILED/DEAD_LETTERED events, just now
+// reachable for an abandoned claim too. A losing claim attempt against a row with an ACTIVE (unexpired)
+// claim never reports a false success -- it returns `retryable: true`, explicitly not a final outcome,
+// so a caller can never mistake "someone else currently owns this" for "this is settled".
 export async function applyPaymentEvent({ eventId, rail, apply }) {
+  const token = randomUUID()
+  const now = new Date()
+  const claimExpiresAt = new Date(now.getTime() + CLAIM_DURATION_MS)
   const claim = await db().paymentEvent.updateMany({
-    where: { id: eventId, processingStatus: { in: CLAIMABLE_STATUSES } },
-    data: { attempts: { increment: 1 }, lastAttemptAt: new Date(), processingStatus: 'APPLYING' },
+    where: {
+      id: eventId,
+      OR: [
+        { processingStatus: { in: CLAIMABLE_STATUSES } },
+        { processingStatus: 'APPLYING', claimExpiresAt: { lt: now } },
+      ],
+    },
+    data: { attempts: { increment: 1 }, lastAttemptAt: now, processingStatus: 'APPLYING', claimToken: token, claimExpiresAt },
   })
   if (claim.count === 0) {
-    // Lost the claim race (or arrived after the winner already finished) — acknowledge without ever
-    // running apply(). Report duplicate:true only once we can actually see the terminal APPLIED
-    // outcome; a sibling that's still mid-flight (APPLYING) reports its current status instead of
-    // guessing at an outcome that hasn't happened yet — callers already treat any non-error result as
-    // a safe 200 acknowledgement (see both webhook routes and the admin replay endpoint).
+    // Lost the claim race. Report duplicate:true only once we can actually see the terminal APPLIED
+    // outcome; a row currently held by an ACTIVE (unexpired) claim reports retryable:true instead of
+    // guessing at an outcome that hasn't happened yet -- this is NEVER acknowledged as a final
+    // success. Callers still return HTTP 200 (the event IS durably stored and genuinely owned by
+    // someone), but the response body itself makes no false completion claim.
     const current = await db().paymentEvent.findUnique({ where: { id: eventId } })
     if (current?.processingStatus === 'APPLIED') return { applied: false, duplicate: true, claimed: false }
-    return { applied: false, duplicate: false, claimed: false, status: current?.processingStatus ?? null }
+    return { applied: false, duplicate: false, claimed: false, retryable: true, status: current?.processingStatus ?? null }
   }
   try {
-    // apply() is trusted to mark the row APPLIED or IGNORED itself on success — see module comment.
-    return await apply()
+    // apply() is trusted to mark the row APPLIED or IGNORED itself on success, bound to `token` -- see
+    // module comment and each rail's own apply function (applyPaymentIntentEvent /
+    // applyStripeCheckoutEvent).
+    return await apply(token)
   } catch (err) {
     if (isProviderRefUniqueViolation(err)) {
       // A SEPARATE claim round (a genuinely later redelivery or replay, not a concurrent one — those
-      // are now impossible per the comment above) already applied this exact event and committed
-      // first — this attempt collided with that and rolled back, but the underlying payment WAS
-      // genuinely applied by the sibling round. Mark this delivery APPLIED too (a benign duplicate),
-      // not FAILED — otherwise a normal, harmless race would dead-letter a payment that already
-      // settled correctly. Guarded (`not: 'APPLIED'`) so this can only ever set the row TO applied,
-      // never touch it if it's already there — belt-and-braces on top of a race that CAS has already
-      // made structurally impossible to concurrently double-execute.
-      await db().paymentEvent.updateMany({ where: { id: eventId, processingStatus: { not: 'APPLIED' } }, data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null } })
+      // are impossible per the comment above) already applied this exact event and committed first —
+      // this attempt collided with that and rolled back, but the underlying payment WAS genuinely
+      // applied by the sibling round. Mark this delivery APPLIED too (a benign duplicate), not FAILED
+      // — otherwise a normal, harmless race would dead-letter a payment that already settled
+      // correctly. Bound to `token`: if a newer claimant has since taken over (this worker's own claim
+      // expired while it was mid-flight), this write correctly becomes a no-op instead of stomping on
+      // whatever the newer claimant established.
+      await db().paymentEvent.updateMany({
+        where: { id: eventId, claimToken: token, processingStatus: { not: 'APPLIED' } },
+        data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null, claimToken: null, claimExpiresAt: null },
+      })
       return { applied: false, duplicate: true }
     }
     // Re-read this claim's own freshly-incremented attempts value rather than trusting a stale local
@@ -153,18 +189,19 @@ export async function applyPaymentEvent({ eventId, rail, apply }) {
     // only returns a count), so the post-claim attempts figure must be read back explicitly.
     const claimed = await db().paymentEvent.findUnique({ where: { id: eventId } })
     const dead = (claimed?.attempts ?? 0) >= DEAD_LETTER_THRESHOLD
-    // Guarded to only affect the row while it's still in the APPLYING state THIS call put it in — if
-    // it somehow moved on already (e.g. an out-of-band admin action), a stale failure must never
-    // downgrade whatever it moved to.
+    // Bound to `token`, same reasoning as the benign-duplicate write above: a stale worker's own
+    // failure-handling must never downgrade whatever a newer claimant has already established.
     await db()
       .paymentEvent.updateMany({
-        where: { id: eventId, processingStatus: 'APPLYING' },
+        where: { id: eventId, claimToken: token, processingStatus: 'APPLYING' },
         data: {
           processingStatus: dead ? 'DEAD_LETTERED' : 'FAILED',
           // Pre-sanitized at write time (never the raw error) — a DB column is a permanent record,
           // stronger guarantee needed than key-based log redaction alone.
           lastError: JSON.stringify(errorSummary(err)).slice(0, 2000),
           lastAttemptAt: new Date(),
+          claimToken: null,
+          claimExpiresAt: null,
         },
       })
       .catch((e2) => log.error('payment_event_failure_record_failed', { eventId, err: errorSummary(e2) }))

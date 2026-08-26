@@ -88,6 +88,7 @@ export type PlatformRideRequest = {
   fareMinor: number | null
   cancellationFeeMinor: number | null
   scheduledFor: string | null
+  accessibilityRequired: boolean
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string
@@ -268,7 +269,7 @@ export type PlatformHostOverview = {
 }
 
 export type PlatformDriverOverview = {
-  driver: ApiUser
+  driver: ApiUser & { accessibilityCapable: boolean }
   totals: {
     assigned: number
     active: number
@@ -1105,6 +1106,7 @@ export async function createPrototypeSrRide(input: {
   routeType?: string
   features?: string[]
   scheduledFor?: string
+  accessibilityRequired?: boolean
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -1118,6 +1120,7 @@ export async function createPrototypeSrRide(input: {
       lowDataMode: input.lowDataMode,
       pickupCoords: input.pickupCoords,
       scheduledFor: input.scheduledFor,
+      accessibilityRequired: input.accessibilityRequired,
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',
@@ -1220,6 +1223,16 @@ export async function submitDriverPhoto(file: File) {
     method: 'PATCH',
     token: session.token,
     body: { fileBase64, mimeType: file.type },
+  })
+  return response.driverProfile
+}
+
+export async function updatePrototypeDriverAccessibility(accessibilityCapable: boolean) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; driverProfile: { accessibilityCapable: boolean } }>('/api/driver/accessibility', {
+    method: 'PATCH',
+    token: session.token,
+    body: { accessibilityCapable },
   })
   return response.driverProfile
 }

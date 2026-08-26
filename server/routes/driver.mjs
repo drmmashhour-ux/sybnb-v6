@@ -28,6 +28,21 @@ export async function handleDriver(req, res, url, context) {
     await updateDriverLocation(context.user.id, lat, lng)
     return json(res, 200, { ok: true })
   }
+
+  // SR Ride vs. Uber gap-closure (P2 #16): self-declared, like the vehicle make/model/plate fields
+  // already are -- shown to riders as real data, never dressed up as a verified trust badge.
+  if (url.pathname === '/api/driver/accessibility') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    const profile = await db().driverProfile.upsert({
+      where: { userId: context.user.id },
+      create: { userId: context.user.id, accessibilityCapable: Boolean(body.accessibilityCapable) },
+      update: { accessibilityCapable: Boolean(body.accessibilityCapable) },
+      select: { accessibilityCapable: true },
+    })
+    return json(res, 200, { ok: true, driverProfile: profile })
+  }
   // SR Ride vs. Uber gap-closure: a driver's own photo, so a rider can actually recognize who
   // they're getting into a car with (previously nothing beyond name + vehicle text existed).
   // Mirrors PATCH /api/me/id-document exactly -- same validation shape, same storage discipline.
@@ -108,6 +123,10 @@ export async function handleDriver(req, res, url, context) {
       take: 50,
     })
     const ratingSummary = await getDriverRatingSummary(context.user.id)
+    const driverProfile = await db().driverProfile.findUnique({
+      where: { userId: context.user.id },
+      select: { accessibilityCapable: true },
+    })
     return json(res, 200, {
       ok: true,
       overview: {
@@ -116,6 +135,7 @@ export async function handleDriver(req, res, url, context) {
           email: context.user.email,
           displayName: context.user.displayName,
           roles: context.roles,
+          accessibilityCapable: driverProfile?.accessibilityCapable || false,
         },
         totals: {
           assigned: rides.length,

@@ -74,6 +74,7 @@ export async function handleSrRides(req, res, url, context) {
         dropoffLocationId: body.dropoffLocationId || undefined,
         status: scheduledFor ? 'DRAFT' : 'REQUESTED',
         scheduledFor,
+        accessibilityRequired: Boolean(body.accessibilityRequired),
         fareMinor: quote.fareMinor,
         currency: body.currency || 'SYP',
         metadata: {
@@ -318,6 +319,23 @@ export async function handleSrRides(req, res, url, context) {
       error.code = 'RIDE_ALREADY_CLAIMED'
       error.expose = true
       throw error
+    }
+
+    // SR Ride vs. Uber gap-closure (P2 #16): enforced, not decorative -- a rider who marked
+    // accessibilityRequired genuinely needs a driver who self-declared their vehicle as capable.
+    // Real matching, not just a badge nobody has to honor (CAPSULE_RULES.noFakeTrustSignal).
+    if (existing.accessibilityRequired) {
+      const claimingDriverProfile = await db().driverProfile.findUnique({
+        where: { userId: context.user.id },
+        select: { accessibilityCapable: true },
+      })
+      if (!claimingDriverProfile?.accessibilityCapable) {
+        const error = new Error('This ride requires an accessibility-capable vehicle.')
+        error.statusCode = 403
+        error.code = 'RIDE_ACCESSIBILITY_MISMATCH'
+        error.expose = true
+        throw error
+      }
     }
 
     // Optimistic-concurrency guard: the WHERE clause re-checks driverId is still null so two

@@ -10,6 +10,7 @@ import {
   reportPrototypeDriverLocation,
   sendPrototypeSrRideMessage,
   submitDriverPhoto,
+  updatePrototypeDriverAccessibility,
   updatePrototypeDriverRideStatus,
   type PlatformDriverOverview,
   type PlatformMessage,
@@ -62,6 +63,8 @@ const copy = {
     stopSharing: 'إيقاف المشاركة',
     locationDenied: 'تعذر الوصول إلى الموقع. تحقق من إذن الموقع.',
     locationUnsupported: 'الموقع الجغرافي غير مدعوم على هذا الجهاز.',
+    accessibilityCapable: 'مركبتي تسمح بالوصول لذوي الاحتياجات الخاصة',
+    accessibilityRequired: 'يحتاج مركبة لذوي الاحتياجات الخاصة',
     empty: 'لا توجد رحلات مسندة بعد.',
     dispatch: 'مركز التوجيه',
     safety: 'أمان الرحلة',
@@ -123,6 +126,8 @@ const copy = {
     stopSharing: 'Stop sharing',
     locationDenied: 'Could not access location. Check your location permission.',
     locationUnsupported: 'Geolocation is not supported on this device.',
+    accessibilityCapable: 'My vehicle is wheelchair accessible',
+    accessibilityRequired: 'Needs accessible vehicle',
     empty: 'No assigned rides yet.',
     dispatch: 'Dispatch center',
     safety: 'Ride safety',
@@ -194,6 +199,17 @@ export function DriverDashboardPage({ lang }: Props) {
       setPhotoStatus('submitted')
     } catch {
       setPhotoStatus('error')
+    }
+  }
+
+  async function toggleAccessibility(next: boolean) {
+    try {
+      const driverProfile = await updatePrototypeDriverAccessibility(next)
+      setOverview((previous) =>
+        previous ? { ...previous, driver: { ...previous.driver, accessibilityCapable: driverProfile.accessibilityCapable } } : previous,
+      )
+    } catch {
+      // Non-critical toggle -- the checkbox simply won't reflect the change; no dedicated error slot.
     }
   }
 
@@ -307,6 +323,7 @@ export function DriverDashboardPage({ lang }: Props) {
                   <i dir="ltr">
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
                   </i>
+                  {pendingRide.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {t.accessibilityRequired}</span>}
                   <button disabled={claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
                     {claimingRideId === pendingRide.id ? t.claiming : t.accept}
                   </button>
@@ -331,6 +348,14 @@ export function DriverDashboardPage({ lang }: Props) {
             }
             dir={isAr ? 'rtl' : 'ltr'}
           />
+          <label style={styles.locationRow}>
+            <input
+              type="checkbox"
+              checked={overview?.driver.accessibilityCapable || false}
+              onChange={(event) => void toggleAccessibility(event.target.checked)}
+            />
+            {t.accessibilityCapable}
+          </label>
           <div style={styles.photoUpload}>
             <strong>{t.photoTitle}</strong>
             <span>{t.photoCopy}</span>
@@ -422,6 +447,7 @@ function RideCard({
       <Info label={labels.dropoff} value={String(ride.metadata.dropoff || '-')} />
       <Info label={labels.status} value={statusText(ride.status, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
       <Info label={labels.fare} value={moneyText(ride.fareMinor || 0, ride.currency, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
+      {ride.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {labels.accessibilityRequired}</span>}
       {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
         <div style={styles.actions}>
           <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>
@@ -628,6 +654,7 @@ const styles: Record<string, CSSProperties> = {
   panel: { border: '1px solid #263651', borderRadius: 8, background: '#101722', color: '#9aa6ba', padding: 14 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
   locationRow: { display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid #263651', paddingTop: 10 },
+  accessibilityBadge: { display: 'inline-block', width: 'fit-content', borderRadius: 999, background: 'rgba(25,215,255,.14)', border: '1px solid rgba(25,215,255,.4)', color: '#19d7ff', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
   chatPanel: { display: 'grid', gap: 8, borderTop: '1px solid #263651', paddingTop: 10 },
   chatMessages: { display: 'grid', gap: 6, maxHeight: 180, overflowY: 'auto' },
   chatEmpty: { color: '#5c6b85', fontSize: 13 },

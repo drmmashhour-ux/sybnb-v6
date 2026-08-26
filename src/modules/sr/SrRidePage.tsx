@@ -90,6 +90,7 @@ const copy = {
     scheduleForLater: 'جدولة الرحلة لوقت لاحق',
     scheduleRide: 'جدولة الرحلة',
     scheduledFor: 'مجدولة في',
+    accessibilityRequired: 'أحتاج مركبة تسمح بالوصول لذوي الاحتياجات الخاصة',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -159,6 +160,7 @@ const copy = {
     scheduleForLater: 'Schedule for later',
     scheduleRide: 'Schedule ride',
     scheduledFor: 'Scheduled for',
+    accessibilityRequired: 'I need a wheelchair-accessible vehicle',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -212,6 +214,7 @@ export function SrRidePage({ lang }: Props) {
   const [shareStatus, setShareStatus] = useState<'idle' | 'sharing' | 'copied' | 'error'>('idle')
   const [scheduleForLater, setScheduleForLater] = useState(false)
   const [scheduledFor, setScheduledFor] = useState('')
+  const [accessibilityRequired, setAccessibilityRequired] = useState(false)
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
   const fallbackFareMinor = useMemo(() => {
@@ -349,6 +352,7 @@ export function SrRidePage({ lang }: Props) {
         routeType: String(rideFilters.srRideRoute || ''),
         features: Array.isArray(rideFilters.srRideFeatures) ? rideFilters.srRideFeatures : [],
         scheduledFor: scheduleForLater && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
+        accessibilityRequired,
       })
       setRide(nextRide)
       setStatus('idle')
@@ -557,6 +561,17 @@ export function SrRidePage({ lang }: Props) {
 
           {!ride && (
             <label style={styles.scheduleRow}>
+              <input
+                type="checkbox"
+                checked={accessibilityRequired}
+                onChange={(event) => setAccessibilityRequired(event.target.checked)}
+              />
+              {t.accessibilityRequired}
+            </label>
+          )}
+
+          {!ride && (
+            <label style={styles.scheduleRow}>
               <input type="checkbox" checked={scheduleForLater} onChange={(event) => setScheduleForLater(event.target.checked)} />
               {t.scheduleForLater}
             </label>
@@ -593,6 +608,7 @@ export function SrRidePage({ lang }: Props) {
           <Info label={t.pickup} value={String(ride?.metadata.pickup || pickup)} />
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
           <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : isAr ? 'يدوي' : 'manual'} />
+          {ride?.accessibilityRequired && <div style={styles.message}>♿ {t.accessibilityRequired}</div>}
 
           {ride && MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status) && (
             <div style={styles.card}>

@@ -181,6 +181,7 @@ export function DashboardPage({ lang }: Props) {
   }
 
   const activeBooking = overview?.bookings[0]
+  const isDisputed = activeBooking?.status === 'DISPUTED'
   const activeListing = activeBooking?.listing
   const activeTitle = activeListing ? labelForListing(activeListing, lang) : ''
   const activeReference = activeBooking?.id ? `BK-${activeBooking.id.slice(0, 4).toUpperCase()}-${activeBooking.id.slice(4, 8).toUpperCase()}` : ''
@@ -215,10 +216,11 @@ export function DashboardPage({ lang }: Props) {
             <>
               <div style={styles.tripMeta}>
                 {activeTripDates && <span style={styles.datePill}>{activeTripDates}</span>}
-                <span style={styles.activePill}>{t.inTrip}</span>
+                <span style={isDisputed ? styles.disputePill : styles.activePill}>{isDisputed ? t.disputeOpen : t.inTrip}</span>
               </div>
               <h1 style={styles.tripTitle}>{activeTitle}</h1>
               <p style={styles.tripRef}>{activeReference}</p>
+              {isDisputed && <p style={styles.disputeNotice}>{t.disputeCopy}</p>}
             </>
           ) : (
             <>
@@ -426,8 +428,10 @@ const styles: Record<string, CSSProperties> = {
   tripMeta: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   datePill: { borderRadius: 999, background: '#25252f', color: '#d6d9e6', padding: '7px 12px', fontSize: 12, fontWeight: 900 },
   activePill: { color: '#20d29b', fontSize: 13, fontWeight: 950 },
+  disputePill: { color: '#ffb020', fontSize: 13, fontWeight: 950 },
   tripTitle: { margin: 0, fontSize: 38, lineHeight: 1.12, textAlign: 'right' },
   tripRef: { margin: 0, color: '#82899b', textAlign: 'right', fontWeight: 800 },
+  disputeNotice: { margin: 0, color: '#ffb020', textAlign: 'right', fontWeight: 800, fontSize: 13 },
   tripActions: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 },
   sosButton: { minHeight: 64, borderRadius: 14, border: '2px solid #ff4c73', background: 'transparent', color: '#ff4c73', fontWeight: 950, fontSize: 17 },
   goldButton: { minHeight: 64, border: 0, borderRadius: 14, background: '#e5b80b', color: '#fff', fontWeight: 950, fontSize: 17 },

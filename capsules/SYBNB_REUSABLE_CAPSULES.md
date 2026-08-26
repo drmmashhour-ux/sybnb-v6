@@ -11,6 +11,7 @@ This folder records the shared capsule system used across STR, rentals, seller, 
 - Map Capsule: Google Maps online link plus offline coordinate fallback.
 - Admin Decision Capsule: accept, reject, hold, reopen, send to client, send to host/seller.
 - Location Capsule: STR and renter search share `src/engines/search` for full Syria governorate, city, area, and street data.
+- Case Status Capsule: dispute/complaint status shown only from a real fetched status field; steps and copy are derived from the status enum, never hardcoded as complete.
 
 ## Hard Rule
 

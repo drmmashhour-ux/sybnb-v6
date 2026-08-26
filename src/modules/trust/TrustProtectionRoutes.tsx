@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { disputePrototypeBooking, fetchPrototypeBooking, submitGuestIdDocument, type PlatformBooking, type PlatformListing } from '../../shared/api/platformApi'
 import { listingTitleText } from '../../shared/i18n/display'
+import { CaseStatusCapsule, type CaseStatusMap, type CaseStatusOutcome, type CaseStatusStepDef } from '../../shared/capsules/CaseStatusCapsule'
 export { isTrustProtectionRoute } from './trustRoutes'
 
 type Props = {
@@ -278,28 +279,91 @@ function DisputeFlow({ lang, bookingId }: { lang: Lang; bookingId: string }) {
 
 function DisputeClosedFeedback({ lang, bookingId }: { lang: Lang; bookingId: string }) {
   const isAr = lang === 'ar'
-  const steps = isAr
-    ? ['فتح النزاع', 'جمع الأدلة', 'قرار SYBNB', 'إغلاق الحالة']
-    : ['Dispute opened', 'Evidence collected', 'SYBNB decision', 'Case closed']
+  const [booking, setBooking] = useState<PlatformBooking | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  // Fetch-on-mount (same pattern as BookingProtectionHub above): this screen is reached via a full
+  // navigation from DisputeFlow, and may also be reached later via back/forward nav or a bookmark,
+  // so it must never render a stale or assumed status -- only what the backend says right now.
+  useEffect(() => {
+    let cancelled = false
+    setLoaded(false)
+    fetchPrototypeBooking(bookingId)
+      .then((result) => {
+        if (cancelled) return
+        setBooking(result)
+        setLoaded(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setBooking(null)
+        setLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [bookingId])
+
+  const steps: CaseStatusStepDef[] = isAr
+    ? [
+        { key: 'opened', label: 'فتح النزاع' },
+        { key: 'review', label: 'قيد المراجعة من SYBNB' },
+      ]
+    : [
+        { key: 'opened', label: 'Dispute opened' },
+        { key: 'review', label: 'Under review by SYBNB' },
+      ]
+
+  // CAPSULE_RULES.noFabricatedResolution: every branch below must come straight from the real
+  // booking.status returned by the backend -- never a hardcoded "closed"/"decision made" claim.
+  const statusMap: CaseStatusMap = {
+    DISPUTED: {
+      stepIndex: 1,
+      pending: true,
+      title: isAr ? 'تم إرسال النزاع' : 'Dispute Submitted',
+      body: isAr
+        ? 'تم إرسال نزاعك وحجزك الآن قيد المراجعة. سنُحدّث هذه الصفحة بمجرد أن يتخذ فريق SYBNB قراراً.'
+        : "Your dispute was submitted and your booking is now under review. We'll update you here once SYBNB makes a decision.",
+    },
+    CONFIRMED: {
+      stepIndex: 1,
+      pending: false,
+      title: isAr ? 'تمت مراجعة النزاع' : 'Dispute Reviewed',
+      body: isAr
+        ? 'راجع فريق SYBNB هذا النزاع، وتم تأكيد الحجز كما هو دون أي تغيير.'
+        : 'SYBNB reviewed this dispute. The booking was confirmed — no change was made.',
+    },
+    CANCELLED: {
+      stepIndex: 1,
+      pending: false,
+      title: isAr ? 'تمت مراجعة النزاع' : 'Dispute Reviewed',
+      body: isAr
+        ? 'راجع فريق SYBNB هذا النزاع وتم إلغاء الحجز. تم تقديم طلب استرداد المبلغ وهو الآن قيد المعالجة.'
+        : 'SYBNB reviewed this dispute and the booking was cancelled. A refund was requested and is being processed.',
+    },
+  }
+
+  const fallback: CaseStatusOutcome = {
+    stepIndex: 0,
+    pending: true,
+    title: isAr ? 'تم إرسال النزاع' : 'Dispute Submitted',
+    body: isAr
+      ? 'تم إرسال نزاعك. راجع لوحة التحكم لمعرفة آخر حالة.'
+      : 'Your dispute was submitted. Check your dashboard for the latest status.',
+  }
 
   return (
     <main className="trust-phone" dir={isAr ? 'rtl' : 'ltr'}>
-      <TrustHeader title={isAr ? 'تم إغلاق الحالة' : 'Case Closed'} />
-      <span className="booking-code">{bookingIdLabel(bookingId)}</span>
-      <section className="dispute-closed-card">
-        <strong>✓</strong>
-        <h2>{isAr ? 'تمت معالجة النزاع' : 'Dispute handled'}</h2>
-        <p>
-          {isAr
-            ? 'تم إغلاق الحالة وحفظ القرار في سجل الحجز.'
-            : 'The case is closed and the decision was saved to the booking record.'}
-        </p>
-      </section>
-      <section className="case-timeline">
-        {steps.map((step) => (
-          <span key={step}>✓ {step}</span>
-        ))}
-      </section>
+      <TrustHeader title={isAr ? 'حالة النزاع' : 'Dispute Status'} />
+      <CaseStatusCapsule
+        status={booking?.status || ''}
+        steps={steps}
+        statusMap={statusMap}
+        fallback={fallback}
+        loading={!loaded}
+        loadingLabel={isAr ? 'جارٍ التحميل...' : 'Loading...'}
+        caseLabel={bookingIdLabel(bookingId)}
+      />
       <button className="trust-primary" onClick={() => (window.location.hash = '/dashboard')}>{isAr ? 'العودة لرحلتي' : 'Return to my trip'}</button>
     </main>
   )

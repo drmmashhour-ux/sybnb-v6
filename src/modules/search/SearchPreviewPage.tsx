@@ -30,6 +30,7 @@ const T = {
     details: 'عرض التفاصيل',
     filterTitle: 'اختيار ذكي',
     resultTitle: 'النتائج المناسبة',
+    noPhotoYet: 'لا توجد صور بعد',
     ready: 'جاهز للبحث',
     staysReady: 'جاهز لحجز استضافة',
     staysTitle: 'بحث الإيجار اليومي',
@@ -90,6 +91,7 @@ const T = {
     details: 'View details',
     filterTitle: 'Smart selection',
     resultTitle: 'Matched results',
+    noPhotoYet: 'No photos yet',
     ready: 'Ready to search',
     staysReady: 'Ready to book a stay',
     staysTitle: 'Daily Stay Search',
@@ -266,7 +268,10 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           <div className="search-result-grid">
             {listings.map((listing) => (
               <article key={listing.id} className="search-result-card">
-                <img src={listingImage(listing)} alt={listingTitleText(listing, lang)} loading="lazy" />
+                <div className="search-result-media">
+                  <img src={listingImage(listing)} alt={listingTitleText(listing, lang)} loading="lazy" />
+                  {!hasRealPhoto(listing) && <span className="search-result-no-photo">{t.noPhotoYet}</span>}
+                </div>
                 <div className="search-result-body">
                   {listing.status !== 'APPROVED' && (
                     <span className="search-result-status">{statusText(listing.status, lang)}</span>
@@ -311,6 +316,14 @@ function listingImage(listing: PlatformListing) {
   const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
   if (typeof mediaUrl === 'string') return mediaUrl
   return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+}
+
+// CAPSULE_RULES.noFakeTrustSignal: the fallback image looks like a real, professional listing photo
+// -- without this flag, a guest has no way to tell a real uploaded photo from a generic placeholder,
+// making every result look equally "real" (the audit's exact complaint). Mirrors listingImage()'s own
+// real-media check rather than re-deriving it separately.
+function hasRealPhoto(listing: PlatformListing) {
+  return Boolean(listing.media?.some((item) => typeof (item.url || item.src || item.assetUrl) === 'string'))
 }
 
 function searchSummary(value: UnifiedSearchValue, lang: Lang) {

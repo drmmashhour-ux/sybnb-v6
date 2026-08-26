@@ -5200,12 +5200,35 @@ a {
   overflow: hidden;
 }
 
-.search-result-card > img {
+.search-result-media {
+  position: relative;
+}
+
+.search-result-media img {
   aspect-ratio: 16 / 10;
   display: block;
   filter: brightness(0.9);
   object-fit: cover;
   width: 100%;
+}
+
+.search-result-no-photo {
+  background: rgba(10, 12, 20, 0.78);
+  border-radius: 999px;
+  bottom: 10px;
+  color: #d6d9e6;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 10px;
+  position: absolute;
+}
+
+[dir='rtl'] .search-result-no-photo {
+  right: 10px;
+}
+
+[dir='ltr'] .search-result-no-photo {
+  left: 10px;
 }
 
 .search-result-body {
@@ -5323,7 +5346,7 @@ a {
     grid-template-columns: 116px minmax(0, 1fr);
   }
 
-  .search-result-card > img {
+  .search-result-media img {
     aspect-ratio: auto;
     height: 100%;
   }

@@ -123,7 +123,7 @@ const OPERATION_ACTOR_ROLES = {
 // its booking/listing/division) is even looked up, since intake must durably store an
 // already-authenticated event (the signature was verified upstream, before this call) before any
 // content-dependent decision is made.
-const DIVISIONS = ['STAYS', 'RENTALS', 'BUY', 'CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION', 'PLATFORM']
+const DIVISIONS = ['STAYS', 'RENTALS', 'BUY', 'CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION', 'PLATFORM', 'SR']
 
 const APPROVED_PROVIDER_CONFIGS = {
   manual: {

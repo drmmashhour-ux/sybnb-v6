@@ -337,6 +337,25 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
         note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
       })
     }
+  } else if (proof.rideId) {
+    // SR Ride vs. Uber gap-closure: no booking-style HOLD/release two-step -- a ride completes in
+    // one continuous session (unlike a multi-day stay), so there's no equivalent dispute window to
+    // hold funds against. 100% of the fare goes straight to the driver: SR Ride has no owner-set
+    // commission rate yet, the same "0% until a real business decision is made" placeholder already
+    // used for CARS/MARKETPLACE/NEW_CONSTRUCTION above -- not an assumption, a documented gap.
+    const ride = await tx.rideRequest.findUnique({ where: { id: proof.rideId }, select: { driverId: true } })
+    if (ride?.driverId) {
+      await recordWalletEntry(tx, {
+        userId: ride.driverId,
+        type: 'CREDIT',
+        amountMinor: proof.amountMinor,
+        currency: proof.currency,
+        referenceType: 'ride_fare',
+        referenceId: proof.rideId,
+        keyParts: ['ride-fare', proof.rideId, proof.id],
+        note: 'Driver fare collected after verified rider payment proof.',
+      })
+    }
   }
 
   return proof

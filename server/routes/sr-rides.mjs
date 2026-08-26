@@ -91,6 +91,7 @@ export async function handleSrRides(req, res, url, context) {
           },
         },
         review: true,
+        paymentProofs: { select: { id: true, status: true, amountMinor: true, currency: true }, orderBy: { createdAt: 'desc' }, take: 1 },
       },
     })
     if (!ride) {

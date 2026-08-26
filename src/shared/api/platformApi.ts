@@ -103,6 +103,7 @@ export type PlatformRideRequest = {
     ratingCount: number
   } | null
   review?: PlatformRideReview | null
+  paymentProofs?: Array<{ id: string; status: string; amountMinor: number; currency: string }>
 }
 
 export type PlatformRideReview = {
@@ -863,6 +864,7 @@ export async function fetchPrototypeListing(listingId: string) {
 
 export async function submitPrototypeLocalWalletProof(input: {
   bookingId?: string
+  rideId?: string
   amountMinor: number
   currency: string
   proofAssetUrl?: string

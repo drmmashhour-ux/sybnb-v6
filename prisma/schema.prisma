@@ -326,6 +326,7 @@ model Booking {
 model PaymentProof {
   id              String        @id @default(uuid())
   bookingId       String?       @map("booking_id")
+  rideId          String?       @map("ride_id")
   userId          String        @map("user_id")
   provider        String
   status          PaymentStatus @default(PENDING_PROOF)
@@ -359,8 +360,9 @@ model PaymentProof {
   providerPaymentObjectType String? @map("provider_payment_object_type")
   providerPaymentObjectId   String? @map("provider_payment_object_id")
 
-  booking Booking? @relation(fields: [bookingId], references: [id])
-  payer   User     @relation("PaymentPayer", fields: [userId], references: [id])
+  booking Booking?     @relation(fields: [bookingId], references: [id])
+  ride    RideRequest? @relation(fields: [rideId], references: [id])
+  payer   User         @relation("PaymentPayer", fields: [userId], references: [id])
   refunds Refund[]
 
   // A given provider reference may be submitted only once. Postgres treats NULLs as distinct, so
@@ -988,6 +990,7 @@ model RideRequest {
   pickupLocation Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
   dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
   review         RideReview?
+  paymentProofs  PaymentProof[]
 
   @@index([status, requestedAt])
   @@index([driverId, status])

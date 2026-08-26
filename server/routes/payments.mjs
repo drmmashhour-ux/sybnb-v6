@@ -522,15 +522,33 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    // SR Ride vs. Uber gap-closure: a ride's fare, mirroring the booking case exactly -- only a
+    // COMPLETED ride has a final, real fare (mid-ride the distance/time isn't settled yet, matching
+    // Uber's own post-trip charge model), and only that ride's own rider may submit proof for it.
+    const ride = body.rideId
+      ? await db().rideRequest.findFirst({
+          where: { id: body.rideId, riderId: context.user.id, status: 'COMPLETED' },
+        })
+      : null
+
+    if (body.rideId && !ride) {
+      const error = new Error('This ride is not available for payment proof upload.')
+      error.statusCode = 403
+      error.code = 'PAYMENT_RIDE_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+
     // When a booking is linked, the real amount due is the full guest total — rent plus cleaning
     // fee, tax, extra fees, and the cancellation-protection add-on if purchased (expectedTotalMinor,
     // the same function the Stripe path uses so both rails charge the identical figure the guest was
     // shown) — never a client-supplied figure (only a floor check existed before, with no ceiling,
     // so a guest could claim an arbitrarily inflated amount) and never bare booking.amountMinor
     // (which is rent only — using it here silently dropped the cleaning/tax/protection portion of
-    // every local-wallet payment from the ledger). Client input is only used for the no-booking case
+    // every local-wallet payment from the ledger). A linked ride is the same discipline: its own
+    // locked fareMinor, never client input. Client input is only used for the no-booking-no-ride case
     // (e.g. a standalone seller-plan/advertising payment), which has no independent amount to check.
-    const amountMinor = booking ? expectedTotalMinor(booking) : Number(body.amountMinor || 0)
+    const amountMinor = booking ? expectedTotalMinor(booking) : ride ? ride.fareMinor || 0 : Number(body.amountMinor || 0)
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
       const error = new Error('Payment proof amount must be greater than zero.')
       error.statusCode = 400
@@ -543,7 +561,7 @@ export async function handlePayments(req, res, url, context) {
       operation: 'create',
       rail: 'manual_proof',
       provider: 'manual',
-      division: booking?.listing?.division || 'PLATFORM',
+      division: booking?.listing?.division || (ride ? 'SR' : 'PLATFORM'),
       country: activePolicyCountryKey(),
       environment: policyEnvironment(),
       actor: { roles: context.roles },
@@ -573,17 +591,34 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    if (ride) {
+      // A REJECTED proof must not block resubmission -- only a still-live one (awaiting review, or
+      // already approved) does. Mirrors the intent of the providerRef uniqueness check above, scoped
+      // to this ride instead of a global reference string.
+      const existingRideProof = await db().paymentProof.findFirst({
+        where: { rideId: ride.id, status: { in: ['PENDING_ADMIN_REVIEW', 'APPROVED'] } },
+      })
+      if (existingRideProof) {
+        const error = new Error('Payment proof was already submitted for this ride.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_RIDE_ALREADY_SUBMITTED'
+        error.expose = true
+        throw error
+      }
+    }
+
     const walletProofAssetUrls = normalizeProofAssetUrls(body)
     let proof
     try {
       proof = await db().paymentProof.create({
         data: {
           bookingId: booking?.id || undefined,
+          rideId: ride?.id || undefined,
           userId: context.user.id,
           provider: 'syrian_local_wallet',
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
-          currency: booking?.currency || body.currency || 'SYP',
+          currency: booking?.currency || ride?.currency || body.currency || 'SYP',
           proofAssetUrl: walletProofAssetUrls[0] || undefined,
           proofAssetUrls: walletProofAssetUrls,
           providerRef,

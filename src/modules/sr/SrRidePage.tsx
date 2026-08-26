@@ -8,6 +8,7 @@ import {
   fetchPrototypeSrRide,
   fetchSrQuote,
   resolveApiUrl,
+  submitPrototypeLocalWalletProof,
   submitPrototypeSrRideReview,
   type PlatformRideRequest,
   type PlatformSrQuote,
@@ -56,6 +57,14 @@ const copy = {
     completed: 'اكتملت الرحلة. شكراً لاستخدامك سير.',
     receiptFare: 'المبلغ المدفوع',
     receiptDistance: 'المسافة',
+    payTitle: 'تأكيد الدفع',
+    payCopy: 'ادفع الأجرة للسائق مباشرة (نقداً أو تحويل)، ثم أدخل رقم مرجع العملية هنا ليتحقق منها فريق SYBNB.',
+    payReferencePlaceholder: 'رقم مرجع العملية',
+    paySubmit: 'إرسال إثبات الدفع',
+    paySubmitting: 'جار الإرسال...',
+    paymentPending: 'تم إرسال إثبات الدفع، بانتظار المراجعة.',
+    paymentConfirmed: 'تم تأكيد الدفع.',
+    paymentRejected: 'تعذر قبول إثبات الدفع السابق. يرجى إرسال رقم مرجع صحيح.',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -101,6 +110,14 @@ const copy = {
     completed: 'Ride completed. Thanks for riding with SR.',
     receiptFare: 'Amount charged',
     receiptDistance: 'Distance',
+    payTitle: 'Confirm payment',
+    payCopy: "Pay the fare directly to the driver (cash or transfer), then enter the transaction reference here so SYBNB can verify it.",
+    payReferencePlaceholder: 'Transaction reference',
+    paySubmit: 'Submit payment proof',
+    paySubmitting: 'Submitting...',
+    paymentPending: 'Payment proof submitted, awaiting review.',
+    paymentConfirmed: 'Payment confirmed.',
+    paymentRejected: 'The previous payment proof could not be accepted. Please submit a valid reference.',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -146,6 +163,8 @@ export function SrRidePage({ lang }: Props) {
   const [reviewRating, setReviewRating] = useState(0)
   const [reviewComment, setReviewComment] = useState('')
   const [reviewStatus, setReviewStatus] = useState<'idle' | 'saving' | 'error'>('idle')
+  const [payProviderRef, setPayProviderRef] = useState('')
+  const [payStatus, setPayStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
   const fallbackFareMinor = useMemo(() => {
@@ -278,6 +297,27 @@ export function SrRidePage({ lang }: Props) {
       setReviewStatus('idle')
     } catch (error) {
       setReviewStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function submitPayment() {
+    if (!ride || !payProviderRef.trim()) return
+    setPayStatus('saving')
+    try {
+      // amountMinor/currency are sent for display continuity only -- the server derives the real
+      // charge from the ride's own locked fareMinor, never trusts this value (see
+      // server/routes/payments.mjs's local-wallet-proof handler).
+      await submitPrototypeLocalWalletProof({
+        rideId: ride.id,
+        amountMinor: ride.fareMinor || 0,
+        currency: ride.currency,
+        providerRef: payProviderRef.trim(),
+      })
+      setRide(await fetchPrototypeSrRide(ride.id))
+      setPayStatus('submitted')
+    } catch (error) {
+      setPayStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
     }
   }
@@ -416,6 +456,32 @@ export function SrRidePage({ lang }: Props) {
                   <strong dir="ltr">{ride.metadata.distanceKm} km</strong>
                 </div>
               )}
+              {(() => {
+                const latestProof = ride.paymentProofs?.[0]
+                if (latestProof?.status === 'APPROVED') {
+                  return <div style={styles.message}>✓ {t.paymentConfirmed}</div>
+                }
+                if (latestProof?.status === 'PENDING_ADMIN_REVIEW') {
+                  return <div style={styles.message}>{t.paymentPending}</div>
+                }
+                // A REJECTED proof falls through to the form below so the rider can resubmit.
+                return (
+                  <div style={styles.card}>
+                    <strong>{t.payTitle}</strong>
+                    <span>{t.payCopy}</span>
+                    {latestProof?.status === 'REJECTED' && <p style={styles.addressWarning}>{t.paymentRejected}</p>}
+                    <input
+                      style={styles.payInput}
+                      value={payProviderRef}
+                      onChange={(event) => setPayProviderRef(event.target.value)}
+                      placeholder={t.payReferencePlaceholder}
+                    />
+                    <button disabled={!payProviderRef.trim() || payStatus === 'saving'} style={styles.primaryButton} onClick={() => void submitPayment()}>
+                      {payStatus === 'saving' ? t.paySubmitting : t.paySubmit}
+                    </button>
+                  </div>
+                )
+              })()}
               {ride.review ? (
                 <div style={styles.message}>
                   {t.yourRating}: {'★'.repeat(ride.review.rating)}
@@ -538,4 +604,5 @@ const styles: Record<string, CSSProperties> = {
   star: { border: 0, background: 'transparent', color: '#3a4459', fontSize: 28, padding: 0, cursor: 'pointer' },
   starActive: { border: 0, background: 'transparent', color: '#e5b80b', fontSize: 28, padding: 0, cursor: 'pointer' },
   reviewTextarea: { minHeight: 64, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: 10, fontFamily: 'inherit', resize: 'vertical' },
+  payInput: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
 }

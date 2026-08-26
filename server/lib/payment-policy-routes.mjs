@@ -40,6 +40,9 @@ export const PAYMENT_POLICY_ROUTES = Object.freeze([
   // --- admin.mjs (paying the host out — the owner-authorized 8th operation type) ---
   { method: 'PATCH', pathPattern: '^/api/admin/payouts/[^/]+/release$', operation: 'payout_release', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
 
+  // --- admin.mjs (Item 2 Phase 2b round 1 — the owner-authorized 9th operation type) ---
+  { method: 'PATCH', pathPattern: '^/api/admin/refunds/[^/]+/legacy-accept$', operation: 'legacy_refund_accept', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
+
   // --- host.mjs (host-initiated cancellation, reverses an approved payment — found by the
   // all-routers enforcement scan, not the original hand-survey; see the implementation report) ---
   { method: 'PATCH', pathPattern: '^/api/host/requests/[^/]+$', operation: 'refund', file: 'server/routes/host.mjs', rail: 'manual_proof' },

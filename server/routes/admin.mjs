@@ -6,6 +6,7 @@ import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
+import { idempotencyKey } from '../lib/security.mjs'
 
 export async function handleAdmin(req, res, url, context) {
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)
@@ -180,6 +181,194 @@ export async function handleAdmin(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, walletEntry: entry })
+  }
+
+  const legacyRefundAcceptMatch = url.pathname.match(/^\/api\/admin\/refunds\/([^/]+)\/legacy-accept$/)
+  if (legacyRefundAcceptMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+
+    const refundId = legacyRefundAcceptMatch[1]
+    const body = await readJson(req)
+    const reason = typeof body.reason === 'string' ? body.reason.trim().replace(/\s+/g, ' ') : ''
+    if (!reason || reason.length > 2000) {
+      const error = new Error('reason must be a non-empty string of at most 2000 characters.')
+      error.statusCode = 400
+      error.code = 'INVALID_ACCEPTANCE_REASON'
+      error.expose = true
+      throw error
+    }
+
+    const refund = await db().refund.findUnique({
+      where: { id: refundId },
+      include: { paymentProof: { include: { booking: { include: { listing: true } } } } },
+    })
+    if (!refund) {
+      const error = new Error('Refund not found.')
+      error.statusCode = 404
+      error.code = 'REFUND_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    // Item 2 Phase 2b round 1, mandatory boundary: this operation exists ONLY for migrated legacy
+    // refunds -- it must never become a route to fast-track a real, non-legacy ACTION_REQUIRED
+    // refund. Step 2's LEGACY_PENDING_CONFIRMATION requirement below already makes that
+    // structurally impossible (that status is CHECK-constrained to migratedFromLegacy=true rows
+    // only), but this explicit, early check gives a clear, honest error instead of a confusing
+    // "no eligible attempt found" for an obviously-wrong request.
+    if (!refund.migratedFromLegacy) {
+      const error = new Error('legacy_refund_accept only applies to refunds migrated from legacy data.')
+      error.statusCode = 400
+      error.code = 'REFUND_NOT_LEGACY'
+      error.expose = true
+      throw error
+    }
+
+    const division = refund.paymentProof?.booking?.listing?.division || 'PLATFORM'
+
+    authorizePaymentOperation({
+      operation: 'legacy_refund_accept',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
+    const acceptedAt = new Date()
+
+    const result = await db().$transaction(async (tx) => {
+      // Step 1: claim -- the PRIMARY refund-level serializer. Guarded on the exact precondition a
+      // legacy ACTION_REQUIRED refund is created with (see scripts/migrate-legacy-refunds-2a.mjs);
+      // 0 rows means already claimed, already resolved, or genuinely not eligible.
+      const claimed = await tx.refund.updateMany({
+        where: { id: refundId, status: 'ACTION_REQUIRED', reservationHeld: true },
+        data: { status: 'IN_PROGRESS' },
+      })
+      if (claimed.count !== 1) {
+        const error = new Error('Refund is not currently claimable (already in progress, already resolved, or not reservation-held).')
+        error.statusCode = 409
+        error.code = 'REFUND_NOT_CLAIMABLE'
+        error.expose = true
+        throw error
+      }
+      const claimedRefund = await tx.refund.findUniqueOrThrow({ where: { id: refundId } })
+
+      // Step 2: derive the original attempt from claimedRefund.id, never from a caller-supplied id
+      // (closes the substitution risk an earlier design revision was rejected for). Matches ONLY
+      // LEGACY_PENDING_CONFIRMATION -- deliberately excludes LEGACY_UNVERIFIED, which is the
+      // explicit owner decision (Finding 8) that zero-evidence legacy rows get no automated
+      // acceptance path at all in this phase.
+      const candidates = await tx.refundAttempt.findMany({
+        where: { refundId: claimedRefund.id, status: 'LEGACY_PENDING_CONFIRMATION', supersededByAttemptId: null },
+      })
+      if (candidates.length !== 1) {
+        const error = new Error(
+          `Expected exactly one LEGACY_PENDING_CONFIRMATION attempt to accept for this refund; found ${candidates.length}. ` +
+          'LEGACY_UNVERIFIED refunds have no automated acceptance path and are not eligible here.',
+        )
+        error.statusCode = 409
+        error.code = 'NO_ACCEPTABLE_LEGACY_ATTEMPT'
+        error.expose = true
+        throw error
+      }
+      const original = candidates[0]
+
+      // Step 3: insert the new LEGACY_ACCOUNTING_ACCEPTED attempt. The evidence digest binds the
+      // refund, the original attempt/evidence being accepted, the amount/currency, the actor, the
+      // acceptance timestamp, and the normalized reason -- reusing the same sha256-of-joined-parts
+      // primitive every idempotency key in this codebase already uses, not a new mechanism.
+      const evidenceDigest = idempotencyKey([
+        'legacy_refund_accept',
+        claimedRefund.id,
+        original.id,
+        original.legacyPaymentEventId,
+        String(claimedRefund.amountMinor),
+        claimedRefund.currency,
+        context.user.id,
+        acceptedAt.toISOString(),
+        reason,
+      ])
+      const newAttempt = await tx.refundAttempt.create({
+        data: {
+          refundId: claimedRefund.id,
+          status: 'LEGACY_ACCOUNTING_ACCEPTED',
+          migratedFromLegacy: true,
+          completedAt: acceptedAt,
+          legacyPaymentEventId: original.legacyPaymentEventId,
+          legacyAcceptedByUserId: context.user.id,
+          legacyAcceptedAt: acceptedAt,
+          legacyAcceptanceReason: reason,
+          legacyAcceptanceEvidenceDigest: evidenceDigest,
+        },
+      })
+
+      // Step 4: mark the original attempt superseded -- an independent, attempt-scoped
+      // defense-in-depth guard (the primary invariant is the refund_attempt_supersession_once
+      // trigger, which holds regardless of caller).
+      const superseded = await tx.refundAttempt.updateMany({
+        where: { id: original.id, supersededByAttemptId: null },
+        data: { supersededByAttemptId: newAttempt.id },
+      })
+      if (superseded.count !== 1) {
+        const error = new Error('Could not mark the original attempt as superseded.')
+        error.statusCode = 409
+        error.code = 'SUPERSESSION_FAILED'
+        error.expose = true
+        throw error
+      }
+
+      // Step 5: transfer reserved -> accepted on the payment proof. Must affect EXACTLY one row;
+      // anything else is an anomaly (not a normal race outcome, since Step 1 already confirmed
+      // reservation validity) and rolls back Steps 1-4 too. Uses ONLY claimedRefund's own fields,
+      // never a caller-supplied proof id or amount.
+      const transferred = await tx.paymentProof.updateMany({
+        where: { id: claimedRefund.paymentProofId, reservedRefundMinor: { gte: claimedRefund.amountMinor } },
+        data: {
+          reservedRefundMinor: { decrement: claimedRefund.amountMinor },
+          acceptedRefundMinor: { increment: claimedRefund.amountMinor },
+        },
+      })
+      if (transferred.count !== 1) {
+        const error = new Error('Anomaly: payment proof counter transfer did not affect exactly one row.')
+        error.statusCode = 500
+        error.code = 'COUNTER_TRANSFER_ANOMALY'
+        throw error
+      }
+
+      // Step 6: finalize. Same exactly-one-row discipline as Step 5. succeededAt is deliberately
+      // NEVER set here -- ACCOUNTING_ACCEPTED is a materially different epistemic claim (an
+      // owner's acceptance of incomplete evidence) from genuine provider/ledger-confirmed SUCCEEDED,
+      // and must never become indistinguishable from it anywhere downstream.
+      const finalized = await tx.refund.updateMany({
+        where: { id: claimedRefund.id, status: 'IN_PROGRESS', reservationHeld: true },
+        data: { status: 'ACCOUNTING_ACCEPTED', reservationHeld: false },
+      })
+      if (finalized.count !== 1) {
+        const error = new Error('Anomaly: refund finalize did not affect exactly one row.')
+        error.statusCode = 500
+        error.code = 'REFUND_FINALIZE_ANOMALY'
+        throw error
+      }
+
+      const auditLog = await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'ADMIN_LEGACY_REFUND_ACCEPTED',
+          entityType: 'refunds',
+          entityId: claimedRefund.id,
+          before: { refund: claimedRefund, originalAttemptId: original.id },
+          after: { refundStatus: 'ACCOUNTING_ACCEPTED', newAttemptId: newAttempt.id, evidenceDigest },
+        },
+      })
+
+      return { refundId: claimedRefund.id, newAttemptId: newAttempt.id, auditLogId: auditLog.id }
+    })
+
+    const refreshed = await db().refund.findUnique({ where: { id: result.refundId }, include: { attempts: true } })
+    return json(res, 200, { ok: true, refund: refreshed })
   }
 
   if (url.pathname === '/api/admin/review-queue') {

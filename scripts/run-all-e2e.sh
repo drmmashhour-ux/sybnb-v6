@@ -4,7 +4,7 @@
 #
 # Prereqs: local Postgres with the schema-correct `sybnb_v6` DB, and the synthetic user ids below.
 # Usage:  bash scripts/run-all-e2e.sh
-#         PAYMENT_ONLY=1 bash scripts/run-all-e2e.sh   -- runs ONLY the 13 payment suites; exits 0 iff
+#         PAYMENT_ONLY=1 bash scripts/run-all-e2e.sh   -- runs ONLY the 14 payment suites; exits 0 iff
 #         all 13 pass, independent of the other (pre-existing, unrelated) suites this script also runs
 #         in full mode. Use this as the actual green/red gate for payment work -- the full-mode run
 #         stays honestly non-zero while marketplace/cars/buy/rentals/new-construction/sell/advertising/
@@ -78,6 +78,7 @@ export PAYMENT_OPERATION_MANUAL_PROOF_CAPTURE_ENABLED=true
 export PAYMENT_OPERATION_MANUAL_PROOF_REFUND_ENABLED=true
 export PAYMENT_OPERATION_MANUAL_PROOF_PAYOUT_RELEASE_ENABLED=true
 export PAYMENT_OPERATION_MANUAL_PROOF_RECONCILIATION_READ_ENABLED=true
+export PAYMENT_OPERATION_MANUAL_PROOF_LEGACY_REFUND_ACCEPT_ENABLED=true
 
 psql_reset() { psql -d sybnb_v6 -tAc "DELETE FROM seller_profiles WHERE user_id IN ('$SELLER1','$SELLER2'); DELETE FROM payment_proofs WHERE provider='seller_plan';" >/dev/null 2>&1; }
 
@@ -145,6 +146,7 @@ run "payment-evt-dur"  payment-event-durability.e2e.mjs
 run "payment-evt-id"   payment-event-identity.e2e.mjs
 run "payment-evt-claim" payment-event-claim-recovery.e2e.mjs
 run "payment-evt-supr" payment-event-supersession.e2e.mjs
+run "payment-legacy-accept" legacy-refund-accept.e2e.mjs
 run_full "marketplace"      marketplace.e2e.mjs      reset
 run_full "cars"             cars.e2e.mjs             reset
 run_full "buy"              buy.e2e.mjs              reset

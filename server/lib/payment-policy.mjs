@@ -27,6 +27,15 @@ export const PAYMENT_OPERATIONS = Object.freeze([
   // have made those types ambiguous for every other call site; a distinct type keeps each
   // operation meaning exactly one thing.
   'payout_release',
+  // ADMIN-only acceptance of an incomplete-evidence legacy refund (Item 2 Phase 2b round 1) --
+  // moves a migrated Refund from ACTION_REQUIRED to the genuinely distinct ACCOUNTING_ACCEPTED
+  // status via the approved 6-step legacy_refund_accept transaction. No provider call, no wallet
+  // entry -- a pure ledger reclassification of an owner's accounting decision, gated the same as
+  // every other admin money-adjacent operation. Applies ONLY to refunds with a real
+  // LEGACY_PENDING_CONFIRMATION attempt (structurally impossible for LEGACY_UNVERIFIED or any
+  // non-legacy attempt to satisfy) -- the 43 zero-evidence LEGACY_UNVERIFIED rows have no
+  // acceptance path here or anywhere yet, by explicit owner decision.
+  'legacy_refund_accept',
 ])
 
 // An emergency stop pauses everything EXCEPT durable, authenticated webhook intake and read-only
@@ -74,6 +83,7 @@ const OPERATION_ACTOR_ROLES = {
   replay: ['ADMIN'],
   refund: ['ADMIN'],
   payout_release: ['ADMIN'],
+  legacy_refund_accept: ['ADMIN'],
 }
 
 // A payment rail's configuration must be an explicitly approved record, not merely "an env var is

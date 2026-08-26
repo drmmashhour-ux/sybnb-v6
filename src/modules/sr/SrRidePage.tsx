@@ -10,6 +10,7 @@ import {
   fetchSrQuote,
   resolveApiUrl,
   sendPrototypeSrRideMessage,
+  sharePrototypeSrRide,
   submitPrototypeLocalWalletProof,
   submitPrototypeSrRideReview,
   type PlatformMessage,
@@ -21,6 +22,8 @@ const ACTIVE_RIDE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVE
 const RIDER_CANCELLABLE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING']
 // Matches MESSAGING_ELIGIBLE_RIDE_STATUSES in server/routes/messages.mjs.
 const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']
+// Matches LIVE_TRACKING_STATUSES in server/routes/sr-rides.mjs.
+const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { RideMap } from '../../shared/maps/RideMap'
@@ -79,6 +82,11 @@ const copy = {
     chatEmpty: 'لا توجد رسائل بعد.',
     chatPlaceholder: 'اكتب رسالة...',
     chatSend: 'إرسال',
+    shareTrip: 'شارك رحلتي',
+    sharing: 'جار المشاركة...',
+    shareCopied: '✓ تم نسخ رابط المشاركة',
+    shareTitle: 'رحلتي مع سير',
+    shareText: 'تابع رحلتي مباشرة عبر هذا الرابط.',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -140,6 +148,11 @@ const copy = {
     chatEmpty: 'No messages yet.',
     chatPlaceholder: 'Type a message...',
     chatSend: 'Send',
+    shareTrip: 'Share my trip',
+    sharing: 'Sharing...',
+    shareCopied: '✓ Share link copied',
+    shareTitle: 'My SR ride',
+    shareText: 'Follow my ride live via this link.',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -190,6 +203,7 @@ export function SrRidePage({ lang }: Props) {
   const [chatMessages, setChatMessages] = useState<PlatformMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatStatus, setChatStatus] = useState<'idle' | 'sending' | 'error'>('idle')
+  const [shareStatus, setShareStatus] = useState<'idle' | 'sharing' | 'copied' | 'error'>('idle')
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
   const fallbackFareMinor = useMemo(() => {
@@ -251,6 +265,31 @@ export function SrRidePage({ lang }: Props) {
       setChatStatus('idle')
     } catch (error) {
       setChatStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function shareTrip() {
+    if (!ride) return
+    setShareStatus('sharing')
+    try {
+      const { rideId, exp, sig } = await sharePrototypeSrRide(ride.id)
+      const shareUrl = `${window.location.origin}${window.location.pathname}#/ride/shared/${rideId}?exp=${exp}&sig=${sig}`
+      if (navigator.share) {
+        await navigator.share({ title: t.shareTitle, text: t.shareText, url: shareUrl })
+        setShareStatus('idle')
+      } else {
+        await navigator.clipboard.writeText(shareUrl)
+        setShareStatus('copied')
+      }
+    } catch (error) {
+      // The user closing the native share sheet without picking anything throws AbortError -- not
+      // a real failure, so it shouldn't surface as one.
+      if (error instanceof Error && error.name === 'AbortError') {
+        setShareStatus('idle')
+        return
+      }
+      setShareStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
     }
   }
@@ -624,6 +663,12 @@ export function SrRidePage({ lang }: Props) {
                 </>
               )}
             </>
+          )}
+
+          {ride && LIVE_TRACKING_STATUSES.includes(ride.status) && (
+            <button disabled={shareStatus === 'sharing'} style={styles.secondaryButton} onClick={() => void shareTrip()}>
+              {shareStatus === 'copied' ? t.shareCopied : shareStatus === 'sharing' ? t.sharing : t.shareTrip}
+            </button>
           )}
 
           {ride && ACTIVE_RIDE_STATUSES.includes(ride.status) && (

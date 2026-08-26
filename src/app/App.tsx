@@ -33,6 +33,7 @@ const RentalsPage = lazyNamed(() => import('../modules/rentals/RentalsPage'), 'R
 const SearchPreviewPage = lazyNamed(() => import('../modules/search/SearchPreviewPage'), 'SearchPreviewPage')
 const SellerDivisionRoutes = lazyNamed(() => import('../modules/seller'), 'SellerDivisionRoutes')
 const SrRidePage = lazyNamed(() => import('../modules/sr/SrRidePage'), 'SrRidePage')
+const SharedRidePage = lazyNamed(() => import('../modules/sr/SharedRidePage'), 'SharedRidePage')
 const StaffAccessPage = lazyNamed(() => import('../modules/account/StaffAccessPage'), 'StaffAccessPage')
 const SyrianLocalWalletPaymentPage = lazyNamed(
   () => import('../modules/payments/SyrianLocalWalletPaymentPage'),
@@ -92,6 +93,10 @@ export function App() {
   const listingMatch = path.match(/^\/listing\/([^/]+)$/)
   const paymentReceiptMatch = path.match(/^\/payment\/receipt\/([^/]+)$/)
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
+  // SR Ride vs. Uber gap-closure (P0 #3): a trip-share link -- deliberately public/ungated, same
+  // category as the trust-center/SOS routes below (informational, verified by its own signed token
+  // rather than a session; see server/lib/ride-share.mjs). Never added to guestProtectedRoute.
+  const sharedRideMatch = path.match(/^\/ride\/shared\/([^/?]+)(?:\?(.*))?$/)
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
   // Claiming a gift calls a requireAuth() endpoint (server/routes/wallet.mjs), so a real guest
   // session must exist before the claim screens render — otherwise the only thing standing between
@@ -168,6 +173,13 @@ export function App() {
           <ListingDetailPage listingId={listingMatch[1]} lang={lang} />
         ) : path === '/ride' || path === '/ride-preview' ? (
           <SrRidePage lang={lang} />
+        ) : sharedRideMatch ? (
+          <SharedRidePage
+            lang={lang}
+            rideId={sharedRideMatch[1]}
+            exp={new URLSearchParams(sharedRideMatch[2] || '').get('exp') || ''}
+            sig={new URLSearchParams(sharedRideMatch[2] || '').get('sig') || ''}
+          />
         ) : isSellerRoute(path) ? (
           <SellerDivisionRoutes lang={lang} path={path} />
         ) : path === '/search-preview' || path === '/stays' ? (

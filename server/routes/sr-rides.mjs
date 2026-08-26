@@ -7,6 +7,7 @@ import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { getDriverLocation, getRideCoords } from '../lib/live-map.mjs'
+import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -390,6 +391,101 @@ export async function handleSrRides(req, res, url, context) {
     })
 
     return json(res, 201, { ok: true, review })
+  }
+
+  // SR Ride vs. Uber gap-closure (P0 #3): trip-sharing with a trusted contact. Mints a signed,
+  // time-limited token (server/lib/ride-share.mjs) -- no account needed to view, matching how
+  // Uber's own share links work. Only mintable while the ride is actually in a live-tracking
+  // status; sharing a not-yet-matched or already-finished ride has nothing live to show.
+  const shareMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/share$/)
+  if (shareMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+
+    const ride = await db().rideRequest.findUnique({ where: { id: shareMatch[1] } })
+    if (!ride || ride.riderId !== context.user.id) {
+      const error = new Error('Ride request not found for this account.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (!LIVE_TRACKING_STATUSES.includes(ride.status)) {
+      const error = new Error('This ride cannot be shared right now.')
+      error.statusCode = 400
+      error.code = 'RIDE_NOT_SHAREABLE'
+      error.expose = true
+      throw error
+    }
+
+    const { exp, sig } = signRideShareToken(ride.id)
+    return json(res, 200, { ok: true, rideId: ride.id, exp, sig })
+  }
+
+  // Public: no auth, verified purely by the signed token above. Deliberately minimal -- never the
+  // rider's own identity (whoever holds this link already knows who they're checking on), never
+  // payment/fare data, never the driver's raw internal review status.
+  const sharedMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/shared$/)
+  if (sharedMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    const rideId = sharedMatch[1]
+    const exp = url.searchParams.get('exp')
+    const sig = url.searchParams.get('sig')
+    if (!verifyRideShareToken(rideId, exp, sig)) {
+      const error = new Error('This share link is invalid or has expired.')
+      error.statusCode = 403
+      error.code = 'RIDE_SHARE_INVALID'
+      error.expose = true
+      throw error
+    }
+
+    const ride = await db().rideRequest.findUnique({
+      where: { id: rideId },
+      include: {
+        driver: {
+          select: {
+            displayName: true,
+            idDocumentStatus: true,
+            driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, photoRef: true } },
+          },
+        },
+      },
+    })
+    if (!ride) {
+      const error = new Error('Ride request not found.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    const rideCoords = await getRideCoords(ride.id)
+    const driverLocation =
+      ride.driverId && LIVE_TRACKING_STATUSES.includes(ride.status) ? await getDriverLocation(ride.driverId) : null
+
+    return json(res, 200, {
+      ok: true,
+      ride: {
+        status: ride.status,
+        pickupCoords: rideCoords.pickup,
+        dropoffCoords: rideCoords.dropoff,
+        driver: ride.driver
+          ? {
+              displayName: ride.driver.displayName,
+              isVerified: ride.driver.idDocumentStatus === 'APPROVED',
+              driverProfile: ride.driver.driverProfile
+                ? {
+                    vehicleMake: ride.driver.driverProfile.vehicleMake,
+                    vehicleModel: ride.driver.driverProfile.vehicleModel,
+                    vehiclePlate: ride.driver.driverProfile.vehiclePlate,
+                    photoUrl: ride.driver.driverProfile.photoRef ? signDriverPhotoUrl(ride.driver.driverProfile.photoRef) : null,
+                  }
+                : null,
+              location: driverLocation,
+            }
+          : null,
+      },
+    })
   }
 
   return false

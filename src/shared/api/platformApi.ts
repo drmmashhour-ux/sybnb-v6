@@ -1173,6 +1173,35 @@ export async function sendPrototypeSrRideMessage(rideId: string, body: string, a
   return response.message
 }
 
+export async function sharePrototypeSrRide(rideId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; rideId: string; exp: number; sig: string }>(`/api/sr/rides/${rideId}/share`, {
+    method: 'POST',
+    token: session.token,
+  })
+  return response
+}
+
+export type PlatformSharedRide = {
+  status: string
+  pickupCoords: { lat: number; lng: number } | null
+  dropoffCoords: { lat: number; lng: number } | null
+  driver: {
+    displayName: string
+    isVerified: boolean
+    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; photoUrl: string | null } | null
+    location: { lat: number; lng: number; updatedAt: string } | null
+  } | null
+}
+
+// Public -- no session, verified purely by the signed exp/sig pair (server/lib/ride-share.mjs).
+export async function fetchSharedSrRide(rideId: string, exp: string, sig: string) {
+  const response = await apiRequest<{ ok: true; ride: PlatformSharedRide }>(
+    `/api/sr/rides/${rideId}/shared?exp=${encodeURIComponent(exp)}&sig=${encodeURIComponent(sig)}`,
+  )
+  return response.ride
+}
+
 export async function fetchPrototypeDriverOverview() {
   const session = await ensurePrototypeDriverSession()
   const response = await apiRequest<{ ok: true; overview: PlatformDriverOverview }>('/api/driver/rides', {

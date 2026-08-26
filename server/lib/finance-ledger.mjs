@@ -376,6 +376,158 @@ export function isProviderRefUniqueViolation(err) {
     (Array.isArray(target) && target.includes('provider_ref')) || String(target || '').includes('provider_ref'))
 }
 
+// Same P2002-recognition pattern, for the refunds_one_active_per_payment_proof partial unique
+// index (Item 2 Phase 2a) -- a second, genuinely different refund request against a payment proof
+// that already has an active (REQUESTED/IN_PROGRESS/ACTION_REQUIRED) refund hits this.
+function isActiveRefundUniqueViolation(err) {
+  const target = err?.meta?.target
+  return err?.code === 'P2002' && (target === 'refunds_one_active_per_payment_proof' ||
+    (Array.isArray(target) && target.includes('payment_proof_id')) || String(target || '').includes('payment_proof_id'))
+}
+
+// Mirrors the manual-family allowlist scripts/migrate-legacy-refunds-2a.mjs already uses for the
+// exact same reasoning: these are the only providers with no external processor to canonicalize
+// against, so the PaymentProof itself can stand in as the refunded object's identity.
+const MANUAL_REFUND_PROVIDER_FAMILY = new Set(['manual', 'syrian_local_wallet', 'sham_cash'])
+
+// The closed, code-level catalogue this refund-request layer accepts -- matches the approved
+// design's REFUND_ELIGIBILITY_POLICY reason codes exactly. 'LEGACY_UNKNOWN' is deliberately absent:
+// it is a migration-only historical value written once by the Phase 2a backfill for rows with no
+// recoverable source route, and must never be reachable from a NEW refund request (Item 2 Phase 2b
+// round 2, explicit owner instruction).
+const NEW_REFUND_REASON_CODES = new Set(['GUEST_CANCELLED', 'HOST_CANCELLED', 'ADMIN_REJECTED_BOOKING', 'DISPUTE_RULING'])
+
+// Item 2 Phase 2b round 2: creates a Refund + initial (non-legacy) RefundAttempt for a live
+// host/guest/admin refund-triggering action, REPLACING the immediate wallet credit these three
+// flows previously issued directly (owner-confirmed: fulfillment is deferred to a later phase that
+// adds real outbound execution -- this function makes zero wallet entries and zero provider calls).
+//
+// Every field the caller supplies is what that flow ALREADY computed for its own refund amount
+// (unchanged from before this round) -- this function does not re-derive eligibility, it only
+// atomically reserves the given amount against the hard, unconditional payment_proofs.amount_minor
+// cap (never a policy-dependent ceiling) and records the request.
+//
+// Idempotent by (proofId, reasonCode, amountMinor, currency): a genuine retry of the exact same
+// logical request (e.g. a double-submit) returns the existing attempt, no new writes. A genuinely
+// DIFFERENT request against a proof that already has an active refund is refused with
+// DUPLICATE_REFUND_REQUEST -- refunds_one_active_per_payment_proof is the real, database-enforced
+// authority; this function's own idempotency check is a convenience layer in front of it, not a
+// substitute.
+//
+// The manual-rail canonical-request shape (provider='manual', providerPaymentObjectType=
+// 'payment_proof', providerPaymentObjectId=paymentProofId) is deliberate: this codebase's manual/
+// wallet rail has no external processor object to reference (no Stripe charge id, nothing) -- the
+// PaymentProof record itself is the real, stable, always-present identity being refunded against.
+// Card-rail proofs are NOT supported by this function -- PaymentProof.providerPaymentObjectType/Id
+// are still null on every existing proof (no live code populates them yet; that is a distinct,
+// separate change to finalizeStripeSession, out of this round's scope) -- callers must not invoke
+// this for a card-family proof.
+export async function createRefundRequest(tx, {
+  paymentProofId,
+  bookingId,
+  requestedByUserId,
+  amountMinor,
+  currency,
+  reason,
+  reasonCode,
+}) {
+  if (!NEW_REFUND_REASON_CODES.has(reasonCode)) {
+    throw new Error(`createRefundRequest: reasonCode '${reasonCode}' is not in the closed catalogue for new refund requests.`)
+  }
+  const normalizedAmount = Math.round(amountMinor || 0)
+  if (!paymentProofId || !normalizedAmount || normalizedAmount <= 0) {
+    throw new Error('createRefundRequest: paymentProofId and a positive amountMinor are required.')
+  }
+
+  // Defense in depth, not just caller convention: this function's canonical-request shape claims
+  // provider='manual' -- refuse rather than silently mislabel a card-family proof (mirrors the
+  // manual-family allowlist the Phase 2a classification script already uses, same reasoning: a
+  // wrongly-typed match here would be worse than the pre-existing, already-flagged gap where
+  // host.mjs/bookings.mjs credit the wallet for a card payment with no isCardPayment guard).
+  const targetProof = await tx.paymentProof.findUnique({ where: { id: paymentProofId }, select: { provider: true } })
+  if (!targetProof) {
+    const error = new Error('Payment proof not found.')
+    error.statusCode = 404
+    error.code = 'PAYMENT_PROOF_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
+  if (!MANUAL_REFUND_PROVIDER_FAMILY.has(targetProof.provider)) {
+    const error = new Error(`createRefundRequest does not support provider '${targetProof.provider}' -- this refund needs a real provider-issued refund, not a wallet-rail request.`)
+    error.statusCode = 400
+    error.code = 'REFUND_PROVIDER_NOT_SUPPORTED'
+    error.expose = true
+    throw error
+  }
+
+  const provider = 'manual'
+  const providerEndpointKey = 'sybnb-manual-review'
+  const providerPaymentObjectType = 'payment_proof'
+  const providerPaymentObjectId = paymentProofId
+  const canonicalRequestVersion = 1
+
+  const key = idempotencyKey(['refund-request', paymentProofId, reasonCode, String(normalizedAmount), currency])
+  const existingAttempt = await tx.refundAttempt.findUnique({ where: { idempotencyKey: key }, include: { refund: true } })
+  if (existingAttempt) {
+    return { refund: existingAttempt.refund, attempt: existingAttempt, idempotent: true }
+  }
+
+  // Atomic, cumulative, database-enforced reservation -- checked in THIS single guarded statement,
+  // never a separate pre-check: reserved + succeeded + accepted (the two other terminal buckets, so
+  // a proof partially consumed by an earlier, now-terminal refund correctly has less headroom) plus
+  // this new request must not exceed the proof's own amount_minor. 0 rows means insufficient
+  // capacity -- refused before any Refund/RefundAttempt row is ever created.
+  const reserved = await tx.$executeRaw`
+    UPDATE payment_proofs
+    SET reserved_refund_minor = reserved_refund_minor + ${normalizedAmount}
+    WHERE id = ${paymentProofId}::uuid
+      AND reserved_refund_minor + succeeded_refund_minor + accepted_refund_minor + ${normalizedAmount} <= amount_minor
+  `
+  if (reserved !== 1) {
+    const error = new Error('This payment proof does not have enough remaining refundable capacity for this request.')
+    error.statusCode = 409
+    error.code = 'INSUFFICIENT_REFUND_CAPACITY'
+    error.expose = true
+    throw error
+  }
+
+  let refund
+  try {
+    refund = await tx.refund.create({
+      data: {
+        paymentProofId, bookingId, requestedByUserId, amountMinor: normalizedAmount, currency,
+        reason, reasonCode, rail: 'manual_proof', status: 'IN_PROGRESS', reservationHeld: true,
+        migratedFromLegacy: false,
+      },
+    })
+  } catch (err) {
+    if (isActiveRefundUniqueViolation(err)) {
+      const error = new Error('A refund is already active for this payment proof.')
+      error.statusCode = 409
+      error.code = 'DUPLICATE_REFUND_REQUEST'
+      error.expose = true
+      throw error
+    }
+    throw err
+  }
+
+  const requestFingerprint = idempotencyKey([
+    provider, providerPaymentObjectType, providerPaymentObjectId, providerEndpointKey,
+    String(normalizedAmount), currency, String(canonicalRequestVersion),
+  ])
+
+  const attempt = await tx.refundAttempt.create({
+    data: {
+      refundId: refund.id, status: 'CLAIMED', migratedFromLegacy: false,
+      canonicalRequestVersion, provider, providerPaymentObjectType, providerPaymentObjectId,
+      providerEndpointKey, amountMinor: normalizedAmount, currency,
+      idempotencyKey: key, requestFingerprint,
+    },
+  })
+
+  return { refund, attempt, idempotent: false }
+}
+
 // Picks the actor for a system/webhook-driven auto-approval that has no human context.user — e.g.
 // a Stripe or PaymentIntent webhook confirming a charge with nobody reviewing it in an admin tab.
 export async function firstAdminId(tx) {

@@ -6,6 +6,7 @@ import {
   bookingFinanceSplit,
   buildPayoutRow,
   cancellationAdminFee,
+  createRefundRequest,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
@@ -228,16 +229,30 @@ export async function handleHost(req, res, url, context) {
           },
         })
 
-        await recordWalletEntry(tx, {
-          userId: existing.guestId,
-          type: 'REFUND',
-          amountMinor: approvedPayment?.amountMinor || existing.amountMinor,
-          currency: existing.currency,
-          referenceType: 'booking_refund',
-          referenceId: existing.id,
-          keyParts: ['booking-refund', existing.id, approvedPayment?.id],
-          note: 'Guest refund after host cancelled a protected booking.',
-        })
+        // Item 2 Phase 2b round 2: creates a Refund + initial RefundAttempt instead of an immediate
+        // wallet credit -- owner-confirmed replacement; fulfillment deferred to a later phase.
+        // Guarded on a REAL approvedPayment existing, unlike the removed recordWalletEntry call
+        // above it: Refund.paymentProofId is a real, non-null FK, so there is structurally no proof
+        // to attach a refund to when no payment was ever approved. This also closes a real,
+        // pre-existing defect the old fallback (`approvedPayment?.amountMinor || existing.amountMinor`)
+        // had: a host cancelling a booking with NO approved payment would still wallet-credit the
+        // guest for the booking's full LISTED price -- crediting money that was never actually
+        // paid. bookings.mjs's equivalent guest-cancel path already correctly guards its whole
+        // refund block on `if (approvedPayment)`; host.mjs did not. The OTHER wallet entries below
+        // (admin-share-reversal, host-cancel-fee) still share this same unguarded pattern -- left
+        // untouched here as a separate, already-flagged finding (see the delivered report), not
+        // "necessary to create the new refund records" and therefore out of this round's scope.
+        if (approvedPayment) {
+          await createRefundRequest(tx, {
+            paymentProofId: approvedPayment.id,
+            bookingId: existing.id,
+            requestedByUserId: context.user.id,
+            amountMinor: approvedPayment.amountMinor,
+            currency: existing.currency,
+            reason: 'Guest refund after host cancelled a protected booking.',
+            reasonCode: 'HOST_CANCELLED',
+          })
+        }
 
         await recordWalletEntry(tx, {
           userId: adminRecipientId,

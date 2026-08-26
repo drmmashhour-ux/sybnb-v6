@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, recordWalletEntry, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, recordWalletEntry, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
@@ -890,15 +890,19 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
       })
 
       if (!isCardPayment) {
-        await recordWalletEntry(tx, {
-          userId: existing.guestId,
-          type: 'REFUND',
+        // Item 2 Phase 2b round 2: creates a Refund + initial RefundAttempt instead of an immediate
+        // wallet credit -- owner-confirmed replacement; fulfillment deferred to a later phase.
+        // reasonCode distinguishes an admin rejecting a still-REQUESTED booking from a ruling
+        // against the host in an already-DISPUTED one -- existing.status is the ORIGINAL status,
+        // captured before this transaction's own booking.updateMany above.
+        await createRefundRequest(tx, {
+          paymentProofId: approvedPayment.id,
+          bookingId: existing.id,
+          requestedByUserId: actorUserId,
           amountMinor: approvedPayment.amountMinor,
           currency: existing.currency,
-          referenceType: 'booking_refund',
-          referenceId: existing.id,
-          keyParts: ['booking-admin-reject-refund', existing.id, approvedPayment.id],
-          note: 'Guest refund after admin rejected/ruled against this booking.',
+          reason: 'Guest refund after admin rejected/ruled against this booking.',
+          reasonCode: existing.status === 'DISPUTED' ? 'DISPUTE_RULING' : 'ADMIN_REJECTED_BOOKING',
         })
       }
 

@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import {
   bookingFinanceSplit,
   cancellationAdminFee,
+  createRefundRequest,
   originalAdminShareRecipient,
   recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
@@ -81,16 +82,25 @@ export async function handleBookings(req, res, url, context) {
           },
         })
 
-        await recordWalletEntry(tx, {
-          userId: existing.guestId,
-          type: 'REFUND',
-          amountMinor: guestRefundAmountMinor,
-          currency: existing.currency,
-          referenceType: 'booking_refund',
-          referenceId: existing.id,
-          keyParts: ['booking-guest-cancel-refund', existing.id, approvedPayment.id],
-          note: 'Guest refund after guest cancelled a protected booking.',
-        })
+        // Item 2 Phase 2b round 2: creates a Refund + initial RefundAttempt (the new, reviewed data
+        // model) instead of an immediate wallet credit -- owner-confirmed replacement, not additive;
+        // actual fulfillment is deferred to a later phase that adds real outbound execution. Amount
+        // computation (guestRefundAmountMinor, protection-fee-adjusted) is completely unchanged from
+        // before this round. Guarded on > 0 to match recordWalletEntry's own prior silent-no-op for
+        // a zero amount (the edge case where the protection fee fully consumes the payment) --
+        // createRefundRequest itself throws on a non-positive amount rather than no-op, since a
+        // real, non-legacy Refund row for zero money is never a meaningful thing to create.
+        if (guestRefundAmountMinor > 0) {
+          await createRefundRequest(tx, {
+            paymentProofId: approvedPayment.id,
+            bookingId: existing.id,
+            requestedByUserId: context.user.id,
+            amountMinor: guestRefundAmountMinor,
+            currency: existing.currency,
+            reason: 'Guest refund after guest cancelled a protected booking.',
+            reasonCode: 'GUEST_CANCELLED',
+          })
+        }
 
         // adminShareMinor never included the protection fee (it's excluded from the split base and
         // recorded as its own 'booking_protection_fee' CREDIT at approval time — see

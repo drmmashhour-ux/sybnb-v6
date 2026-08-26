@@ -45,6 +45,7 @@
     "test:e2e:payment-event-claim-recovery": "node tests/e2e/payment-event-claim-recovery.e2e.mjs",
     "test:e2e:payment-event-supersession": "node tests/e2e/payment-event-supersession.e2e.mjs",
     "test:e2e:legacy-refund-accept": "node tests/e2e/legacy-refund-accept.e2e.mjs",
+    "test:e2e:refund-request-creation": "node tests/e2e/refund-request-creation.e2e.mjs",
     "test:e2e:payment-webhook-default-deny": "node tests/e2e/payment-webhook-default-deny.e2e.mjs",
     "test:e2e:payment-stripe-policy-deferred-recovery": "node tests/e2e/payment-event-stripe-policy-deferred-recovery.e2e.mjs",
     "test:e2e:payment-policy-stripe-approval-guard": "node tests/e2e/payment-policy-stripe-approval-guard.e2e.mjs",

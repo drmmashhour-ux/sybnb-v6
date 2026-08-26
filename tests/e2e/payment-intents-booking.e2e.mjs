@@ -339,8 +339,16 @@ const rejectD = await call('PATCH', `/api/admin/review-queue/booking/${bookingD.
 check('admin rejected the dispute -> booking CANCELLED', rejectD.status === 200 && rejectD.j?.entity?.status === 'CANCELLED', JSON.stringify(rejectD.j))
 
 const splitD = bookingFinanceSplit(bookingDFull, proofD.j?.proof?.amountMinor)
+// Item 2 Phase 2b round 2: the admin-dispute-rejection path (manual/local-wallet rail) now creates
+// a Refund + RefundAttempt instead of an immediate wallet REFUND credit -- owner-confirmed
+// replacement, not additive; fulfillment deferred to a later phase. Updated from this suite's
+// pre-round-2 assertion, which checked for the now-removed wallet entry directly.
+const refundD = await db().refund.findFirst({ where: { paymentProofId: proofDId }, include: { attempts: true } })
+check('guest\'s refund is now tracked via a real (non-legacy) Refund record on the admin-rejection path', refundD?.amountMinor === proofD.j?.proof?.amountMinor && refundD?.migratedFromLegacy === false, JSON.stringify(refundD))
+check('the new Refund is IN_PROGRESS with reservationHeld=true and reasonCode=DISPUTE_RULING (this was a DISPUTED booking, not a plain REQUESTED rejection)', refundD?.status === 'IN_PROGRESS' && refundD?.reservationHeld === true && refundD?.reasonCode === 'DISPUTE_RULING', JSON.stringify(refundD))
+check('exactly one CLAIMED, non-legacy RefundAttempt exists for it', refundD?.attempts?.length === 1 && refundD.attempts[0].status === 'CLAIMED' && refundD.attempts[0].migratedFromLegacy === false, JSON.stringify(refundD?.attempts))
 const guestRefundD = (await walletEntries(bookingD.id, ['booking_refund'])).find((e) => e.type === 'REFUND')
-check('guest IS refunded on the admin-rejection path (unlike the PaymentIntent card-refund path)', guestRefundD?.amountMinor === proofD.j?.proof?.amountMinor, JSON.stringify(guestRefundD))
+check('no wallet REFUND entry was created for this refund (round-2 replacement, not additive)', guestRefundD === undefined, JSON.stringify(guestRefundD))
 const shareReversalD = (await walletEntries(bookingD.id, ['booking_admin_share_reversal'])).find((e) => e.type === 'DEBIT')
 check('admin-share reversal DEBIT recorded (refactored shared helper)', shareReversalD?.amountMinor === splitD.adminShareMinor, JSON.stringify({ shareReversalD, expected: splitD.adminShareMinor }))
 const payoutClawbackD = (await walletEntries(bookingD.id, ['booking_payout_clawback'])).find((e) => e.type === 'DEBIT')

@@ -86,6 +86,7 @@ export type PlatformRideRequest = {
   status: string
   requestedAt: string
   fareMinor: number | null
+  cancellationFeeMinor: number | null
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string

@@ -7,6 +7,10 @@ import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 
+// Placeholder rate pending a real business decision from the owner -- see the cancel handler
+// below for the disclosure. Not derived from anything; a plain, named, easily-found constant.
+const RIDE_CANCELLATION_FEE_PERCENT = 20
+
 export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/sr/quote') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
@@ -161,11 +165,22 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
+    // SR Ride vs. Uber gap-closure (P1 #9): a driver already assigned or en route has committed
+    // real time/travel to this ride -- cancelling on them for free, unlike cancelling before a
+    // driver exists (REQUESTED/MATCHING, always free), is what Uber's own cancellation-fee policy
+    // protects against. RIDE_CANCELLATION_FEE_PERCENT is a placeholder rate pending a real business
+    // decision from the owner (same disclosure the 0%-commission ride-payment default already
+    // carries) -- computed here from the ride's own locked fareMinor, never invented.
+    const driverAlreadyCommitted = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(existing.status)
+    const cancellationFeeMinor = driverAlreadyCommitted && existing.fareMinor
+      ? Math.round((existing.fareMinor * RIDE_CANCELLATION_FEE_PERCENT) / 100)
+      : null
+
     // Optimistic-concurrency guard: re-check the status we read so a driver claim/arrival
     // landing at the same moment cannot be silently overwritten by this cancel.
     const cancelResult = await db().rideRequest.updateMany({
       where: { id: existing.id, status: existing.status },
-      data: { status: 'CANCELLED' },
+      data: { status: 'CANCELLED', cancellationFeeMinor },
     })
 
     if (cancelResult.count === 0) {

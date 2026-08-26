@@ -525,9 +525,18 @@ export async function handlePayments(req, res, url, context) {
     // SR Ride vs. Uber gap-closure: a ride's fare, mirroring the booking case exactly -- only a
     // COMPLETED ride has a final, real fare (mid-ride the distance/time isn't settled yet, matching
     // Uber's own post-trip charge model), and only that ride's own rider may submit proof for it.
+    // A CANCELLED ride is also payable, but only when the cancel handler actually assessed a fee
+    // (cancellationFeeMinor set) -- a free cancellation (no driver committed yet) has nothing to pay.
     const ride = body.rideId
       ? await db().rideRequest.findFirst({
-          where: { id: body.rideId, riderId: context.user.id, status: 'COMPLETED' },
+          where: {
+            id: body.rideId,
+            riderId: context.user.id,
+            OR: [
+              { status: 'COMPLETED' },
+              { status: 'CANCELLED', cancellationFeeMinor: { not: null } },
+            ],
+          },
         })
       : null
 
@@ -548,7 +557,11 @@ export async function handlePayments(req, res, url, context) {
     // every local-wallet payment from the ledger). A linked ride is the same discipline: its own
     // locked fareMinor, never client input. Client input is only used for the no-booking-no-ride case
     // (e.g. a standalone seller-plan/advertising payment), which has no independent amount to check.
-    const amountMinor = booking ? expectedTotalMinor(booking) : ride ? ride.fareMinor || 0 : Number(body.amountMinor || 0)
+    const amountMinor = booking
+      ? expectedTotalMinor(booking)
+      : ride
+        ? (ride.status === 'CANCELLED' ? ride.cancellationFeeMinor : ride.fareMinor) || 0
+        : Number(body.amountMinor || 0)
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
       const error = new Error('Payment proof amount must be greater than zero.')
       error.statusCode = 400

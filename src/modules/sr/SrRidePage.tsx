@@ -65,6 +65,10 @@ const copy = {
     paymentPending: 'تم إرسال إثبات الدفع، بانتظار المراجعة.',
     paymentConfirmed: 'تم تأكيد الدفع.',
     paymentRejected: 'تعذر قبول إثبات الدفع السابق. يرجى إرسال رقم مرجع صحيح.',
+    cancellationFeeLabel: 'رسوم الإلغاء',
+    payFeeTitle: 'تأكيد دفع رسوم الإلغاء',
+    payFeeCopy: 'كان السائق قد بدأ التوجه إليك بالفعل. ادفع رسوم الإلغاء له مباشرة (نقداً أو تحويل)، ثم أدخل رقم مرجع العملية هنا ليتحقق منها فريق SYBNB.',
+    cancellationFeeWarning: 'قد يترتب على الإلغاء الآن رسوم إلغاء تقريبية قدرها {amount} لأن السائق بدأ التوجه إليك بالفعل.',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -118,6 +122,10 @@ const copy = {
     paymentPending: 'Payment proof submitted, awaiting review.',
     paymentConfirmed: 'Payment confirmed.',
     paymentRejected: 'The previous payment proof could not be accepted. Please submit a valid reference.',
+    cancellationFeeLabel: 'Cancellation fee',
+    payFeeTitle: 'Confirm cancellation fee payment',
+    payFeeCopy: 'Your driver had already started heading your way. Pay the cancellation fee directly to them (cash or transfer), then enter the transaction reference here so SYBNB can verify it.',
+    cancellationFeeWarning: 'Cancelling now may incur an estimated cancellation fee of {amount} because your driver has already started heading your way.',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -306,11 +314,13 @@ export function SrRidePage({ lang }: Props) {
     setPayStatus('saving')
     try {
       // amountMinor/currency are sent for display continuity only -- the server derives the real
-      // charge from the ride's own locked fareMinor, never trusts this value (see
-      // server/routes/payments.mjs's local-wallet-proof handler).
+      // charge from the ride's own locked fareMinor (or, for a cancelled ride, its
+      // cancellationFeeMinor), never trusts this value (see server/routes/payments.mjs's
+      // local-wallet-proof handler).
+      const amountMinor = ride.status === 'CANCELLED' ? ride.cancellationFeeMinor || 0 : ride.fareMinor || 0
       await submitPrototypeLocalWalletProof({
         rideId: ride.id,
-        amountMinor: ride.fareMinor || 0,
+        amountMinor,
         currency: ride.currency,
         providerRef: payProviderRef.trim(),
       })
@@ -322,6 +332,33 @@ export function SrRidePage({ lang }: Props) {
     }
   }
 
+  function renderPaymentSection(title: string, copy: string) {
+    const latestProof = ride?.paymentProofs?.[0]
+    if (latestProof?.status === 'APPROVED') {
+      return <div style={styles.message}>✓ {t.paymentConfirmed}</div>
+    }
+    if (latestProof?.status === 'PENDING_ADMIN_REVIEW') {
+      return <div style={styles.message}>{t.paymentPending}</div>
+    }
+    // A REJECTED proof falls through to the form below so the rider can resubmit.
+    return (
+      <div style={styles.card}>
+        <strong>{title}</strong>
+        <span>{copy}</span>
+        {latestProof?.status === 'REJECTED' && <p style={styles.addressWarning}>{t.paymentRejected}</p>}
+        <input
+          style={styles.payInput}
+          value={payProviderRef}
+          onChange={(event) => setPayProviderRef(event.target.value)}
+          placeholder={t.payReferencePlaceholder}
+        />
+        <button disabled={!payProviderRef.trim() || payStatus === 'saving'} style={styles.primaryButton} onClick={() => void submitPayment()}>
+          {payStatus === 'saving' ? t.paySubmitting : t.paySubmit}
+        </button>
+      </div>
+    )
+  }
+
   function startNewRide() {
     setRide(null)
     setQuote(null)
@@ -331,6 +368,11 @@ export function SrRidePage({ lang }: Props) {
 
   const canCancel = Boolean(ride && RIDER_CANCELLABLE_STATUSES.includes(ride.status))
   const isTerminal = Boolean(ride && ['COMPLETED', 'CANCELLED'].includes(ride.status))
+  // Client-side estimate only, purely so the rider isn't surprised before an irreversible action --
+  // the real fee (if any) is computed and stored server-side at the moment of cancellation. Keep
+  // this rate in sync with RIDE_CANCELLATION_FEE_PERCENT in server/routes/sr-rides.mjs.
+  const driverAlreadyCommitted = Boolean(ride && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status))
+  const estimatedCancellationFeeMinor = driverAlreadyCommitted && ride?.fareMinor ? Math.round((ride.fareMinor * 20) / 100) : 0
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -456,32 +498,7 @@ export function SrRidePage({ lang }: Props) {
                   <strong dir="ltr">{ride.metadata.distanceKm} km</strong>
                 </div>
               )}
-              {(() => {
-                const latestProof = ride.paymentProofs?.[0]
-                if (latestProof?.status === 'APPROVED') {
-                  return <div style={styles.message}>✓ {t.paymentConfirmed}</div>
-                }
-                if (latestProof?.status === 'PENDING_ADMIN_REVIEW') {
-                  return <div style={styles.message}>{t.paymentPending}</div>
-                }
-                // A REJECTED proof falls through to the form below so the rider can resubmit.
-                return (
-                  <div style={styles.card}>
-                    <strong>{t.payTitle}</strong>
-                    <span>{t.payCopy}</span>
-                    {latestProof?.status === 'REJECTED' && <p style={styles.addressWarning}>{t.paymentRejected}</p>}
-                    <input
-                      style={styles.payInput}
-                      value={payProviderRef}
-                      onChange={(event) => setPayProviderRef(event.target.value)}
-                      placeholder={t.payReferencePlaceholder}
-                    />
-                    <button disabled={!payProviderRef.trim() || payStatus === 'saving'} style={styles.primaryButton} onClick={() => void submitPayment()}>
-                      {payStatus === 'saving' ? t.paySubmitting : t.paySubmit}
-                    </button>
-                  </div>
-                )
-              })()}
+              {renderPaymentSection(t.payTitle, t.payCopy)}
               {ride.review ? (
                 <div style={styles.message}>
                   {t.yourRating}: {'★'.repeat(ride.review.rating)}
@@ -511,13 +528,30 @@ export function SrRidePage({ lang }: Props) {
             </>
           )}
           {ride?.status === 'CANCELLED' && (
-            <div style={{ ...styles.message, ...styles.error }}>{t.cancelled}</div>
+            <>
+              <div style={{ ...styles.message, ...styles.error }}>{t.cancelled}</div>
+              {typeof ride.cancellationFeeMinor === 'number' && ride.cancellationFeeMinor > 0 && (
+                <>
+                  <div style={styles.stat}>
+                    <span>{t.cancellationFeeLabel}</span>
+                    <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(ride.cancellationFeeMinor, ride.currency, lang)}</strong>
+                  </div>
+                  {renderPaymentSection(t.payFeeTitle, t.payFeeCopy)}
+                </>
+              )}
+            </>
           )}
 
           {ride && ACTIVE_RIDE_STATUSES.includes(ride.status) && (
             <button style={styles.sosButton} onClick={() => (window.location.hash = '/trust-center/sos')}>
               {t.sos} ⚠
             </button>
+          )}
+
+          {canCancel && estimatedCancellationFeeMinor > 0 && (
+            <p style={styles.addressWarning}>
+              {t.cancellationFeeWarning.replace('{amount}', moneyText(estimatedCancellationFeeMinor, ride?.currency || 'SYP', lang))}
+            </p>
           )}
 
           <div style={styles.actions}>

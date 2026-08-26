@@ -343,17 +343,23 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // hold funds against. 100% of the fare goes straight to the driver: SR Ride has no owner-set
     // commission rate yet, the same "0% until a real business decision is made" placeholder already
     // used for CARS/MARKETPLACE/NEW_CONSTRUCTION above -- not an assumption, a documented gap.
-    const ride = await tx.rideRequest.findUnique({ where: { id: proof.rideId }, select: { driverId: true } })
+    const ride = await tx.rideRequest.findUnique({ where: { id: proof.rideId }, select: { driverId: true, status: true } })
     if (ride?.driverId) {
+      // A ride is either COMPLETED (this is the fare) or CANCELLED-with-a-fee (this is the
+      // cancellation fee, capsule 20) -- never both, so the ride's own status at approval time is
+      // enough to label the ledger entry correctly for finance reconciliation.
+      const isCancellationFee = ride.status === 'CANCELLED'
       await recordWalletEntry(tx, {
         userId: ride.driverId,
         type: 'CREDIT',
         amountMinor: proof.amountMinor,
         currency: proof.currency,
-        referenceType: 'ride_fare',
+        referenceType: isCancellationFee ? 'ride_cancellation_fee' : 'ride_fare',
         referenceId: proof.rideId,
-        keyParts: ['ride-fare', proof.rideId, proof.id],
-        note: 'Driver fare collected after verified rider payment proof.',
+        keyParts: [isCancellationFee ? 'ride-cancellation-fee' : 'ride-fare', proof.rideId, proof.id],
+        note: isCancellationFee
+          ? 'Driver cancellation fee collected after verified rider payment proof.'
+          : 'Driver fare collected after verified rider payment proof.',
       })
     }
   }

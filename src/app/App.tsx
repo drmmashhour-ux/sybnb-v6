@@ -34,6 +34,7 @@ const SearchPreviewPage = lazyNamed(() => import('../modules/search/SearchPrevie
 const SellerDivisionRoutes = lazyNamed(() => import('../modules/seller'), 'SellerDivisionRoutes')
 const SrRidePage = lazyNamed(() => import('../modules/sr/SrRidePage'), 'SrRidePage')
 const SharedRidePage = lazyNamed(() => import('../modules/sr/SharedRidePage'), 'SharedRidePage')
+const AdminPromoCodesPage = lazyNamed(() => import('../modules/sr/AdminPromoCodesPage'), 'AdminPromoCodesPage')
 const StaffAccessPage = lazyNamed(() => import('../modules/account/StaffAccessPage'), 'StaffAccessPage')
 const SyrianLocalWalletPaymentPage = lazyNamed(
   () => import('../modules/payments/SyrianLocalWalletPaymentPage'),
@@ -151,6 +152,8 @@ export function App() {
           <DriverDashboardPage lang={lang} />
         ) : path === '/immocontact' ? (
           <ImmocontactPage lang={lang} />
+        ) : path === '/admin/sr/promo-codes' ? (
+          <AdminPromoCodesPage lang={lang} />
         ) : path === '/admin/review' ? (
           <AdminReviewPage lang={lang} />
         ) : path === '/ai-brain' ? (

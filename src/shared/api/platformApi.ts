@@ -90,6 +90,7 @@ export type PlatformRideRequest = {
   scheduledFor: string | null
   accessibilityRequired: boolean
   stops: Array<{ address: string; lat: number | null; lng: number | null }>
+  discountMinor: number | null
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string
@@ -1109,6 +1110,7 @@ export async function createPrototypeSrRide(input: {
   scheduledFor?: string
   accessibilityRequired?: boolean
   stops?: string[]
+  promoCode?: string
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -1124,6 +1126,7 @@ export async function createPrototypeSrRide(input: {
       scheduledFor: input.scheduledFor,
       accessibilityRequired: input.accessibilityRequired,
       stops: input.stops,
+      promoCode: input.promoCode,
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',
@@ -1245,6 +1248,51 @@ export async function deleteSavedPlace(placeId: string) {
     method: 'DELETE',
     token: session.token,
   })
+}
+
+export type PlatformPromoCode = {
+  id: string
+  code: string
+  discountType: 'PERCENT' | 'FLAT'
+  discountValue: number
+  maxDiscountMinor: number | null
+  active: boolean
+  expiresAt: string | null
+  createdAt: string
+}
+
+export async function fetchPromoCodes() {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; promoCodes: PlatformPromoCode[] }>('/api/admin/sr/promo-codes', {
+    token: session.token,
+  })
+  return response.promoCodes
+}
+
+export async function createPromoCode(input: {
+  code: string
+  discountType: 'PERCENT' | 'FLAT'
+  discountValue: number
+  maxDiscountMinor?: number
+  expiresAt?: string
+}) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; promoCode: PlatformPromoCode }>('/api/admin/sr/promo-codes', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return response.promoCode
+}
+
+export async function setPromoCodeActive(promoCodeId: string, active: boolean) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; promoCode: PlatformPromoCode }>(`/api/admin/sr/promo-codes/${promoCodeId}`, {
+    method: 'PATCH',
+    token: session.token,
+    body: { active },
+  })
+  return response.promoCode
 }
 
 export async function fetchPrototypeDriverOverview() {

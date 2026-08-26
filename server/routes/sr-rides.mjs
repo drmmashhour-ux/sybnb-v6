@@ -9,6 +9,12 @@ import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { getDriverLocation, getRideCoords } from '../lib/live-map.mjs'
 import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
 import { activateScheduledRides, MIN_SCHEDULE_LEAD_MS } from '../lib/ride-schedule.mjs'
+import {
+  computeDiscountMinor,
+  isPromoRedemptionUniqueViolation,
+  promoAlreadyUsedError,
+  validateActivePromoCode,
+} from '../lib/promo-code.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -77,26 +83,58 @@ export async function handleSrRides(req, res, url, context) {
       scheduledFor = parsed
     }
 
-    const ride = await db().rideRequest.create({
-      data: {
-        riderId: context.user.id,
-        pickupLocationId: body.pickupLocationId || undefined,
-        dropoffLocationId: body.dropoffLocationId || undefined,
-        status: scheduledFor ? 'DRAFT' : 'REQUESTED',
-        scheduledFor,
-        accessibilityRequired: Boolean(body.accessibilityRequired),
-        fareMinor: quote.fareMinor,
-        currency: body.currency || 'SYP',
-        metadata: {
-          ...(body.metadata || {}),
-          pickup,
-          dropoff,
-          category,
-          distanceKm: quote.distanceKm,
-          distanceEstimated: quote.estimated,
-        },
+    // SR Ride vs. Uber gap-closure (P2 #12): an optional promo code, applied against the ride's
+    // own already-computed fareMinor -- never a client-supplied discount. Validated read-only
+    // first (codes aren't concurrently created/modified by the requesting rider, so no race there);
+    // the actual redemption is created in the SAME transaction as the ride itself, so a concurrent
+    // double-submission of the same code by the same rider rolls the whole ride creation back
+    // instead of leaving a discounted ride with no valid redemption record.
+    let promo
+    let discountMinor = 0
+    if (body.promoCode) {
+      promo = await validateActivePromoCode(body.promoCode)
+      discountMinor = computeDiscountMinor(promo, quote.fareMinor)
+    }
+    const finalFareMinor = quote.fareMinor - discountMinor
+
+    const rideData = {
+      riderId: context.user.id,
+      pickupLocationId: body.pickupLocationId || undefined,
+      dropoffLocationId: body.dropoffLocationId || undefined,
+      status: scheduledFor ? 'DRAFT' : 'REQUESTED',
+      scheduledFor,
+      accessibilityRequired: Boolean(body.accessibilityRequired),
+      fareMinor: finalFareMinor,
+      promoCodeId: promo?.id,
+      discountMinor: promo ? discountMinor : undefined,
+      currency: body.currency || 'SYP',
+      metadata: {
+        ...(body.metadata || {}),
+        pickup,
+        dropoff,
+        category,
+        distanceKm: quote.distanceKm,
+        distanceEstimated: quote.estimated,
       },
-    })
+    }
+
+    let ride
+    if (promo) {
+      try {
+        ride = await db().$transaction(async (tx) => {
+          const created = await tx.rideRequest.create({ data: rideData })
+          await tx.promoRedemption.create({
+            data: { promoCodeId: promo.id, userId: context.user.id, rideId: created.id, discountAppliedMinor: discountMinor },
+          })
+          return created
+        })
+      } catch (err) {
+        if (isPromoRedemptionUniqueViolation(err)) throw promoAlreadyUsedError()
+        throw err
+      }
+    } else {
+      ride = await db().rideRequest.create({ data: rideData })
+    }
 
     if (quote.pickupCoords || quote.dropoffCoords) {
       await db().$executeRaw`
@@ -548,6 +586,74 @@ export async function handleSrRides(req, res, url, context) {
           : null,
       },
     })
+  }
+
+  // SR Ride vs. Uber gap-closure (P2 #12): admin-managed promo codes. Owner-approved scope: simple
+  // percent-or-flat discount, admin-created, single redemption per rider.
+  if (url.pathname === '/api/admin/sr/promo-codes') {
+    if (req.method === 'GET') {
+      requireAuth(context, ['ADMIN'])
+      const promoCodes = await db().promoCode.findMany({ orderBy: { createdAt: 'desc' } })
+      return json(res, 200, { ok: true, promoCodes })
+    }
+    if (req.method === 'POST') {
+      requireAuth(context, ['ADMIN'])
+      const body = await readJson(req)
+      const code = String(body.code || '').trim().toUpperCase()
+      const discountType = body.discountType === 'FLAT' ? 'FLAT' : body.discountType === 'PERCENT' ? 'PERCENT' : null
+      const discountValue = Number(body.discountValue)
+
+      if (!code || !discountType || !Number.isFinite(discountValue) || discountValue <= 0) {
+        const error = new Error('A code, discountType (PERCENT or FLAT), and a positive discountValue are required.')
+        error.statusCode = 400
+        error.code = 'PROMO_CODE_CREATE_INVALID'
+        error.expose = true
+        throw error
+      }
+      if (discountType === 'PERCENT' && discountValue > 100) {
+        const error = new Error('A percent discount cannot exceed 100.')
+        error.statusCode = 400
+        error.code = 'PROMO_CODE_CREATE_INVALID'
+        error.expose = true
+        throw error
+      }
+
+      try {
+        const promoCode = await db().promoCode.create({
+          data: {
+            code,
+            discountType,
+            discountValue: Math.round(discountValue),
+            maxDiscountMinor: Number.isFinite(Number(body.maxDiscountMinor)) ? Math.round(Number(body.maxDiscountMinor)) : undefined,
+            expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+            createdByAdminId: context.user.id,
+          },
+        })
+        return json(res, 201, { ok: true, promoCode })
+      } catch (err) {
+        if (err?.code === 'P2002') {
+          const error = new Error('A promo code with this code already exists.')
+          error.statusCode = 409
+          error.code = 'PROMO_CODE_DUPLICATE'
+          error.expose = true
+          throw error
+        }
+        throw err
+      }
+    }
+    return methodNotAllowed(res, ['GET', 'POST'])
+  }
+
+  const promoCodeMatch = url.pathname.match(/^\/api\/admin\/sr\/promo-codes\/([^/]+)$/)
+  if (promoCodeMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const promoCode = await db().promoCode.update({
+      where: { id: promoCodeMatch[1] },
+      data: { active: Boolean(body.active) },
+    })
+    return json(res, 200, { ok: true, promoCode })
   }
 
   return false

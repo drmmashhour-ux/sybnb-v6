@@ -100,6 +100,8 @@ const copy = {
     stop: 'محطة',
     addStop: '+ إضافة محطة',
     removeStop: 'إزالة',
+    promoCodePlaceholder: 'كود الخصم (اختياري)',
+    promoDiscountApplied: 'خصم الكود',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -175,6 +177,8 @@ const copy = {
     stop: 'Stop',
     addStop: '+ Add stop',
     removeStop: 'Remove',
+    promoCodePlaceholder: 'Promo code (optional)',
+    promoDiscountApplied: 'Promo discount',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -230,6 +234,7 @@ export function SrRidePage({ lang }: Props) {
   const [scheduledFor, setScheduledFor] = useState('')
   const [accessibilityRequired, setAccessibilityRequired] = useState(false)
   const [stops, setStops] = useState<string[]>([])
+  const [promoCode, setPromoCode] = useState('')
   const [savedPlaces, setSavedPlaces] = useState<PlatformSavedPlace[]>([])
   const [newPlaceLabel, setNewPlaceLabel] = useState('')
   const [savingPlace, setSavingPlace] = useState(false)
@@ -404,6 +409,7 @@ export function SrRidePage({ lang }: Props) {
         scheduledFor: scheduleForLater && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
         accessibilityRequired,
         stops: stops.map((stop) => stop.trim()).filter(Boolean),
+        promoCode: promoCode.trim() || undefined,
       })
       setRide(nextRide)
       setStatus('idle')
@@ -703,6 +709,15 @@ export function SrRidePage({ lang }: Props) {
             />
           )}
 
+          {!ride && (
+            <input
+              style={styles.payInput}
+              value={promoCode}
+              onChange={(event) => setPromoCode(event.target.value)}
+              placeholder={t.promoCodePlaceholder}
+            />
+          )}
+
           <button
             disabled={status === 'saving' || (scheduleForLater && !scheduledFor)}
             style={styles.primaryButton}
@@ -790,6 +805,12 @@ export function SrRidePage({ lang }: Props) {
                 <span>{t.receiptFare}</span>
                 <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(ride.fareMinor ?? 0, ride.currency, lang)}</strong>
               </div>
+              {!!ride.discountMinor && (
+                <div style={styles.stat}>
+                  <span>{t.promoDiscountApplied}</span>
+                  <strong dir={isAr ? 'rtl' : 'ltr'}>-{moneyText(ride.discountMinor, ride.currency, lang)}</strong>
+                </div>
+              )}
               {typeof ride.metadata.distanceKm === 'number' && (
                 <div style={styles.stat}>
                   <span>{t.receiptDistance}</span>

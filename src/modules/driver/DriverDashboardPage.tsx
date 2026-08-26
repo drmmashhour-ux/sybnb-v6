@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
@@ -7,6 +7,7 @@ import {
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
   fetchPrototypeSrRideThread,
+  reportPrototypeDriverLocation,
   sendPrototypeSrRideMessage,
   submitDriverPhoto,
   updatePrototypeDriverRideStatus,
@@ -22,6 +23,12 @@ type Props = {
 
 // Matches MESSAGING_ELIGIBLE_RIDE_STATUSES in server/routes/messages.mjs.
 const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']
+// Matches LIVE_TRACKING_STATUSES in server/routes/sr-rides.mjs.
+const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+// Throttles how often an actual network post goes out -- watchPosition can fire far more often
+// than this, and the server only needs roughly this cadence to stay within getDriverLocation()'s
+// 2-minute freshness window (server/lib/live-map.mjs) with comfortable margin.
+const LOCATION_REPORT_INTERVAL_MS = 8000
 
 const copy = {
   ar: {
@@ -51,6 +58,10 @@ const copy = {
     chatEmpty: 'لا توجد رسائل بعد.',
     chatPlaceholder: 'اكتب رسالة...',
     chatSend: 'إرسال',
+    shareLocation: 'مشاركة موقعي',
+    stopSharing: 'إيقاف المشاركة',
+    locationDenied: 'تعذر الوصول إلى الموقع. تحقق من إذن الموقع.',
+    locationUnsupported: 'الموقع الجغرافي غير مدعوم على هذا الجهاز.',
     empty: 'لا توجد رحلات مسندة بعد.',
     dispatch: 'مركز التوجيه',
     safety: 'أمان الرحلة',
@@ -108,6 +119,10 @@ const copy = {
     chatEmpty: 'No messages yet.',
     chatPlaceholder: 'Type a message...',
     chatSend: 'Send',
+    shareLocation: 'Share my location',
+    stopSharing: 'Stop sharing',
+    locationDenied: 'Could not access location. Check your location permission.',
+    locationUnsupported: 'Geolocation is not supported on this device.',
     empty: 'No assigned rides yet.',
     dispatch: 'Dispatch center',
     safety: 'Ride safety',
@@ -423,8 +438,60 @@ function RideCard({
           </button>
         </div>
       )}
+      {LIVE_TRACKING_STATUSES.includes(ride.status) && <LocationSharingToggle rideId={ride.id} labels={labels} />}
       {MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status) && <RideChatPanel rideId={ride.id} labels={labels} />}
     </article>
+  )
+}
+
+// SR Ride vs. Uber gap-closure (P0 #1): mounted only while the ride is in a live-tracking status
+// (RideCard's own gate), so leaving that window (completed/cancelled) unmounts this component and
+// its cleanup effect stops the watch automatically -- no separate "is this ride still active"
+// bookkeeping needed here.
+function LocationSharingToggle({ rideId, labels }: { rideId: string; labels: typeof copy.en }) {
+  const [sharing, setSharing] = useState(false)
+  const [error, setError] = useState('')
+  const watchIdRef = useRef<number | null>(null)
+  const lastSentAtRef = useRef(0)
+
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
+    }
+  }, [])
+
+  function toggle() {
+    if (sharing) {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
+      watchIdRef.current = null
+      setSharing(false)
+      return
+    }
+    if (!navigator.geolocation) {
+      setError(labels.locationUnsupported)
+      return
+    }
+    setError('')
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const now = Date.now()
+        if (now - lastSentAtRef.current < LOCATION_REPORT_INTERVAL_MS) return
+        lastSentAtRef.current = now
+        void reportPrototypeDriverLocation(position.coords.latitude, position.coords.longitude)
+      },
+      () => setError(labels.locationDenied),
+      { enableHighAccuracy: true, maximumAge: 5000 },
+    )
+    setSharing(true)
+  }
+
+  return (
+    <div style={styles.locationRow}>
+      <button style={sharing ? styles.dangerButton : styles.secondaryButton} onClick={toggle}>
+        {sharing ? labels.stopSharing : labels.shareLocation}
+      </button>
+      {error && <span style={styles.chatEmpty}>{error}</span>}
+    </div>
   )
 }
 
@@ -560,6 +627,7 @@ const styles: Record<string, CSSProperties> = {
   dangerButton: { minHeight: 44, border: '1px solid rgba(255,96,96,.5)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 900, padding: '0 12px' },
   panel: { border: '1px solid #263651', borderRadius: 8, background: '#101722', color: '#9aa6ba', padding: 14 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
+  locationRow: { display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid #263651', paddingTop: 10 },
   chatPanel: { display: 'grid', gap: 8, borderTop: '1px solid #263651', paddingTop: 10 },
   chatMessages: { display: 'grid', gap: 6, maxHeight: 180, overflowY: 'auto' },
   chatEmpty: { color: '#5c6b85', fontSize: 13 },

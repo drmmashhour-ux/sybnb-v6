@@ -23,6 +23,7 @@ const RIDER_CANCELLABLE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 
 const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
+import { RideMap } from '../../shared/maps/RideMap'
 
 type Props = {
   lang: Lang
@@ -515,6 +516,9 @@ export function SrRidePage({ lang }: Props) {
           <h2 style={styles.cardTitle}>{t.status}</h2>
           <Info label={t.rideId} value={ride ? ride.id.slice(0, 8).toUpperCase() : '-'} />
           <Info label={t.status} value={statusText(ride?.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+          {ride && (ride.pickupCoords || ride.dropoffCoords || ride.driver?.location) && (
+            <RideMap pickup={ride.pickupCoords} dropoff={ride.dropoffCoords} driverLocation={ride.driver?.location} />
+          )}
           {driverPhotoUrl && <img src={driverPhotoUrl} alt="" style={styles.driverPhoto} />}
           {ride?.driver?.isVerified && <span style={styles.verifiedBadge}>✓ {t.verifiedDriver}</span>}
           <Info label={t.driver} value={driverIdentityLabel(ride, t)} />

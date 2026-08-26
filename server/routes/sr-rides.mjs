@@ -6,6 +6,12 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
+import { getDriverLocation, getRideCoords } from '../lib/live-map.mjs'
+
+// SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
+// trip -- a completed or cancelled ride has no live position to show, and showing one would be
+// stale/misleading rather than genuinely live.
+const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 
 // Placeholder rate pending a real business decision from the owner -- see the cancel handler
 // below for the disclosure. Not derived from anything; a plain, named, easily-found constant.
@@ -115,9 +121,17 @@ export async function handleSrRides(req, res, url, context) {
     // Signed URL, never the raw storage key (photoRef) -- the driver-photo bucket is private
     // (server/lib/storage.mjs), and the key itself is not meant to leave the server.
     const ratingSummary = ride.driverId ? await getDriverRatingSummary(ride.driverId) : null
+    const rideCoords = await getRideCoords(ride.id)
+    // Only fetched while actually en route -- a completed/cancelled ride has no live position
+    // (LIVE_TRACKING_STATUSES), and getDriverLocation() itself already refuses to return a stale
+    // (unreported-in-2-minutes) position even for a ride that is still active.
+    const driverLocation =
+      ride.driverId && LIVE_TRACKING_STATUSES.includes(ride.status) ? await getDriverLocation(ride.driverId) : null
     const ridePayload = ride.driver
       ? {
           ...ride,
+          pickupCoords: rideCoords.pickup,
+          dropoffCoords: rideCoords.dropoff,
           driver: {
             id: ride.driver.id,
             displayName: ride.driver.displayName,
@@ -134,9 +148,10 @@ export async function handleSrRides(req, res, url, context) {
                 }
               : null,
             ...ratingSummary,
+            location: driverLocation,
           },
         }
-      : ride
+      : { ...ride, pickupCoords: rideCoords.pickup, dropoffCoords: rideCoords.dropoff }
     return json(res, 200, { ok: true, ride: ridePayload })
   }
 

@@ -102,9 +102,12 @@ export type PlatformRideRequest = {
     driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; photoUrl: string | null } | null
     averageRating: number | null
     ratingCount: number
+    location: { lat: number; lng: number; updatedAt: string } | null
   } | null
   review?: PlatformRideReview | null
   paymentProofs?: Array<{ id: string; status: string; amountMinor: number; currency: string }>
+  pickupCoords?: { lat: number; lng: number } | null
+  dropoffCoords?: { lat: number; lng: number } | null
 }
 
 export type PlatformRideReview = {
@@ -1187,6 +1190,15 @@ export async function submitDriverPhoto(file: File) {
     body: { fileBase64, mimeType: file.type },
   })
   return response.driverProfile
+}
+
+export async function reportPrototypeDriverLocation(lat: number, lng: number) {
+  const session = await ensurePrototypeDriverSession()
+  await apiRequest<{ ok: true }>('/api/driver/location', {
+    method: 'PATCH',
+    token: session.token,
+    body: { lat, lng },
+  })
 }
 
 // CAPSULE_RULES.noFakeTrustSignal: the driver dashboard's own docs-status panel must reflect the

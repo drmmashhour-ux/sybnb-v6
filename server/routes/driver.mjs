@@ -3,8 +3,30 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
+import { updateDriverLocation } from '../lib/live-map.mjs'
 
 export async function handleDriver(req, res, url, context) {
+  // SR Ride vs. Uber gap-closure (P0 #1): the driver client reports its own GPS position here
+  // while sharing is on; never gated to a specific ride (a real driver app reports continuously,
+  // same as the location column itself belongs to the driver, not to any one ride).
+  if (url.pathname === '/api/driver/location') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    const lat = Number(body.lat)
+    const lng = Number(body.lng)
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      const error = new Error('A valid lat/lng is required.')
+      error.statusCode = 400
+      error.code = 'DRIVER_LOCATION_INVALID'
+      error.expose = true
+      throw error
+    }
+
+    await updateDriverLocation(context.user.id, lat, lng)
+    return json(res, 200, { ok: true })
+  }
   // SR Ride vs. Uber gap-closure: a driver's own photo, so a rider can actually recognize who
   // they're getting into a car with (previously nothing beyond name + vehicle text existed).
   // Mirrors PATCH /api/me/id-document exactly -- same validation shape, same storage discipline.

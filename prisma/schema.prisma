@@ -209,6 +209,7 @@ model DriverProfile {
   photoMimeType   String?  @map("photo_mime_type")
   active          Boolean  @default(false)
   lastLocationGeo Unsupported("geometry(Point,4326)")? @map("last_location_geo")
+  lastLocationUpdatedAt DateTime? @map("last_location_updated_at")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

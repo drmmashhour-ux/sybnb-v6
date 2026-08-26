@@ -4,6 +4,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { updateDriverLocation } from '../lib/live-map.mjs'
+import { activateScheduledRides } from '../lib/ride-schedule.mjs'
 
 export async function handleDriver(req, res, url, context) {
   // SR Ride vs. Uber gap-closure (P0 #1): the driver client reports its own GPS position here
@@ -67,6 +68,11 @@ export async function handleDriver(req, res, url, context) {
   if (url.pathname === '/api/driver/rides/pending') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['DRIVER'])
+    // SR Ride vs. Uber gap-closure (P1 #6): activate any scheduled ride whose pickup time has
+    // come within the driver-visibility window -- see server/lib/ride-schedule.mjs. Unscoped here
+    // (unlike the single-ride GET) since this is exactly the read path meant to surface every
+    // ride ready for dispatch, scheduled or not.
+    await activateScheduledRides()
     const rides = await db().rideRequest.findMany({
       where: { driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
       include: {

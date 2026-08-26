@@ -8,6 +8,7 @@ import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { getDriverLocation, getRideCoords } from '../lib/live-map.mjs'
 import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
+import { activateScheduledRides, MIN_SCHEDULE_LEAD_MS } from '../lib/ride-schedule.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -50,12 +51,29 @@ export async function handleSrRides(req, res, url, context) {
       dropoffCoordsOverride: body.dropoffCoords,
     })
 
+    // SR Ride vs. Uber gap-closure (P1 #6): an optional future pickup time. A ride created dormant
+    // (RideStatus.DRAFT) only becomes dispatchable once activateScheduledRides() picks it up from a
+    // read path -- see server/lib/ride-schedule.mjs for why (no scheduler in this deployment).
+    let scheduledFor
+    if (body.scheduledFor) {
+      const parsed = new Date(body.scheduledFor)
+      if (Number.isNaN(parsed.getTime()) || parsed.getTime() < Date.now() + MIN_SCHEDULE_LEAD_MS) {
+        const error = new Error('A scheduled ride must be requested at least 30 minutes ahead.')
+        error.statusCode = 400
+        error.code = 'RIDE_SCHEDULE_TOO_SOON'
+        error.expose = true
+        throw error
+      }
+      scheduledFor = parsed
+    }
+
     const ride = await db().rideRequest.create({
       data: {
         riderId: context.user.id,
         pickupLocationId: body.pickupLocationId || undefined,
         dropoffLocationId: body.dropoffLocationId || undefined,
-        status: 'REQUESTED',
+        status: scheduledFor ? 'DRAFT' : 'REQUESTED',
+        scheduledFor,
         fareMinor: quote.fareMinor,
         currency: body.currency || 'SYP',
         metadata: {
@@ -86,6 +104,9 @@ export async function handleSrRides(req, res, url, context) {
   if (rideMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
+    // Scoped to this one ride -- cheap, and means the rider polling their own scheduled ride sees
+    // it flip from DRAFT to REQUESTED right on schedule without needing a driver to poll first.
+    await activateScheduledRides({ id: rideMatch[1] })
     // Real driver identity for the rider: name + vehicle already exist in the data model
     // (User.displayName, DriverProfile.vehicle*) but were never surfaced here -- the rider used to
     // see only the first 8 characters of the driver's database id. Select() keeps this to exactly
@@ -172,7 +193,7 @@ export async function handleSrRides(req, res, url, context) {
 
     // A rider may cancel only before the trip is under way. Once IN_PROGRESS the driver
     // controls the lifecycle, and terminal states cannot be re-cancelled.
-    const riderCancellable = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING']
+    const riderCancellable = ['DRAFT', 'REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING']
     if (!riderCancellable.includes(existing.status)) {
       const error = new Error('This ride can no longer be cancelled by the rider.')
       error.statusCode = 400

@@ -87,6 +87,7 @@ export type PlatformRideRequest = {
   requestedAt: string
   fareMinor: number | null
   cancellationFeeMinor: number | null
+  scheduledFor: string | null
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string
@@ -1103,6 +1104,7 @@ export async function createPrototypeSrRide(input: {
   pickupCoords?: { lat: number; lng: number }
   routeType?: string
   features?: string[]
+  scheduledFor?: string
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -1115,6 +1117,7 @@ export async function createPrototypeSrRide(input: {
       currency: input.currency,
       lowDataMode: input.lowDataMode,
       pickupCoords: input.pickupCoords,
+      scheduledFor: input.scheduledFor,
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',

@@ -985,6 +985,7 @@ model RideRequest {
   requestedAt     DateTime   @default(now()) @map("requested_at")
   fareMinor       Int?       @map("fare_minor")
   cancellationFeeMinor Int?  @map("cancellation_fee_minor")
+  scheduledFor    DateTime?  @map("scheduled_for")
   currency        String     @default("SYP")
   pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
   dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")

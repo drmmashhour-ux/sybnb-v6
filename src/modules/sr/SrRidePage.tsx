@@ -18,8 +18,8 @@ import {
   type PlatformSrQuote,
 } from '../../shared/api/platformApi'
 
-const ACTIVE_RIDE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
-const RIDER_CANCELLABLE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING']
+const ACTIVE_RIDE_STATUSES = ['DRAFT', 'REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+const RIDER_CANCELLABLE_STATUSES = ['DRAFT', 'REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING']
 // Matches MESSAGING_ELIGIBLE_RIDE_STATUSES in server/routes/messages.mjs.
 const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']
 // Matches LIVE_TRACKING_STATUSES in server/routes/sr-rides.mjs.
@@ -87,6 +87,9 @@ const copy = {
     shareCopied: '✓ تم نسخ رابط المشاركة',
     shareTitle: 'رحلتي مع سير',
     shareText: 'تابع رحلتي مباشرة عبر هذا الرابط.',
+    scheduleForLater: 'جدولة الرحلة لوقت لاحق',
+    scheduleRide: 'جدولة الرحلة',
+    scheduledFor: 'مجدولة في',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -153,6 +156,9 @@ const copy = {
     shareCopied: '✓ Share link copied',
     shareTitle: 'My SR ride',
     shareText: 'Follow my ride live via this link.',
+    scheduleForLater: 'Schedule for later',
+    scheduleRide: 'Schedule ride',
+    scheduledFor: 'Scheduled for',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -204,6 +210,8 @@ export function SrRidePage({ lang }: Props) {
   const [chatInput, setChatInput] = useState('')
   const [chatStatus, setChatStatus] = useState<'idle' | 'sending' | 'error'>('idle')
   const [shareStatus, setShareStatus] = useState<'idle' | 'sharing' | 'copied' | 'error'>('idle')
+  const [scheduleForLater, setScheduleForLater] = useState(false)
+  const [scheduledFor, setScheduledFor] = useState('')
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
   const fallbackFareMinor = useMemo(() => {
@@ -340,6 +348,7 @@ export function SrRidePage({ lang }: Props) {
         pickupCoords,
         routeType: String(rideFilters.srRideRoute || ''),
         features: Array.isArray(rideFilters.srRideFeatures) ? rideFilters.srRideFeatures : [],
+        scheduledFor: scheduleForLater && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
       })
       setRide(nextRide)
       setStatus('idle')
@@ -546,8 +555,28 @@ export function SrRidePage({ lang }: Props) {
 
           {!ride && addressUnrecognized && <div style={styles.addressWarning}>⚠ {t.addressUnrecognized}</div>}
 
-          <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestRide()}>
-            {status === 'saving' ? t.saving : t.request}
+          {!ride && (
+            <label style={styles.scheduleRow}>
+              <input type="checkbox" checked={scheduleForLater} onChange={(event) => setScheduleForLater(event.target.checked)} />
+              {t.scheduleForLater}
+            </label>
+          )}
+          {!ride && scheduleForLater && (
+            <input
+              type="datetime-local"
+              style={styles.payInput}
+              value={scheduledFor}
+              min={new Date(Date.now() + 30 * 60 * 1000).toISOString().slice(0, 16)}
+              onChange={(event) => setScheduledFor(event.target.value)}
+            />
+          )}
+
+          <button
+            disabled={status === 'saving' || (scheduleForLater && !scheduledFor)}
+            style={styles.primaryButton}
+            onClick={() => void requestRide()}
+          >
+            {status === 'saving' ? t.saving : scheduleForLater ? t.scheduleRide : t.request}
           </button>
         </article>
 
@@ -596,6 +625,11 @@ export function SrRidePage({ lang }: Props) {
             </div>
           )}
 
+          {ride?.status === 'DRAFT' && ride.scheduledFor && (
+            <div style={styles.message}>
+              {t.scheduledFor} {new Date(ride.scheduledFor).toLocaleString(isAr ? 'ar-SY' : 'en-US')}
+            </div>
+          )}
           {ride && ['REQUESTED', 'MATCHING'].includes(ride.status) && (
             <div style={styles.message}>{t.waitingForDriver}</div>
           )}
@@ -671,7 +705,7 @@ export function SrRidePage({ lang }: Props) {
             </button>
           )}
 
-          {ride && ACTIVE_RIDE_STATUSES.includes(ride.status) && (
+          {ride && ride.status !== 'DRAFT' && ACTIVE_RIDE_STATUSES.includes(ride.status) && (
             <button style={styles.sosButton} onClick={() => (window.location.hash = '/trust-center/sos')}>
               {t.sos} ⚠
             </button>
@@ -774,4 +808,5 @@ const styles: Record<string, CSSProperties> = {
   chatBubbleTheirs: { justifySelf: 'start', maxWidth: '80%', borderRadius: '10px 10px 10px 2px', background: '#0d1420', border: '1px solid #263651', color: '#e7ecf5', padding: '8px 10px', fontSize: 13 },
   chatInputRow: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 },
   chatInput: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
+  scheduleRow: { display: 'flex', alignItems: 'center', gap: 8, color: '#9aa6ba', fontWeight: 800, fontSize: 14 },
 }

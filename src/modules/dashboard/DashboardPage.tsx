@@ -51,6 +51,8 @@ const copy = {
     saveTrip: 'حفظ نسخة شخصية',
     printTrip: 'طباعة الرحلة',
     member: 'العضوية الموثقة',
+    pendingVerification: 'التوثيق قيد المراجعة',
+    verifyNow: 'وثّق هويتك',
     inTrip: 'في الرحلة',
     noActiveTrip: 'لا توجد رحلة نشطة حالياً',
     noActiveTripCopy: 'ابحث عن إقامة واحجزها لتظهر تفاصيل رحلتك هنا.',
@@ -112,6 +114,8 @@ const copy = {
     saveTrip: 'Save personal copy',
     printTrip: 'Print trip',
     member: 'Verified membership',
+    pendingVerification: 'Verification in review',
+    verifyNow: 'Verify your identity',
     inTrip: 'In trip',
     noActiveTrip: 'No active trip right now',
     noActiveTripCopy: 'Search and book a stay to see your trip details here.',
@@ -188,6 +192,10 @@ export function DashboardPage({ lang }: Props) {
   const activeTripDates = activeBooking?.checkIn && activeBooking?.checkOut ? tripDateRange(activeBooking.checkIn, activeBooking.checkOut, lang) : ''
   const displayName = overview?.user?.displayName || (isAr ? 'ضيف' : 'Guest')
   const avatarLetter = displayName.trim().charAt(0).toUpperCase() || (isAr ? 'ض' : 'G')
+  // CAPSULE_RULES.noFakeTrustSignal: mirrors the same real idDocumentStatus-driven pattern
+  // HostDashboardPage already uses for its own verification badge -- never a static claim.
+  const isMembershipVerified = overview?.user?.idDocumentStatus === 'APPROVED'
+  const isMembershipPendingReview = overview?.user?.idDocumentStatus === 'PENDING_REVIEW'
   const activeStep = Math.max(2, activeTripStep(overview))
   const pastTrips = overview?.bookings.slice(1, 3).map((booking) => normalizePastTrip(booking, lang)) || []
   const walletRows = normalizeWalletRows(overview, lang)
@@ -203,7 +211,18 @@ export function DashboardPage({ lang }: Props) {
           <span style={styles.avatar}>{avatarLetter}</span>
           <div>
             <strong>{displayName}</strong>
-            <span>SYBNB STAYS · {t.member}</span>
+            {isMembershipVerified ? (
+              <span>SYBNB STAYS · {t.member}</span>
+            ) : isMembershipPendingReview ? (
+              <span>SYBNB STAYS · {t.pendingVerification}</span>
+            ) : (
+              <span>
+                SYBNB STAYS ·{' '}
+                <button style={styles.verifyLink} onClick={() => (window.location.hash = '/trust-center/verification')}>
+                  {t.verifyNow}
+                </button>
+              </span>
+            )}
           </div>
         </div>
       </section>
@@ -422,6 +441,7 @@ const styles: Record<string, CSSProperties> = {
   iconButton: { width: 50, height: 50, borderRadius: 999, border: '1px solid #242b3e', background: '#101522', color: '#fff', fontSize: 26, display: 'grid', placeItems: 'center' },
   profile: { display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: 12, textAlign: 'right' },
   avatar: { width: 48, height: 48, borderRadius: 999, border: '2px solid rgba(255,255,255,.24)', background: 'linear-gradient(145deg,#5268ff,#20d29b)', display: 'grid', placeItems: 'center', fontWeight: 950, color: '#fff' },
+  verifyLink: { border: 0, background: 'none', padding: 0, color: '#ffb020', fontWeight: 900, fontSize: 'inherit', textDecoration: 'underline', cursor: 'pointer' },
   desktopHero: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.42fr) minmax(330px, .78fr)', gap: 18, alignItems: 'stretch' },
   sidePanel: { display: 'grid', gap: 16, alignContent: 'stretch' },
   tripCard: { border: '1.5px solid #20d29b', borderRadius: 22, background: '#14141b', padding: 30, display: 'grid', gap: 18, alignContent: 'center', minHeight: 300, boxShadow: '0 18px 42px rgba(0,0,0,.34)' },

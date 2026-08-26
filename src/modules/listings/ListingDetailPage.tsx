@@ -685,7 +685,11 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                   <div style={styles.mapLocationCard}>
                     <span style={styles.mapPin}>{detailCopy.mapPin}</span>
                     <strong>{mapTarget?.label}</strong>
-                    <small>{mapTarget?.hasCoordinates ? mapTarget.query : t.mapApproximate}</small>
+                    {mapTarget?.hasCoordinates ? (
+                      <small>{mapTarget.query}</small>
+                    ) : mapTarget?.hasRealLocation ? (
+                      <small>{t.mapApproximate}</small>
+                    ) : null}
                   </div>
                 </div>
                 <a href={googleMapsSearchUrl(listing, title, lang)} rel="noreferrer" target="_blank" style={styles.secondaryLinkButton}>

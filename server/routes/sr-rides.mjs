@@ -5,6 +5,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 // the route does NOT depend on any country's geocoder module directly.
 import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
+import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 
 export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/sr/quote') {
@@ -107,6 +108,7 @@ export async function handleSrRides(req, res, url, context) {
     }
     // Signed URL, never the raw storage key (photoRef) -- the driver-photo bucket is private
     // (server/lib/storage.mjs), and the key itself is not meant to leave the server.
+    const ratingSummary = ride.driverId ? await getDriverRatingSummary(ride.driverId) : null
     const ridePayload = ride.driver
       ? {
           ...ride,
@@ -120,6 +122,7 @@ export async function handleSrRides(req, res, url, context) {
                   photoUrl: ride.driver.driverProfile.photoRef ? signDriverPhotoUrl(ride.driver.driverProfile.photoRef) : null,
                 }
               : null,
+            ...ratingSummary,
           },
         }
       : ride

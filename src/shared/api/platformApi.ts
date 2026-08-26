@@ -98,6 +98,8 @@ export type PlatformRideRequest = {
     id: string
     displayName: string
     driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; photoUrl: string | null } | null
+    averageRating: number | null
+    ratingCount: number
   } | null
   review?: PlatformRideReview | null
 }
@@ -266,6 +268,7 @@ export type PlatformDriverOverview = {
     completed: number
     earningsMinor: number
   }
+  rating: { averageRating: number | null; ratingCount: number }
   rides: PlatformRideRequest[]
 }
 

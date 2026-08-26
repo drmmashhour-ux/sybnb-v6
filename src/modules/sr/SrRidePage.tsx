@@ -483,7 +483,10 @@ function driverIdentityLabel(ride: PlatformRideRequest | null, t: { driverNotAss
   if (!ride?.driver) return t.driverNotAssigned
   const vehicle = [ride.driver.driverProfile?.vehicleMake, ride.driver.driverProfile?.vehicleModel].filter(Boolean).join(' ')
   const plate = ride.driver.driverProfile?.vehiclePlate
-  return [ride.driver.displayName, vehicle, plate].filter(Boolean).join(' · ')
+  // Never show a rating for a driver with none yet -- an invented "0.0" or a hidden zero would be
+  // exactly the kind of unbacked claim CAPSULE_RULES.noFakeTrustSignal exists to prevent.
+  const rating = ride.driver.averageRating !== null ? `★${ride.driver.averageRating} (${ride.driver.ratingCount})` : null
+  return [ride.driver.displayName, vehicle, plate, rating].filter(Boolean).join(' · ')
 }
 
 function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir?: 'ltr' | 'rtl' }) {

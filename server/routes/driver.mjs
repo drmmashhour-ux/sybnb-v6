@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.mjs'
+import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 
 export async function handleDriver(req, res, url, context) {
   // SR Ride vs. Uber gap-closure: a driver's own photo, so a rider can actually recognize who
@@ -78,6 +79,7 @@ export async function handleDriver(req, res, url, context) {
       orderBy: { requestedAt: 'desc' },
       take: 50,
     })
+    const ratingSummary = await getDriverRatingSummary(context.user.id)
     return json(res, 200, {
       ok: true,
       overview: {
@@ -95,6 +97,7 @@ export async function handleDriver(req, res, url, context) {
             .filter((ride) => ride.status === 'COMPLETED')
             .reduce((sum, ride) => sum + (ride.fareMinor || 0), 0),
         },
+        rating: ratingSummary,
         rides,
       },
     })

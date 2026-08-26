@@ -30,6 +30,7 @@ const copy = {
     active: 'نشطة',
     completed: 'مكتملة',
     earnings: 'إيراد مكتمل',
+    rating: 'تقييمك',
     rider: 'الراكب',
     pickup: 'الانطلاق',
     dropoff: 'الوجهة',
@@ -81,6 +82,7 @@ const copy = {
     active: 'Active',
     completed: 'Completed',
     earnings: 'Completed earnings',
+    rating: 'Your rating',
     rider: 'Rider',
     pickup: 'Pickup',
     dropoff: 'Dropoff',
@@ -188,15 +190,20 @@ export function DriverDashboardPage({ lang }: Props) {
     }
   }
 
-  const stats = useMemo(
-    () => [
+  const stats = useMemo(() => {
+    const base = [
       { label: t.assigned, value: String(overview?.totals.assigned || 0) },
       { label: t.active, value: String(overview?.totals.active || 0) },
       { label: t.completed, value: String(overview?.totals.completed || 0) },
       { label: t.earnings, value: moneyText(overview?.totals.earningsMinor || 0, 'SYP', lang) },
-    ],
-    [lang, overview, t],
-  )
+    ]
+    // Only ever a real, rider-submitted average -- never a placeholder for a driver with zero
+    // ratings yet (CAPSULE_RULES.noFakeTrustSignal).
+    if (overview?.rating.ratingCount) {
+      base.push({ label: t.rating, value: `★${overview.rating.averageRating} (${overview.rating.ratingCount})` })
+    }
+    return base
+  }, [lang, overview, t])
 
   async function loadOverview() {
     setStatus('loading')

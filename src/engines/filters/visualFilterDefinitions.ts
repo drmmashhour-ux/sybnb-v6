@@ -553,7 +553,10 @@ export function hostInventoryFilterGroupsFromConfig() {
 }
 
 export function srRideFilterGroupsFromConfig() {
-  return visualFilterGroupsById(['srRideCategory', 'srRideRoute', 'srRideFeatures', 'payments'])
+  // No 'payments' group here: SR Ride has no in-app payment-collection mechanism at all (no
+  // PaymentProof relation on RideRequest, fares are informational only) -- offering a payment-method
+  // choice would imply a capability that doesn't exist. CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['srRideCategory', 'srRideRoute', 'srRideFeatures'])
 }
 
 export const sellerPropertyFilterGroups = sellerPropertyFilterGroupsFromConfig()

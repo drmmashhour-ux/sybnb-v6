@@ -32,6 +32,7 @@ const copy = {
     fare: 'الأجرة التقديرية',
     distance: 'المسافة التقديرية',
     distanceApprox: '(تقريبية بحسب العنوان)',
+    addressUnrecognized: 'تعذّر التعرف على العنوان المدخل. السعر والمسافة تقدير افتراضي وليسا مبنيين على عنوانك الفعلي — تحقق من كتابة اسم الحي بشكل صحيح.',
     request: 'طلب الرحلة',
     refresh: 'تحديث الحالة',
     status: 'حالة الرحلة',
@@ -67,6 +68,7 @@ const copy = {
     fare: 'Estimated fare',
     distance: 'Estimated distance',
     distanceApprox: '(approximate, from address text)',
+    addressUnrecognized: "We couldn't recognize this address. The price and distance are a rough default, not based on your actual location — check that the neighborhood name is spelled correctly.",
     request: 'Request ride',
     refresh: 'Refresh status',
     status: 'Ride status',
@@ -117,7 +119,6 @@ export function SrRidePage({ lang }: Props) {
     srRideCategory: 'economy',
     srRideRoute: 'cityRide',
     srRideFeatures: ['instantConfirm', 'ac'],
-    payments: ['localWallet'],
   })
   const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [message, setMessage] = useState('')
@@ -129,6 +130,11 @@ export function SrRidePage({ lang }: Props) {
   }, [category, lowDataMode])
 
   const fareMinor = ride?.fareMinor ?? quote?.fareMinor ?? fallbackFareMinor
+  // CAPSULE_RULES.noFakeTrustSignal: quote.estimated alone doesn't distinguish "GPS was imprecise
+  // but we still recognized the neighborhood" from "we recognized nothing at all". Both pickup AND
+  // dropoff coords coming back null (the gazetteer geocoder found no match for either) means the
+  // whole distance/price is a blind default, not a real estimate.
+  const addressUnrecognized = Boolean(quote?.estimated) && !quote?.pickupCoords && !quote?.dropoffCoords
 
   useEffect(() => {
     if (ride) return
@@ -183,6 +189,8 @@ export function SrRidePage({ lang }: Props) {
         lowDataMode,
         accuracyMeters,
         pickupCoords,
+        routeType: String(rideFilters.srRideRoute || ''),
+        features: Array.isArray(rideFilters.srRideFeatures) ? rideFilters.srRideFeatures : [],
       })
       setRide(nextRide)
       setStatus('idle')
@@ -319,6 +327,8 @@ export function SrRidePage({ lang }: Props) {
             <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinor, 'SYP', lang)}</strong>
           </div>
 
+          {!ride && addressUnrecognized && <div style={styles.addressWarning}>⚠ {t.addressUnrecognized}</div>}
+
           <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestRide()}>
             {status === 'saving' ? t.saving : t.request}
           </button>
@@ -432,4 +442,5 @@ const styles: Record<string, CSSProperties> = {
   actions: { display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' },
   message: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 8, background: 'rgba(32,210,155,.1)', color: '#b7ffe8', padding: 12, fontWeight: 900 },
   error: { borderColor: 'rgba(255,96,96,.45)', background: 'rgba(255,96,96,.1)', color: '#ffd1d1' },
+  addressWarning: { border: '1px solid rgba(255,176,32,.45)', borderRadius: 8, background: 'rgba(255,176,32,.1)', color: '#ffd98a', padding: 12, fontWeight: 800, fontSize: 13, lineHeight: 1.4 },
 }

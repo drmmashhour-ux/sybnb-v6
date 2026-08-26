@@ -1073,6 +1073,8 @@ export async function createPrototypeSrRide(input: {
   lowDataMode: boolean
   accuracyMeters?: number
   pickupCoords?: { lat: number; lng: number }
+  routeType?: string
+  features?: string[]
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -1088,6 +1090,10 @@ export async function createPrototypeSrRide(input: {
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',
+        // Recorded as the rider's stated preference, not an enforced match -- no driver-matching
+        // logic reads these yet. Real, not decorative: previously selected but silently discarded.
+        requestedRouteType: input.routeType,
+        requestedFeatures: input.features,
       },
     },
   })

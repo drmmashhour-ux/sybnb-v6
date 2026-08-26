@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   claimPrototypeSrRide,
+  fetchDriverIdentityStatus,
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
   updatePrototypeDriverRideStatus,
@@ -61,9 +62,9 @@ const copy = {
     highDemand: 'الطلب في المنطقة الحرة الآن مرتفع جداً وتوقعات دخل مرتفعة.',
     docsStatus: 'حالة الأمان والوثائق',
     verifiedIdentity: 'الهوية الموثقة',
-    license: 'رخصة القيادة',
-    carInsurance: 'تأمين المركبة',
-    renewInsurance: 'تنبيه: أجدد التأمين خلال ١٤ يوم لتجنب إيقاف الحساب.',
+    identityVerified: 'موثق',
+    identityPending: 'قيد المراجعة',
+    identityNotVerified: 'غير موثق',
     todayEarnings: 'أرباح اليوم',
     nextBatch: 'الدفعة القادمة',
     reportIssue: 'إبلاغ عن مشكلة',
@@ -114,9 +115,9 @@ const copy = {
     highDemand: 'Demand in the free zone is very high now with elevated income expectations.',
     docsStatus: 'Safety and document status',
     verifiedIdentity: 'Verified identity',
-    license: 'Driver license',
-    carInsurance: 'Vehicle insurance',
-    renewInsurance: 'Warning: renew insurance within 14 days to avoid account pause.',
+    identityVerified: 'Verified',
+    identityPending: 'Pending review',
+    identityNotVerified: 'Not verified',
     todayEarnings: 'Today earnings',
     nextBatch: 'Next batch',
     reportIssue: 'Report issue',
@@ -135,13 +136,23 @@ export function DriverDashboardPage({ lang }: Props) {
   const [pendingStatus, setPendingStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [claimingRideId, setClaimingRideId] = useState('')
   const [claimError, setClaimError] = useState('')
+  const [idDocumentStatus, setIdDocumentStatus] = useState<'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null>(null)
 
   useEffect(() => {
     void loadOverview()
     void loadPendingRides()
+    void loadIdentityStatus()
     const interval = window.setInterval(() => void loadPendingRides(), 6000)
     return () => window.clearInterval(interval)
   }, [])
+
+  async function loadIdentityStatus() {
+    try {
+      setIdDocumentStatus(await fetchDriverIdentityStatus())
+    } catch {
+      setIdDocumentStatus(null)
+    }
+  }
 
   async function loadPendingRides() {
     try {
@@ -280,10 +291,17 @@ export function DriverDashboardPage({ lang }: Props) {
         </article>
         <article style={styles.docsPanel}>
           <h2>{t.docsStatus}</h2>
-          <Info label={t.verifiedIdentity} value={isAr ? 'موثق' : 'Verified'} dir={isAr ? 'rtl' : 'ltr'} />
-          <Info label={t.license} value={isAr ? 'سارية' : 'Valid'} dir={isAr ? 'rtl' : 'ltr'} />
-          <Info label={t.carInsurance} value={isAr ? 'ينتهي قريباً' : 'Expiring soon'} dir={isAr ? 'rtl' : 'ltr'} />
-          <p style={styles.insuranceWarning}>{t.renewInsurance}</p>
+          <Info
+            label={t.verifiedIdentity}
+            value={
+              idDocumentStatus === 'APPROVED'
+                ? t.identityVerified
+                : idDocumentStatus === 'PENDING_REVIEW'
+                  ? t.identityPending
+                  : t.identityNotVerified
+            }
+            dir={isAr ? 'rtl' : 'ltr'}
+          />
         </article>
       </section>
 

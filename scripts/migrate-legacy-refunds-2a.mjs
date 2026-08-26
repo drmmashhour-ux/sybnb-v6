@@ -3,20 +3,31 @@
 // Populates Refund/RefundAttempt rows for every pre-existing REFUNDED PaymentProof, using the
 // SAME six-way classification algorithm independently reviewed and verified across the Item 2
 // design cycle (Revision 6 onward; verified counts 49/1/51/43/0/0, stable through Revision 10).
-// The classification pass below is a direct adaptation of that reviewed script
-// (verify_legacy_refund_classification.mjs) -- same evidence sources, same matching rules, same
-// idempotencyKey() import (not reimplemented) -- extended here to WRITE the backfilled rows
-// instead of only reporting counts.
+//
+// ROUND 2 CORRECTIVE NOTE (round 1 rejected by independent review, findings 1 and 5): round 1's
+// classifier was adapted from an early (Revision-6-era) scratch verification script and silently
+// regressed a semantic check the DESIGN cycle itself had already fixed at Revision 8 -- it checked
+// only amount/currency/beneficiary + the proof-exact idempotency key, never `entry.type`,
+// `entry.referenceType`, or `entry.referenceId`. Fixed below: every wallet match now also requires
+// `entry.type === 'REFUND'`, `entry.referenceType === 'booking_refund'`, and
+// `entry.referenceId === proof.bookingId`, matching Revision 8's mutation-probe-proven design
+// exactly. Round 1 also classified entirely BEFORE opening the write transaction and then wrote
+// using those stale snapshots -- a real TOCTOU window (evidence could change between classification
+// and write). Fixed below: every piece of evidence a bucket's write depends on is RE-FETCHED and
+// RE-VALIDATED against its original classification snapshot from INSIDE the transaction,
+// immediately before that row is written; any divergence aborts the entire transaction (fail
+// closed, never write against evidence that might have moved).
 //
 // Runs read-only classification FIRST, over the whole dataset, and aborts entirely (zero writes)
 // if any row comes back ambiguous or unclassified -- this script never guesses. Only if every row
-// classifies cleanly does it open a single database transaction and write every Refund/
-// RefundAttempt/PaymentProof-counter/PaymentEvent-linkage row atomically: either all 144 rows
+// classifies cleanly does it open a single database transaction; inside it, the exact same evidence
+// is re-verified fresh before each write, and the whole transaction is atomic: either all 144 rows
 // migrate, or none do.
 //
 // Two judgment calls this backfill makes that were NOT already settled by the design document
 // (which specified the six-way classification and the CHECK-constraint shapes, but not a
-// row-by-row Refund construction), reported here explicitly for reviewer sign-off:
+// row-by-row Refund construction), reported here explicitly for reviewer sign-off -- UNCHANGED
+// from round 1, still gated, not resolved by this round's fixes:
 //
 //   1. reasonCode: for wallet-matched buckets (wallet_verified_exact,
 //      wallet_verified_protection_fee_adjusted) the matched idempotencyKey prefix positively
@@ -45,6 +56,7 @@
 
 import { PrismaClient } from '@prisma/client'
 import { idempotencyKey } from '../server/lib/security.mjs'
+import { fileURLToPath } from 'url'
 
 const DRY_RUN = process.argv.includes('--dry-run')
 const db = new PrismaClient()
@@ -57,7 +69,17 @@ const KNOWN_KEY_PREFIXES = [
 const MANUAL_FAMILY = new Set(['manual', 'syrian_local_wallet', 'sham_cash'])
 const CARD_FAMILY = ['payment_intent', 'stripe', 'card']
 
-async function classify(proof) {
+// The full semantic-match predicate for a WalletEntry against a PaymentProof -- shared by the
+// classification pass and the in-transaction re-validation pass, so the two can never drift apart.
+// Exported (along with classify/revalidateInsideTransaction below) so the evidence harness can
+// unit-test these functions directly against constructed fixtures -- e.g. proving
+// revalidateInsideTransaction genuinely throws on a stale snapshot -- rather than only observing
+// this script's own end-to-end console output.
+export function walletEntrySemanticMatch(entry, proof) {
+  return entry.type === 'REFUND' && entry.referenceType === 'booking_refund' && entry.referenceId === proof.bookingId
+}
+
+export async function classify(proof) {
   const matchedKeys = []
   for (const { source, prefix, reasonCode } of KNOWN_KEY_PREFIXES) {
     const key = idempotencyKey([prefix, proof.bookingId, proof.id])
@@ -95,6 +117,9 @@ async function classify(proof) {
       return { bucket: 'ambiguous', reason: `wallet-keyed evidence found but proof.provider='${proof.provider}' is not in the manual-family allowlist` }
     }
     const { entry, source, reasonCode } = matchedKeys[0]
+    if (!walletEntrySemanticMatch(entry, proof)) {
+      return { bucket: 'ambiguous', reason: `wallet entry found (source: ${source}) but semantic fields don't match: type=${entry.type} referenceType=${entry.referenceType} referenceId=${entry.referenceId} vs expected type=REFUND referenceType=booking_refund referenceId=${proof.bookingId}` }
+    }
     const exact = entry.amountMinor === proof.amountMinor && entry.currency === proof.currency && entry.wallet.userId === proof.userId
     if (exact) {
       return { bucket: 'wallet_verified_exact', entry, source, reasonCode }
@@ -124,6 +149,49 @@ async function classify(proof) {
   }
 
   return { bucket: 'unclassified', provider: proof.provider, adminNote: proof.adminNote }
+}
+
+// Re-fetches the exact rows a classification result depends on, from INSIDE the write transaction,
+// and confirms every field the classifier actually relied on is unchanged since the classification
+// pass ran outside the transaction. Throws (aborting the whole transaction) on any divergence --
+// this is the TOCTOU fix: never write against evidence that might have moved.
+export async function revalidateInsideTransaction(tx, proof, result) {
+  const freshProof = await tx.paymentProof.findUnique({ where: { id: proof.id } })
+  if (!freshProof || freshProof.status !== 'REFUNDED' || freshProof.amountMinor !== proof.amountMinor ||
+      freshProof.currency !== proof.currency || freshProof.bookingId !== proof.bookingId ||
+      freshProof.userId !== proof.userId || freshProof.provider !== proof.provider) {
+    throw new Error(`TOCTOU: payment_proof ${proof.id} changed between classification and write -- aborting entire transaction`)
+  }
+
+  if (result.bucket === 'wallet_verified_exact' || result.bucket === 'wallet_verified_protection_fee_adjusted') {
+    const fresh = await tx.walletEntry.findUnique({ where: { id: result.entry.id }, include: { wallet: true } })
+    if (!fresh) throw new Error(`TOCTOU: wallet_entry ${result.entry.id} for proof ${proof.id} no longer exists -- aborting entire transaction`)
+    if (!walletEntrySemanticMatch(fresh, proof) || fresh.amountMinor !== result.entry.amountMinor ||
+        fresh.currency !== result.entry.currency || fresh.wallet.userId !== result.entry.wallet.userId) {
+      throw new Error(`TOCTOU: wallet_entry ${result.entry.id} for proof ${proof.id} changed between classification and write -- aborting entire transaction`)
+    }
+    return
+  }
+
+  if (result.bucket === 'provider_event_verified_amount_unpopulated') {
+    const fresh = await tx.paymentEvent.findUnique({ where: { id: result.event.id } })
+    if (!fresh) throw new Error(`TOCTOU: payment_event ${result.event.id} for proof ${proof.id} no longer exists -- aborting entire transaction`)
+    // Matches classify()'s own "amountPopulated" predicate exactly: this bucket requires NOT
+    // (amountMinor AND currency both populated), not that both are null -- the real data has
+    // amountMinor populated with currency null for all 51 rows in this bucket. An earlier version
+    // of this check wrongly demanded both be null, which would have false-positive-aborted every
+    // single real row in this bucket; caught by the round-2 evidence harness re-running this
+    // script against representative data, not by reasoning alone.
+    const freshAmountPopulated = fresh.amountMinor != null && fresh.currency != null
+    if (fresh.type !== 'charge.refunded' || fresh.processingStatus !== 'APPLIED' ||
+        fresh.intentId !== result.event.intentId || freshAmountPopulated) {
+      throw new Error(`TOCTOU: payment_event ${result.event.id} for proof ${proof.id} changed between classification and write -- aborting entire transaction`)
+    }
+    return
+  }
+
+  // unverified_card: no external evidence row to re-check by definition -- the fresh proof check
+  // above is the whole of what this bucket depends on, and it already ran.
 }
 
 async function main() {
@@ -161,6 +229,8 @@ async function main() {
 
   await db.$transaction(async (tx) => {
     for (const { proof, result } of classified) {
+      await revalidateInsideTransaction(tx, proof, result)
+
       const existingActive = await tx.refund.findFirst({ where: { paymentProofId: proof.id } })
       if (existingActive) {
         throw new Error(`INVARIANT VIOLATION: payment_proof ${proof.id} already has a refund row -- backfill must only run once against a table with zero pre-existing refunds`)
@@ -288,8 +358,14 @@ async function main() {
   await db.$disconnect()
 }
 
-main().catch(async (err) => {
-  console.error(err)
-  await db.$disconnect()
-  process.exitCode = 1
-})
+// Only run the real backfill when this file is executed directly (`node migrate-legacy-refunds-2a.mjs`),
+// never as a side effect of another module importing classify/revalidateInsideTransaction/
+// walletEntrySemanticMatch for unit testing -- an unguarded top-level main() call would otherwise
+// trigger a real, unintended backfill attempt just from an `import` statement.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch(async (err) => {
+    console.error(err)
+    await db.$disconnect()
+    process.exitCode = 1
+  })
+}

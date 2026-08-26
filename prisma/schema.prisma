@@ -1002,6 +1002,7 @@ model RideRequest {
   review         RideReview?
   paymentProofs  PaymentProof[]
   messageThread  MessageThread?
+  stops          RideStop[]
 
   @@index([status, requestedAt])
   @@index([driverId, status])
@@ -1044,6 +1045,22 @@ model SavedPlace {
 
   @@index([userId])
   @@map("saved_places")
+}
+
+// SR Ride vs. Uber gap-closure (P2 #14): multi-stop rides. Plain lat/lng, not PostGIS -- resolved
+// once at ride-creation time, only ever played back for display, never spatially queried again.
+model RideStop {
+  id       String @id @default(uuid())
+  rideId   String @map("ride_id")
+  sequence Int
+  address  String
+  lat      Float?
+  lng      Float?
+
+  ride RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@index([rideId, sequence])
+  @@map("ride_stops")
 }
 
 model AdminAuditLog {

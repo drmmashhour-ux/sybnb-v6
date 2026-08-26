@@ -65,6 +65,8 @@ const copy = {
     locationUnsupported: 'الموقع الجغرافي غير مدعوم على هذا الجهاز.',
     accessibilityCapable: 'مركبتي تسمح بالوصول لذوي الاحتياجات الخاصة',
     accessibilityRequired: 'يحتاج مركبة لذوي الاحتياجات الخاصة',
+    stopsCount: 'محطات',
+    stopLabel: 'محطة',
     empty: 'لا توجد رحلات مسندة بعد.',
     dispatch: 'مركز التوجيه',
     safety: 'أمان الرحلة',
@@ -128,6 +130,8 @@ const copy = {
     locationUnsupported: 'Geolocation is not supported on this device.',
     accessibilityCapable: 'My vehicle is wheelchair accessible',
     accessibilityRequired: 'Needs accessible vehicle',
+    stopsCount: 'stops',
+    stopLabel: 'Stop',
     empty: 'No assigned rides yet.',
     dispatch: 'Dispatch center',
     safety: 'Ride safety',
@@ -324,6 +328,11 @@ export function DriverDashboardPage({ lang }: Props) {
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
                   </i>
                   {pendingRide.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {t.accessibilityRequired}</span>}
+                  {pendingRide.stops.length > 0 && (
+                    <span style={styles.accessibilityBadge}>
+                      {pendingRide.stops.length} {t.stopsCount}
+                    </span>
+                  )}
                   <button disabled={claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
                     {claimingRideId === pendingRide.id ? t.claiming : t.accept}
                   </button>
@@ -448,6 +457,9 @@ function RideCard({
       <Info label={labels.status} value={statusText(ride.status, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
       <Info label={labels.fare} value={moneyText(ride.fareMinor || 0, ride.currency, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
       {ride.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {labels.accessibilityRequired}</span>}
+      {ride.stops.map((stop, index) => (
+        <Info key={index} label={`${labels.stopLabel} ${index + 1}`} value={stop.address} />
+      ))}
       {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
         <div style={styles.actions}>
           <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>

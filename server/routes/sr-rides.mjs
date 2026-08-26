@@ -42,6 +42,14 @@ export async function handleSrRides(req, res, url, context) {
     const category = String(body.category || 'SR Economy')
     const pickup = String(body.pickup || '')
     const dropoff = String(body.dropoff || '')
+    // SR Ride vs. Uber gap-closure (P2 #14): up to 3 intermediate stops, matching Uber's own
+    // multi-stop cap. Blank entries are dropped rather than rejected -- a rider clearing a stop
+    // field shouldn't block the whole request.
+    const stops = (Array.isArray(body.stops) ? body.stops : [])
+      .map((stop) => String(stop || '').trim())
+      .filter(Boolean)
+      .slice(0, 3)
+    const stopCoordsOverrides = Array.isArray(body.stopCoords) ? body.stopCoords : []
     const quote = quoteSrRideForActiveCountry({
       pickup,
       dropoff,
@@ -49,6 +57,8 @@ export async function handleSrRides(req, res, url, context) {
       lowDataMode: Boolean(body.lowDataMode),
       pickupCoordsOverride: body.pickupCoords,
       dropoffCoordsOverride: body.dropoffCoords,
+      stops,
+      stopCoordsOverrides,
     })
 
     // SR Ride vs. Uber gap-closure (P1 #6): an optional future pickup time. A ride created dormant
@@ -98,6 +108,18 @@ export async function handleSrRides(req, res, url, context) {
       `
     }
 
+    if (stops.length > 0) {
+      await db().rideStop.createMany({
+        data: stops.map((address, index) => ({
+          rideId: ride.id,
+          sequence: index,
+          address,
+          lat: quote.stopCoords[index]?.lat,
+          lng: quote.stopCoords[index]?.lng,
+        })),
+      })
+    }
+
     return json(res, 201, { ok: true, ride })
   }
 
@@ -125,6 +147,7 @@ export async function handleSrRides(req, res, url, context) {
         },
         review: true,
         paymentProofs: { select: { id: true, status: true, amountMinor: true, currency: true }, orderBy: { createdAt: 'desc' }, take: 1 },
+        stops: { select: { address: true, lat: true, lng: true }, orderBy: { sequence: 'asc' } },
       },
     })
     if (!ride) {

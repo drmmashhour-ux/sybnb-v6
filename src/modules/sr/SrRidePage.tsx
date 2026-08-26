@@ -97,6 +97,9 @@ const copy = {
     accessibilityRequired: 'أحتاج مركبة تسمح بالوصول لذوي الاحتياجات الخاصة',
     savePlaceLabelPlaceholder: 'اسم المكان (مثال: المنزل)',
     savePlaceButton: 'حفظ عنوان الانطلاق',
+    stop: 'محطة',
+    addStop: '+ إضافة محطة',
+    removeStop: 'إزالة',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -169,6 +172,9 @@ const copy = {
     accessibilityRequired: 'I need a wheelchair-accessible vehicle',
     savePlaceLabelPlaceholder: 'Place name (e.g. Home)',
     savePlaceButton: 'Save pickup address',
+    stop: 'Stop',
+    addStop: '+ Add stop',
+    removeStop: 'Remove',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -223,6 +229,7 @@ export function SrRidePage({ lang }: Props) {
   const [scheduleForLater, setScheduleForLater] = useState(false)
   const [scheduledFor, setScheduledFor] = useState('')
   const [accessibilityRequired, setAccessibilityRequired] = useState(false)
+  const [stops, setStops] = useState<string[]>([])
   const [savedPlaces, setSavedPlaces] = useState<PlatformSavedPlace[]>([])
   const [newPlaceLabel, setNewPlaceLabel] = useState('')
   const [savingPlace, setSavingPlace] = useState(false)
@@ -396,6 +403,7 @@ export function SrRidePage({ lang }: Props) {
         features: Array.isArray(rideFilters.srRideFeatures) ? rideFilters.srRideFeatures : [],
         scheduledFor: scheduleForLater && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
         accessibilityRequired,
+        stops: stops.map((stop) => stop.trim()).filter(Boolean),
       })
       setRide(nextRide)
       setStatus('idle')
@@ -585,6 +593,35 @@ export function SrRidePage({ lang }: Props) {
             </div>
           )}
 
+          {!ride &&
+            stops.map((stop, index) => (
+              <label key={index} style={styles.label}>
+                {t.stop} {index + 1}
+                <div style={styles.savePlaceRow}>
+                  <input
+                    style={styles.input}
+                    value={stop}
+                    onChange={(event) =>
+                      setStops((previous) => previous.map((value, valueIndex) => (valueIndex === index ? event.target.value : value)))
+                    }
+                  />
+                  <button
+                    type="button"
+                    style={styles.secondaryButton}
+                    onClick={() => setStops((previous) => previous.filter((_, valueIndex) => valueIndex !== index))}
+                  >
+                    {t.removeStop}
+                  </button>
+                </div>
+              </label>
+            ))}
+
+          {!ride && stops.length < 3 && (
+            <button type="button" style={styles.secondaryButton} onClick={() => setStops((previous) => [...previous, ''])}>
+              {t.addStop}
+            </button>
+          )}
+
           <label style={styles.label}>
             {t.dropoff}
             <input style={styles.input} value={dropoff} onChange={(event) => setDropoff(event.target.value)} />
@@ -680,12 +717,20 @@ export function SrRidePage({ lang }: Props) {
           <Info label={t.rideId} value={ride ? ride.id.slice(0, 8).toUpperCase() : '-'} />
           <Info label={t.status} value={statusText(ride?.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
           {ride && (ride.pickupCoords || ride.dropoffCoords || ride.driver?.location) && (
-            <RideMap pickup={ride.pickupCoords} dropoff={ride.dropoffCoords} driverLocation={ride.driver?.location} />
+            <RideMap
+              pickup={ride.pickupCoords}
+              dropoff={ride.dropoffCoords}
+              stops={ride.stops.filter((stop) => stop.lat != null && stop.lng != null).map((stop) => ({ lat: stop.lat as number, lng: stop.lng as number }))}
+              driverLocation={ride.driver?.location}
+            />
           )}
           {driverPhotoUrl && <img src={driverPhotoUrl} alt="" style={styles.driverPhoto} />}
           {ride?.driver?.isVerified && <span style={styles.verifiedBadge}>✓ {t.verifiedDriver}</span>}
           <Info label={t.driver} value={driverIdentityLabel(ride, t)} />
           <Info label={t.pickup} value={String(ride?.metadata.pickup || pickup)} />
+          {ride?.stops.map((stop, index) => (
+            <Info key={index} label={`${t.stop} ${index + 1}`} value={stop.address} />
+          ))}
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
           <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : isAr ? 'يدوي' : 'manual'} />
           {ride?.accessibilityRequired && <div style={styles.message}>♿ {t.accessibilityRequired}</div>}

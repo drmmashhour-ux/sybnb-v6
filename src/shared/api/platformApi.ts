@@ -89,6 +89,7 @@ export type PlatformRideRequest = {
   cancellationFeeMinor: number | null
   scheduledFor: string | null
   accessibilityRequired: boolean
+  stops: Array<{ address: string; lat: number | null; lng: number | null }>
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string
@@ -1107,6 +1108,7 @@ export async function createPrototypeSrRide(input: {
   features?: string[]
   scheduledFor?: string
   accessibilityRequired?: boolean
+  stops?: string[]
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -1121,6 +1123,7 @@ export async function createPrototypeSrRide(input: {
       pickupCoords: input.pickupCoords,
       scheduledFor: input.scheduledFor,
       accessibilityRequired: input.accessibilityRequired,
+      stops: input.stops,
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',

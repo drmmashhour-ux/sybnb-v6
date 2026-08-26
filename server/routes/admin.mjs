@@ -320,12 +320,19 @@ export async function handleAdmin(req, res, url, context) {
         throw error
       }
 
-      // Step 5: transfer reserved -> accepted on the payment proof. Must affect EXACTLY one row;
-      // anything else is an anomaly (not a normal race outcome, since Step 1 already confirmed
-      // reservation validity) and rolls back Steps 1-4 too. Uses ONLY claimedRefund's own fields,
-      // never a caller-supplied proof id or amount.
+      // Step 5: transfer reserved -> accepted on the payment proof. The guard requires the EXACT
+      // expected reserved amount for this migrated refund, not merely "at least this much" --
+      // round-2 corrective fix, independent review finding: refunds_one_active_per_payment_proof
+      // (Phase 2a) guarantees at most one active refund per proof, so once Step 1 has claimed THIS
+      // refund, reservedRefundMinor must equal exactly claimedRefund.amountMinor. A `gte` guard
+      // would let this transaction silently succeed even if the proof happened to carry MORE
+      // reserved capacity than this specific refund accounts for -- masking a genuine data
+      // inconsistency (e.g. a phantom leftover reservation from elsewhere) as a normal transfer
+      // instead of surfacing it as the anomaly it actually is. Must affect EXACTLY one row; anything
+      // else rolls back Steps 1-4 too. Uses ONLY claimedRefund's own fields, never a caller-supplied
+      // proof id or amount.
       const transferred = await tx.paymentProof.updateMany({
-        where: { id: claimedRefund.paymentProofId, reservedRefundMinor: { gte: claimedRefund.amountMinor } },
+        where: { id: claimedRefund.paymentProofId, reservedRefundMinor: claimedRefund.amountMinor },
         data: {
           reservedRefundMinor: { decrement: claimedRefund.amountMinor },
           acceptedRefundMinor: { increment: claimedRefund.amountMinor },

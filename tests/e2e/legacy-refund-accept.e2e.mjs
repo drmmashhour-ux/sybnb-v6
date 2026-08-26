@@ -84,8 +84,13 @@ async function seedProofAndBooking(amountMinor) {
   return { listing, booking, proof }
 }
 
-async function seedLegacyPendingConfirmationRefund(amountMinor) {
-  const { proof } = await seedProofAndBooking(amountMinor)
+// reservedOverride lets a test deliberately desync PaymentProof.reservedRefundMinor from this
+// refund's own amountMinor -- default is the correct, in-sync value every real backfilled row has.
+// proofAmountMinor lets the underlying proof carry MORE total capacity than this refund needs (a
+// prerequisite for a realistic over-reservation scenario -- reservedRefundMinor can never itself
+// exceed proof.amountMinor, per the refund_minor_within_amount CHECK from Phase 2a).
+async function seedLegacyPendingConfirmationRefund(amountMinor, reservedOverride, proofAmountMinor) {
+  const { proof } = await seedProofAndBooking(proofAmountMinor ?? amountMinor)
   const event = await db().paymentEvent.create({
     data: {
       providerEventId: `evt_lra_${randomUUID()}`, type: 'charge.refunded', rail: 'payment_intent',
@@ -95,7 +100,7 @@ async function seedLegacyPendingConfirmationRefund(amountMinor) {
   })
   const refund = await db().refund.create({
     data: {
-      paymentProofId: proof.id, bookingId: proof.bookingId, amountMinor: proof.amountMinor, currency: proof.currency,
+      paymentProofId: proof.id, bookingId: proof.bookingId, amountMinor, currency: proof.currency,
       reason: 'test fixture', reasonCode: 'LEGACY_UNKNOWN', rail: 'payment_intent',
       status: 'ACTION_REQUIRED', reservationHeld: true, migratedFromLegacy: true,
     },
@@ -106,7 +111,7 @@ async function seedLegacyPendingConfirmationRefund(amountMinor) {
       completedAt: new Date(), legacyPaymentEventId: event.id,
     },
   })
-  await db().paymentProof.update({ where: { id: proof.id }, data: { reservedRefundMinor: proof.amountMinor } })
+  await db().paymentProof.update({ where: { id: proof.id }, data: { reservedRefundMinor: reservedOverride ?? amountMinor } })
   return { proof, refund, attempt, event }
 }
 
@@ -244,6 +249,42 @@ async function main() {
     const freshProof = await db().paymentProof.findUnique({ where: { id: proof.id } })
     check('concurrency race: proof accepted exactly once, not twice', freshProof.acceptedRefundMinor === proof.amountMinor, freshProof.acceptedRefundMinor)
     check('concurrency race: proof reserved fully drained, not negative or double-decremented', freshProof.reservedRefundMinor === 0, freshProof.reservedRefundMinor)
+  }
+
+  // --- 7. Adversarial: reservedRefundMinor is GREATER than this refund's own amountMinor (round-2
+  // corrective fix, independent review finding). Step 5's guard now requires an EXACT match, not
+  // merely "at least this much" -- a proof carrying MORE reserved capacity than this specific refund
+  // accounts for is a genuine data inconsistency (refunds_one_active_per_payment_proof guarantees at
+  // most one active refund per proof, so once Step 1 claims this one, reservedRefundMinor should
+  // equal exactly its amountMinor) and must be refused, not silently transferred through. ---
+  {
+    // proof carries 150000 total capacity; this refund only accounts for 100000 of it; but
+    // reservedRefundMinor is set to the full 150000 -- an inconsistency Step 5 must now catch.
+    const { proof, refund, attempt } = await seedLegacyPendingConfirmationRefund(100000, 150000, 150000)
+    const res = await call('PATCH', `/api/admin/refunds/${refund.id}/legacy-accept`, A, { reason: 'attempting to accept against an over-reserved proof' })
+    check('over-reserved proof: refused with 500 (anomaly, not silently accepted)', res.status === 500, JSON.stringify(res.j))
+    check('over-reserved proof: correct error code', res.j?.error?.code === 'COUNTER_TRANSFER_ANOMALY', res.j?.error?.code)
+
+    const freshRefund = await db().refund.findUnique({ where: { id: refund.id } })
+    check('over-reserved proof: refund rolled back to ACTION_REQUIRED (Step 1-4 undone, not stuck at IN_PROGRESS)', freshRefund.status === 'ACTION_REQUIRED', freshRefund.status)
+    check('over-reserved proof: reservationHeld still true after rollback', freshRefund.reservationHeld === true, freshRefund.reservationHeld)
+
+    const attemptCount = await db().refundAttempt.count({ where: { refundId: refund.id } })
+    check('over-reserved proof: still exactly 1 attempt (the new LEGACY_ACCOUNTING_ACCEPTED attempt from Step 3 was rolled back, not left orphaned)', attemptCount === 1, attemptCount)
+    const freshAttempt = await db().refundAttempt.findUnique({ where: { id: attempt.id } })
+    check('over-reserved proof: original attempt NOT superseded (Step 4 rolled back too)', freshAttempt.supersededByAttemptId === null, freshAttempt.supersededByAttemptId)
+
+    const freshProof = await db().paymentProof.findUnique({ where: { id: proof.id } })
+    check('over-reserved proof: reservedRefundMinor completely untouched by the failed transaction', freshProof.reservedRefundMinor === 150000, freshProof.reservedRefundMinor)
+    check('over-reserved proof: acceptedRefundMinor still 0 (zero partial financial effect)', freshProof.acceptedRefundMinor === 0, freshProof.acceptedRefundMinor)
+
+    // Sanity: the SAME refund amount, with reservedRefundMinor correctly in sync, DOES succeed --
+    // proves the fix rejects only the genuine inconsistency, not every over-capacity proof.
+    const { proof: proof2, refund: refund2 } = await seedLegacyPendingConfirmationRefund(100000)
+    const res2 = await call('PATCH', `/api/admin/refunds/${refund2.id}/legacy-accept`, A, { reason: 'control: reservedRefundMinor correctly in sync' })
+    check('control (in-sync reservedRefundMinor): succeeds normally', res2.status === 200, JSON.stringify(res2.j))
+    const freshProof2 = await db().paymentProof.findUnique({ where: { id: proof2.id } })
+    check('control: reservedRefundMinor correctly drained to 0', freshProof2.reservedRefundMinor === 0, freshProof2.reservedRefundMinor)
   }
 
   console.log(`\n==== LEGACY_REFUND_ACCEPT E2E: ${pass} passed, ${fail} failed ====`)

@@ -86,6 +86,7 @@ export async function handleSrRides(req, res, url, context) {
           select: {
             id: true,
             displayName: true,
+            idDocumentStatus: true,
             driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, photoRef: true } },
           },
         },
@@ -113,7 +114,12 @@ export async function handleSrRides(req, res, url, context) {
       ? {
           ...ride,
           driver: {
-            ...ride.driver,
+            id: ride.driver.id,
+            displayName: ride.driver.displayName,
+            // Real, not decorative: reuses the same idDocumentStatus review pipeline already used
+            // for guest/host verification -- never a static claim (CAPSULE_RULES.noFakeTrustSignal).
+            // A rider only needs the yes/no answer, never the raw internal review-state string.
+            isVerified: ride.driver.idDocumentStatus === 'APPROVED',
             driverProfile: ride.driver.driverProfile
               ? {
                   vehicleMake: ride.driver.driverProfile.vehicleMake,

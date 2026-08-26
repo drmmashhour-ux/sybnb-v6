@@ -48,6 +48,7 @@ const copy = {
     gps: 'استخدام موقعي الحالي',
     manualHint: 'يمكن متابعة الطلب حتى بدون GPS عبر العناوين اليدوية.',
     driverNotAssigned: 'لم يُعيّن سائق بعد',
+    verifiedDriver: 'هوية موثقة',
     waitingForDriver: 'بانتظار قبول أحد السائقين القريبين للرحلة...',
     driverAssigned: 'تم تعيين سائق لرحلتك.',
     driverArriving: 'السائق في طريقه إليك الآن.',
@@ -92,6 +93,7 @@ const copy = {
     gps: 'Use my current location',
     manualHint: 'The request can continue without GPS through manual addresses.',
     driverNotAssigned: 'Not assigned yet',
+    verifiedDriver: 'Verified identity',
     waitingForDriver: 'Waiting for a nearby driver to accept the ride...',
     driverAssigned: 'A driver has been assigned to your ride.',
     driverArriving: 'Your driver is on the way to you.',
@@ -383,6 +385,7 @@ export function SrRidePage({ lang }: Props) {
           <Info label={t.rideId} value={ride ? ride.id.slice(0, 8).toUpperCase() : '-'} />
           <Info label={t.status} value={statusText(ride?.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
           {driverPhotoUrl && <img src={driverPhotoUrl} alt="" style={styles.driverPhoto} />}
+          {ride?.driver?.isVerified && <span style={styles.verifiedBadge}>✓ {t.verifiedDriver}</span>}
           <Info label={t.driver} value={driverIdentityLabel(ride, t)} />
           <Info label={t.pickup} value={String(ride?.metadata.pickup || pickup)} />
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
@@ -508,6 +511,7 @@ const styles: Record<string, CSSProperties> = {
   grid: { display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' },
   card: { border: '1px solid #1e2a3c', borderRadius: 8, background: '#101722', padding: 16, display: 'grid', gap: 12 },
   driverPhoto: { width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', border: '2px solid #263651' },
+  verifiedBadge: { display: 'inline-block', width: 'fit-content', borderRadius: 999, background: 'rgba(32,210,155,.14)', border: '1px solid rgba(32,210,155,.4)', color: '#20d29b', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
   cardTitle: { fontSize: 22, margin: 0 },
   mapPreview: { minHeight: 170, border: '1px solid #263651', borderRadius: 8, background: 'linear-gradient(135deg,#0c1220,#122033)', display: 'grid', placeItems: 'center', textAlign: 'center', padding: 18, position: 'relative', overflow: 'hidden' },
   dot: { width: 24, height: 24, borderRadius: 999, background: '#19d7ff', boxShadow: '0 0 0 16px rgba(25,215,255,.13), 0 0 36px rgba(25,215,255,.55)' },

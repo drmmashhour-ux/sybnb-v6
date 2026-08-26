@@ -97,6 +97,7 @@ export type PlatformRideRequest = {
   driver?: {
     id: string
     displayName: string
+    isVerified: boolean
     driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; photoUrl: string | null } | null
     averageRating: number | null
     ratingCount: number

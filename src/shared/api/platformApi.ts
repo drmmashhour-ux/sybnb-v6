@@ -696,7 +696,7 @@ export type PlatformMessage = {
   id: string
   threadId: string
   senderUserId: string
-  senderRole: 'GUEST' | 'HOST' | 'ADMIN' | 'SUPPORT'
+  senderRole: 'GUEST' | 'HOST' | 'ADMIN' | 'SUPPORT' | 'DRIVER' | 'RIDER'
   body: string
   createdAt: string
   sender?: { id: string; displayName: string }
@@ -704,7 +704,8 @@ export type PlatformMessage = {
 
 export type PlatformMessageThread = {
   id: string
-  bookingId: string
+  bookingId?: string
+  rideId?: string
   messages: PlatformMessage[]
 }
 
@@ -1149,6 +1150,24 @@ export async function submitPrototypeSrRideReview(input: { rideId: string; ratin
     body: { rating: input.rating, comment: input.comment },
   })
   return response.review
+}
+
+export async function fetchPrototypeSrRideThread(rideId: string, asDriver = false) {
+  const session = asDriver ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; thread: PlatformMessageThread }>(`/api/sr/rides/${rideId}/thread`, {
+    token: session.token,
+  })
+  return response.thread
+}
+
+export async function sendPrototypeSrRideMessage(rideId: string, body: string, asDriver = false) {
+  const session = asDriver ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; message: PlatformMessage }>(`/api/sr/rides/${rideId}/thread/messages`, {
+    method: 'POST',
+    token: session.token,
+    body: { body },
+  })
+  return response.message
 }
 
 export async function fetchPrototypeDriverOverview() {

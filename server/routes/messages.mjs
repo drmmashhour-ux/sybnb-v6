@@ -5,6 +5,13 @@ import { isBookingViewable } from './bookings.mjs'
 
 const MESSAGING_ELIGIBLE_BOOKING_STATUSES = ['CONFIRMED', 'COMPLETED', 'DISPUTED']
 
+// SR Ride vs. Uber gap-closure (P0 #4): a rider and driver only have anything to coordinate once
+// a driver actually exists (never REQUESTED/MATCHING) up through a short window after the trip
+// ends (mirrors Uber's own in-app chat window, e.g. reporting a lost item) -- not CANCELLED,
+// which has no live coordination need and would otherwise reopen a channel disputes should go
+// through support for instead.
+const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']
+
 async function loadBookingForThread(bookingId, context) {
   const booking = await db().booking.findUnique({
     where: { id: bookingId },
@@ -86,6 +93,55 @@ async function ensureListingThread(listingId, guestId) {
   return db().messageThread.upsert({
     where: { listingId_guestId: { listingId, guestId } },
     create: { listingId, guestId },
+    update: {},
+  })
+}
+
+async function loadRideForThread(rideId, context) {
+  const ride = await db().rideRequest.findUnique({ where: { id: rideId } })
+
+  if (!ride) {
+    const error = new Error('Ride request not found.')
+    error.statusCode = 404
+    error.code = 'RIDE_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
+
+  const isParticipant =
+    context.roles.includes('ADMIN') ||
+    context.roles.includes('SUPPORT') ||
+    ride.riderId === context.user.id ||
+    ride.driverId === context.user.id
+  if (!isParticipant) {
+    const error = new Error('This ride is not available for this account.')
+    error.statusCode = 403
+    error.code = 'RIDE_FORBIDDEN'
+    error.expose = true
+    throw error
+  }
+
+  if (!MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status)) {
+    const error = new Error('Messaging opens once a driver is assigned to the ride.')
+    error.statusCode = 400
+    error.code = 'MESSAGING_NOT_ELIGIBLE'
+    error.expose = true
+    throw error
+  }
+
+  return ride
+}
+
+function rideSenderRoleFor(ride, context) {
+  if (context.roles.includes('ADMIN')) return 'ADMIN'
+  if (context.roles.includes('SUPPORT')) return 'SUPPORT'
+  return ride.driverId === context.user.id ? 'DRIVER' : 'RIDER'
+}
+
+async function ensureRideThread(rideId) {
+  return db().messageThread.upsert({
+    where: { rideId },
+    create: { rideId },
     update: {},
   })
 }
@@ -283,6 +339,62 @@ export async function handleMessages(req, res, url, context) {
         threadId: thread.id,
         senderUserId: context.user.id,
         senderRole: senderRoleFor(booking, context),
+        body: text,
+      },
+      include: { sender: { select: { id: true, displayName: true } } },
+    })
+
+    return json(res, 201, { ok: true, message })
+  }
+
+  const rideThreadMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/thread$/)
+  if (rideThreadMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+
+    const ride = await loadRideForThread(rideThreadMatch[1], context)
+    const thread = await ensureRideThread(ride.id)
+    const messages = await db().message.findMany({
+      where: { threadId: thread.id },
+      include: { sender: { select: { id: true, displayName: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+    })
+
+    return json(res, 200, { ok: true, thread: { id: thread.id, rideId: ride.id, messages } })
+  }
+
+  const rideSendMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/thread\/messages$/)
+  if (rideSendMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+
+    const ride = await loadRideForThread(rideSendMatch[1], context)
+    const body = await readJson(req)
+    const text = typeof body.body === 'string' ? body.body.trim() : ''
+
+    if (!text) {
+      const error = new Error('Message body is required.')
+      error.statusCode = 400
+      error.code = 'MESSAGE_BODY_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
+    if (text.length > 4000) {
+      const error = new Error('Message body is too long.')
+      error.statusCode = 400
+      error.code = 'MESSAGE_BODY_TOO_LONG'
+      error.expose = true
+      throw error
+    }
+
+    const thread = await ensureRideThread(ride.id)
+    const message = await db().message.create({
+      data: {
+        threadId: thread.id,
+        senderUserId: context.user.id,
+        senderRole: rideSenderRoleFor(ride, context),
         body: text,
       },
       include: { sender: { select: { id: true, displayName: true } } },

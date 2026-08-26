@@ -6,9 +6,12 @@ import {
   fetchDriverIdentityStatus,
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
+  fetchPrototypeSrRideThread,
+  sendPrototypeSrRideMessage,
   submitDriverPhoto,
   updatePrototypeDriverRideStatus,
   type PlatformDriverOverview,
+  type PlatformMessage,
   type PlatformRideRequest,
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
@@ -16,6 +19,9 @@ import { moneyText, statusText } from '../../shared/i18n/display'
 type Props = {
   lang: Lang
 }
+
+// Matches MESSAGING_ELIGIBLE_RIDE_STATUSES in server/routes/messages.mjs.
+const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']
 
 const copy = {
   ar: {
@@ -40,6 +46,11 @@ const copy = {
     start: 'بدء الرحلة',
     complete: 'إنهاء',
     cancel: 'إلغاء',
+    messageRider: 'راسل الراكب',
+    hideChat: 'إخفاء المحادثة',
+    chatEmpty: 'لا توجد رسائل بعد.',
+    chatPlaceholder: 'اكتب رسالة...',
+    chatSend: 'إرسال',
     empty: 'لا توجد رحلات مسندة بعد.',
     dispatch: 'مركز التوجيه',
     safety: 'أمان الرحلة',
@@ -92,6 +103,11 @@ const copy = {
     start: 'Start ride',
     complete: 'Complete',
     cancel: 'Cancel',
+    messageRider: 'Message rider',
+    hideChat: 'Hide chat',
+    chatEmpty: 'No messages yet.',
+    chatPlaceholder: 'Type a message...',
+    chatSend: 'Send',
     empty: 'No assigned rides yet.',
     dispatch: 'Dispatch center',
     safety: 'Ride safety',
@@ -407,7 +423,86 @@ function RideCard({
           </button>
         </div>
       )}
+      {MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status) && <RideChatPanel rideId={ride.id} labels={labels} />}
     </article>
+  )
+}
+
+// SR Ride vs. Uber gap-closure (P0 #4): each ride card manages its own chat state independently
+// (collapsed by default -- a list of several active rides would otherwise show every thread open
+// at once), reusing the same rideId + thread endpoints the rider's SrRidePage.tsx uses, just with
+// the driver-session variant of the API calls.
+function RideChatPanel({ rideId, labels }: { rideId: string; labels: typeof copy.en }) {
+  const [open, setOpen] = useState(false)
+  const [messages, setMessages] = useState<PlatformMessage[]>([])
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    function poll() {
+      fetchPrototypeSrRideThread(rideId, true)
+        .then((thread) => {
+          if (!cancelled) setMessages(thread.messages)
+        })
+        .catch(() => {})
+    }
+    poll()
+    const interval = window.setInterval(poll, 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [open, rideId])
+
+  async function send() {
+    if (!input.trim()) return
+    setSending(true)
+    try {
+      const sent = await sendPrototypeSrRideMessage(rideId, input.trim(), true)
+      setMessages((previous) => [...previous, sent])
+      setInput('')
+    } catch {
+      // Surfacing a dedicated error here would need its own status slot per card; the send button
+      // simply re-enables so the driver can retry, consistent with this card's compact footprint.
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div style={styles.chatPanel}>
+      <button style={styles.secondaryButton} onClick={() => setOpen((value) => !value)}>
+        {open ? labels.hideChat : labels.messageRider}
+      </button>
+      {open && (
+        <>
+          <div style={styles.chatMessages}>
+            {messages.length === 0 && <span style={styles.chatEmpty}>{labels.chatEmpty}</span>}
+            {messages.map((entry) => (
+              <div key={entry.id} style={entry.senderRole === 'DRIVER' ? styles.chatBubbleMine : styles.chatBubbleTheirs}>
+                {entry.body}
+              </div>
+            ))}
+          </div>
+          <div style={styles.chatInputRow}>
+            <input
+              style={styles.chatInput}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder={labels.chatPlaceholder}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void send()
+              }}
+            />
+            <button disabled={!input.trim() || sending} style={styles.secondaryButton} onClick={() => void send()}>
+              {labels.chatSend}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -465,4 +560,11 @@ const styles: Record<string, CSSProperties> = {
   dangerButton: { minHeight: 44, border: '1px solid rgba(255,96,96,.5)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 900, padding: '0 12px' },
   panel: { border: '1px solid #263651', borderRadius: 8, background: '#101722', color: '#9aa6ba', padding: 14 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
+  chatPanel: { display: 'grid', gap: 8, borderTop: '1px solid #263651', paddingTop: 10 },
+  chatMessages: { display: 'grid', gap: 6, maxHeight: 180, overflowY: 'auto' },
+  chatEmpty: { color: '#5c6b85', fontSize: 13 },
+  chatBubbleMine: { justifySelf: 'end', maxWidth: '80%', borderRadius: '10px 10px 2px 10px', background: 'rgba(25,215,255,.14)', border: '1px solid rgba(25,215,255,.35)', color: '#e7fbff', padding: '8px 10px', fontSize: 13 },
+  chatBubbleTheirs: { justifySelf: 'start', maxWidth: '80%', borderRadius: '10px 10px 10px 2px', background: '#0d1420', border: '1px solid #263651', color: '#e7ecf5', padding: '8px 10px', fontSize: 13 },
+  chatInputRow: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 },
+  chatInput: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
 }

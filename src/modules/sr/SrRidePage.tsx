@@ -6,16 +6,21 @@ import {
   cancelPrototypeSrRide,
   createPrototypeSrRide,
   fetchPrototypeSrRide,
+  fetchPrototypeSrRideThread,
   fetchSrQuote,
   resolveApiUrl,
+  sendPrototypeSrRideMessage,
   submitPrototypeLocalWalletProof,
   submitPrototypeSrRideReview,
+  type PlatformMessage,
   type PlatformRideRequest,
   type PlatformSrQuote,
 } from '../../shared/api/platformApi'
 
 const ACTIVE_RIDE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 const RIDER_CANCELLABLE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING']
+// Matches MESSAGING_ELIGIBLE_RIDE_STATUSES in server/routes/messages.mjs.
+const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 
@@ -69,6 +74,10 @@ const copy = {
     payFeeTitle: 'تأكيد دفع رسوم الإلغاء',
     payFeeCopy: 'كان السائق قد بدأ التوجه إليك بالفعل. ادفع رسوم الإلغاء له مباشرة (نقداً أو تحويل)، ثم أدخل رقم مرجع العملية هنا ليتحقق منها فريق SYBNB.',
     cancellationFeeWarning: 'قد يترتب على الإلغاء الآن رسوم إلغاء تقريبية قدرها {amount} لأن السائق بدأ التوجه إليك بالفعل.',
+    chatTitle: 'راسل السائق',
+    chatEmpty: 'لا توجد رسائل بعد.',
+    chatPlaceholder: 'اكتب رسالة...',
+    chatSend: 'إرسال',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -126,6 +135,10 @@ const copy = {
     payFeeTitle: 'Confirm cancellation fee payment',
     payFeeCopy: 'Your driver had already started heading your way. Pay the cancellation fee directly to them (cash or transfer), then enter the transaction reference here so SYBNB can verify it.',
     cancellationFeeWarning: 'Cancelling now may incur an estimated cancellation fee of {amount} because your driver has already started heading your way.',
+    chatTitle: 'Message your driver',
+    chatEmpty: 'No messages yet.',
+    chatPlaceholder: 'Type a message...',
+    chatSend: 'Send',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -173,6 +186,9 @@ export function SrRidePage({ lang }: Props) {
   const [reviewStatus, setReviewStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [payProviderRef, setPayProviderRef] = useState('')
   const [payStatus, setPayStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
+  const [chatMessages, setChatMessages] = useState<PlatformMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatStatus, setChatStatus] = useState<'idle' | 'sending' | 'error'>('idle')
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
   const fallbackFareMinor = useMemo(() => {
@@ -204,6 +220,39 @@ export function SrRidePage({ lang }: Props) {
     }, 4000)
     return () => window.clearInterval(interval)
   }, [ride])
+
+  useEffect(() => {
+    if (!ride || !MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status)) return
+    let cancelled = false
+    function poll() {
+      if (!ride) return
+      fetchPrototypeSrRideThread(ride.id)
+        .then((thread) => {
+          if (!cancelled) setChatMessages(thread.messages)
+        })
+        .catch(() => {})
+    }
+    poll()
+    const interval = window.setInterval(poll, 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [ride?.id, ride?.status])
+
+  async function sendChatMessage() {
+    if (!ride || !chatInput.trim()) return
+    setChatStatus('sending')
+    try {
+      const sent = await sendPrototypeSrRideMessage(ride.id, chatInput.trim())
+      setChatMessages((previous) => [...previous, sent])
+      setChatInput('')
+      setChatStatus('idle')
+    } catch (error) {
+      setChatStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
 
   // signDriverPhotoUrl() mints a fresh signature+expiry on every fetch (server/lib/storage.mjs), so
   // naively rendering ride.driver.driverProfile.photoUrl directly would give <img> a new src on
@@ -473,6 +522,37 @@ export function SrRidePage({ lang }: Props) {
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
           <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : isAr ? 'يدوي' : 'manual'} />
 
+          {ride && MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status) && (
+            <div style={styles.card}>
+              <strong>{t.chatTitle}</strong>
+              <div style={styles.chatMessages}>
+                {chatMessages.length === 0 && <span style={styles.chatEmpty}>{t.chatEmpty}</span>}
+                {chatMessages.map((entry) => (
+                  <div
+                    key={entry.id}
+                    style={entry.senderRole === 'RIDER' ? styles.chatBubbleMine : styles.chatBubbleTheirs}
+                  >
+                    {entry.body}
+                  </div>
+                ))}
+              </div>
+              <div style={styles.chatInputRow}>
+                <input
+                  style={styles.chatInput}
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  placeholder={t.chatPlaceholder}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') void sendChatMessage()
+                  }}
+                />
+                <button disabled={!chatInput.trim() || chatStatus === 'sending'} style={styles.secondaryButton} onClick={() => void sendChatMessage()}>
+                  {t.chatSend}
+                </button>
+              </div>
+            </div>
+          )}
+
           {ride && ['REQUESTED', 'MATCHING'].includes(ride.status) && (
             <div style={styles.message}>{t.waitingForDriver}</div>
           )}
@@ -639,4 +719,10 @@ const styles: Record<string, CSSProperties> = {
   starActive: { border: 0, background: 'transparent', color: '#e5b80b', fontSize: 28, padding: 0, cursor: 'pointer' },
   reviewTextarea: { minHeight: 64, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: 10, fontFamily: 'inherit', resize: 'vertical' },
   payInput: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
+  chatMessages: { display: 'grid', gap: 6, maxHeight: 220, overflowY: 'auto' },
+  chatEmpty: { color: '#5c6b85', fontSize: 13 },
+  chatBubbleMine: { justifySelf: 'end', maxWidth: '80%', borderRadius: '10px 10px 2px 10px', background: 'rgba(32,210,155,.14)', border: '1px solid rgba(32,210,155,.35)', color: '#e7fff6', padding: '8px 10px', fontSize: 13 },
+  chatBubbleTheirs: { justifySelf: 'start', maxWidth: '80%', borderRadius: '10px 10px 10px 2px', background: '#0d1420', border: '1px solid #263651', color: '#e7ecf5', padding: '8px 10px', fontSize: 13 },
+  chatInputRow: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 },
+  chatInput: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
 }

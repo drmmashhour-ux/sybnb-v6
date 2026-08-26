@@ -125,6 +125,8 @@ enum MessageSenderRole {
   HOST
   ADMIN
   SUPPORT
+  DRIVER
+  RIDER
 
   @@map("message_sender_role")
 }
@@ -399,12 +401,14 @@ model MessageThread {
   bookingId String?  @unique @map("booking_id")
   listingId String?  @map("listing_id")
   guestId   String?  @map("guest_id")
+  rideId    String?  @unique @map("ride_id")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  booking  Booking?  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  listing  Listing?  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  guest    User?     @relation("ListingInquiryGuest", fields: [guestId], references: [id], onDelete: Cascade)
+  booking  Booking?     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  listing  Listing?     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  guest    User?        @relation("ListingInquiryGuest", fields: [guestId], references: [id], onDelete: Cascade)
+  ride     RideRequest? @relation(fields: [rideId], references: [id], onDelete: Cascade)
   messages Message[]
 
   @@unique([listingId, guestId])
@@ -992,6 +996,7 @@ model RideRequest {
   dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
   review         RideReview?
   paymentProofs  PaymentProof[]
+  messageThread  MessageThread?
 
   @@index([status, requestedAt])
   @@index([driverId, status])

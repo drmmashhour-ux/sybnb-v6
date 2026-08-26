@@ -171,20 +171,46 @@ export async function recordWalletEntry(tx, {
     await tx.wallet.update({ where: { id: wallet.id }, data: { cachedBalanceMinor: { increment: balanceDelta } } })
   }
 
-  const entry = await tx.walletEntry.create({
-    data: {
-      walletId: wallet.id,
-      type,
-      amountMinor: normalizedAmount,
-      currency,
-      referenceType,
-      referenceId,
-      idempotencyKey: key,
-      note,
-    },
-  })
+  try {
+    return await tx.walletEntry.create({
+      data: {
+        walletId: wallet.id,
+        type,
+        amountMinor: normalizedAmount,
+        currency,
+        referenceType,
+        referenceId,
+        idempotencyKey: key,
+        note,
+      },
+    })
+  } catch (err) {
+    if (isWalletEntryIdempotencyViolation(err)) {
+      // Item 2 Phase 2b round 3: the findUnique check above is NOT atomic with this create -- two
+      // genuinely concurrent callers with the SAME idempotencyKey (e.g. two simultaneous admin
+      // finalize-cancellation calls for the same booking) can both pass it before either commits,
+      // then race here. Re-throwing a well-typed, recognizable error (rather than letting the raw
+      // P2002 propagate as an unhandled 500) lets a caller treat the loser exactly like a genuine
+      // idempotent retry -- the balance mutation this losing transaction made above is safely
+      // rolled back with the rest of it, since throwing here aborts the whole $transaction; the
+      // winner's already-committed entry is the only one that ever takes effect.
+      const error = new Error('This wallet entry was already recorded by a concurrent request.')
+      error.statusCode = 409
+      error.code = 'WALLET_ENTRY_RACE_LOST'
+      error.idempotencyKey = key
+      error.expose = true
+      throw error
+    }
+    throw err
+  }
+}
 
-  return entry
+// Same P2002-recognition pattern as isProviderRefUniqueViolation/isActiveRefundUniqueViolation,
+// for wallet_entries_idempotency_key_key.
+function isWalletEntryIdempotencyViolation(err) {
+  const target = err?.meta?.target
+  return err?.code === 'P2002' && (target === 'wallet_entries_idempotency_key_key' ||
+    (Array.isArray(target) && target.includes('idempotency_key')) || String(target || '').includes('idempotency_key'))
 }
 
 // Shared by the admin manual-review path and any automatic payment confirmation (e.g. Stripe)
@@ -362,6 +388,94 @@ export async function reverseBookingPlatformShare(tx, {
   }
 
   return { split, adminRecipientId, hostClawedBack }
+}
+
+// Item 2 Phase 2b round 3: the commission-reversal + cancellation-fee side effects a guest/host
+// cancellation used to post inline, atomically, in the SAME actor-triggered transaction that also
+// created the refund request. Splitting them out is what makes the actor-policy split possible:
+// createRefundRequest() is genuinely money-safe for the booking's own guest/host to trigger
+// directly (zero wallet entries, zero provider calls -- proven since Phase 2b round 2), but
+// reversing the platform's commission and charging/crediting a cancellation fee IS real wallet
+// money movement, so it now happens only via a separate, ADMIN-only finalize action (see
+// POST/PATCH /api/admin/bookings/:id/finalize-cancellation in admin.mjs), after the cancellation
+// itself has already happened. Reuses reverseBookingPlatformShare (the same admin-share-reversal +
+// payout-clawback-if-released logic the admin dispute-rejection path already relies on) rather than
+// re-deriving it a third time -- this is the "reusable service function" this round asked for, not
+// a fresh implementation. recordWalletEntry's own idempotency-by-key means calling this function
+// twice for the same booking is always safe (a no-op second time), so no separate "already
+// finalized" guard is needed here.
+export async function finalizeCancellationLedgerEffects(tx, {
+  booking, // must include `listing` (for listing.ownerId / listing.division)
+  approvedPayment,
+  cancelledBy, // 'GUEST' | 'HOST' -- who initiated the original cancellation
+}) {
+  const keyPrefix = cancelledBy === 'GUEST' ? 'booking-guest-cancel' : 'booking-host-cancel'
+  const { split, adminRecipientId, hostClawedBack } = await reverseBookingPlatformShare(tx, {
+    booking,
+    approvedPayment,
+    keyPrefix,
+    adminShareReversalNote: `Admin/SYBNB share reversed because the ${cancelledBy.toLowerCase()}-cancelled booking was refunded.`,
+    payoutClawbackNote: `Host payout clawed back after the ${cancelledBy.toLowerCase()}-cancelled booking was refunded.`,
+  })
+
+  let feeCharged = false
+  if (cancelledBy === 'GUEST') {
+    // Mirrors the guest-cancel path's own original rule exactly: no fee when the guest purchased
+    // cancellation protection.
+    if (!split.cancellationProtectionPurchased) {
+      const fee = cancellationAdminFee(booking.currency)
+      await recordWalletEntry(tx, {
+        userId: booking.guestId,
+        type: 'DEBIT',
+        amountMinor: fee.amountMinor,
+        currency: fee.currency,
+        referenceType: 'booking_guest_cancel_fee',
+        referenceId: booking.id,
+        keyParts: ['booking-guest-cancel-fee-guest', booking.id, approvedPayment.id],
+        note: 'Guest cancellation admin fee after cancelling a paid booking without cancellation protection.',
+      })
+      await recordWalletEntry(tx, {
+        userId: adminRecipientId,
+        type: 'CREDIT',
+        amountMinor: fee.amountMinor,
+        currency: fee.currency,
+        referenceType: 'booking_guest_cancel_fee',
+        referenceId: booking.id,
+        keyParts: ['booking-guest-cancel-fee-admin', booking.id, approvedPayment.id],
+        note: 'Admin received guest cancellation fee for paid booking without cancellation protection.',
+      })
+      feeCharged = true
+    }
+  } else {
+    // host.mjs's original fee charge was unconditional (no protection-status check, unlike the
+    // guest-cancel path) -- preserved exactly as-is here, not silently changed by this
+    // restructuring. This asymmetry was already flagged as a separate, out-of-scope finding in the
+    // Phase 2b round 2 report; still not this round's to fix.
+    const fee = cancellationAdminFee(booking.currency)
+    await recordWalletEntry(tx, {
+      userId: booking.listing.ownerId,
+      type: 'DEBIT',
+      amountMinor: fee.amountMinor,
+      currency: fee.currency,
+      referenceType: 'booking_host_cancel_fee',
+      referenceId: booking.id,
+      keyParts: ['booking-host-cancel-fee-host', booking.id, approvedPayment.id],
+      note: 'Host cancellation admin fee after cancelling a protected paid booking.',
+    })
+    await recordWalletEntry(tx, {
+      userId: adminRecipientId,
+      type: 'CREDIT',
+      amountMinor: fee.amountMinor,
+      currency: fee.currency,
+      referenceType: 'booking_host_cancel_fee',
+      referenceId: booking.id,
+      keyParts: ['booking-host-cancel-fee-admin', booking.id, approvedPayment.id],
+      note: 'Admin received host cancellation fee for protected paid booking.',
+    })
+    feeCharged = true
+  }
+
+  return { split, adminRecipientId, hostClawedBack, feeCharged }
 }
 
 // Translates a DB unique-constraint violation on (provider, provider_ref) into a recognizable

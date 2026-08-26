@@ -4,8 +4,6 @@ import {
   bookingFinanceSplit,
   cancellationAdminFee,
   createRefundRequest,
-  originalAdminShareRecipient,
-  recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
@@ -41,11 +39,17 @@ export async function handleBookings(req, res, url, context) {
       throw error
     }
 
-    // Only money-moving when an approved payment actually exists to reverse — a guest cancelling
-    // before any payment was ever approved is a pure status change, not a payment operation.
+    // Item 2 Phase 2b round 3: creating the refund REQUEST (createRefundRequest, below) moves zero
+    // money -- verified exhaustively since round 2 -- so it is genuinely safe for the booking's own
+    // guest to trigger directly. It no longer shares a gate with the commission-reversal and
+    // cancellation-fee wallet entries (real money movement), which now happen only via a separate,
+    // ADMIN-only finalize action (see PATCH /api/admin/bookings/:id/finalize-cancellation in
+    // admin.mjs) -- see finalizeCancellationLedgerEffects() in finance-ledger.mjs. This is what
+    // resolves the previously-disclosed gap where a real guest could never actually cancel a paid
+    // booking at all (the old bundled 'refund' operation was ADMIN-only end to end).
     if (existing.payments.some((payment) => payment.status === 'APPROVED')) {
       authorizePaymentOperation({
-        operation: 'refund',
+        operation: 'refund_request',
         rail: 'manual_proof',
         provider: 'manual',
         division: existing.listing.division,
@@ -64,10 +68,6 @@ export async function handleBookings(req, res, url, context) {
         const guestRefundAmountMinor = protectedByAddOn
           ? Math.max(0, approvedPayment.amountMinor - split.cancellationProtectionFeeMinor)
           : approvedPayment.amountMinor
-        // Reverse against whoever the wallet entries show actually received the original
-        // commission share, not PaymentProof.reviewedById (which can be null or simply not the
-        // credited account) — see originalAdminShareRecipient() for why.
-        const adminRecipientId = await originalAdminShareRecipient(tx, existing.id)
 
         await tx.paymentProof.updateMany({
           where: {
@@ -102,45 +102,11 @@ export async function handleBookings(req, res, url, context) {
           })
         }
 
-        // adminShareMinor never included the protection fee (it's excluded from the split base and
-        // recorded as its own 'booking_protection_fee' CREDIT at approval time — see
-        // approvePaymentProof), so it must be reversed in full here, not reduced by the fee again.
-        // The protection fee itself is a non-refundable premium and is never reversed.
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'DEBIT',
-          amountMinor: split.adminShareMinor,
-          currency: existing.currency,
-          referenceType: 'booking_admin_share_reversal',
-          referenceId: existing.id,
-          keyParts: ['booking-guest-cancel-admin-share-reversal', existing.id, approvedPayment.id],
-          note: 'Admin/SYBNB share reversed because the guest-cancelled booking was refunded.',
-        })
-
-        if (!protectedByAddOn) {
-          const fee = cancellationAdminFee(existing.currency)
-          await recordWalletEntry(tx, {
-            userId: existing.guestId,
-            type: 'DEBIT',
-            amountMinor: fee.amountMinor,
-            currency: fee.currency,
-          referenceType: 'booking_guest_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-guest-cancel-fee-guest', existing.id, approvedPayment.id],
-          note: 'Guest cancellation admin fee after cancelling a paid booking without cancellation protection.',
-          })
-
-          await recordWalletEntry(tx, {
-            userId: adminRecipientId,
-            type: 'CREDIT',
-            amountMinor: fee.amountMinor,
-            currency: fee.currency,
-          referenceType: 'booking_guest_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-guest-cancel-fee-admin', existing.id, approvedPayment.id],
-          note: 'Admin received guest cancellation fee for paid booking without cancellation protection.',
-          })
-        }
+        // Item 2 Phase 2b round 3: the admin-share-reversal DEBIT and cancellation-fee DEBIT/CREDIT
+        // that used to post right here, inline, atomically with the guest's own action, now happen
+        // ONLY via the separate ADMIN-only finalize-cancellation action -- see
+        // finalizeCancellationLedgerEffects() in finance-ledger.mjs. Zero wallet entries are created
+        // by this transaction; that is the whole point of the actor-policy split above.
       }
 
       return tx.booking.update({
@@ -175,6 +141,9 @@ export async function handleBookings(req, res, url, context) {
             currency: cancellationAdminFee(booking.currency).currency,
             chargedTo: 'GUEST',
             waivedByProtection: booking.metadata?.cancellationProtectionPurchased === true,
+            // Item 2 Phase 2b round 3: this amount is no longer charged inline here -- it (and the
+            // admin-share reversal) now posts only via a separate ADMIN-only finalize action.
+            status: 'PENDING_ADMIN_FINALIZATION',
           },
         },
       },

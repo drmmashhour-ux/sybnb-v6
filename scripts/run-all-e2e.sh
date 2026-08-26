@@ -79,6 +79,7 @@ export PAYMENT_OPERATION_MANUAL_PROOF_REFUND_ENABLED=true
 export PAYMENT_OPERATION_MANUAL_PROOF_PAYOUT_RELEASE_ENABLED=true
 export PAYMENT_OPERATION_MANUAL_PROOF_RECONCILIATION_READ_ENABLED=true
 export PAYMENT_OPERATION_MANUAL_PROOF_LEGACY_REFUND_ACCEPT_ENABLED=true
+export PAYMENT_OPERATION_MANUAL_PROOF_REFUND_REQUEST_ENABLED=true
 
 psql_reset() { psql -d sybnb_v6 -tAc "DELETE FROM seller_profiles WHERE user_id IN ('$SELLER1','$SELLER2'); DELETE FROM payment_proofs WHERE provider='seller_plan';" >/dev/null 2>&1; }
 
@@ -148,6 +149,7 @@ run "payment-evt-claim" payment-event-claim-recovery.e2e.mjs
 run "payment-evt-supr" payment-event-supersession.e2e.mjs
 run "payment-legacy-accept" legacy-refund-accept.e2e.mjs
 run "payment-refund-req" refund-request-creation.e2e.mjs
+run "payment-refund-policy" refund-actor-policy-split.e2e.mjs
 run_full "marketplace"      marketplace.e2e.mjs      reset
 run_full "cars"             cars.e2e.mjs             reset
 run_full "buy"              buy.e2e.mjs              reset

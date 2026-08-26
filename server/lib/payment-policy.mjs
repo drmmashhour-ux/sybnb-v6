@@ -36,6 +36,15 @@ export const PAYMENT_OPERATIONS = Object.freeze([
   // non-legacy attempt to satisfy) -- the 43 zero-evidence LEGACY_UNVERIFIED rows have no
   // acceptance path here or anywhere yet, by explicit owner decision.
   'legacy_refund_accept',
+  // Item 2 Phase 2b round 3: creating a Refund + initial RefundAttempt REQUEST record
+  // (createRefundRequest(), finance-ledger.mjs) moves zero money -- no wallet entry, no provider
+  // call, proven exhaustively since round 2. A distinct operation from 'refund' (which now means
+  // actual wallet money movement: commission reversal, cancellation fees, and -- once built -- real
+  // outbound execution) lets the booking's own guest/host actor be authorized for THIS operation
+  // without ever being authorized to move money directly. This is what resolves the previously-
+  // disclosed gap where a real guest/host could never actually cancel a paid booking at all, since
+  // the old bundled 'refund' operation was ADMIN-only end to end and gated the whole cancellation.
+  'refund_request',
 ])
 
 // An emergency stop pauses everything EXCEPT durable, authenticated webhook intake and read-only
@@ -84,6 +93,14 @@ const OPERATION_ACTOR_ROLES = {
   refund: ['ADMIN'],
   payout_release: ['ADMIN'],
   legacy_refund_accept: ['ADMIN'],
+  // Deliberately broader than every other entry here: refund_request never moves money (see its
+  // definition in PAYMENT_OPERATIONS above), so it is safe for the booking's own guest/host actor
+  // to trigger directly. Route-level auth (requireAuth + an ownership-scoped query, e.g.
+  // bookings.mjs's `guestId: context.user.id` / host.mjs's `listing: { ownerId: context.user.id }`)
+  // still enforces that a guest/host can only ever act on THEIR OWN booking -- this policy layer
+  // only answers "may this actor CLASS perform this operation type at all", same as every other
+  // entry; it has never done resource-ownership checking and still doesn't here.
+  refund_request: ['ADMIN', 'HOST', 'GUEST'],
 }
 
 // A payment rail's configuration must be an explicitly approved record, not merely "an env var is

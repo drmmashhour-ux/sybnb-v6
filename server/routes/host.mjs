@@ -3,12 +3,8 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { resolveListingCityName } from '../lib/listing-location.mjs'
 import { isCurrencyAllowed } from '../lib/country.mjs'
 import {
-  bookingFinanceSplit,
   buildPayoutRow,
-  cancellationAdminFee,
   createRefundRequest,
-  originalAdminShareRecipient,
-  recordWalletEntry,
 } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings } from '../lib/listing-lifecycle.mjs'
@@ -192,11 +188,17 @@ export async function handleHost(req, res, url, context) {
       throw error
     }
 
-    // Only money-moving when the host is CANCELLING (reverses a real, already-approved payment) —
-    // confirming is a pure status change (the payout stays held either way; see the comment below).
+    // Item 2 Phase 2b round 3: creating the refund REQUEST (createRefundRequest, below) moves zero
+    // money -- verified exhaustively since round 2 -- so it is genuinely safe for the booking's own
+    // host to trigger directly. It no longer shares a gate with the commission-reversal and
+    // cancellation-fee wallet entries (real money movement), which now happen only via a separate,
+    // ADMIN-only finalize action (see PATCH /api/admin/bookings/:id/finalize-cancellation in
+    // admin.mjs) -- see finalizeCancellationLedgerEffects() in finance-ledger.mjs. This is what
+    // resolves the previously-disclosed gap where a real host could never actually cancel a paid
+    // booking at all (the old bundled 'refund' operation was ADMIN-only end to end).
     if (status === 'CANCELLED' && existing.payments.some((payment) => payment.status === 'APPROVED')) {
       authorizePaymentOperation({
-        operation: 'refund',
+        operation: 'refund_request',
         rail: 'manual_proof',
         provider: 'manual',
         division: existing.listing.division,
@@ -208,14 +210,8 @@ export async function handleHost(req, res, url, context) {
 
     const booking = await db().$transaction(async (tx) => {
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
-      const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor)
 
       if (status === 'CANCELLED') {
-        // Same fix as the guest-cancel path in bookings.mjs: reverse against whoever actually
-        // received the original commission-share wallet credit, not the possibly stale/null
-        // PaymentProof.reviewedById field.
-        const adminRecipientId = await originalAdminShareRecipient(tx, existing.id)
-
         await tx.paymentProof.updateMany({
           where: {
             bookingId: existing.id,
@@ -231,17 +227,12 @@ export async function handleHost(req, res, url, context) {
 
         // Item 2 Phase 2b round 2: creates a Refund + initial RefundAttempt instead of an immediate
         // wallet credit -- owner-confirmed replacement; fulfillment deferred to a later phase.
-        // Guarded on a REAL approvedPayment existing, unlike the removed recordWalletEntry call
-        // above it: Refund.paymentProofId is a real, non-null FK, so there is structurally no proof
-        // to attach a refund to when no payment was ever approved. This also closes a real,
-        // pre-existing defect the old fallback (`approvedPayment?.amountMinor || existing.amountMinor`)
-        // had: a host cancelling a booking with NO approved payment would still wallet-credit the
-        // guest for the booking's full LISTED price -- crediting money that was never actually
-        // paid. bookings.mjs's equivalent guest-cancel path already correctly guards its whole
-        // refund block on `if (approvedPayment)`; host.mjs did not. The OTHER wallet entries below
-        // (admin-share-reversal, host-cancel-fee) still share this same unguarded pattern -- left
-        // untouched here as a separate, already-flagged finding (see the delivered report), not
-        // "necessary to create the new refund records" and therefore out of this round's scope.
+        // Guarded on a REAL approvedPayment existing: Refund.paymentProofId is a real, non-null FK,
+        // so there is structurally no proof to attach a refund to when no payment was ever
+        // approved. This also closes a real, pre-existing defect the old fallback
+        // (`approvedPayment?.amountMinor || existing.amountMinor`) had: a host cancelling a booking
+        // with NO approved payment would still wallet-credit the guest for the booking's full
+        // LISTED price -- crediting money that was never actually paid.
         if (approvedPayment) {
           await createRefundRequest(tx, {
             paymentProofId: approvedPayment.id,
@@ -254,39 +245,17 @@ export async function handleHost(req, res, url, context) {
           })
         }
 
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'DEBIT',
-          amountMinor: split.adminShareMinor,
-          currency: existing.currency,
-          referenceType: 'booking_admin_share_reversal',
-          referenceId: existing.id,
-          keyParts: ['booking-admin-share-reversal', existing.id, approvedPayment?.id],
-          note: 'Admin/SYBNB share reversed because the protected booking was refunded.',
-        })
-
-        const hostCancelFee = cancellationAdminFee(existing.currency)
-        await recordWalletEntry(tx, {
-          userId: existing.listing.ownerId,
-          type: 'DEBIT',
-          amountMinor: hostCancelFee.amountMinor,
-          currency: hostCancelFee.currency,
-          referenceType: 'booking_host_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-host-cancel-fee-host', existing.id, approvedPayment?.id],
-          note: 'Host cancellation admin fee after cancelling a protected paid booking.',
-        })
-
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'CREDIT',
-          amountMinor: hostCancelFee.amountMinor,
-          currency: hostCancelFee.currency,
-          referenceType: 'booking_host_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-host-cancel-fee-admin', existing.id, approvedPayment?.id],
-          note: 'Admin received host cancellation fee for protected paid booking.',
-        })
+        // Item 2 Phase 2b round 3: the admin-share-reversal DEBIT and cancellation-fee DEBIT/CREDIT
+        // that used to post right here, inline, atomically with the host's own action -- previously
+        // UNGUARDED on approvedPayment existing at all, a real pre-existing money-creation defect
+        // for a never-paid booking, flagged but explicitly left unfixed in round 2 -- now happen
+        // ONLY via the separate ADMIN-only finalize-cancellation action (see
+        // finalizeCancellationLedgerEffects() in finance-ledger.mjs), which structurally requires a
+        // real REFUNDED payment proof to exist. That requirement closes the old unguarded-fallback
+        // defect as a side effect of this round's restructuring, the same way round 2's own
+        // `if (approvedPayment)` guard did for the refund-request call above it. Zero wallet
+        // entries are created by this transaction; that is the whole point of the actor-policy
+        // split above.
       }
 
       // Payout is intentionally NOT released here. Confirming only means the host accepted the

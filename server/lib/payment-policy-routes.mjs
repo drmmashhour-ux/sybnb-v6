@@ -34,8 +34,10 @@ export const PAYMENT_POLICY_ROUTES = Object.freeze([
   { method: 'PATCH', pathPattern: '^/api/admin/review-queue/payment/[^/]+$', operation: 'refund', file: 'server/routes/admin.mjs', rail: 'manual_proof', note: 'decision!=APPROVED branch, reversing an already-approved payment' },
   { method: 'PATCH', pathPattern: '^/api/admin/review-queue/booking/[^/]+$', operation: 'refund', file: 'server/routes/admin.mjs', rail: 'manual_proof', note: 'decision!=APPROVED branch with an approved payment on the booking' },
 
-  // --- bookings.mjs (guest-initiated cancellation, moves money) ---
-  { method: 'PATCH', pathPattern: '^/api/bookings/[^/]+/cancel$', operation: 'refund', file: 'server/routes/bookings.mjs', rail: 'manual_proof' },
+  // --- bookings.mjs (guest-initiated cancellation — creates a refund REQUEST only, zero money
+  // movement; Item 2 Phase 2b round 3 split this off 'refund' so the booking's own guest can be
+  // authorized for it without ever being authorized to move money directly) ---
+  { method: 'PATCH', pathPattern: '^/api/bookings/[^/]+/cancel$', operation: 'refund_request', file: 'server/routes/bookings.mjs', rail: 'manual_proof' },
 
   // --- admin.mjs (paying the host out — the owner-authorized 8th operation type) ---
   { method: 'PATCH', pathPattern: '^/api/admin/payouts/[^/]+/release$', operation: 'payout_release', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
@@ -43,9 +45,15 @@ export const PAYMENT_POLICY_ROUTES = Object.freeze([
   // --- admin.mjs (Item 2 Phase 2b round 1 — the owner-authorized 9th operation type) ---
   { method: 'PATCH', pathPattern: '^/api/admin/refunds/[^/]+/legacy-accept$', operation: 'legacy_refund_accept', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
 
-  // --- host.mjs (host-initiated cancellation, reverses an approved payment — found by the
-  // all-routers enforcement scan, not the original hand-survey; see the implementation report) ---
-  { method: 'PATCH', pathPattern: '^/api/host/requests/[^/]+$', operation: 'refund', file: 'server/routes/host.mjs', rail: 'manual_proof' },
+  // --- host.mjs (host-initiated cancellation — creates a refund REQUEST only, zero money movement;
+  // same round-3 split as bookings.mjs above) ---
+  { method: 'PATCH', pathPattern: '^/api/host/requests/[^/]+$', operation: 'refund_request', file: 'server/routes/host.mjs', rail: 'manual_proof' },
+
+  // --- admin.mjs (Item 2 Phase 2b round 3 — the ADMIN-only counterpart to refund_request above,
+  // reusing the existing 'refund' operation rather than a new type: this is where the commission-
+  // reversal and cancellation-fee wallet entries a guest/host cancellation used to post inline now
+  // actually happen, gated the same as every other real wallet-money-moving admin action) ---
+  { method: 'PATCH', pathPattern: '^/api/admin/bookings/[^/]+/finalize-cancellation$', operation: 'refund', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
 ])
 
 // Routes deliberately excluded from the registry — documented so the enforcement audit's static

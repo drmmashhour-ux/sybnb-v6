@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, recordWalletEntry, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, finalizeCancellationLedgerEffects, recordWalletEntry, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
@@ -181,6 +181,109 @@ export async function handleAdmin(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, walletEntry: entry })
+  }
+
+  // Item 2 Phase 2b round 3: finalizes the commission-reversal + cancellation-fee wallet entries a
+  // guest/host cancellation used to post inline, atomically, as part of their own action.
+  // createRefundRequest() (still triggered directly by the booking's own guest/host at cancel time)
+  // moves zero money; THIS is where the real wallet money movement actually happens now, and it
+  // stays ADMIN-only end to end -- see finalizeCancellationLedgerEffects() in finance-ledger.mjs
+  // and the policy-split comment at the top of bookings.mjs's/host.mjs's cancel handlers.
+  const finalizeCancellationMatch = url.pathname.match(/^\/api\/admin\/bookings\/([^/]+)\/finalize-cancellation$/)
+  if (finalizeCancellationMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+
+    const bookingId = finalizeCancellationMatch[1]
+    const existing = await db().booking.findUnique({
+      where: { id: bookingId },
+      include: { listing: true, payments: true },
+    })
+    if (!existing) {
+      const error = new Error('Booking not found.')
+      error.statusCode = 404
+      error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (existing.status !== 'CANCELLED') {
+      const error = new Error('Only a cancelled booking can have its cancellation finalized.')
+      error.statusCode = 400
+      error.code = 'BOOKING_NOT_CANCELLED'
+      error.expose = true
+      throw error
+    }
+    // The cancel handlers mark the payment proof REFUNDED (not delete it), so this is the durable
+    // signal a real approved-then-reversed payment actually exists here to finalize against --
+    // structurally impossible for a booking that was cancelled with no approved payment at all
+    // (nothing to reverse, no fee to charge), matching the same guard the cancel handlers apply to
+    // createRefundRequest() itself.
+    const approvedPayment = existing.payments.find((payment) => payment.status === 'REFUNDED')
+    if (!approvedPayment) {
+      const error = new Error('This booking has no reversed payment to finalize (it was cancelled with no approved payment).')
+      error.statusCode = 409
+      error.code = 'NOTHING_TO_FINALIZE'
+      error.expose = true
+      throw error
+    }
+
+    // Who initiated the cancellation determines who owes the cancellation fee -- derived from the
+    // durable audit trail the cancel handlers already write, never from caller input.
+    const cancellationAuditEntry = await db().adminAuditLog.findFirst({
+      where: { entityType: 'bookings', entityId: bookingId, action: { in: ['BOOKING_GUEST_CANCELLED', 'HOST_CANCELLED'] } },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!cancellationAuditEntry) {
+      const error = new Error('No recorded cancellation source (guest or host) was found for this booking.')
+      error.statusCode = 409
+      error.code = 'CANCELLATION_SOURCE_UNKNOWN'
+      error.expose = true
+      throw error
+    }
+    const cancelledBy = cancellationAuditEntry.action === 'BOOKING_GUEST_CANCELLED' ? 'GUEST' : 'HOST'
+
+    authorizePaymentOperation({
+      operation: 'refund',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: existing.listing.division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
+    // A genuinely concurrent second finalize call for the same booking can lose a race inside
+    // recordWalletEntry's idempotency-by-key check (see WALLET_ENTRY_RACE_LOST in
+    // finance-ledger.mjs) -- by the time that happens, the winning transaction has already
+    // committed every entry this call would have posted. One retry re-enters
+    // finalizeCancellationLedgerEffects with everything now genuinely idempotent (every
+    // recordWalletEntry call finds its existing entry via the normal findUnique path, not a race),
+    // so the loser still gets a correct, non-error 200 rather than a raw 500 -- exactly like any
+    // other idempotent re-call of this endpoint.
+    let result
+    try {
+      result = await db().$transaction((tx) =>
+        finalizeCancellationLedgerEffects(tx, { booking: existing, approvedPayment, cancelledBy }),
+      )
+    } catch (err) {
+      if (err.code !== 'WALLET_ENTRY_RACE_LOST') throw err
+      result = await db().$transaction((tx) =>
+        finalizeCancellationLedgerEffects(tx, { booking: existing, approvedPayment, cancelledBy }),
+      )
+    }
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'BOOKING_CANCELLATION_FINALIZED',
+        entityType: 'bookings',
+        entityId: bookingId,
+        before: existing,
+        after: { cancelledBy, ...result },
+      },
+    })
+
+    return json(res, 200, { ok: true, cancelledBy, ...result })
   }
 
   const legacyRefundAcceptMatch = url.pathname.match(/^\/api\/admin\/refunds\/([^/]+)\/legacy-accept$/)

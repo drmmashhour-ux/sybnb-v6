@@ -1,4 +1,9 @@
-// SYBNB — Item 2 Phase 2b round 2: new refund request creation E2E (governed evidence artifact).
+// SYBNB — Item 2 Phase 2b round 2 (updated in round 3): new refund request creation E2E (governed
+// evidence artifact). Round 3 resolved the ADMIN-only actor gate this file's round-2 version
+// documented as a known, disclosed gap -- host/guest cancel now genuinely succeeds over real HTTP
+// (see tests/e2e/refund-actor-policy-split.e2e.mjs for the full round-3 actor-boundary and
+// finalize-cancellation adversarial suite; this file keeps the round-2 request-creation-correctness
+// coverage: reasonCode catalogue, idempotency, concurrency, cap enforcement, card-rail exclusion).
 //
 // Proves, over real HTTP against the real running server + real Postgres (plus a few direct,
 // function-level probes of createRefundRequest() for the surgical cases HTTP alone can't cleanly
@@ -113,63 +118,46 @@ async function main() {
   // approval, which the admin review-queue REJECT decision requires (['REQUESTED','DISPUTED']).
   const reviewableListingId = await makeStaysListing(150000, false)
 
-  // --- 1. Host-cancel creates a real Refund + RefundAttempt, HOST_CANCELLED, zero wallet entries ---
+  // --- 1. Host-cancel: Item 2 Phase 2b round 3 resolved the previously-disclosed ADMIN-only gate
+  // gap -- the real HTTP route now genuinely succeeds for a real HOST actor (operation split to
+  // refund_request, actor-authorized for HOST/GUEST/ADMIN; see tests/e2e/refund-actor-policy-
+  // split.e2e.mjs for the full actor-boundary/finalize-action adversarial suite). Still zero wallet
+  // entries -- the commission-reversal/cancellation-fee money movement is now a separate, later,
+  // ADMIN-only action, not part of this transaction at all.
   {
-    // KNOWN, PRE-EXISTING, OUT-OF-SCOPE GAP (see the delivered report): host.mjs's
-    // authorizePaymentOperation({operation:'refund', actor:{roles: context.roles}}) call --
-    // unchanged by this round, present since the foundational payment-policy commit -- requires
-    // OPERATION_ACTOR_ROLES.refund=['ADMIN']. The HOST actor making THIS request is never ADMIN, so
-    // the real route is refused by policy before either the old wallet-credit code or this round's
-    // createRefundRequest() ever runs. This is documented here as an explicit, asserted fact (not
-    // hidden), per the owner's 2026-08-26 direction. Layer 2 below proves the new service-layer
-    // logic itself is correct, independent of this pre-existing route-level block.
     const booking = await makeBooking(listingId)
     const { proofId, amountMinor } = await payAndApprove(booking.id)
     const cancel = await call('PATCH', `/api/host/requests/${booking.id}`, H, { status: 'CANCELLED' })
-    check('host-cancel HTTP route: refused by the pre-existing ADMIN-only refund policy gate (fails closed, not a silent bypass)', cancel.status === 403 && cancel.j?.error?.code === 'PAYMENT_POLICY_DENIED', JSON.stringify(cancel.j))
-    const blockedRefundCount = await db().refund.count({ where: { paymentProofId: proofId } })
-    check('host-cancel HTTP route: zero effects from the refused request (no partial Refund/RefundAttempt/wallet write)', blockedRefundCount === 0, blockedRefundCount)
-    const blockedBooking = await db().booking.findUnique({ where: { id: booking.id } })
-    check('host-cancel HTTP route: booking status untouched by the refused request', blockedBooking.status !== 'CANCELLED', blockedBooking.status)
-
-    // Layer 2: service-level proof that createRefundRequest() itself -- called with the exact
-    // params host.mjs's own code passes -- is correct, independent of the route-level block above.
-    const direct = await db().$transaction((tx) => createRefundRequest(tx, {
-      paymentProofId: proofId, bookingId: booking.id, requestedByUserId: host.id,
-      amountMinor, currency: 'SYP', reason: 'Guest refund after host cancelled a protected booking.', reasonCode: 'HOST_CANCELLED',
-    }))
-    check('host-triggered createRefundRequest(): creates a new, non-legacy refund', direct.idempotent === false && direct.refund.migratedFromLegacy === false, JSON.stringify(direct))
+    check('host-cancel HTTP route: succeeds for a real HOST actor (200, CANCELLED)', cancel.status === 200 && cancel.j?.booking?.status === 'CANCELLED', JSON.stringify(cancel.j))
     const refund = await refundFor(proofId)
-    check('host-triggered createRefundRequest(): real, non-legacy Refund with the correct amount', refund?.amountMinor === amountMinor && refund?.migratedFromLegacy === false, JSON.stringify(refund))
-    check('host-triggered createRefundRequest(): reasonCode is HOST_CANCELLED', refund?.reasonCode === 'HOST_CANCELLED', refund?.reasonCode)
-    check('host-triggered createRefundRequest(): status IN_PROGRESS, reservationHeld true', refund?.status === 'IN_PROGRESS' && refund?.reservationHeld === true, JSON.stringify(refund))
-    check('host-triggered createRefundRequest(): exactly one CLAIMED, non-legacy attempt', refund?.attempts?.length === 1 && refund.attempts[0].status === 'CLAIMED' && refund.attempts[0].migratedFromLegacy === false, JSON.stringify(refund?.attempts))
-    check('host-triggered createRefundRequest(): attempt canonical fields reference the manual rail, not a real provider', refund?.attempts?.[0]?.provider === 'manual' && refund.attempts[0].providerPaymentObjectType === 'payment_proof' && refund.attempts[0].providerPaymentObjectId === proofId, JSON.stringify(refund?.attempts?.[0]))
+    check('host-cancel: real, non-legacy Refund created with the correct amount', refund?.amountMinor === amountMinor && refund?.migratedFromLegacy === false, JSON.stringify(refund))
+    check('host-cancel: reasonCode is HOST_CANCELLED', refund?.reasonCode === 'HOST_CANCELLED', refund?.reasonCode)
+    check('host-cancel: status IN_PROGRESS, reservationHeld true', refund?.status === 'IN_PROGRESS' && refund?.reservationHeld === true, JSON.stringify(refund))
+    check('host-cancel: exactly one CLAIMED, non-legacy attempt', refund?.attempts?.length === 1 && refund.attempts[0].status === 'CLAIMED' && refund.attempts[0].migratedFromLegacy === false, JSON.stringify(refund?.attempts))
     const walletEntries = await walletRefundEntries(booking.id)
-    check('host-triggered createRefundRequest(): ZERO wallet REFUND entries (no provider call, no wallet fulfillment)', walletEntries.length === 0, JSON.stringify(walletEntries))
+    check('host-cancel: ZERO wallet REFUND entries (money movement is now a separate ADMIN-only action)', walletEntries.length === 0, JSON.stringify(walletEntries))
+    // referenceId alone isn't specific enough -- approval-time entries (e.g. the admin-share
+    // CREDIT) already legitimately reference this same booking. Scope to the referenceTypes only
+    // the deferred admin finalize action would ever create.
+    const deferredEntries = await db().walletEntry.count({ where: { referenceId: booking.id, referenceType: { in: ['booking_admin_share_reversal', 'booking_host_cancel_fee', 'booking_guest_cancel_fee', 'booking_payout_clawback'] } } })
+    check('host-cancel: ZERO commission-reversal/cancellation-fee wallet entries yet (deferred to admin finalize)', deferredEntries === 0, deferredEntries)
     const proof = await db().paymentProof.findUnique({ where: { id: proofId } })
-    check('host-triggered createRefundRequest(): proof reservedRefundMinor reflects the reservation', proof.reservedRefundMinor === amountMinor, proof.reservedRefundMinor)
+    check('host-cancel: proof reservedRefundMinor reflects the reservation', proof.reservedRefundMinor === amountMinor, proof.reservedRefundMinor)
   }
 
-  // --- 2. Guest-cancel: same pre-existing HTTP-level block, same service-level correctness proof ---
+  // --- 2. Guest-cancel: same resolution, same zero-wallet-effect proof ---
   {
     const booking = await makeBooking(listingId)
     const { proofId, amountMinor } = await payAndApprove(booking.id)
     const cancel = await call('PATCH', `/api/bookings/${booking.id}/cancel`, G, {})
-    check('guest-cancel HTTP route: refused by the pre-existing ADMIN-only refund policy gate (fails closed, not a silent bypass)', cancel.status === 403 && cancel.j?.error?.code === 'PAYMENT_POLICY_DENIED', JSON.stringify(cancel.j))
-    const blockedRefundCount = await db().refund.count({ where: { paymentProofId: proofId } })
-    check('guest-cancel HTTP route: zero effects from the refused request', blockedRefundCount === 0, blockedRefundCount)
-
-    const direct = await db().$transaction((tx) => createRefundRequest(tx, {
-      paymentProofId: proofId, bookingId: booking.id, requestedByUserId: guest.id,
-      amountMinor, currency: 'SYP', reason: 'Guest refund after guest cancelled a protected booking.', reasonCode: 'GUEST_CANCELLED',
-    }))
-    check('guest-triggered createRefundRequest(): creates a new, non-legacy refund', direct.idempotent === false, JSON.stringify(direct))
+    check('guest-cancel HTTP route: succeeds for a real GUEST actor (200, CANCELLED)', cancel.status === 200 && cancel.j?.booking?.status === 'CANCELLED', JSON.stringify(cancel.j))
     const refund = await refundFor(proofId)
-    check('guest-triggered createRefundRequest(): real, non-legacy Refund created', refund?.migratedFromLegacy === false && refund?.amountMinor > 0, JSON.stringify(refund))
-    check('guest-triggered createRefundRequest(): reasonCode is GUEST_CANCELLED', refund?.reasonCode === 'GUEST_CANCELLED', refund?.reasonCode)
+    check('guest-cancel: real, non-legacy Refund created', refund?.migratedFromLegacy === false && refund?.amountMinor > 0, JSON.stringify(refund))
+    check('guest-cancel: reasonCode is GUEST_CANCELLED', refund?.reasonCode === 'GUEST_CANCELLED', refund?.reasonCode)
     const walletEntries = await walletRefundEntries(booking.id)
-    check('guest-triggered createRefundRequest(): ZERO wallet REFUND entries', walletEntries.length === 0, JSON.stringify(walletEntries))
+    check('guest-cancel: ZERO wallet REFUND entries', walletEntries.length === 0, JSON.stringify(walletEntries))
+    const deferredEntries = await db().walletEntry.count({ where: { referenceId: booking.id, referenceType: { in: ['booking_admin_share_reversal', 'booking_host_cancel_fee', 'booking_guest_cancel_fee', 'booking_payout_clawback'] } } })
+    check('guest-cancel: ZERO commission-reversal/cancellation-fee wallet entries yet (deferred to admin finalize)', deferredEntries === 0, deferredEntries)
   }
 
   // --- 3. Admin-reject (REQUESTED booking) creates a real Refund + RefundAttempt, ADMIN_REJECTED_BOOKING ---

@@ -4127,8 +4127,16 @@ a {
   }
 
   .top-nav-logo {
-    height: 38px;
-    width: 72px;
+    /* !important: BrandLogo (shared/brand/BrandLogo.tsx) sets width/height as an inline style
+       (higher specificity than a plain class rule), so without !important this override was
+       silently dead -- the logo stayed at its 148x48 desktop size on mobile, consuming ~76px of
+       header space the mobile layout never actually had. That was the real driver of the RTL
+       header overflow (69px measured, close enough to be the same defect): the header's other
+       items got squeezed into whatever the oversized logo left behind. Scoped to this one class so
+       BrandLogo's other, unrelated call sites (seller/admin pages, none of which pass this
+       className) are completely unaffected. */
+    height: 38px !important;
+    width: 72px !important;
   }
 
   .top-nav-logo img {
@@ -4202,6 +4210,11 @@ a {
   .public-auth-actions {
     display: flex;
     gap: 6px;
+    /* A long real display name (e.g. a full guest name) must never force this grid item wider than
+       the available track -- min-width:0 lets it shrink; the child .menu-action truncates with an
+       ellipsis instead. Without this, RTL's default right-anchored overflow scroll made the
+       overflow visible as the header pushed past the left edge (LTR just scrolled it out of view). */
+    min-width: 0;
   }
 
   .public-auth-actions .primary-action {
@@ -4217,7 +4230,10 @@ a {
     height: auto;
     min-height: 44px !important;
     min-width: 0;
+    overflow: hidden;
     padding: 0 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .public-auth-actions .menu-action::before {

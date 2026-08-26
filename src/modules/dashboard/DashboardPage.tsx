@@ -6,7 +6,7 @@ import {
   fetchPrototypeOverview,
   type PlatformOverview,
 } from '../../shared/api/platformApi'
-import { listingTitleText, moneyText } from '../../shared/i18n/display'
+import { listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 
 type Props = {
   lang: Lang
@@ -63,7 +63,6 @@ const copy = {
     trustScore: 'مركز الثقة',
     currentTrip: 'رحلتي الحالية',
     previousTrips: 'رحلاتي السابقة',
-    completed: 'مكتمل',
     tripDates: '12 - 15 فبراير',
     progressSteps: ['تم الحجز', 'تم الدفع', 'الوصول', 'المغادرة'],
     walletTitle: 'محفظتي وحركات الدفع',
@@ -126,7 +125,6 @@ const copy = {
     trustScore: 'Trust Center',
     currentTrip: 'Current trip',
     previousTrips: 'Previous trips',
-    completed: 'Completed',
     tripDates: 'Feb 12 - 15',
     progressSteps: ['Booked', 'Paid', 'Arrival', 'Departure'],
     walletTitle: 'My Wallet and Payment Movements',
@@ -184,7 +182,14 @@ export function DashboardPage({ lang }: Props) {
     URL.revokeObjectURL(url)
   }
 
-  const activeBooking = overview?.bookings[0]
+  // CAPSULE_RULES.noFakeTrustSignal: "current trip" must be a real non-terminal booking, not just
+  // whichever booking was created most recently -- an old cancelled/completed booking could
+  // otherwise outrank a genuinely upcoming one that was requested earlier. bookings is already
+  // ordered by createdAt desc (server/routes/me.mjs), so the first non-terminal match is the most
+  // recent active one. The backend's completeExpiredBookings() keeps status honest (flips CONFIRMED
+  // to COMPLETED once checkOut has passed), so trusting status here is safe, not naive.
+  const TERMINAL_BOOKING_STATUSES = ['COMPLETED', 'CANCELLED']
+  const activeBooking = overview?.bookings.find((booking) => !TERMINAL_BOOKING_STATUSES.includes(booking.status))
   const isDisputed = activeBooking?.status === 'DISPUTED'
   const activeListing = activeBooking?.listing
   const activeTitle = activeListing ? labelForListing(activeListing, lang) : ''
@@ -196,8 +201,12 @@ export function DashboardPage({ lang }: Props) {
   // HostDashboardPage already uses for its own verification badge -- never a static claim.
   const isMembershipVerified = overview?.user?.idDocumentStatus === 'APPROVED'
   const isMembershipPendingReview = overview?.user?.idDocumentStatus === 'PENDING_REVIEW'
-  const activeStep = Math.max(2, activeTripStep(overview))
-  const pastTrips = overview?.bookings.slice(1, 3).map((booking) => normalizePastTrip(booking, lang)) || []
+  const activeStep = activeTripStep(activeBooking)
+  const pastTrips =
+    overview?.bookings
+      .filter((booking) => booking.id !== activeBooking?.id && TERMINAL_BOOKING_STATUSES.includes(booking.status))
+      .slice(0, 3)
+      .map((booking) => normalizePastTrip(booking, lang)) || []
   const walletRows = normalizeWalletRows(overview, lang)
   const protectedFunds = overview?.payments
     .filter((payment) => ['PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED'].includes(payment.status))
@@ -340,7 +349,7 @@ export function DashboardPage({ lang }: Props) {
               <strong>{trip.title}</strong>
               <span>{trip.dates}</span>
             </div>
-            <b>{t.completed}</b>
+            <b>{trip.statusLabel}</b>
           </article>
         )) : <p style={styles.mutedText}>{t.empty}</p>}
       </section>
@@ -359,6 +368,7 @@ function normalizePastTrip(booking: PlatformOverview['bookings'][number], lang: 
     title: booking.listing ? labelForListing(booking.listing, lang) : booking.id.slice(0, 8).toUpperCase(),
     dates: booking.checkIn && booking.checkOut ? tripDateRange(booking.checkIn, booking.checkOut, lang) : lang === 'ar' ? 'رحلة محفوظة' : 'Saved trip',
     image: bookingImage(booking),
+    statusLabel: statusText(booking.status, lang),
   }
 }
 
@@ -372,16 +382,18 @@ function labelForListing(listing: NonNullable<PlatformOverview['bookings'][numbe
   return listingTitleText(listing, lang)
 }
 
-function activeTripStep(overview: PlatformOverview | null) {
-  const booking = overview?.bookings[0]
-  const payment = booking?.payments?.[0] || overview?.payments[0]
-
-  if (!booking) return 0
+function activeTripStep(booking: PlatformOverview['bookings'][number] | undefined) {
+  // "Arrival" (step 2) must reflect the real check-in date, not just booking+payment confirmation --
+  // a CONFIRMED booking used to force-show "Arrival" as done the instant it was paid, even for a
+  // stay weeks away. Scoped to this booking's own payments only -- a guest's unrelated payment from
+  // a different booking must never influence this booking's progress stepper.
+  if (!booking) return -1
   if (booking.status === 'COMPLETED') return 3
-  if (booking.status === 'CONFIRMED') return 2
-  if (payment?.status === 'APPROVED') return 2
-  if (payment) return 1
-  return 0
+  const payment = booking.payments?.[0]
+  const isPaid = booking.status === 'CONFIRMED' || payment?.status === 'APPROVED'
+  if (!isPaid) return 0
+  const hasArrived = booking.checkIn ? new Date(booking.checkIn).getTime() <= Date.now() : false
+  return hasArrived ? 2 : 1
 }
 
 function normalizeWalletRows(overview: PlatformOverview | null, lang: Lang) {

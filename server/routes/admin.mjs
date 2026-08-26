@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, finalizeCancellationLedgerEffects, recordWalletEntry, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, executeManualRailRefund, finalizeCancellationLedgerEffects, recordWalletEntry, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
@@ -284,6 +284,57 @@ export async function handleAdmin(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, cancelledBy, ...result })
+  }
+
+  // Item 2 Phase 2b round 3 (guest-refund gap closure): executes a real, non-legacy refund request
+  // by crediting the original payer's wallet -- see executeManualRailRefund() in finance-ledger.mjs
+  // for the full reasoning (internal wallet credit, not an external provider call; no real provider
+  // is connected or approved anywhere in this codebase). Stays under the existing 'refund'
+  // operation, ADMIN-only, unchanged -- this is exactly the real wallet-money-movement half of the
+  // round-3 actor-policy split, same as finalize-cancellation above.
+  const executeRefundMatch = url.pathname.match(/^\/api\/admin\/refunds\/([^/]+)\/execute$/)
+  if (executeRefundMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+
+    const refundId = executeRefundMatch[1]
+    const refund = await db().refund.findUnique({
+      where: { id: refundId },
+      include: { paymentProof: { include: { booking: { include: { listing: true } } } } },
+    })
+    if (!refund) {
+      const error = new Error('Refund not found.')
+      error.statusCode = 404
+      error.code = 'REFUND_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const division = refund.paymentProof?.booking?.listing?.division || 'PLATFORM'
+
+    authorizePaymentOperation({
+      operation: 'refund',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
+    const result = await db().$transaction((tx) => executeManualRailRefund(tx, { refundId, actorUserId: context.user.id }))
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_REFUND_EXECUTED',
+        entityType: 'refunds',
+        entityId: refundId,
+        before: refund,
+        after: result,
+      },
+    })
+
+    return json(res, 200, { ok: true, ...result })
   }
 
   const legacyRefundAcceptMatch = url.pathname.match(/^\/api\/admin\/refunds\/([^/]+)\/legacy-accept$/)

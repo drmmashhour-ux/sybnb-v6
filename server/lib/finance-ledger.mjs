@@ -319,6 +319,24 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       update: {},
       create: { userId: proof.userId, role: 'SELLER' },
     })
+    // The full plan fee is 100% platform revenue (there's no host/counterparty to split with,
+    // unlike a booking) -- this approval previously recorded no wallet entry at all, so real,
+    // already-collected seller-plan revenue -- the entire monetization model for the 0%-commission
+    // divisions (CARS/MARKETPLACE/NEW_CONSTRUCTION) -- was invisible everywhere a WalletEntry is
+    // the source of truth: admin finance totals, income projections, payout rows. Recorded the
+    // same way booking commission is: a CREDIT to the approving admin's own wallet.
+    if (actorUserId) {
+      await recordWalletEntry(tx, {
+        userId: actorUserId,
+        type: 'CREDIT',
+        amountMinor: proof.amountMinor,
+        currency: proof.currency,
+        referenceType: 'seller_plan_fee',
+        referenceId: proof.id,
+        keyParts: ['seller-plan-fee', proof.id, actorUserId],
+        note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
+      })
+    }
   }
 
   return proof
@@ -640,6 +658,130 @@ export async function createRefundRequest(tx, {
   })
 
   return { refund, attempt, idempotent: false }
+}
+
+// Item 2 Phase 2b round 3 (guest-refund gap closure): executes a real, non-legacy manual-rail
+// Refund by crediting the original payer's SYBNB wallet -- the same internal ledger mechanism this
+// platform already uses for host payouts and admin commission, not an external provider call.
+// There is no real payment provider connected or approved anywhere in this codebase (Stripe/
+// PaymentIntent are both unapproved); the manual/local-wallet rail's actual operating model has
+// always been human-reviewed money moving through the internal wallet ledger, so "executing" a
+// refund on this rail means the platform recognizes its own debt to the guest as fulfilled the
+// same way it already recognizes a host's payout as fulfilled -- via a wallet credit, not a
+// reversal of the original external (Sham Cash / bank transfer) payment method.
+//
+// Mirrors legacy_refund_accept's exact discipline (claim -> exact-amount counter transfer ->
+// finalize), adapted for a genuine SUCCEEDED outcome rather than an accounting reclassification:
+// the primary serializer is the RefundAttempt's own CLAIMED->SUCCEEDED transition (a conditional
+// updateMany, matching the CAS-claim pattern used throughout this codebase) rather than the
+// Refund's own status (which has no distinct "about to execute" value to transition through, since
+// createRefundRequest() already leaves it at IN_PROGRESS). A concurrent second call loses at this
+// step -- 0 rows matched -- and is refused before touching any counter or wallet balance.
+export async function executeManualRailRefund(tx, { refundId, actorUserId }) {
+  const refund = await tx.refund.findUnique({
+    where: { id: refundId },
+    include: { paymentProof: true, attempts: true },
+  })
+  if (!refund) {
+    const error = new Error('Refund not found.')
+    error.statusCode = 404
+    error.code = 'REFUND_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
+  // Legacy refunds have their own, materially different acceptance path (legacy_refund_accept,
+  // round 1) -- an owner's acknowledgement of incomplete historical evidence, never a genuine
+  // wallet credit. Keeping them structurally separate here, the same way createRefundRequest()
+  // structurally cannot produce a LEGACY_UNKNOWN reasonCode, so the two paths can never collide.
+  if (refund.migratedFromLegacy) {
+    const error = new Error('This is a migrated legacy refund -- use legacy_refund_accept, not execute.')
+    error.statusCode = 400
+    error.code = 'REFUND_IS_LEGACY'
+    error.expose = true
+    throw error
+  }
+  if (!MANUAL_REFUND_PROVIDER_FAMILY.has(refund.paymentProof?.provider)) {
+    const error = new Error(`executeManualRailRefund does not support provider '${refund.paymentProof?.provider}' -- this refund needs a real provider-issued refund, not a wallet-rail execution.`)
+    error.statusCode = 400
+    error.code = 'REFUND_PROVIDER_NOT_SUPPORTED'
+    error.expose = true
+    throw error
+  }
+  const claimableAttempt = refund.attempts.find((a) => a.status === 'CLAIMED' && a.supersededByAttemptId === null && !a.migratedFromLegacy)
+  if (!claimableAttempt) {
+    const error = new Error('No claimable (non-legacy, CLAIMED) refund attempt exists for this refund.')
+    error.statusCode = 409
+    error.code = 'NO_CLAIMABLE_ATTEMPT'
+    error.expose = true
+    throw error
+  }
+
+  // Step 1: claim the attempt -- the primary serializer.
+  const claimed = await tx.refundAttempt.updateMany({
+    where: { id: claimableAttempt.id, status: 'CLAIMED' },
+    data: { status: 'SUCCEEDED', completedAt: new Date(), providerStatus: 'wallet_credited' },
+  })
+  if (claimed.count !== 1) {
+    const error = new Error('This refund attempt is not currently executable (already executed or claimed by a concurrent request).')
+    error.statusCode = 409
+    error.code = 'REFUND_NOT_EXECUTABLE'
+    error.expose = true
+    throw error
+  }
+
+  // Step 2: transfer reserved -> succeeded on the proof. Exact-amount guard, same reasoning as
+  // legacy_refund_accept's Step 5: refunds_one_active_per_payment_proof guarantees at most one
+  // active refund per proof, so once Step 1 has claimed THIS refund's only attempt,
+  // reservedRefundMinor must equal exactly refund.amountMinor -- a `gte` guard would mask a real
+  // data inconsistency as a normal transfer.
+  const transferred = await tx.paymentProof.updateMany({
+    where: { id: refund.paymentProofId, reservedRefundMinor: refund.amountMinor },
+    data: {
+      reservedRefundMinor: { decrement: refund.amountMinor },
+      succeededRefundMinor: { increment: refund.amountMinor },
+    },
+  })
+  if (transferred.count !== 1) {
+    const error = new Error('Anomaly: payment proof counter transfer did not affect exactly one row.')
+    error.statusCode = 500
+    error.code = 'COUNTER_TRANSFER_ANOMALY'
+    throw error
+  }
+
+  // Step 3: finalize the refund. succeededAt IS set here (unlike legacy_refund_accept's
+  // ACCOUNTING_ACCEPTED) -- this is a genuine, ledger-confirmed success, not an accounting
+  // reclassification of incomplete evidence.
+  const finalized = await tx.refund.updateMany({
+    where: { id: refund.id, status: 'IN_PROGRESS', reservationHeld: true },
+    data: { status: 'SUCCEEDED', reservationHeld: false, succeededAt: new Date() },
+  })
+  if (finalized.count !== 1) {
+    const error = new Error('Anomaly: refund finalize did not affect exactly one row.')
+    error.statusCode = 500
+    error.code = 'REFUND_FINALIZE_ANOMALY'
+    throw error
+  }
+
+  // Step 4: the actual money movement -- credit the original payer's wallet. By this point the
+  // attempt claim above has already made this call the sole owner of this refund's execution, so
+  // this recordWalletEntry call cannot race with another executeManualRailRefund call for the same
+  // refund; its own idempotency-by-key still protects against any other coincidental replay.
+  const walletEntry = await recordWalletEntry(tx, {
+    userId: refund.paymentProof.userId,
+    type: 'REFUND',
+    amountMinor: refund.amountMinor,
+    currency: refund.currency,
+    referenceType: 'booking_refund',
+    referenceId: refund.bookingId || refund.paymentProofId,
+    keyParts: ['refund-execution-wallet-credit', refund.id],
+    note: 'Refund executed as an internal SYBNB wallet credit (manual/local-wallet rail -- no external provider call).',
+  })
+
+  return {
+    refund: { ...refund, status: 'SUCCEEDED', reservationHeld: false },
+    attempt: { ...claimableAttempt, status: 'SUCCEEDED' },
+    walletEntry,
+  }
 }
 
 // Picks the actor for a system/webhook-driven auto-approval that has no human context.user — e.g.

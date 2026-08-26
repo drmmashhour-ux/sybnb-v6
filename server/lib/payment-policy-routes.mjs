@@ -54,6 +54,10 @@ export const PAYMENT_POLICY_ROUTES = Object.freeze([
   // reversal and cancellation-fee wallet entries a guest/host cancellation used to post inline now
   // actually happen, gated the same as every other real wallet-money-moving admin action) ---
   { method: 'PATCH', pathPattern: '^/api/admin/bookings/[^/]+/finalize-cancellation$', operation: 'refund', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
+
+  // --- admin.mjs (Item 2 Phase 2b round 3, guest-refund gap closure — executes a real, non-legacy
+  // refund as an internal wallet credit; also under the existing 'refund' operation, ADMIN-only) ---
+  { method: 'PATCH', pathPattern: '^/api/admin/refunds/[^/]+/execute$', operation: 'refund', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
 ])
 
 // Routes deliberately excluded from the registry — documented so the enforcement audit's static

@@ -148,8 +148,10 @@ run "payment-evt-id"   payment-event-identity.e2e.mjs
 run "payment-evt-claim" payment-event-claim-recovery.e2e.mjs
 run "payment-evt-supr" payment-event-supersession.e2e.mjs
 run "payment-legacy-accept" legacy-refund-accept.e2e.mjs
+run "payment-seller-plan-fee" seller-plan-fee-ledger.e2e.mjs
 run "payment-refund-req" refund-request-creation.e2e.mjs
 run "payment-refund-policy" refund-actor-policy-split.e2e.mjs
+run "payment-refund-execute" refund-execution-wallet-credit.e2e.mjs
 run_full "marketplace"      marketplace.e2e.mjs      reset
 run_full "cars"             cars.e2e.mjs             reset
 run_full "buy"              buy.e2e.mjs              reset

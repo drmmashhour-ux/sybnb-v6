@@ -87,6 +87,11 @@ export type PlatformRideRequest = {
     displayName: string
     email: string | null
   }
+  driver?: {
+    id: string
+    displayName: string
+    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null } | null
+  } | null
 }
 
 export type PlatformBooking = {
@@ -1112,6 +1117,16 @@ export async function fetchPrototypeDriverOverview() {
     token: session.token,
   })
   return response.overview
+}
+
+// CAPSULE_RULES.noFakeTrustSignal: the driver dashboard's own docs-status panel must reflect the
+// same real idDocumentStatus field the host/guest verification badges already use, not a static claim.
+export async function fetchDriverIdentityStatus() {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; overview: PlatformOverview }>('/api/me/overview', {
+    token: session.token,
+  })
+  return response.overview.user.idDocumentStatus ?? null
 }
 
 export async function fetchPendingSrRides() {

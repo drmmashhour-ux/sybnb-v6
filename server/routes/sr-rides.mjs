@@ -73,7 +73,22 @@ export async function handleSrRides(req, res, url, context) {
   if (rideMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
-    const ride = await db().rideRequest.findUnique({ where: { id: rideMatch[1] } })
+    // Real driver identity for the rider: name + vehicle already exist in the data model
+    // (User.displayName, DriverProfile.vehicle*) but were never surfaced here -- the rider used to
+    // see only the first 8 characters of the driver's database id. Select() keeps this to exactly
+    // what a rider should reasonably see; never the driver's email/phone/passwordHash.
+    const ride = await db().rideRequest.findUnique({
+      where: { id: rideMatch[1] },
+      include: {
+        driver: {
+          select: {
+            id: true,
+            displayName: true,
+            driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true } },
+          },
+        },
+      },
+    })
     if (!ride) {
       const error = new Error('Ride request not found.')
       error.statusCode = 404

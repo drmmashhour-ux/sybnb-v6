@@ -44,6 +44,7 @@ const copy = {
     saving: 'جار الحفظ',
     gps: 'استخدام موقعي الحالي',
     manualHint: 'يمكن متابعة الطلب حتى بدون GPS عبر العناوين اليدوية.',
+    driverNotAssigned: 'لم يُعيّن سائق بعد',
     waitingForDriver: 'بانتظار قبول أحد السائقين القريبين للرحلة...',
     driverAssigned: 'تم تعيين سائق لرحلتك.',
     driverArriving: 'السائق في طريقه إليك الآن.',
@@ -77,6 +78,7 @@ const copy = {
     saving: 'Saving',
     gps: 'Use my current location',
     manualHint: 'The request can continue without GPS through manual addresses.',
+    driverNotAssigned: 'Not assigned yet',
     waitingForDriver: 'Waiting for a nearby driver to accept the ride...',
     driverAssigned: 'A driver has been assigned to your ride.',
     driverArriving: 'Your driver is on the way to you.',
@@ -324,7 +326,7 @@ export function SrRidePage({ lang }: Props) {
           <h2 style={styles.cardTitle}>{t.status}</h2>
           <Info label={t.rideId} value={ride ? ride.id.slice(0, 8).toUpperCase() : '-'} />
           <Info label={t.status} value={statusText(ride?.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
-          <Info label={t.driver} value={ride?.driverId ? ride.driverId.slice(0, 8).toUpperCase() : '-'} />
+          <Info label={t.driver} value={driverIdentityLabel(ride, t)} />
           <Info label={t.pickup} value={String(ride?.metadata.pickup || pickup)} />
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
           <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : isAr ? 'يدوي' : 'manual'} />
@@ -372,6 +374,15 @@ export function SrRidePage({ lang }: Props) {
       </section>
     </main>
   )
+}
+
+// CAPSULE_RULES.noFakeTrustSignal: only ever renders real data returned by the API (driver's real
+// displayName + real vehicle fields) -- never fabricates a name or vehicle when the API omits one.
+function driverIdentityLabel(ride: PlatformRideRequest | null, t: { driverNotAssigned: string }): string {
+  if (!ride?.driver) return t.driverNotAssigned
+  const vehicle = [ride.driver.driverProfile?.vehicleMake, ride.driver.driverProfile?.vehicleModel].filter(Boolean).join(' ')
+  const plate = ride.driver.driverProfile?.vehiclePlate
+  return [ride.driver.displayName, vehicle, plate].filter(Boolean).join(' · ')
 }
 
 function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir?: 'ltr' | 'rtl' }) {

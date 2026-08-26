@@ -7,6 +7,7 @@ import {
   createPrototypeSrRide,
   fetchPrototypeSrRide,
   fetchSrQuote,
+  resolveApiUrl,
   submitPrototypeSrRideReview,
   type PlatformRideRequest,
   type PlatformSrQuote,
@@ -131,6 +132,7 @@ export function SrRidePage({ lang }: Props) {
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>()
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | undefined>()
   const [ride, setRide] = useState<PlatformRideRequest | null>(null)
+  const [driverPhotoUrl, setDriverPhotoUrl] = useState<string | null>(null)
   const [quote, setQuote] = useState<PlatformSrQuote | null>(null)
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
@@ -173,6 +175,15 @@ export function SrRidePage({ lang }: Props) {
     }, 4000)
     return () => window.clearInterval(interval)
   }, [ride])
+
+  // signDriverPhotoUrl() mints a fresh signature+expiry on every fetch (server/lib/storage.mjs), so
+  // naively rendering ride.driver.driverProfile.photoUrl directly would give <img> a new src on
+  // every 4s poll -- interrupting the in-flight image load before it ever finishes decoding. Only
+  // re-resolve when the driver actually changes, not on every poll of the same driver.
+  useEffect(() => {
+    const photoUrl = ride?.driver?.driverProfile?.photoUrl
+    setDriverPhotoUrl(photoUrl ? resolveApiUrl(photoUrl) : null)
+  }, [ride?.driverId])
 
   async function useCurrentLocation() {
     setMessage('')
@@ -371,6 +382,7 @@ export function SrRidePage({ lang }: Props) {
           <h2 style={styles.cardTitle}>{t.status}</h2>
           <Info label={t.rideId} value={ride ? ride.id.slice(0, 8).toUpperCase() : '-'} />
           <Info label={t.status} value={statusText(ride?.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+          {driverPhotoUrl && <img src={driverPhotoUrl} alt="" style={styles.driverPhoto} />}
           <Info label={t.driver} value={driverIdentityLabel(ride, t)} />
           <Info label={t.pickup} value={String(ride?.metadata.pickup || pickup)} />
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
@@ -492,6 +504,7 @@ const styles: Record<string, CSSProperties> = {
   body: { color: '#9aa6ba', margin: 0, maxWidth: 720, lineHeight: 1.6 },
   grid: { display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' },
   card: { border: '1px solid #1e2a3c', borderRadius: 8, background: '#101722', padding: 16, display: 'grid', gap: 12 },
+  driverPhoto: { width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', border: '2px solid #263651' },
   cardTitle: { fontSize: 22, margin: 0 },
   mapPreview: { minHeight: 170, border: '1px solid #263651', borderRadius: 8, background: 'linear-gradient(135deg,#0c1220,#122033)', display: 'grid', placeItems: 'center', textAlign: 'center', padding: 18, position: 'relative', overflow: 'hidden' },
   dot: { width: 24, height: 24, borderRadius: 999, background: '#19d7ff', boxShadow: '0 0 0 16px rgba(25,215,255,.13), 0 0 36px rgba(25,215,255,.55)' },

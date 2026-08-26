@@ -1,8 +1,46 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.mjs'
 
 export async function handleDriver(req, res, url, context) {
+  // SR Ride vs. Uber gap-closure: a driver's own photo, so a rider can actually recognize who
+  // they're getting into a car with (previously nothing beyond name + vehicle text existed).
+  // Mirrors PATCH /api/me/id-document exactly -- same validation shape, same storage discipline.
+  if (url.pathname === '/api/driver/photo') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : ''
+    const mimeType = typeof body.mimeType === 'string' ? body.mimeType : ''
+
+    if (!fileBase64 || !mimeType) {
+      const error = new Error('A photo file is required.')
+      error.statusCode = 400
+      error.code = 'DRIVER_PHOTO_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
+    const storageKey = await saveDriverPhoto(fileBase64, mimeType)
+    const previous = await db().driverProfile.findUnique({ where: { userId: context.user.id }, select: { photoRef: true } })
+
+    const profile = await db().driverProfile.upsert({
+      where: { userId: context.user.id },
+      create: { userId: context.user.id, photoRef: storageKey, photoMimeType: mimeType },
+      update: { photoRef: storageKey, photoMimeType: mimeType },
+      select: { photoRef: true, photoMimeType: true },
+    })
+
+    // Replacing a previous photo -- remove the old file now that the new one is safely written and
+    // the DB row points at the new one (same ordering as the ID-document replace path).
+    if (previous?.photoRef && previous.photoRef !== storageKey) {
+      await deleteDriverPhoto(previous.photoRef)
+    }
+
+    return json(res, 200, { ok: true, driverProfile: profile })
+  }
+
   if (url.pathname === '/api/driver/rides/pending') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['DRIVER'])

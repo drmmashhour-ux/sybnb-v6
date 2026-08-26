@@ -203,6 +203,8 @@ model DriverProfile {
   vehicleMake     String?  @map("vehicle_make")
   vehicleModel    String?  @map("vehicle_model")
   vehiclePlate    String?  @map("vehicle_plate")
+  photoRef        String?  @map("photo_ref")
+  photoMimeType   String?  @map("photo_mime_type")
   active          Boolean  @default(false)
   lastLocationGeo Unsupported("geometry(Point,4326)")? @map("last_location_geo")
   createdAt       DateTime @default(now()) @map("created_at")

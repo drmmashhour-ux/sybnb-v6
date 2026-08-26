@@ -27,6 +27,15 @@ export async function handleStorage(req, res, url, _context) {
       // Private object: never sniff, never cache in shared caches.
       'x-content-type-options': 'nosniff',
       'cache-control': 'private, no-store',
+      // Overrides the global 'same-origin' default (server/index.mjs) set for the JSON API. This
+      // endpoint's entire purpose is embeddable content behind a signed, time-limited, unguessable
+      // URL -- the signature itself is the access control, not same-origin. Without this override,
+      // any legitimate cross-origin <img>/<a> embed (the frontend and API are on different
+      // origins/ports in dev, and different domains in production) is silently blocked by the
+      // browser's Cross-Origin-Resource-Policy enforcement, even though the request itself
+      // succeeds server-side (a real, previously-undiscovered bug found while adding the first
+      // plain <img src> consumer of this route).
+      'cross-origin-resource-policy': 'cross-origin',
     })
     res.end(bytes)
   } catch (error) {

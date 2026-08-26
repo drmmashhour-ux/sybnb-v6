@@ -4,6 +4,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 // Consume the country-neutral geocoding seam (resolves the active country's geocoder, fail-closed) —
 // the route does NOT depend on any country's geocoder module directly.
 import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
+import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 
 export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/sr/quote') {
@@ -84,7 +85,7 @@ export async function handleSrRides(req, res, url, context) {
           select: {
             id: true,
             displayName: true,
-            driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true } },
+            driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, photoRef: true } },
           },
         },
         review: true,
@@ -104,7 +105,25 @@ export async function handleSrRides(req, res, url, context) {
       error.expose = true
       throw error
     }
-    return json(res, 200, { ok: true, ride })
+    // Signed URL, never the raw storage key (photoRef) -- the driver-photo bucket is private
+    // (server/lib/storage.mjs), and the key itself is not meant to leave the server.
+    const ridePayload = ride.driver
+      ? {
+          ...ride,
+          driver: {
+            ...ride.driver,
+            driverProfile: ride.driver.driverProfile
+              ? {
+                  vehicleMake: ride.driver.driverProfile.vehicleMake,
+                  vehicleModel: ride.driver.driverProfile.vehicleModel,
+                  vehiclePlate: ride.driver.driverProfile.vehiclePlate,
+                  photoUrl: ride.driver.driverProfile.photoRef ? signDriverPhotoUrl(ride.driver.driverProfile.photoRef) : null,
+                }
+              : null,
+          },
+        }
+      : ride
+    return json(res, 200, { ok: true, ride: ridePayload })
   }
 
   const cancelMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/cancel$/)

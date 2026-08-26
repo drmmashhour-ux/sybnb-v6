@@ -34,6 +34,7 @@ const BUCKETS = {
   kyc: { private: true, mime: ['image/jpeg', 'image/png', 'application/pdf'], maxBytes: 8 * 1024 * 1024 },
   'payment-proof': { private: true, mime: ['image/jpeg', 'image/png', 'application/pdf'], maxBytes: 8 * 1024 * 1024 },
   'listing-media': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
+  'driver-photo': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
 }
 
 function bucketPolicy(bucket) {

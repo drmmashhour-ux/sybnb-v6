@@ -1,5 +1,12 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:3051'
 
+// A server-relative signed storage URL (e.g. driver photoUrl) must resolve against the API's own
+// origin, not the page's -- a bare `<img src="/api/...">` would otherwise ask the frontend's own
+// dev/static server for it. Already-absolute URLs pass through unchanged.
+export function resolveApiUrl(path: string) {
+  return /^https?:\/\//.test(path) ? path : `${API_BASE_URL}${path}`
+}
+
 type ApiUser = {
   id: string
   email: string | null
@@ -90,7 +97,7 @@ export type PlatformRideRequest = {
   driver?: {
     id: string
     displayName: string
-    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null } | null
+    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; photoUrl: string | null } | null
   } | null
   review?: PlatformRideReview | null
 }
@@ -1143,6 +1150,17 @@ export async function fetchPrototypeDriverOverview() {
     token: session.token,
   })
   return response.overview
+}
+
+export async function submitDriverPhoto(file: File) {
+  const session = await ensurePrototypeDriverSession()
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{ ok: true; driverProfile: { photoRef: string; photoMimeType: string } }>('/api/driver/photo', {
+    method: 'PATCH',
+    token: session.token,
+    body: { fileBase64, mimeType: file.type },
+  })
+  return response.driverProfile
 }
 
 // CAPSULE_RULES.noFakeTrustSignal: the driver dashboard's own docs-status panel must reflect the

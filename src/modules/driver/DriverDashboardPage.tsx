@@ -6,6 +6,7 @@ import {
   fetchDriverIdentityStatus,
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
+  submitDriverPhoto,
   updatePrototypeDriverRideStatus,
   type PlatformDriverOverview,
   type PlatformRideRequest,
@@ -59,6 +60,12 @@ const copy = {
     identityVerified: 'موثق',
     identityPending: 'قيد المراجعة',
     identityNotVerified: 'غير موثق',
+    photoTitle: 'صورتك الشخصية',
+    photoCopy: 'ارفع صورة واضحة لوجهك ليتعرف عليك الراكب قبل الرحلة.',
+    uploadPhoto: 'رفع صورة',
+    uploading: 'جار الرفع...',
+    photoSubmitted: 'تم حفظ صورتك.',
+    photoError: 'تعذر رفع الصورة.',
     reportIssue: 'إبلاغ عن مشكلة',
     sos: 'طوارئ SOS',
   },
@@ -104,6 +111,12 @@ const copy = {
     identityVerified: 'Verified',
     identityPending: 'Pending review',
     identityNotVerified: 'Not verified',
+    photoTitle: 'Your photo',
+    photoCopy: 'Upload a clear photo of your face so riders can recognize you before the ride.',
+    uploadPhoto: 'Upload photo',
+    uploading: 'Uploading...',
+    photoSubmitted: 'Your photo was saved.',
+    photoError: 'Could not upload the photo.',
     reportIssue: 'Report issue',
     sos: 'SOS emergency',
   },
@@ -121,6 +134,8 @@ export function DriverDashboardPage({ lang }: Props) {
   const [claimingRideId, setClaimingRideId] = useState('')
   const [claimError, setClaimError] = useState('')
   const [idDocumentStatus, setIdDocumentStatus] = useState<'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null>(null)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [photoStatus, setPhotoStatus] = useState<'idle' | 'uploading' | 'submitted' | 'error'>('idle')
 
   useEffect(() => {
     void loadOverview()
@@ -135,6 +150,17 @@ export function DriverDashboardPage({ lang }: Props) {
       setIdDocumentStatus(await fetchDriverIdentityStatus())
     } catch {
       setIdDocumentStatus(null)
+    }
+  }
+
+  async function submitPhoto() {
+    if (!photoFile) return
+    setPhotoStatus('uploading')
+    try {
+      await submitDriverPhoto(photoFile)
+      setPhotoStatus('submitted')
+    } catch {
+      setPhotoStatus('error')
     }
   }
 
@@ -267,6 +293,28 @@ export function DriverDashboardPage({ lang }: Props) {
             }
             dir={isAr ? 'rtl' : 'ltr'}
           />
+          <div style={styles.photoUpload}>
+            <strong>{t.photoTitle}</strong>
+            <span>{t.photoCopy}</span>
+            <label style={styles.photoInputLabel}>
+              <input
+                accept="image/png,image/jpeg,image/webp"
+                style={{ display: 'none' }}
+                type="file"
+                onChange={(event) => setPhotoFile(event.target.files?.[0] || null)}
+              />
+              {photoFile ? photoFile.name : t.uploadPhoto}
+            </label>
+            {photoStatus === 'submitted' && <p style={styles.photoNote}>✓ {t.photoSubmitted}</p>}
+            {photoStatus === 'error' && <p style={styles.photoNote}>{t.photoError}</p>}
+            <button
+              style={styles.photoSubmitButton}
+              disabled={!photoFile || photoStatus === 'uploading'}
+              onClick={() => void submitPhoto()}
+            >
+              {photoStatus === 'uploading' ? t.uploading : t.uploadPhoto}
+            </button>
+          </div>
         </article>
       </section>
 
@@ -390,6 +438,10 @@ const styles: Record<string, CSSProperties> = {
   offerCard: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
   driverIntelligence: { display: 'grid', gap: 34, gridTemplateColumns: '1fr 1fr' },
   docsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 12 },
+  photoUpload: { display: 'grid', gap: 8, borderTop: '1px solid #1e2a3c', paddingTop: 14, marginTop: 4 },
+  photoInputLabel: { border: '1px dashed #2f3b52', borderRadius: 10, padding: 12, textAlign: 'center', color: '#9aa6ba', cursor: 'pointer', fontWeight: 800 },
+  photoNote: { margin: 0, color: '#9aa6ba', fontSize: 13 },
+  photoSubmitButton: { minHeight: 44, border: 0, borderRadius: 10, background: '#19d7ff', color: '#051014', fontWeight: 950 },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },
   earningsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 22, gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center' },
   driverCtas: { display: 'grid', gap: 28, gridTemplateColumns: '1fr 1fr 1fr' },

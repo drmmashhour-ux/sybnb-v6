@@ -92,6 +92,16 @@ export type PlatformRideRequest = {
     displayName: string
     driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null } | null
   } | null
+  review?: PlatformRideReview | null
+}
+
+export type PlatformRideReview = {
+  id: string
+  rideId: string
+  riderId: string
+  rating: number
+  comment: string | null
+  createdAt: string
 }
 
 export type PlatformBooking = {
@@ -1115,6 +1125,16 @@ export async function cancelPrototypeSrRide(rideId: string) {
     token: session.token,
   })
   return response.ride
+}
+
+export async function submitPrototypeSrRideReview(input: { rideId: string; rating: number; comment?: string }) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; review: PlatformRideReview }>(`/api/sr/rides/${input.rideId}/review`, {
+    method: 'POST',
+    token: session.token,
+    body: { rating: input.rating, comment: input.comment },
+  })
+  return response.review
 }
 
 export async function fetchPrototypeDriverOverview() {

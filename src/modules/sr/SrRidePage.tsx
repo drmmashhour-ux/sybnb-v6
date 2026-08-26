@@ -7,6 +7,7 @@ import {
   createPrototypeSrRide,
   fetchPrototypeSrRide,
   fetchSrQuote,
+  submitPrototypeSrRideReview,
   type PlatformRideRequest,
   type PlatformSrQuote,
 } from '../../shared/api/platformApi'
@@ -51,6 +52,14 @@ const copy = {
     driverArriving: 'السائق في طريقه إليك الآن.',
     inProgress: 'الرحلة جارية الآن.',
     completed: 'اكتملت الرحلة. شكراً لاستخدامك سير.',
+    receiptFare: 'المبلغ المدفوع',
+    receiptDistance: 'المسافة',
+    rateTitle: 'قيّم رحلتك',
+    rateSubmit: 'إرسال التقييم',
+    rateSubmitting: 'جار الإرسال',
+    rateCommentPlaceholder: 'ملاحظة اختيارية عن الرحلة (غير إلزامية)',
+    rateThanks: 'شكراً لتقييمك',
+    yourRating: 'تقييمك',
     cancelled: 'تم إلغاء الرحلة.',
     cancel: 'إلغاء الرحلة',
     cancelling: 'جار الإلغاء',
@@ -87,6 +96,14 @@ const copy = {
     driverArriving: 'Your driver is on the way to you.',
     inProgress: 'Your ride is now in progress.',
     completed: 'Ride completed. Thanks for riding with SR.',
+    receiptFare: 'Amount charged',
+    receiptDistance: 'Distance',
+    rateTitle: 'Rate your ride',
+    rateSubmit: 'Submit rating',
+    rateSubmitting: 'Submitting',
+    rateCommentPlaceholder: 'Optional note about the ride',
+    rateThanks: 'Thanks for your rating',
+    yourRating: 'Your rating',
     cancelled: 'This ride was cancelled.',
     cancel: 'Cancel ride',
     cancelling: 'Cancelling',
@@ -122,6 +139,9 @@ export function SrRidePage({ lang }: Props) {
   })
   const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [message, setMessage] = useState('')
+  const [reviewRating, setReviewRating] = useState(0)
+  const [reviewComment, setReviewComment] = useState('')
+  const [reviewStatus, setReviewStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
   const fallbackFareMinor = useMemo(() => {
@@ -232,6 +252,19 @@ export function SrRidePage({ lang }: Props) {
       setMessage(t.cancelled)
     } catch (error) {
       setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function submitReview() {
+    if (!ride || reviewRating < 1) return
+    setReviewStatus('saving')
+    try {
+      await submitPrototypeSrRideReview({ rideId: ride.id, rating: reviewRating, comment: reviewComment.trim() || undefined })
+      setRide(await fetchPrototypeSrRide(ride.id))
+      setReviewStatus('idle')
+    } catch (error) {
+      setReviewStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
     }
   }
@@ -356,7 +389,45 @@ export function SrRidePage({ lang }: Props) {
             <div style={styles.message}>{t.inProgress}</div>
           )}
           {ride?.status === 'COMPLETED' && (
-            <div style={styles.message}>{t.completed}</div>
+            <>
+              <div style={styles.message}>{t.completed}</div>
+              <div style={styles.stat}>
+                <span>{t.receiptFare}</span>
+                <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(ride.fareMinor ?? 0, ride.currency, lang)}</strong>
+              </div>
+              {typeof ride.metadata.distanceKm === 'number' && (
+                <div style={styles.stat}>
+                  <span>{t.receiptDistance}</span>
+                  <strong dir="ltr">{ride.metadata.distanceKm} km</strong>
+                </div>
+              )}
+              {ride.review ? (
+                <div style={styles.message}>
+                  {t.yourRating}: {'★'.repeat(ride.review.rating)}
+                  {'☆'.repeat(5 - ride.review.rating)}
+                </div>
+              ) : (
+                <div style={styles.card}>
+                  <strong>{t.rateTitle}</strong>
+                  <div style={styles.starRow}>
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <button key={n} style={n <= reviewRating ? styles.starActive : styles.star} onClick={() => setReviewRating(n)}>
+                        ★
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    style={styles.reviewTextarea}
+                    value={reviewComment}
+                    onChange={(event) => setReviewComment(event.target.value)}
+                    placeholder={t.rateCommentPlaceholder}
+                  />
+                  <button disabled={reviewRating < 1 || reviewStatus === 'saving'} style={styles.primaryButton} onClick={() => void submitReview()}>
+                    {reviewStatus === 'saving' ? t.rateSubmitting : t.rateSubmit}
+                  </button>
+                </div>
+              )}
+            </>
           )}
           {ride?.status === 'CANCELLED' && (
             <div style={{ ...styles.message, ...styles.error }}>{t.cancelled}</div>
@@ -443,4 +514,8 @@ const styles: Record<string, CSSProperties> = {
   message: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 8, background: 'rgba(32,210,155,.1)', color: '#b7ffe8', padding: 12, fontWeight: 900 },
   error: { borderColor: 'rgba(255,96,96,.45)', background: 'rgba(255,96,96,.1)', color: '#ffd1d1' },
   addressWarning: { border: '1px solid rgba(255,176,32,.45)', borderRadius: 8, background: 'rgba(255,176,32,.1)', color: '#ffd98a', padding: 12, fontWeight: 800, fontSize: 13, lineHeight: 1.4 },
+  starRow: { display: 'flex', gap: 6 },
+  star: { border: 0, background: 'transparent', color: '#3a4459', fontSize: 28, padding: 0, cursor: 'pointer' },
+  starActive: { border: 0, background: 'transparent', color: '#e5b80b', fontSize: 28, padding: 0, cursor: 'pointer' },
+  reviewTextarea: { minHeight: 64, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: 10, fontFamily: 'inherit', resize: 'vertical' },
 }

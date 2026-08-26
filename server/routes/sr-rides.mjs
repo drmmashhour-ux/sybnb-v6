@@ -87,6 +87,7 @@ export async function handleSrRides(req, res, url, context) {
             driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true } },
           },
         },
+        review: true,
       },
     })
     if (!ride) {
@@ -270,6 +271,66 @@ export async function handleSrRides(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, ride })
+  }
+
+  // Trust remediation: SR Ride previously had no receipt/rating at all after a completed ride.
+  // Mirrors POST /api/reviews (reviews.mjs) exactly -- same validation, same one-review-per-unit
+  // rule, same admin-hide model -- just for a ride instead of a booking.
+  const reviewMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/review$/)
+  if (reviewMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+    const body = await readJson(req)
+    const rating = Number(body.rating)
+    const comment = typeof body.comment === 'string' ? body.comment.trim().slice(0, 2000) || null : null
+
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      const error = new Error('rating must be an integer from 1 to 5.')
+      error.statusCode = 400
+      error.code = 'REVIEW_RATING_INVALID'
+      error.expose = true
+      throw error
+    }
+
+    const ride = await db().rideRequest.findFirst({
+      where: { id: reviewMatch[1], riderId: context.user.id },
+    })
+
+    if (!ride) {
+      const error = new Error('Ride not found for this rider account.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    if (ride.status !== 'COMPLETED') {
+      const error = new Error('Only completed rides can be reviewed.')
+      error.statusCode = 400
+      error.code = 'REVIEW_RIDE_NOT_COMPLETED'
+      error.expose = true
+      throw error
+    }
+
+    const existingReview = await db().rideReview.findUnique({ where: { rideId: ride.id } })
+    if (existingReview) {
+      const error = new Error('This ride has already been reviewed.')
+      error.statusCode = 409
+      error.code = 'REVIEW_ALREADY_EXISTS'
+      error.expose = true
+      throw error
+    }
+
+    const review = await db().rideReview.create({
+      data: {
+        rideId: ride.id,
+        riderId: context.user.id,
+        rating,
+        comment,
+      },
+    })
+
+    return json(res, 201, { ok: true, review })
   }
 
   return false

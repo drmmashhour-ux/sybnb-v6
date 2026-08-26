@@ -158,6 +158,7 @@ model User {
   driverRideMatches RideRequest[]     @relation("RideDriver")
   auditLogs         AdminAuditLog[]   @relation("AuditActor")
   listingReviews    ListingReview[]   @relation("ReviewGuest")
+  rideReviews       RideReview[]      @relation("RideReviewRider")
   sentMessages      Message[]         @relation("MessageSender")
   paymentProofs     PaymentProof[]    @relation("PaymentPayer")
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
@@ -984,10 +985,32 @@ model RideRequest {
   driver         User?     @relation("RideDriver", fields: [driverId], references: [id])
   pickupLocation Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
   dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
+  review         RideReview?
 
   @@index([status, requestedAt])
   @@index([driverId, status])
   @@map("ride_requests")
+}
+
+// Trust remediation capsule (client-satisfaction audit P2 #10): direct structural mirror of
+// ListingReview -- one review per completed unit of service, no separate "reviewed party" column
+// since the driver is derivable via ride_requests.driver_id the same way ListingReview derives the
+// host via listings.owner_id.
+model RideReview {
+  id              String    @id @default(uuid())
+  rideId          String    @unique @map("ride_id")
+  riderId         String    @map("rider_id")
+  rating          Int
+  comment         String?
+  hiddenAt        DateTime? @map("hidden_at")
+  hiddenByAdminId String?   @map("hidden_by_admin_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  ride  RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  rider User        @relation("RideReviewRider", fields: [riderId], references: [id])
+
+  @@map("ride_reviews")
 }
 
 model AdminAuditLog {

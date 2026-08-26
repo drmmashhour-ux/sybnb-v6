@@ -32,6 +32,21 @@ async function makeCar(token, attrs, price, title) {
   return id
 }
 
+// Publish gate (server/routes/listings.mjs) requires an admin-approved ID document plus an
+// accepted 'listing-agreement' legal consent before ANY division's submit() can leave DRAFT --
+// satisfy it for both sellers up front so downstream submit/approve/browse/inquiry assertions are
+// genuinely exercised instead of stopping at 403 ID_VERIFICATION_REQUIRED.
+async function verifySellerKyc(token, userId) {
+  await call('PATCH', '/api/me/id-document', token, { fileBase64: 'ZmFrZQ==', mimeType: 'image/png' })
+  await call('PATCH', `/api/admin/review-queue/iddocument/${userId}`, A, { decision: 'APPROVE' })
+  const legal = await call('GET', '/api/legal', null)
+  const doc = legal.j.documents.find((d) => d.key === 'listing-agreement')
+  await call('POST', '/api/legal/consent', token, { documentKey: 'listing-agreement', version: doc.version })
+}
+console.log('=== 0. KYC + LEGAL-CONSENT BOOTSTRAP (required by the listings.mjs publish gate) ===')
+await verifySellerKyc(S1, seller1.id)
+await verifySellerKyc(S2, seller2.id)
+
 console.log('=== 1. AUTHORIZATION / ROLE GATES (Cars) ===')
 check('anon cannot create CARS listing (401)', (await call('POST','/api/listings', null, {division:'CARS',titleAr:'x',priceMinor:1000,currency:'SYP'})).status === 401)
 const buyerCreate = await call('POST','/api/listings', B, {division:'CARS',titleAr:'x',priceMinor:1000,currency:'SYP'})

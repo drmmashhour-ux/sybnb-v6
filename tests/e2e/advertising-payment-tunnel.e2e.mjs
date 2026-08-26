@@ -57,6 +57,21 @@ async function submitProof(token, ref, amount=1900) {
   return call('POST','/api/payments/seller-plan-proof', token, {planCode:'advertising-plus', amountMinor:amount, currency:'USD', providerRef:ref, legalName:'Advertiser Co', sellerType:'advertiser'})
 }
 
+// Publish gate (server/routes/listings.mjs) requires an admin-approved ID document plus an
+// accepted 'listing-agreement' legal consent before ANY division's submit() can leave DRAFT --
+// satisfy it for both advertisers up front so the submit/approve assertions below are genuinely
+// exercised instead of stopping at 403 ID_VERIFICATION_REQUIRED.
+async function verifySellerKyc(token, userId) {
+  await call('PATCH', '/api/me/id-document', token, { fileBase64: 'ZmFrZQ==', mimeType: 'image/png' })
+  await call('PATCH', `/api/admin/review-queue/iddocument/${userId}`, A, { decision: 'APPROVE' })
+  const legal = await call('GET', '/api/legal', null)
+  const doc = legal.j.documents.find((d) => d.key === 'listing-agreement')
+  await call('POST', '/api/legal/consent', token, { documentKey: 'listing-agreement', version: doc.version })
+}
+console.log('=== 0. KYC + LEGAL-CONSENT BOOTSTRAP (required by the listings.mjs publish gate) ===')
+await verifySellerKyc(AA, advA.id)
+await verifySellerKyc(AB, advB.id)
+
 console.log('=== 1. GATE: activation blocked before payment/approval ===')
 const preCreate = await call('POST','/api/listings', AA, adBody())
 check('advertiser cannot create paid ad before plan (403 SELLER_PLAN_REQUIRED)', preCreate.status === 403 && code(preCreate) === 'SELLER_PLAN_REQUIRED', preCreate.status+' '+code(preCreate))

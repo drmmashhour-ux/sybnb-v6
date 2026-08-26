@@ -12,6 +12,7 @@ This folder records the shared capsule system used across STR, rentals, seller, 
 - Admin Decision Capsule: accept, reject, hold, reopen, send to client, send to host/seller.
 - Location Capsule: STR and renter search share `src/engines/search` for full Syria governorate, city, area, and street data.
 - Case Status Capsule: dispute/complaint status shown only from a real fetched status field; steps and copy are derived from the status enum, never hardcoded as complete.
+- Trust Signal Rule: the Filter Capsule and any badge/checkbox implying vetting (verified, checked, approved) must be backed by a real backend field. No matching field means the option is removed, not shown decoratively or pre-checked.
 
 ## Hard Rule
 

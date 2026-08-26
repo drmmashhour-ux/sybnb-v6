@@ -118,7 +118,6 @@ const visualFilterPhotoSrc: Partial<Record<VisualFilterArt, string>> = {
   'sr-ride-intercity': '/assets/filter-photos/sr-ride/intercity.webp',
   'sr-ride-hourly': '/assets/filter-photos/sr-ride/hourly.webp',
   'sr-ride-instant': '/assets/filter-photos/sr-ride/instant-confirm.webp',
-  'sr-ride-verified-driver': '/assets/filter-photos/sr-ride/verified-driver.webp',
   'sr-ride-ac': '/assets/filter-photos/sr-ride/ac.webp',
   'sr-ride-wifi': '/assets/filter-photos/sr-ride/wifi.webp',
   'sr-ride-luggage': '/assets/filter-photos/sr-ride/luggage.webp',
@@ -430,8 +429,10 @@ export const srRideFeatureFilterGroup: VisualFilterGroup = {
   title: { ar: 'مزايا الرحلة', en: 'Ride features' },
   mode: 'multi',
   options: [
+    // A pre-checked "Verified driver" option used to live here, but no verification concept exists
+    // anywhere in the driver data model and it was never sent to the backend -- removed rather than
+    // implying vetting that never happened. See CAPSULE_RULES.noFakeTrustSignal in shared/capsules.
     { id: 'instantConfirm', label: { ar: 'تأكيد فوري', en: 'Instant confirm' }, art: 'sr-ride-instant' },
-    { id: 'verifiedDriver', label: { ar: 'سائق موثق', en: 'Verified driver' }, art: 'sr-ride-verified-driver' },
     { id: 'ac', label: { ar: 'تكييف', en: 'A/C' }, art: 'sr-ride-ac' },
     { id: 'wifi', label: { ar: 'Wi-Fi', en: 'Wi-Fi' }, art: 'sr-ride-wifi' },
     { id: 'luggage', label: { ar: 'حقائب', en: 'Luggage' }, art: 'sr-ride-luggage' },
@@ -680,7 +681,6 @@ export const visualFilterArtOptions: VisualFilterArt[] = [
   'sr-ride-intercity',
   'sr-ride-hourly',
   'sr-ride-instant',
-  'sr-ride-verified-driver',
   'sr-ride-ac',
   'sr-ride-wifi',
   'sr-ride-luggage',

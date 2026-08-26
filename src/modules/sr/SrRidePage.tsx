@@ -112,7 +112,7 @@ export function SrRidePage({ lang }: Props) {
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
     srRideRoute: 'cityRide',
-    srRideFeatures: ['instantConfirm', 'verifiedDriver', 'ac'],
+    srRideFeatures: ['instantConfirm', 'ac'],
     payments: ['localWallet'],
   })
   const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle')

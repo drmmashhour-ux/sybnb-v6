@@ -164,6 +164,7 @@ model User {
   sentMessages      Message[]         @relation("MessageSender")
   paymentProofs     PaymentProof[]    @relation("PaymentPayer")
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
+  savedPlaces       SavedPlace[]
   refundsRequested             Refund[]        @relation("RefundRequestedBy")
   refundAttemptsLegacyAccepted RefundAttempt[] @relation("RefundAttemptLegacyAcceptedBy")
 
@@ -1026,6 +1027,23 @@ model RideReview {
   rider User        @relation("RideReviewRider", fields: [riderId], references: [id])
 
   @@map("ride_reviews")
+}
+
+// SR Ride vs. Uber gap-closure (P2 #13): saved places (e.g. "Home", "Work"). Plain lat/lng, not
+// PostGIS -- never spatially queried, only stored and played back into the ride request form.
+model SavedPlace {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  label     String
+  address   String
+  lat       Float?
+  lng       Float?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("saved_places")
 }
 
 model AdminAuditLog {

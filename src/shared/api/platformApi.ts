@@ -1208,6 +1208,42 @@ export async function fetchSharedSrRide(rideId: string, exp: string, sig: string
   return response.ride
 }
 
+export type PlatformSavedPlace = {
+  id: string
+  userId: string
+  label: string
+  address: string
+  lat: number | null
+  lng: number | null
+  createdAt: string
+}
+
+export async function fetchSavedPlaces() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; places: PlatformSavedPlace[] }>('/api/me/saved-places', {
+    token: session.token,
+  })
+  return response.places
+}
+
+export async function createSavedPlace(input: { label: string; address: string; lat?: number; lng?: number }) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; place: PlatformSavedPlace }>('/api/me/saved-places', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return response.place
+}
+
+export async function deleteSavedPlace(placeId: string) {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/me/saved-places/${placeId}`, {
+    method: 'DELETE',
+    token: session.token,
+  })
+}
+
 export async function fetchPrototypeDriverOverview() {
   const session = await ensurePrototypeDriverSession()
   const response = await apiRequest<{ ok: true; overview: PlatformDriverOverview }>('/api/driver/rides', {

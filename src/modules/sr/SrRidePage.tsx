@@ -5,8 +5,11 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   cancelPrototypeSrRide,
   createPrototypeSrRide,
+  createSavedPlace,
+  deleteSavedPlace,
   fetchPrototypeSrRide,
   fetchPrototypeSrRideThread,
+  fetchSavedPlaces,
   fetchSrQuote,
   resolveApiUrl,
   sendPrototypeSrRideMessage,
@@ -15,6 +18,7 @@ import {
   submitPrototypeSrRideReview,
   type PlatformMessage,
   type PlatformRideRequest,
+  type PlatformSavedPlace,
   type PlatformSrQuote,
 } from '../../shared/api/platformApi'
 
@@ -91,6 +95,8 @@ const copy = {
     scheduleRide: 'جدولة الرحلة',
     scheduledFor: 'مجدولة في',
     accessibilityRequired: 'أحتاج مركبة تسمح بالوصول لذوي الاحتياجات الخاصة',
+    savePlaceLabelPlaceholder: 'اسم المكان (مثال: المنزل)',
+    savePlaceButton: 'حفظ عنوان الانطلاق',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -161,6 +167,8 @@ const copy = {
     scheduleRide: 'Schedule ride',
     scheduledFor: 'Scheduled for',
     accessibilityRequired: 'I need a wheelchair-accessible vehicle',
+    savePlaceLabelPlaceholder: 'Place name (e.g. Home)',
+    savePlaceButton: 'Save pickup address',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -215,6 +223,9 @@ export function SrRidePage({ lang }: Props) {
   const [scheduleForLater, setScheduleForLater] = useState(false)
   const [scheduledFor, setScheduledFor] = useState('')
   const [accessibilityRequired, setAccessibilityRequired] = useState(false)
+  const [savedPlaces, setSavedPlaces] = useState<PlatformSavedPlace[]>([])
+  const [newPlaceLabel, setNewPlaceLabel] = useState('')
+  const [savingPlace, setSavingPlace] = useState(false)
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
   const fallbackFareMinor = useMemo(() => {
@@ -236,6 +247,38 @@ export function SrRidePage({ lang }: Props) {
     }, 400)
     return () => window.clearTimeout(timer)
   }, [pickup, dropoff, category, lowDataMode, pickupCoords, ride])
+
+  useEffect(() => {
+    fetchSavedPlaces().then(setSavedPlaces).catch(() => setSavedPlaces([]))
+  }, [])
+
+  async function saveCurrentPickupAsPlace() {
+    if (!newPlaceLabel.trim() || !pickup.trim()) return
+    setSavingPlace(true)
+    try {
+      const place = await createSavedPlace({
+        label: newPlaceLabel.trim(),
+        address: pickup,
+        lat: pickupCoords?.lat,
+        lng: pickupCoords?.lng,
+      })
+      setSavedPlaces((previous) => [...previous, place])
+      setNewPlaceLabel('')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setSavingPlace(false)
+    }
+  }
+
+  async function removeSavedPlace(placeId: string) {
+    try {
+      await deleteSavedPlace(placeId)
+      setSavedPlaces((previous) => previous.filter((place) => place.id !== placeId))
+    } catch {
+      // Non-critical -- the place simply stays in the list; the next load will reconcile it.
+    }
+  }
 
   useEffect(() => {
     // Keep tracking through the whole live lifecycle (assigned → arriving → in progress),
@@ -500,10 +543,47 @@ export function SrRidePage({ lang }: Props) {
             {t.gps}
           </button>
 
+          {!ride && savedPlaces.length > 0 && (
+            <div style={styles.savedPlacesRow}>
+              {savedPlaces.map((place) => (
+                <span key={place.id} style={styles.savedPlaceChip}>
+                  <button type="button" style={styles.chipButton} onClick={() => setPickup(place.address)}>
+                    {place.label}
+                  </button>
+                  <button type="button" style={styles.chipButton} onClick={() => setDropoff(place.address)}>
+                    → {t.dropoff}
+                  </button>
+                  <button type="button" style={styles.chipButton} onClick={() => void removeSavedPlace(place.id)}>
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
           <label style={styles.label}>
             {t.pickup}
             <input style={styles.input} value={pickup} onChange={(event) => setPickup(event.target.value)} />
           </label>
+
+          {!ride && (
+            <div style={styles.savePlaceRow}>
+              <input
+                style={styles.payInput}
+                value={newPlaceLabel}
+                onChange={(event) => setNewPlaceLabel(event.target.value)}
+                placeholder={t.savePlaceLabelPlaceholder}
+              />
+              <button
+                type="button"
+                disabled={!newPlaceLabel.trim() || !pickup.trim() || savingPlace}
+                style={styles.secondaryButton}
+                onClick={() => void saveCurrentPickupAsPlace()}
+              >
+                {t.savePlaceButton}
+              </button>
+            </div>
+          )}
 
           <label style={styles.label}>
             {t.dropoff}
@@ -825,4 +905,8 @@ const styles: Record<string, CSSProperties> = {
   chatInputRow: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 },
   chatInput: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
   scheduleRow: { display: 'flex', alignItems: 'center', gap: 8, color: '#9aa6ba', fontWeight: 800, fontSize: 14 },
+  savedPlacesRow: { display: 'flex', flexWrap: 'wrap', gap: 8 },
+  savedPlaceChip: { display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #263651', borderRadius: 999, background: '#131e2e', padding: '2px 2px 2px 10px', fontSize: 13, color: '#fff' },
+  chipButton: { border: 0, background: 'transparent', color: '#19d7ff', fontWeight: 800, fontSize: 13, padding: '4px 6px', cursor: 'pointer' },
+  savePlaceRow: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 },
 }

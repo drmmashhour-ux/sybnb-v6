@@ -47,26 +47,18 @@ const copy = {
     nextBestText: 'ابدأ بالرحلات النشطة، ثم حدّث الحالة فور الوصول لتفعيل ثقة العميل.',
     openOperations: 'فتح العمليات',
     openFinance: 'فتح المالية',
-    connected: 'متصل',
-    disconnected: 'غير متصل',
     available: 'متاح',
-    aiSuggested: 'مقترح AI',
     accept: 'قبول',
     pendingEmpty: 'لا توجد طلبات رحلات بانتظار سائق الآن.',
     pendingLoading: 'جار البحث عن طلبات قريبة...',
     claiming: 'جار القبول...',
     claimError: 'تعذر قبول الرحلة، ربما قبلها سائق آخر للتو.',
     distance: 'المسافة',
-    smartRoute: 'تحليل المسار الذكي',
-    nextDriverAdvice: 'توجيه القائد التالي',
-    highDemand: 'الطلب في المنطقة الحرة الآن مرتفع جداً وتوقعات دخل مرتفعة.',
     docsStatus: 'حالة الأمان والوثائق',
     verifiedIdentity: 'الهوية الموثقة',
     identityVerified: 'موثق',
     identityPending: 'قيد المراجعة',
     identityNotVerified: 'غير موثق',
-    todayEarnings: 'أرباح اليوم',
-    nextBatch: 'الدفعة القادمة',
     reportIssue: 'إبلاغ عن مشكلة',
     sos: 'طوارئ SOS',
   },
@@ -100,26 +92,18 @@ const copy = {
     nextBestText: 'Start with active rides, then update arrival state immediately to increase rider confidence.',
     openOperations: 'Open operations',
     openFinance: 'Open finance',
-    connected: 'Connected',
-    disconnected: 'Offline',
     available: 'Available',
-    aiSuggested: 'AI suggested',
     accept: 'Accept',
     pendingEmpty: 'No ride requests waiting for a driver right now.',
     pendingLoading: 'Looking for nearby requests...',
     claiming: 'Claiming...',
     claimError: 'Could not claim this ride, another driver may have just accepted it.',
     distance: 'Distance',
-    smartRoute: 'Smart route analysis',
-    nextDriverAdvice: 'Next driver guidance',
-    highDemand: 'Demand in the free zone is very high now with elevated income expectations.',
     docsStatus: 'Safety and document status',
     verifiedIdentity: 'Verified identity',
     identityVerified: 'Verified',
     identityPending: 'Pending review',
     identityNotVerified: 'Not verified',
-    todayEarnings: 'Today earnings',
-    nextBatch: 'Next batch',
     reportIssue: 'Report issue',
     sos: 'SOS emergency',
   },
@@ -224,14 +208,6 @@ export function DriverDashboardPage({ lang }: Props) {
         {t.back}
       </button>
 
-      <section style={styles.driverTop}>
-        <div style={styles.availability}>
-          <button style={styles.availableButton} onClick={() => void loadOverview()}>{t.connected}</button>
-          <button style={styles.offlineButton} onClick={() => (window.location.hash = '/status')}>{t.disconnected}</button>
-        </div>
-        <h1 style={styles.driverTitle}>{t.title}</h1>
-      </section>
-
       <section style={styles.hero}>
         <p style={styles.eyebrow}>SR / SYBNB</p>
         <h1 style={styles.title}>{t.title}</h1>
@@ -260,9 +236,8 @@ export function DriverDashboardPage({ lang }: Props) {
             {pendingRides.length === 0 ? (
               <p style={{ color: '#9aa6ba' }}>{pendingStatus === 'loading' ? t.pendingLoading : t.pendingEmpty}</p>
             ) : (
-              pendingRides.map((pendingRide, index) => (
-                <article key={pendingRide.id} style={index === 0 ? styles.suggestedOffer : styles.offerCard}>
-                  {index === 0 && <small>{t.aiSuggested}</small>}
+              pendingRides.map((pendingRide) => (
+                <article key={pendingRide.id} style={styles.offerCard}>
                   <span>{String(pendingRide.metadata.dropoff || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
                   <i dir="ltr">
@@ -278,17 +253,7 @@ export function DriverDashboardPage({ lang }: Props) {
         </article>
       </section>
 
-      <section style={styles.driverIntelligence}>
-        <article style={styles.routePanel}>
-          <h2>{t.smartRoute}</h2>
-          <div style={styles.mapMock}>
-            <strong>91%</strong>
-          </div>
-          <div style={styles.routeAdvice}>
-            <strong>{t.nextDriverAdvice}</strong>
-            <span>{t.highDemand}</span>
-          </div>
-        </article>
+      <section style={{ ...styles.driverIntelligence, gridTemplateColumns: '1fr' }}>
         <article style={styles.docsPanel}>
           <h2>{t.docsStatus}</h2>
           <Info
@@ -305,17 +270,11 @@ export function DriverDashboardPage({ lang }: Props) {
         </article>
       </section>
 
-      <section style={styles.earningsPanel}>
-        <div style={styles.bars}>{[38, 52, 28, 88, 62, 42, 78].map((bar, index) => <span key={bar} style={{ height: bar, background: index === 3 ? '#d5a915' : '#1e2230' }} />)}</div>
+      <section style={{ ...styles.earningsPanel, gridTemplateColumns: '1fr' }}>
         <div>
-          <span>{t.nextBatch}</span>
-          <strong>{isAr ? '١٥ مايو ٢٠٢٤' : 'May 15, 2024'}</strong>
-          <small>{isAr ? 'قيد المعالجة: ١٤:٠٤' : 'Processing: 14:04'}</small>
-        </div>
-        <div>
-          <span>{t.todayEarnings}</span>
-          <strong>AED 540.00</strong>
-          <small>{isAr ? '١٤ رحلة مكتملة' : '14 completed rides'}</small>
+          <span>{t.earnings}</span>
+          <strong dir="ltr">{moneyText(overview?.totals.earningsMinor || 0, 'SYP', lang)}</strong>
+          <small>{isAr ? `${overview?.totals.completed || 0} رحلة مكتملة` : `${overview?.totals.completed || 0} completed rides`}</small>
         </div>
       </section>
 
@@ -418,11 +377,6 @@ function DispatchItem({ label, value, tone }: { label: string; value: string; to
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: '100vh', background: '#08090f', color: '#fff', padding: '24px 16px 90px', display: 'grid', gap: 22, maxWidth: 1120, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #263651', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
-  driverTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 },
-  availability: { border: '1px solid #1d2433', borderRadius: 999, background: '#11131c', display: 'flex', padding: 5 },
-  availableButton: { border: 0, borderRadius: 999, background: '#20d29b', color: '#04100d', fontWeight: 950, minHeight: 48, padding: '0 22px' },
-  offlineButton: { border: 0, borderRadius: 999, background: 'transparent', color: '#8f96a8', fontWeight: 900, minHeight: 48, padding: '0 22px' },
-  driverTitle: { margin: 0, fontSize: 34 },
   hero: { border: '1px solid #1e2a3c', borderRadius: 8, padding: 18, background: '#101722', display: 'grid', gap: 14 },
   eyebrow: { color: '#19d7ff', letterSpacing: 2, fontWeight: 900, fontSize: 11, margin: 0 },
   title: { margin: 0, fontSize: 38, lineHeight: 1.08 },
@@ -434,15 +388,10 @@ const styles: Record<string, CSSProperties> = {
   dispatchHero: { border: '1px solid rgba(82,108,255,.9)', borderRadius: 14, background: '#101119', padding: 28, display: 'grid', gap: 24 },
   offerGrid: { display: 'grid', gap: 18, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' },
   offerCard: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
-  suggestedOffer: { border: '2px solid #d5a915', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
   driverIntelligence: { display: 'grid', gap: 34, gridTemplateColumns: '1fr 1fr' },
-  routePanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 16 },
   docsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 12 },
-  mapMock: { minHeight: 180, borderRadius: 12, background: 'radial-gradient(circle at 50% 50%, rgba(25,215,255,.35), transparent 24%), #020304', display: 'grid', placeItems: 'center' },
-  routeAdvice: { borderRadius: 10, background: 'rgba(82,108,255,.14)', padding: 16, display: 'grid', gap: 8, color: '#cfd6ff' },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },
   earningsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 22, gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center' },
-  bars: { display: 'flex', gap: 8, alignItems: 'end', minHeight: 110 },
   driverCtas: { display: 'grid', gap: 28, gridTemplateColumns: '1fr 1fr 1fr' },
   sosButton: { border: 0, borderRadius: 12, background: '#ff5274', color: '#06070c', fontWeight: 950, minHeight: 72, fontSize: 22 },
   reportButton: { border: '1px solid #30384d', borderRadius: 12, background: '#0b0d14', color: '#fff', fontWeight: 950, minHeight: 72, fontSize: 22 },

@@ -161,6 +161,8 @@ model User {
   sentMessages      Message[]         @relation("MessageSender")
   paymentProofs     PaymentProof[]    @relation("PaymentPayer")
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
+  refundsRequested             Refund[]        @relation("RefundRequestedBy")
+  refundAttemptsLegacyAccepted RefundAttempt[] @relation("RefundAttemptLegacyAcceptedBy")
 
   @@map("users")
 }
@@ -339,8 +341,24 @@ model PaymentProof {
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
 
+  // Three separate refund counters -- reserved (held pending an in-flight refund), succeeded
+  // (genuinely provider/ledger-confirmed), accepted (an owner's explicit acceptance of incomplete
+  // legacy evidence, NEVER conflated with succeeded). The hard, unconditional cap
+  // (reserved+succeeded+accepted <= amountMinor) is enforced by the refund_minor_within_amount
+  // CHECK constraint at the database level, independent of any application-level eligibility policy.
+  reservedRefundMinor  Int     @default(0) @map("reserved_refund_minor")
+  succeededRefundMinor Int     @default(0) @map("succeeded_refund_minor")
+  acceptedRefundMinor  Int     @default(0) @map("accepted_refund_minor")
+
+  // Captured at original payment confirmation time -- 'charge' | 'payment_intent'. NULL for every
+  // proof predating this column; refund creation on the stripe_checkout rail refuses to proceed
+  // without these populated (an application-level check, not a DB constraint).
+  providerPaymentObjectType String? @map("provider_payment_object_type")
+  providerPaymentObjectId   String? @map("provider_payment_object_id")
+
   booking Booking? @relation(fields: [bookingId], references: [id])
   payer   User     @relation("PaymentPayer", fields: [userId], references: [id])
+  refunds Refund[]
 
   // A given provider reference may be submitted only once. Postgres treats NULLs as distinct, so
   // internally-generated proofs without a providerRef are unaffected; this closes the TOCTOU race
@@ -431,6 +449,7 @@ model WalletEntry {
   createdAt       DateTime        @default(now()) @map("created_at")
 
   wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  refundAttemptsLegacy RefundAttempt[]
 
   @@index([walletId, createdAt])
   @@index([referenceType, referenceId])
@@ -608,8 +627,25 @@ model PaymentEvent {
   supersededAt         DateTime? @map("superseded_at")
   supersededReason     String?   @map("superseded_reason")
 
-  intent  PaymentIntent? @relation(fields: [intentId], references: [id], onDelete: SetNull)
-  booking Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  // Refund-linkage pair, mirroring intentId/originalIntentId exactly (migration 023, Item 2 Phase
+  // 2a). refundId is LIVE, nullable, SET NULL on delete; originalRefundId is a PERMANENT snapshot,
+  // never cleared. A refund can have several attempts over its lifetime, so a SEPARATE
+  // attempt-level pair is also needed -- a late webhook must resolve to the SPECIFIC attempt it
+  // concerns, not whichever attempt happens to be currently active when the webhook arrives.
+  refundId                String?   @map("refund_id")
+  originalRefundId        String?   @map("original_refund_id")
+  refundAttemptId         String?   @map("refund_attempt_id")
+  originalRefundAttemptId String?   @map("original_refund_attempt_id")
+
+  intent        PaymentIntent?  @relation(fields: [intentId], references: [id], onDelete: SetNull)
+  booking       Booking?        @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  refund        Refund?         @relation(fields: [refundId], references: [id], onDelete: SetNull)
+  // Named to disambiguate from RefundAttempt.legacyPaymentEvent below -- two distinct FK relations
+  // exist between PaymentEvent and RefundAttempt (this live one, and the legacy-evidence one).
+  refundAttempt RefundAttempt?  @relation("PaymentEventRefundAttempt", fields: [refundAttemptId], references: [id], onDelete: SetNull)
+  // Reverse side of RefundAttempt.legacyPaymentEvent (the legacy-evidence FK) -- kept distinct from
+  // the `refundAttempt`/events pair above, which is the live, current-attempt-targeting FK.
+  legacyForRefundAttempts RefundAttempt[] @relation("RefundAttemptLegacyPaymentEvent")
   // Append-only record of every conflicting delivery under this event's canonical identity (same
   // (provider, providerEndpointKey, providerEventId), different immutable content). This event row's
   // own fields (processingStatus/lastError/attempts/etc.) are NEVER written on a conflict -- see
@@ -631,6 +667,8 @@ model PaymentEvent {
   @@index([rail])
   @@index([bookingId])
   @@index([processingStatus])
+  @@index([refundId])
+  @@index([refundAttemptId])
   @@map("payment_events")
 }
 
@@ -658,6 +696,172 @@ model PaymentEventConflict {
 
   @@index([paymentEventId])
   @@map("payment_event_conflicts")
+}
+
+// Item 2 Phase 2a (migration 023): refund state machine, attempt-lifecycle, and legacy-migration
+// data model. Independently reviewed across 10 design revisions before implementation began --
+// see the delivered design/evidence package for the full derivation of every choice below.
+
+enum RefundBusinessStatus {
+  REQUESTED
+  IN_PROGRESS
+  // Not terminal -- reservationHeld (on Refund) says whether capacity/funds are still held, since
+  // that cannot be inferred from this status value alone.
+  ACTION_REQUIRED
+  // Genuinely terminal: provider/ledger-confirmed.
+  SUCCEEDED
+  // Genuinely terminal: an owner explicitly accepted incomplete historical evidence. NEVER
+  // conflated with SUCCEEDED -- a materially different epistemic claim, tracked separately end to
+  // end (see PaymentProof.acceptedRefundMinor).
+  ACCOUNTING_ACCEPTED
+  CANCELLED
+
+  @@map("refund_business_status")
+}
+
+enum RefundAttemptStatus {
+  // Non-terminal (5)
+  CLAIMED
+  OUTBOUND_STARTED
+  AWAITING_PROVIDER_CONFIRMATION
+  RESULT_UNKNOWN
+  RECONCILING
+  // Ordinary terminal (4)
+  SUCCEEDED
+  PROVIDER_DECLINED
+  SUPERSEDED
+  ABANDONED
+  // Legacy terminal (3) -- migratedFromLegacy=true only, see the refund_attempt_status_shape CHECK
+  LEGACY_UNVERIFIED
+  LEGACY_PENDING_CONFIRMATION
+  LEGACY_ACCOUNTING_ACCEPTED
+
+  @@map("refund_attempt_status")
+}
+
+model Refund {
+  id        String @id @default(uuid())
+  paymentProofId String @map("payment_proof_id")
+  // Permanent snapshot, deliberately no FK -- mirrors PaymentEvent.originalBookingId. Must survive
+  // regardless of what later happens to the live booking row.
+  bookingId String? @map("booking_id")
+  requestedByUserId String? @map("requested_by_user_id")
+  amountMinor Int    @map("amount_minor")
+  currency    String
+  reason      String
+  reasonCode  String @map("reason_code")
+  rail        String
+  status      RefundBusinessStatus @default(REQUESTED)
+  // Explicit, persisted answer to "is this refund's own reservation currently held" -- never
+  // inferred from status alone (see RefundBusinessStatus.ACTION_REQUIRED above).
+  reservationHeld     Boolean  @default(true) @map("reservation_held")
+  migratedFromLegacy  Boolean  @default(false) @map("migrated_from_legacy")
+  requestedAt         DateTime @default(now()) @map("requested_at")
+  succeededAt          DateTime? @map("succeeded_at")
+
+  paymentProof PaymentProof     @relation(fields: [paymentProofId], references: [id], onDelete: Restrict)
+  requestedBy  User?            @relation("RefundRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  attempts     RefundAttempt[]
+  events       PaymentEvent[]
+
+  // At most one non-terminal-or-ACTION_REQUIRED refund per payment proof -- see migration 023's
+  // partial unique index (not representable as a bare Prisma @@unique).
+  @@index([paymentProofId, status])
+  @@index([status])
+  @@map("refunds")
+}
+
+model RefundAttempt {
+  id       String @id @default(uuid())
+  refundId String @map("refund_id")
+  status   RefundAttemptStatus @default(CLAIMED)
+  claimToken      String?   @map("claim_token")
+  claimExpiresAt  DateTime? @map("claim_expires_at")
+  // AWAITING_PROVIDER_CONFIRMATION's own reconciliation-eligibility deadline, separate from
+  // claimExpiresAt (which stays populated through RESULT_UNKNOWN unchanged from OUTBOUND_STARTED).
+  reconcileNotBefore DateTime? @map("reconcile_not_before")
+
+  // Canonical-request fields -- all nullable at the schema level; required for an ordinary attempt
+  // and forbidden for a migrated one, enforced by the refund_attempt_status_shape CHECK, not by
+  // NOT NULL (a migrated attempt never made a real provider request and must not fabricate one).
+  canonicalRequestVersion    Int?    @map("canonical_request_version")
+  provider                   String?
+  providerPaymentObjectType  String? @map("provider_payment_object_type")
+  providerPaymentObjectId    String? @map("provider_payment_object_id")
+  providerEndpointKey        String? @map("provider_endpoint_key")
+  amountMinor                Int?    @map("amount_minor")
+  currency                   String?
+  idempotencyKey             String? @unique @map("idempotency_key")
+  requestFingerprint         String? @map("request_fingerprint")
+
+  startedAt          DateTime  @default(now()) @map("started_at")
+  outboundStartedAt  DateTime? @map("outbound_started_at")
+  completedAt        DateTime? @map("completed_at")
+  providerStatus     String?   @map("provider_status")
+  providerRefundRef  String?   @map("provider_refund_ref")
+  errorClassification String? @map("error_classification")
+  ambiguous          Boolean   @default(false)
+
+  // Self-referential, RESTRICT (a canonical attempt must never be deletable while a superseded one
+  // still points to it). Its "set at most once" invariant is enforced by the
+  // refund_attempt_supersession_once trigger (migration 023) -- statement-independent, unlike a
+  // guarded UPDATE alone, which only protects callers using that exact statement.
+  supersededByAttemptId String? @map("superseded_by_attempt_id")
+
+  migratedFromLegacy  Boolean @default(false) @map("migrated_from_legacy")
+  legacyWalletEntryId String? @map("legacy_wallet_entry_id")
+  legacyPaymentEventId String? @map("legacy_payment_event_id")
+  legacyAcceptedByUserId String? @map("legacy_accepted_by_user_id")
+  legacyAcceptedAt       DateTime? @map("legacy_accepted_at")
+  legacyAcceptanceReason String?   @map("legacy_acceptance_reason")
+  legacyAcceptanceEvidenceDigest String? @map("legacy_acceptance_evidence_digest")
+
+  refund               Refund          @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  supersededByAttempt  RefundAttempt?  @relation("RefundAttemptSupersession", fields: [supersededByAttemptId], references: [id], onDelete: Restrict)
+  supersededAttempts   RefundAttempt[] @relation("RefundAttemptSupersession")
+  legacyWalletEntry    WalletEntry?    @relation(fields: [legacyWalletEntryId], references: [id], onDelete: Restrict)
+  legacyPaymentEvent   PaymentEvent?   @relation("RefundAttemptLegacyPaymentEvent", fields: [legacyPaymentEventId], references: [id], onDelete: Restrict)
+  legacyAcceptedBy     User?           @relation("RefundAttemptLegacyAcceptedBy", fields: [legacyAcceptedByUserId], references: [id], onDelete: Restrict)
+  observations         RefundProviderObservation[]
+  events                PaymentEvent[] @relation("PaymentEventRefundAttempt")
+
+  // Exactly one non-terminal attempt per refund -- see migration 023's partial unique index.
+  @@index([refundId, status])
+  @@map("refund_attempts")
+}
+
+// Genuinely append-only: every observed provider response for an attempt, deduplicated by
+// (refundAttemptId, responseDigest). Never UPDATEd once inserted.
+model RefundProviderObservation {
+  id                     String   @id @default(uuid())
+  refundAttemptId        String   @map("refund_attempt_id")
+  observedByClaimToken   String?  @map("observed_by_claim_token")
+  providerPaymentObjectId String  @map("provider_payment_object_id")
+  providerRefundRef      String?  @map("provider_refund_ref")
+  providerStatus         String?  @map("provider_status")
+  responseDigest         String   @map("response_digest")
+  observedAt             DateTime @default(now()) @map("observed_at")
+
+  attempt      RefundAttempt                 @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict)
+  consumption  RefundObservationConsumption?
+
+  @@unique([refundAttemptId, responseDigest], map: "refund_provider_observations_dedup")
+  @@map("refund_provider_observations")
+}
+
+// A SEPARATE insert-only table, not columns on the observation above -- this is what makes BOTH
+// tables genuinely insert-only. "Consuming" an observation is recorded by INSERTING a row here,
+// never by updating the observation itself. The unique constraint on observationId is also the
+// mechanism that resolves a race between two would-be consumers: exactly one INSERT succeeds.
+model RefundObservationConsumption {
+  id                       String   @id @default(uuid())
+  observationId            String   @unique @map("observation_id")
+  consumedAt               DateTime @default(now()) @map("consumed_at")
+  consumedByTransactionRef String   @map("consumed_by_transaction_ref")
+
+  observation RefundProviderObservation @relation(fields: [observationId], references: [id], onDelete: Restrict)
+
+  @@map("refund_observation_consumptions")
 }
 
 enum PaymentIntentStatus {

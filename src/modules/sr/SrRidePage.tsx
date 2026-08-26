@@ -54,6 +54,7 @@ const copy = {
     cancel: 'إلغاء الرحلة',
     cancelling: 'جار الإلغاء',
     newRide: 'طلب رحلة جديدة',
+    sos: 'طوارئ SOS',
   },
   en: {
     back: 'Back to landing',
@@ -88,6 +89,7 @@ const copy = {
     cancel: 'Cancel ride',
     cancelling: 'Cancelling',
     newRide: 'Request a new ride',
+    sos: 'SOS emergency',
   },
 }
 
@@ -350,6 +352,12 @@ export function SrRidePage({ lang }: Props) {
             <div style={{ ...styles.message, ...styles.error }}>{t.cancelled}</div>
           )}
 
+          {ride && ACTIVE_RIDE_STATUSES.includes(ride.status) && (
+            <button style={styles.sosButton} onClick={() => (window.location.hash = '/trust-center/sos')}>
+              {t.sos} ⚠
+            </button>
+          )}
+
           <div style={styles.actions}>
             <button disabled={!ride || isTerminal || status === 'saving'} style={styles.secondaryButton} onClick={() => void refreshRide()}>
               {t.refresh}
@@ -420,6 +428,7 @@ const styles: Record<string, CSSProperties> = {
   primaryButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#19d7ff', color: '#051014', fontWeight: 950, padding: '0 14px' },
   secondaryButton: { minHeight: 48, border: '1px solid #263651', borderRadius: 8, background: '#131e2e', color: '#fff', fontWeight: 900, padding: '0 14px' },
   cancelButton: { minHeight: 48, border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 900, padding: '0 14px' },
+  sosButton: { minHeight: 56, border: '2px solid #ff4c73', borderRadius: 10, background: 'transparent', color: '#ff4c73', fontWeight: 950, fontSize: 16, width: '100%' },
   actions: { display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr' },
   message: { border: '1px solid rgba(32,210,155,.35)', borderRadius: 8, background: 'rgba(32,210,155,.1)', color: '#b7ffe8', padding: 12, fontWeight: 900 },
   error: { borderColor: 'rgba(255,96,96,.45)', background: 'rgba(255,96,96,.1)', color: '#ffd1d1' },

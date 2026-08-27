@@ -132,7 +132,13 @@ export function App() {
         ) : isTrustProtectionRoute(path) ? (
           <TrustProtectionRoutes lang={lang} path={path} />
         ) : guestAccountMatch ? (
-          <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} flow={guestAccountMatch[1] ? 'stays' : 'generic'} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : '/stays'} />
+          // A real bug caught by an independent re-audit: hardcoding '/stays' here always won
+          // over whatever the calling page actually stored (e.g. RentalsPage.openAccount() sets
+          // '/rentals'/'/buy'/'/immocontact' before navigating here) -- GuestAccountPage's own
+          // returnPath logic already falls through to sessionStorage correctly when no explicit
+          // prop is given (defaulting to '/stays' only if nothing was genuinely stored), so simply
+          // not overriding it here lets that real value win.
+          <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} flow={guestAccountMatch[1] ? 'stays' : 'generic'} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : undefined} />
         ) : path === '/dashboard' || path === '/account' ? (
           <DashboardPage lang={lang} />
         ) : path === '/host' ||

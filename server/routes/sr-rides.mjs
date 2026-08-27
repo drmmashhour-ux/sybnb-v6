@@ -16,6 +16,7 @@ import {
   validateActivePromoCode,
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
+import { applyShareDiscount, assertPoolClaimEligible } from '../lib/ride-pooling.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -115,7 +116,12 @@ export async function handleSrRides(req, res, url, context) {
       promo = await validateActivePromoCode(body.promoCode)
       discountMinor = computeDiscountMinor(promo, quote.fareMinor)
     }
-    const finalFareMinor = quote.fareMinor - discountMinor
+
+    // Ride-pooling: a flat opt-in discount, applied after any promo code (sequential, not stacked
+    // business logic invented here -- promo first, then the pooling discount on what's left).
+    const shareable = Boolean(body.shareable)
+    const fareAfterPromo = quote.fareMinor - discountMinor
+    const finalFareMinor = shareable ? applyShareDiscount(fareAfterPromo) : fareAfterPromo
 
     const rideData = {
       riderId: context.user.id,
@@ -124,6 +130,7 @@ export async function handleSrRides(req, res, url, context) {
       status: scheduledFor ? 'DRAFT' : 'REQUESTED',
       scheduledFor,
       accessibilityRequired: Boolean(body.accessibilityRequired),
+      shareable,
       fareMinor: finalFareMinor,
       promoCodeId: promo?.id,
       discountMinor: promo ? discountMinor : undefined,
@@ -402,6 +409,13 @@ export async function handleSrRides(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    // Ride-pooling: real eligibility, not a decorative "Share" label. Also closes a genuine
+    // pre-existing gap -- nothing previously stopped a driver from claiming any number of
+    // unrelated active rides at once; a normal (non-shareable) ride now correctly enforces one
+    // active ride per driver, and a shareable ride allows a second only if it's also shareable and
+    // its pickup is genuinely close to the driver's other active ride.
+    await assertPoolClaimEligible(context.user.id, existing)
 
     // SR Ride vs. Uber gap-closure (P2 #16): enforced, not decorative -- a rider who marked
     // accessibilityRequired genuinely needs a driver who self-declared their vehicle as capable.

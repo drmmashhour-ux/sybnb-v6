@@ -68,6 +68,7 @@ const copy = {
     accessibilityRequired: 'يحتاج مركبة لذوي الاحتياجات الخاصة',
     stopsCount: 'محطات',
     stopLabel: 'محطة',
+    shareable: 'رحلة مشتركة',
     enableNotifications: 'تفعيل الإشعارات',
     enablingNotifications: 'جار التفعيل...',
     empty: 'لا توجد رحلات مسندة بعد.',
@@ -135,6 +136,7 @@ const copy = {
     accessibilityRequired: 'Needs accessible vehicle',
     stopsCount: 'stops',
     stopLabel: 'Stop',
+    shareable: 'Shared ride',
     enableNotifications: 'Enable notifications',
     enablingNotifications: 'Enabling...',
     empty: 'No assigned rides yet.',
@@ -353,6 +355,7 @@ export function DriverDashboardPage({ lang }: Props) {
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
                   </i>
                   {pendingRide.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {t.accessibilityRequired}</span>}
+                  {pendingRide.shareable && <span style={styles.accessibilityBadge}>🤝 {t.shareable}</span>}
                   {pendingRide.stops.length > 0 && (
                     <span style={styles.accessibilityBadge}>
                       {pendingRide.stops.length} {t.stopsCount}
@@ -482,6 +485,7 @@ function RideCard({
       <Info label={labels.status} value={statusText(ride.status, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
       <Info label={labels.fare} value={moneyText(ride.fareMinor || 0, ride.currency, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
       {ride.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {labels.accessibilityRequired}</span>}
+      {ride.shareable && <span style={styles.accessibilityBadge}>🤝 {labels.shareable}</span>}
       {ride.stops.map((stop, index) => (
         <Info key={index} label={`${labels.stopLabel} ${index + 1}`} value={stop.address} />
       ))}

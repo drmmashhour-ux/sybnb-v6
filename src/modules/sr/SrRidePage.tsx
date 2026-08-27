@@ -109,6 +109,8 @@ const copy = {
     notificationsEnabled: 'الإشعارات مفعّلة',
     billToBusiness: 'احتساب الرحلة على حساب {company}',
     billedToBusiness: 'محتسبة على حساب الشركة',
+    shareable: 'رحلة مشتركة (وفّر 15%، قد يشاركك السائق راكباً آخر على نفس الطريق)',
+    sharedRide: 'رحلة مشتركة',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -191,6 +193,8 @@ const copy = {
     notificationsEnabled: 'Notifications enabled',
     billToBusiness: 'Bill this ride to {company}',
     billedToBusiness: 'Billed to your company account',
+    shareable: 'Share & save 15% (a driver may pick up another rider along the way)',
+    sharedRide: 'Shared ride',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -250,6 +254,7 @@ export function SrRidePage({ lang }: Props) {
   const [pushStatus, setPushStatus] = useState<'idle' | 'enabling' | 'enabled' | 'error'>('idle')
   const [businessAccountName, setBusinessAccountName] = useState<string | null>(null)
   const [billToBusinessAccount, setBillToBusinessAccount] = useState(false)
+  const [shareable, setShareable] = useState(false)
   const [savedPlaces, setSavedPlaces] = useState<PlatformSavedPlace[]>([])
   const [newPlaceLabel, setNewPlaceLabel] = useState('')
   const [savingPlace, setSavingPlace] = useState(false)
@@ -440,6 +445,7 @@ export function SrRidePage({ lang }: Props) {
         stops: stops.map((stop) => stop.trim()).filter(Boolean),
         promoCode: promoCode.trim() || undefined,
         billToBusinessAccount: businessAccountName ? billToBusinessAccount : undefined,
+        shareable,
       })
       setRide(nextRide)
       setStatus('idle')
@@ -724,6 +730,13 @@ export function SrRidePage({ lang }: Props) {
 
           {!ride && (
             <label style={styles.scheduleRow}>
+              <input type="checkbox" checked={shareable} onChange={(event) => setShareable(event.target.checked)} />
+              {t.shareable}
+            </label>
+          )}
+
+          {!ride && (
+            <label style={styles.scheduleRow}>
               <input
                 type="checkbox"
                 checked={accessibilityRequired}
@@ -801,6 +814,7 @@ export function SrRidePage({ lang }: Props) {
           <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : isAr ? 'يدوي' : 'manual'} />
           {ride?.accessibilityRequired && <div style={styles.message}>♿ {t.accessibilityRequired}</div>}
           {ride?.businessAccountId && <div style={styles.message}>🏢 {t.billedToBusiness}</div>}
+          {ride?.shareable && <div style={styles.message}>🤝 {t.sharedRide}</div>}
 
           {ride && MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status) && (
             <div style={styles.card}>

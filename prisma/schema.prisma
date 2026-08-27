@@ -996,6 +996,7 @@ model RideRequest {
   promoCodeId     String?    @map("promo_code_id")
   discountMinor   Int?       @map("discount_minor")
   businessAccountId String?  @map("business_account_id")
+  shareable       Boolean    @default(false)
   currency        String     @default("SYP")
   pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
   dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")

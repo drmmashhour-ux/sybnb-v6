@@ -92,6 +92,7 @@ export type PlatformRideRequest = {
   stops: Array<{ address: string; lat: number | null; lng: number | null }>
   discountMinor: number | null
   businessAccountId: string | null
+  shareable: boolean
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string
@@ -1113,6 +1114,7 @@ export async function createPrototypeSrRide(input: {
   stops?: string[]
   promoCode?: string
   billToBusinessAccount?: boolean
+  shareable?: boolean
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -1130,6 +1132,7 @@ export async function createPrototypeSrRide(input: {
       stops: input.stops,
       promoCode: input.promoCode,
       billToBusinessAccount: input.billToBusinessAccount,
+      shareable: input.shareable,
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',

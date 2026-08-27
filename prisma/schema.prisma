@@ -270,6 +270,10 @@ model Listing {
 
   @@index([division, status])
   @@index([ownerId])
+  // Backs GET /api/listings's keyset-paginated browse/search scan (server/routes/listings.mjs):
+  // filters on (division, status), then walks pages ordered by (createdAt, id) DESC. Without the
+  // trailing two columns each page's cursor comparison falls back to a full-bucket sort.
+  @@index([division, status, createdAt, id])
   @@map("listings")
 }
 

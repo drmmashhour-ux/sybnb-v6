@@ -14,6 +14,10 @@ export type UnifiedSearchValue = {
   governorate: string
   city: string
   area: string
+  // True only once the guest actually picks a governorate/city/area via LocationCascade --
+  // lets callers tell "user chose Damascus" apart from "field defaults to Damascus" so an
+  // untouched location never turns into a silent city filter on search.
+  locationTouched: boolean
   customPlaceName: string
   checkIn: string
   checkOut: string
@@ -213,6 +217,53 @@ const T = {
 
 const DIVISIONS: SearchDivision[] = ['stays', 'rentals', 'buy', 'newConstruction', 'cars', 'marketplace']
 
+// Division-specific attribute fields (e.g. Cars' carBrand, Marketplace's marketCategory) reset to
+// their defaults whenever the division changes, mirroring SellerListingWizard's setVisualFilters({})
+// on division switch -- otherwise a filter picked under one division (Brand=Toyota on CARS) silently
+// follows the guest into a division where it makes no sense and over-filters results unseen.
+const DIVISION_ATTRIBUTE_DEFAULTS: Pick<
+  UnifiedSearchValue,
+  | 'propertyType'
+  | 'furnishing'
+  | 'carBrand'
+  | 'carYear'
+  | 'carFuel'
+  | 'carTransmission'
+  | 'marketCategory'
+  | 'condition'
+  | 'roomType'
+  | 'bedType'
+  | 'carBody'
+  | 'bedrooms'
+  | 'amenities'
+  | 'trust'
+  | 'popular'
+  | 'views'
+  | 'access'
+  | 'meals'
+  | 'payments'
+> = {
+  propertyType: 'any',
+  furnishing: 'any',
+  carBrand: '',
+  carYear: '',
+  carFuel: 'any',
+  carTransmission: 'any',
+  marketCategory: 'any',
+  condition: 'any',
+  roomType: 'any',
+  bedType: 'any',
+  carBody: 'any',
+  bedrooms: 'any',
+  amenities: [],
+  trust: [],
+  popular: [],
+  views: [],
+  access: [],
+  meals: [],
+  payments: [],
+}
+
 type FilterOption = {
   icon: string
   key: string
@@ -268,6 +319,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     governorate: 'damascus',
     city: 'damascus-city',
     area: '',
+    locationTouched: false,
     customPlaceName: '',
     checkIn: '',
     checkOut: '',
@@ -357,10 +409,11 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
   }, [value.division])
 
   useEffect(() => {
-    if (lockedDivision && value.division !== initialDivision) update({ division: initialDivision })
+    if (lockedDivision && value.division !== initialDivision) switchDivision(initialDivision)
   }, [initialDivision, lockedDivision, value.division])
 
   const update = (patch: Partial<UnifiedSearchValue>) => setValue((current) => ({ ...current, ...patch }))
+  const switchDivision = (division: SearchDivision) => update({ division, ...DIVISION_ATTRIBUTE_DEFAULTS })
   const updateFilters = (selection: VisualFilterSelection) => {
     setValue((current) => ({
       ...current,
@@ -409,7 +462,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
             <button
               key={division}
               type="button"
-              onClick={() => update({ division })}
+              onClick={() => switchDivision(division)}
               style={{ ...styles.tab, ...(value.division === division ? styles.tabActive : {}) }}
             >
               {t[division]}
@@ -422,7 +475,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
         <LocationCascade
           lang={lang}
           value={{ governorate: value.governorate, city: value.city, area: value.area }}
-          onChange={(next) => update(next)}
+          onChange={(next) => update({ ...next, locationTouched: true })}
         />
         <div style={styles.depthNote}>{t.locationDepth}</div>
 

@@ -602,6 +602,16 @@ export async function createAndApprovePrototypeListing(input: CreateListingInput
   return approved as PlatformListing
 }
 
+export type FetchApprovedListingsResult = {
+  listings: PlatformListing[]
+  nextCursor: string | null
+}
+
+// A real scale-readiness audit found this had no pagination at all — the server capped at a
+// fixed 250 rows with no way to reach anything past that, so once a division+city passed ~250
+// approved listings, older inventory became permanently unreachable. The server now does real
+// keyset pagination (see server/routes/listings.mjs); pass the previous call's `nextCursor` back
+// in to fetch the next page, and stop once it comes back null.
 export async function fetchApprovedListings(
   division = 'STAYS',
   filters?: {
@@ -612,11 +622,12 @@ export async function fetchApprovedListings(
     bathroomsMin?: number
     city?: string
   },
-) {
+  cursor?: string | null,
+): Promise<FetchApprovedListingsResult> {
   const params = new URLSearchParams({ division })
   // Single-select scalar attributes only (Cars: carBrand/…; Buy/Rentals: propertyType). Skip
   // 'any', empty, and multi-select array values — only scalar constraints reach the server.
-  const ATTRIBUTE_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType']
+  const ATTRIBUTE_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType', 'marketCategory']
   if (filters?.attributes) {
     for (const key of ATTRIBUTE_KEYS) {
       const value = filters.attributes[key]
@@ -628,11 +639,14 @@ export async function fetchApprovedListings(
   if (filters?.bedroomsMin && filters.bedroomsMin > 0) params.set('bedroomsMin', String(filters.bedroomsMin))
   if (filters?.bathroomsMin && filters.bathroomsMin > 0) params.set('bathroomsMin', String(filters.bathroomsMin))
   if (filters?.city) params.set('city', filters.city)
+  if (cursor) params.set('cursor', cursor)
   // Real customer journeys must show real inventory only. A legitimate zero-result search returns an
   // empty list (callers render a genuine localized no-results state) — never substitute mock/demo
   // fixtures. API/network errors propagate to the caller's try/catch, which shows the error state.
-  const response = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings?${params.toString()}`)
-  return response.listings
+  const response = await apiRequest<{ ok: true; listings: PlatformListing[]; nextCursor: string | null }>(
+    `/api/listings?${params.toString()}`,
+  )
+  return { listings: response.listings, nextCursor: response.nextCursor }
 }
 
 export type ListingAvailabilityEntry = {
@@ -717,6 +731,7 @@ export type PlatformMessageThread = {
   bookingId?: string
   rideId?: string
   messages: PlatformMessage[]
+  hasMore: boolean
 }
 
 function resolveViewerSession(preferStaff = false) {
@@ -740,9 +755,10 @@ function resolveViewerSession(preferStaff = false) {
   throw new Error('Sign in before opening this conversation.')
 }
 
-export async function fetchBookingThread(bookingId: string, preferStaff = false) {
+export async function fetchBookingThread(bookingId: string, preferStaff = false, before?: string) {
   const session = resolveViewerSession(preferStaff)
-  const response = await apiRequest<{ ok: true; thread: PlatformMessageThread }>(`/api/bookings/${bookingId}/thread`, {
+  const query = before ? `?before=${encodeURIComponent(before)}` : ''
+  const response = await apiRequest<{ ok: true; thread: PlatformMessageThread }>(`/api/bookings/${bookingId}/thread${query}`, {
     token: session.token,
   })
   return response.thread
@@ -763,6 +779,7 @@ export type PlatformListingInquiryThread = {
   listingId: string
   guestId: string
   messages: PlatformMessage[]
+  hasMore: boolean
 }
 
 export type PlatformHostInquiryThread = {
@@ -777,9 +794,10 @@ export type PlatformHostInquiryThread = {
 
 // Real, persistent "contact the owner" thread for RENTALS/BUY listings, reusing the same
 // messages system built for STAYS bookings instead of writing to localStorage only.
-export async function fetchListingInquiryThread(listingId: string) {
+export async function fetchListingInquiryThread(listingId: string, before?: string) {
   const session = await ensurePrototypeGuestSession()
-  const response = await apiRequest<{ ok: true; thread: PlatformListingInquiryThread }>(`/api/listings/${listingId}/thread`, {
+  const query = before ? `?before=${encodeURIComponent(before)}` : ''
+  const response = await apiRequest<{ ok: true; thread: PlatformListingInquiryThread }>(`/api/listings/${listingId}/thread${query}`, {
     token: session.token,
   })
   return response.thread
@@ -823,10 +841,17 @@ export async function fetchHostInquiries(mode: HostDashboardMode = 'host') {
   return response.threads
 }
 
-export async function fetchListingInquiryThreadAsOwner(listingId: string, guestId: string, mode: HostDashboardMode = 'host') {
+export async function fetchListingInquiryThreadAsOwner(
+  listingId: string,
+  guestId: string,
+  mode: HostDashboardMode = 'host',
+  before?: string,
+) {
   const session = await getHostDashboardSession(mode)
+  const params = new URLSearchParams({ guestId })
+  if (before) params.set('before', before)
   const response = await apiRequest<{ ok: true; thread: PlatformListingInquiryThread }>(
-    `/api/listings/${listingId}/thread?guestId=${encodeURIComponent(guestId)}`,
+    `/api/listings/${listingId}/thread?${params.toString()}`,
     { token: session.token },
   )
   return response.thread
@@ -1174,9 +1199,10 @@ export async function submitPrototypeSrRideReview(input: { rideId: string; ratin
   return response.review
 }
 
-export async function fetchPrototypeSrRideThread(rideId: string, asDriver = false) {
+export async function fetchPrototypeSrRideThread(rideId: string, asDriver = false, before?: string) {
   const session = asDriver ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
-  const response = await apiRequest<{ ok: true; thread: PlatformMessageThread }>(`/api/sr/rides/${rideId}/thread`, {
+  const query = before ? `?before=${encodeURIComponent(before)}` : ''
+  const response = await apiRequest<{ ok: true; thread: PlatformMessageThread }>(`/api/sr/rides/${rideId}/thread${query}`, {
     token: session.token,
   })
   return response.thread

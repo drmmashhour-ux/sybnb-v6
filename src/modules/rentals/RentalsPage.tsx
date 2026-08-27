@@ -81,6 +81,8 @@ const copy = {
     newest: 'الأحدث',
     lowestPrice: 'الأقل سعراً',
     availableResults: 'النتائج المتاحة',
+    loadMore: 'عرض المزيد',
+    loadingMore: 'جار التحميل...',
     sendRequest: 'إرسال طلب',
     viewDetails: 'عرض التفاصيل',
     chooseAfterAccount: 'افتح الحساب أولاً',
@@ -156,6 +158,8 @@ const copy = {
     newest: 'Newest',
     lowestPrice: 'Lowest price',
     availableResults: 'Available results',
+    loadMore: 'Load more',
+    loadingMore: 'Loading...',
     sendRequest: 'Send request',
     viewDetails: 'View details',
     chooseAfterAccount: 'Open account first',
@@ -282,6 +286,9 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const t = isBuyMode ? { ...copy[lang], ...buyerCopy[lang] } : copy[lang]
   const isAr = lang === 'ar'
   const [listings, setListings] = useState<PlatformListing[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [lastQuery, setLastQuery] = useState<{ division: string; filters?: Parameters<typeof fetchApprovedListings>[1] } | null>(null)
   const [selectedId, setSelectedId] = useState('')
   const [documents, setDocuments] = useState<UploadedDocument[]>([])
   const [uploadingCount, setUploadingCount] = useState(0)
@@ -356,12 +363,16 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       // fetchApprovedListings only forwards server-backed scalar keys (propertyType); 'any' and
       // unsupported keys (roomType/bedType/amenities) are ignored, so nothing over-filters.
       // Location narrows only on an explicit capsule search, so the first broad load stays rich.
-      const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS', {
+      const division = isBuyMode ? 'BUY' : 'RENTALS'
+      const filters = {
         attributes: visualFilters,
         city: explicit ? GOV_TO_CITY[selectedGovernorate] : undefined,
-      })
-      setListings(nextListings)
-      setSelectedId(nextListings[0]?.id || '')
+      }
+      const results = await fetchApprovedListings(division, filters)
+      setListings(results.listings)
+      setNextCursor(results.nextCursor)
+      setLastQuery({ division, filters })
+      setSelectedId(results.listings[0]?.id || '')
       setStatus('ready')
       // Show available results by default — consistent with Stays/Cars/Marketplace/New Construction,
       // which auto-populate. The search capsule still refines; this removes the empty-looking
@@ -369,8 +380,25 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       setHasSearched(true)
     } catch (error) {
       setListings([])
+      setNextCursor(null)
+      setLastQuery(null)
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function loadMoreListings() {
+    if (!nextCursor || loadingMore || !lastQuery) return
+    setLoadingMore(true)
+    try {
+      const results = await fetchApprovedListings(lastQuery.division, lastQuery.filters, nextCursor)
+      setListings((prev) => [...prev, ...results.listings])
+      setNextCursor(results.nextCursor)
+    } catch {
+      // Keep whatever is already shown; just stop offering more rather than clearing real results.
+      setNextCursor(null)
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -625,6 +653,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
               </article>
             )) : status !== 'loading' ? <p style={styles.empty} role="status">{t.empty}</p> : null}
           </div>
+          {nextCursor && (
+            <div style={styles.loadMoreRow}>
+              <button style={styles.secondaryButton} onClick={() => void loadMoreListings()} disabled={loadingMore}>
+                {loadingMore ? t.loadingMore : t.loadMore}
+              </button>
+            </div>
+          )}
         </section>
 
         <aside style={styles.tunnelPanel}>
@@ -806,6 +841,7 @@ const styles: Record<string, CSSProperties> = {
   sortButton: { minHeight: 40, border: 0, borderRadius: 999, background: colors.panel2, color: colors.muted, fontWeight: 850, padding: '0 18px' },
   sortButtonActive: { minHeight: 40, border: 0, borderRadius: 999, background: colors.blue, color: colors.text, fontWeight: 950, padding: '0 20px' },
   resultGrid: { display: 'grid', gap: 28, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' },
+  loadMoreRow: { display: 'grid', justifyContent: 'center', marginTop: 22 },
   resultCard: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 24, background: colors.panel, overflow: 'hidden', display: 'grid', boxShadow: '0 20px 45px rgba(0,0,0,.24)', minHeight: 380 },
   resultCardActive: { border: `1px solid ${colors.blue}`, borderRadius: 24, background: withAlpha(colors.blue, 0.1), overflow: 'hidden', display: 'grid', boxShadow: `0 0 0 1px ${withAlpha(colors.blue, 0.24)}, 0 20px 45px rgba(0,0,0,.24)`, minHeight: 380 },
   resultImage: { width: '100%', aspectRatio: '1 / 1.25', objectFit: 'cover', background: colors.bg2 },

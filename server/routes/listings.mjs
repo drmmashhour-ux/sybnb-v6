@@ -11,6 +11,29 @@ import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 // paid-plan divisions gated behind an admin-approved SellerProfile.
 const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
 
+// Keyset cursor for GET /api/listings pagination: encodes the last row's (createdAt, id) --
+// the exact pair the query is ordered and compared on -- so a page boundary survives concurrent
+// inserts (unlike an offset, which drifts: a new row landing above page 1 reshuffles what "page 2"
+// means). Self-contained (no DB lookup needed to resume), and safe if that row is later deleted.
+function encodeListingCursor(listing) {
+  return Buffer.from(`${listing.createdAt.toISOString()}_${listing.id}`, 'utf8').toString('base64url')
+}
+function decodeListingCursor(raw) {
+  if (!raw) return null
+  let decoded
+  try {
+    decoded = Buffer.from(String(raw), 'base64url').toString('utf8')
+  } catch {
+    return null
+  }
+  const sep = decoded.indexOf('_')
+  if (sep < 0) return null
+  const createdAt = new Date(decoded.slice(0, sep))
+  const id = decoded.slice(sep + 1)
+  if (Number.isNaN(createdAt.getTime()) || !id) return null
+  return { createdAt, id }
+}
+
 // Project a listing to the fields safe for public/unauthenticated consumers: strip street-level
 // address (addressLine/street) and internal metadata markers (e.g. inventory_source). Only fields
 // the customer UI actually renders are returned.
@@ -125,6 +148,16 @@ export async function handleListings(req, res, url, context) {
       if (priceMin !== undefined && priceMin > 0) priceFilter.gte = priceMin
       if (priceMax !== undefined && priceMax > 0) priceFilter.lte = priceMax
 
+      const rawCursorParam = url.searchParams.get('cursor')
+      const cursor = decodeListingCursor(rawCursorParam)
+      if (rawCursorParam && !cursor) {
+        const error = new Error('Invalid cursor.')
+        error.statusCode = 400
+        error.code = 'INVALID_CURSOR'
+        error.expose = true
+        throw error
+      }
+
       // A real bug caught by an independent re-audit: the advertising submission flow
       // (SellerListingWizard.tsx) writes an ad purchase as a real listing row tagged
       // metadata.advertising=true (currently always division='MARKETPLACE') so it can reuse the
@@ -136,22 +169,76 @@ export async function handleListings(req, res, url, context) {
       // equals: true } }` hits SQL's NULL-trap (`NOT (NULL = true)` is NULL, not TRUE) and would
       // wrongly exclude every listing that has never touched the advertising flow at all --
       // confirmed live (a first attempt silently zeroed out all 424 real MARKETPLACE listings).
-      // Filtering in JS after a generously buffered fetch is the correct, simple fix.
-      const RESULT_LIMIT = 50
-      const candidates = await db().listing.findMany({
-        where: {
-          status: 'APPROVED',
-          division,
-          location: city ? { city } : undefined,
-          priceMinor: Object.keys(priceFilter).length ? priceFilter : undefined,
-          AND: attributeConditions.length ? attributeConditions : undefined,
-        },
-        include: { location: true, media: true },
-        orderBy: { createdAt: 'desc' },
-        take: RESULT_LIMIT + 200,
-      })
-      const listings = candidates.filter((l) => l.metadata?.advertising !== true).slice(0, RESULT_LIMIT)
-      return json(res, 200, { ok: true, listings: listings.map(toPublicListing) })
+      // Filtering in JS is still the correct, simple fix -- but it now runs inside a keyset-paged
+      // scan loop (below) instead of a single fixed-take fetch, so ad-heavy stretches of the feed
+      // can no longer cap results early or hide real inventory that never gets touched by a page.
+      const PAGE_SIZE = 50
+      const SCAN_BATCH_SIZE = 250
+      const MAX_SCAN_BATCHES = 4 // safety cap: at most 1,000 rows scanned per request
+
+      // A real scale-readiness audit found this endpoint's *entire* result set was a single fixed
+      // `take: 250` with no pagination anywhere -- confirmed the server never read a cursor/page
+      // param and neither frontend caller ever sent one, so once any division+city passed ~250
+      // approved listings, older inventory became permanently unreachable through search/browse.
+      // This loop replaces that fixed take with real keyset pagination: it walks batches ordered
+      // by (createdAt, id) DESC, advancing `scanCursor` through every row (ad or not) so a page
+      // boundary is always the true position in the dataset, then returns once PAGE_SIZE real
+      // (non-ad) listings are collected or the dataset is exhausted.
+      let scanCursor = cursor
+      const listings = []
+      let hasMore = false
+      for (let batchNum = 0; batchNum < MAX_SCAN_BATCHES; batchNum++) {
+        const andConditions = [...attributeConditions]
+        if (scanCursor) {
+          andConditions.push({
+            OR: [
+              { createdAt: { lt: scanCursor.createdAt } },
+              { createdAt: scanCursor.createdAt, id: { lt: scanCursor.id } },
+            ],
+          })
+        }
+        const batch = await db().listing.findMany({
+          where: {
+            status: 'APPROVED',
+            division,
+            location: city ? { city } : undefined,
+            priceMinor: Object.keys(priceFilter).length ? priceFilter : undefined,
+            AND: andConditions.length ? andConditions : undefined,
+          },
+          include: { location: true, media: true },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: SCAN_BATCH_SIZE,
+        })
+        if (batch.length === 0) {
+          hasMore = false
+          break
+        }
+
+        let hitPageSize = false
+        for (const listing of batch) {
+          if (listing.metadata?.advertising !== true) listings.push(listing)
+          scanCursor = { createdAt: listing.createdAt, id: listing.id }
+          if (listings.length >= PAGE_SIZE) {
+            hitPageSize = true
+            break
+          }
+        }
+        if (hitPageSize) {
+          hasMore = true
+          break
+        }
+        if (batch.length < SCAN_BATCH_SIZE) {
+          // Fewer rows than requested came back: the dataset is exhausted, not just this batch.
+          hasMore = false
+          break
+        }
+        // Batch was full and PAGE_SIZE isn't reached yet -- keep scanning from scanCursor. If this
+        // was the last allowed batch, the loop exits here with hasMore left true (set below).
+        hasMore = true
+      }
+
+      const nextCursor = hasMore && scanCursor ? encodeListingCursor(scanCursor) : null
+      return json(res, 200, { ok: true, listings: listings.map(toPublicListing), nextCursor })
     }
 
     if (req.method === 'POST') {

@@ -30,6 +30,8 @@ const T = {
     details: 'عرض التفاصيل',
     filterTitle: 'اختيار ذكي',
     resultTitle: 'النتائج المناسبة',
+    loadMore: 'عرض المزيد',
+    loadingMore: 'جار التحميل...',
     noPhotoYet: 'لا توجد صور بعد',
     ready: 'جاهز للبحث',
     staysReady: 'جاهز لحجز استضافة',
@@ -91,6 +93,8 @@ const T = {
     details: 'View details',
     filterTitle: 'Smart selection',
     resultTitle: 'Matched results',
+    loadMore: 'Load more',
+    loadingMore: 'Loading...',
     noPhotoYet: 'No photos yet',
     ready: 'Ready to search',
     staysReady: 'Ready to book a stay',
@@ -152,6 +156,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   const [state, setState] = useState<'loading' | 'empty' | 'error'>('empty')
   const [lastSearch, setLastSearch] = useState<UnifiedSearchValue | null>(null)
   const [listings, setListings] = useState<PlatformListing[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [lastQuery, setLastQuery] = useState<{ division: string; filters?: Parameters<typeof fetchApprovedListings>[1] } | null>(null)
   const isStaysEntry = entry === 'stays'
   const isDirectDivisionEntry = isStaysEntry || initialDivision !== 'stays'
   const divisionCopy = t.divisionCopy[effectiveInitialDivision]
@@ -179,6 +186,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               carTransmission: value.carTransmission,
               condition: value.condition,
               propertyType: value.propertyType,
+              marketCategory: value.marketCategory,
             },
             priceMin: Number(value.minPrice) || undefined,
             priceMax: Number(value.maxPrice) || undefined,
@@ -192,16 +200,40 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             bedroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) ? value.bedroomsCount || undefined : undefined,
             bathroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) ? value.bathrooms || undefined : undefined,
             // Wire the chosen location to the server so results actually narrow to the selected
-            // governorate (maps the capsule key to the stored English city name). Empty when unmatched.
-            city: GOV_TO_CITY[value.governorate] || undefined,
+            // governorate (maps the capsule key to the stored English city name). Only once the
+            // guest actually touches the location picker -- UnifiedSearchBar's governorate/city
+            // default to Damascus for display, and CARS/MARKETPLACE listings are almost never
+            // geotagged, so applying that untouched default as a filter silently zeroed out
+            // every explicit search in those divisions.
+            city: value.locationTouched ? GOV_TO_CITY[value.governorate] || undefined : undefined,
           }
         : undefined
-      const results = await fetchApprovedListings(toApiDivision(value?.division || effectiveInitialDivision), filters)
-      setListings(results)
+      const division = toApiDivision(value?.division || effectiveInitialDivision)
+      const results = await fetchApprovedListings(division, filters)
+      setListings(results.listings)
+      setNextCursor(results.nextCursor)
+      setLastQuery({ division, filters })
       setState('empty')
     } catch {
       setListings([])
+      setNextCursor(null)
+      setLastQuery(null)
       setState('error')
+    }
+  }
+
+  async function loadMoreResults() {
+    if (!nextCursor || loadingMore || !lastQuery) return
+    setLoadingMore(true)
+    try {
+      const results = await fetchApprovedListings(lastQuery.division, lastQuery.filters, nextCursor)
+      setListings((prev) => [...prev, ...results.listings])
+      setNextCursor(results.nextCursor)
+    } catch {
+      // Keep whatever is already shown; just stop offering more rather than clearing real results.
+      setNextCursor(null)
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -302,6 +334,13 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             ))}
           </div>
         ) : null}
+        {nextCursor && (
+          <div className="search-results-load-more">
+            <button type="button" onClick={() => void loadMoreResults()} disabled={loadingMore}>
+              {loadingMore ? t.loadingMore : t.loadMore}
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="search-last">

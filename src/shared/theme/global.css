@@ -5309,6 +5309,26 @@ a {
   color: #fff;
 }
 
+.search-results-load-more {
+  display: grid;
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.search-results-load-more button {
+  background: #171b29;
+  border: 1px solid #30384d;
+  border-radius: 10px;
+  color: #d8dce8;
+  font-weight: 800;
+  min-height: 44px;
+  padding: 0 20px;
+}
+
+.search-results-load-more button:disabled {
+  opacity: 0.6;
+}
+
 .search-last {
   color: #9ba0ad;
 }
@@ -6569,6 +6589,21 @@ a {
   gap: 10px;
   min-height: 286px;
   padding: 14px;
+}
+
+.immo-load-earlier {
+  background: #171b29;
+  border: 1px solid #30384d;
+  border-radius: 10px;
+  color: #d8dce8;
+  font-weight: 800;
+  justify-self: center;
+  min-height: 36px;
+  padding: 0 14px;
+}
+
+.immo-load-earlier:disabled {
+  opacity: 0.6;
 }
 
 .immo-message {

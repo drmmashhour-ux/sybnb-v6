@@ -4,7 +4,7 @@ import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
 import { acceptListingAgreement, createAndSubmitPrototypeListing, getStoredSellerSession, uploadPaymentProofFile } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
-import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
+import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGroups, sellerRealEstateFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
@@ -448,7 +448,7 @@ export function SellerListingWizard({ lang }: Props) {
               {!isAdvertisingFlow && division !== 'CARS' && division !== 'MARKETPLACE' && (
                 <VisualFilterPanel
                   compact
-                  groups={sellerPropertyFilterGroups}
+                  groups={division === 'STAYS' ? sellerPropertyFilterGroups : sellerRealEstateFilterGroups}
                   lang={lang}
                   selection={visualFilters}
                   onChange={(nextFilters) => {
@@ -586,7 +586,7 @@ export function SellerListingWizard({ lang }: Props) {
               <div className="seller-wide-field">
                 <VisualFilterPanel
                   compact
-                  groups={sellerPropertyFilterGroups.slice(1)}
+                  groups={(division === 'STAYS' ? sellerPropertyFilterGroups : sellerRealEstateFilterGroups).slice(1)}
                   lang={lang}
                   selection={visualFilters}
                   onChange={setVisualFilters}

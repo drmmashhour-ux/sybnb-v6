@@ -524,11 +524,9 @@ function newConstructionVisualFilterGroups() {
 
 function marketplaceVisualFilterGroups() {
   // No 'payments' group: MARKETPLACE has no in-app transactional payment mechanism (same
-  // reasoning as CARS/NEW_CONSTRUCTION/RENTALS/BUY above). 'marketCategory' is intentionally kept
-  // even though it doesn't reach the backend yet either -- unlike 'payments'/'trust', it's a real,
-  // buildable feature (the primary way to browse a marketplace) with an existing group definition,
-  // just missing seller-side data capture + a backend filter; flagged separately rather than
-  // removed, since removing it would delete a real expected capability, not decorative filler.
+  // reasoning as CARS/NEW_CONSTRUCTION/RENTALS/BUY above). 'marketCategory' is wired end-to-end:
+  // sellers set it via sellerMarketFilterGroups, it's stored at metadata.visualFilters.marketCategory,
+  // and GET /api/listings' attributeKeys filters on it.
   return visualFilterGroupsById(['sort', 'priceBand', 'marketCategory', 'condition']).map((group) => {
     if (group.id === 'priceBand') {
       return {
@@ -555,8 +553,19 @@ export function sellerPropertyFilterGroupsFromConfig() {
   return visualFilterGroupsById(['popular', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'payments'])
 }
 
+export function sellerRealEstateFilterGroupsFromConfig() {
+  // No 'payments' group: RENTALS/BUY/NEW_CONSTRUCTION sellers have no in-app transactional
+  // payment mechanism (same reasoning as renterPropertyFilterGroupsFromConfig above) -- unlike
+  // STAYS, which keeps 'payments' in sellerPropertyFilterGroups. CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['popular', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access'])
+}
+
 export function sellerCarFilterGroupsFromConfig() {
   return visualFilterGroupsById(['carBody', 'carBrand', 'carFuel', 'carTransmission', 'condition'])
+}
+
+export function sellerMarketFilterGroupsFromConfig() {
+  return visualFilterGroupsById(['marketCategory', 'condition'])
 }
 
 export function renterPropertyFilterGroupsFromConfig() {
@@ -578,7 +587,9 @@ export function srRideFilterGroupsFromConfig() {
 }
 
 export const sellerPropertyFilterGroups = sellerPropertyFilterGroupsFromConfig()
+export const sellerRealEstateFilterGroups = sellerRealEstateFilterGroupsFromConfig()
 export const sellerCarFilterGroups = sellerCarFilterGroupsFromConfig()
+export const sellerMarketFilterGroups = sellerMarketFilterGroupsFromConfig()
 export const renterPropertyFilterGroups = renterPropertyFilterGroupsFromConfig()
 export const hostInventoryFilterGroups = hostInventoryFilterGroupsFromConfig()
 

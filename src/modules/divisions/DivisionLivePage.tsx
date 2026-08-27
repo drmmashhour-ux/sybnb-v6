@@ -184,8 +184,8 @@ export function DivisionLivePage({ division, lang }: Props) {
     setMessage('')
 
     try {
-      const nextListings = await fetchApprovedListings(apiDivision)
-      setListings(nextListings)
+      const results = await fetchApprovedListings(apiDivision)
+      setListings(results.listings)
       setStatus('ready')
     } catch (error) {
       setStatus('error')

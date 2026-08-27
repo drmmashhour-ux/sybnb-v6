@@ -214,6 +214,16 @@ if [ -z "$PAYMENT_ONLY" ]; then
   API_BASE_CLOSED=http://127.0.0.1:3053 API_BASE=http://127.0.0.1:3054 \
     run "public-access-gate" public-access-gate.e2e.mjs
   kill "$PRODUCTION_CLOSED_PID" "$GATE_OPEN_PID" 2>/dev/null
+  sleep 1
+
+  echo "== admin-action rate limit server (low ADMIN_ACTION_RATE_MAX to exercise the 429 path) =="
+  ADMIN_ACTION_RATE_MAX=5 API_HOST=127.0.0.1 API_PORT=3055 SYBNB_COUNTRY=syria \
+    node server/index.mjs > /tmp/sybnb-e2e-api-admin-ratelimit.log 2>&1 &
+  ADMIN_RATELIMIT_PID=$!
+  sleep 3
+  API_BASE=http://127.0.0.1:3055 ADMIN_ACTION_RATE_MAX=5 \
+    run "admin-rate-limit" admin-action-rate-limit.e2e.mjs
+  kill "$ADMIN_RATELIMIT_PID" 2>/dev/null
 fi
 
 echo "== suites with failures: $fails =="

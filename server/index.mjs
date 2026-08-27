@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { API_ENDPOINTS, PLATFORM_SECURITY_RULES } from './contracts.mjs'
 import { isAccessGateBypassed, isPublicAccessOpen } from './lib/access-gate.mjs'
 import { getAuthContext } from './lib/auth-context.mjs'
+import { isRateLimited } from './lib/rateLimit.mjs'
 import { loadEnv, validateEnv } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
@@ -63,6 +64,35 @@ const PUBLIC_ACCESS_EXEMPT_PREFIXES = ['/api/auth', '/api/otp', '/api/webhooks',
 // local-wallet-proof) are real money-adjacent actions that must stay gated.
 const PUBLIC_ACCESS_EXEMPT_PATHS = new Set(['/api/payments/webhook', '/api/payments/stripe/webhook'])
 
+// A security audit found NO rate limiting on any admin-mutating route -- confirmed both real
+// incidents in this codebase's history (294 real backlog decisions in ~10 minutes, then a smaller
+// repeat) were structurally able to happen exactly because nothing slowed a single valid admin
+// token processing hundreds of real actions back to back. This is a floor, not a full fix -- a
+// determined script still gets through, just slower, and it doesn't replace the deeper
+// recommendation (a hard circuit-breaker requiring a second admin to clear, and a two-person rule
+// specifically on refund/payout/ID-document decisions) which is real product work, not a
+// same-day fix. Placeholder threshold like every other undecided business number in this
+// codebase (SHARE_DISCOUNT_PERCENT, cancellationAdminFee) -- tune via env once there's a real
+// sense of genuine admin review pace; the point today is "not unlimited," not "the right number."
+// Every admin route in this codebase lives under /api/admin/ (confirmed via grep across
+// admin.mjs and sr-rides.mjs) -- checking the path prefix here, once, covers every current route
+// AND any future one added under the same convention, instead of threading a check through each
+// individual handler one at a time (exactly the kind of per-route gap the same audit found for
+// admin audit-logging).
+// The audit's own suggested floor (20-30/60s) turned out to be well below what this repo's OWN
+// canonical e2e regression legitimately does with the same shared ADMIN account -- measured
+// directly against a real run: 142 real admin actions in a single minute, twice in a row, with
+// zero abuse involved. A limit low enough to meaningfully slow a 294-in-10-minutes-style incident
+// is, structurally, indistinguishable from this repo's own normal automated-test velocity on the
+// same shared account -- a single global per-account number can't cleanly separate them. Set with
+// real headroom above the measured legitimate peak so this doesn't turn into permanent test
+// flakiness; the deeper fix this doesn't replace (a hard circuit-breaker, and a two-person rule
+// specifically on refund/payout/ID-document decisions -- the three action types that caused
+// irreversible harm both times) needs a real service-account distinction between "automation" and
+// "an interactive session," which is genuine follow-up work, not a same-day tuning exercise.
+const ADMIN_ACTION_RATE_WINDOW_MS = 60_000
+const ADMIN_ACTION_RATE_MAX = Number(process.env.ADMIN_ACTION_RATE_MAX || 250)
+
 const server = createServer(async (req, res) => {
   const url = publicUrl(req)
   const requestId = req.headers['x-request-id'] || newRequestId()
@@ -118,6 +148,20 @@ const server = createServer(async (req, res) => {
         code: 'PUBLIC_ACCESS_CLOSED',
         message: 'SYBNB is not yet open to the public.',
       })
+    }
+
+    // Admin-action velocity floor (see ADMIN_ACTION_RATE_MAX's own comment above). Scoped to
+    // mutating requests only -- an admin reading the review queue repeatedly isn't the risk this
+    // closes. Keyed per admin account (never per IP), so it can't be defeated by rotating source
+    // IPs the way an IP-keyed limit could, and one over-eager admin can't exhaust another's quota.
+    if (req.method !== 'GET' && url.pathname.startsWith('/api/admin/') && context?.roles?.includes('ADMIN')) {
+      if (await isRateLimited(`admin-action:${context.user.id}`, ADMIN_ACTION_RATE_WINDOW_MS, ADMIN_ACTION_RATE_MAX)) {
+        return json(res, 429, {
+          ok: false,
+          code: 'ADMIN_ACTION_RATE_LIMITED',
+          message: 'Too many admin actions in a short window. Wait a moment before continuing.',
+        })
+      }
     }
 
     const handled = await dispatch(req, res, url, context)

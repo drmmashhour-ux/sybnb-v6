@@ -374,7 +374,10 @@ function normalizePastTrip(booking: PlatformOverview['bookings'][number], lang: 
 
 function tripDateRange(checkIn: string, checkOut: string, lang: Lang) {
   const locale = localeForLang(lang)
-  const format = (value: string) => new Date(value).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' })
+  // Check-in/check-out are stored/returned as midnight-UTC dates -- formatting without an
+  // explicit UTC timeZone rolls the date back a day for any viewer west of UTC (found by an
+  // independent re-audit: a real Aug 30 booking rendered as "Aug 29" in EDT).
+  const format = (value: string) => new Date(value).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   return `${format(checkIn)} - ${format(checkOut)}`
 }
 

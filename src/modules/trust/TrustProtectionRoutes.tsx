@@ -140,9 +140,11 @@ function BookingProtectionHub({ lang, bookingId }: { lang: Lang; bookingId: stri
     }
   }, [bookingId])
 
+  // Check-in/check-out are midnight-UTC dates -- an explicit UTC timeZone keeps this in sync
+  // with what was actually booked for any viewer west of UTC (same bug/fix as DashboardPage.tsx).
   const dateRange =
     booking?.checkIn && booking?.checkOut
-      ? `${new Date(booking.checkIn).toLocaleDateString(isAr ? 'ar' : 'en')} - ${new Date(booking.checkOut).toLocaleDateString(isAr ? 'ar' : 'en')}`
+      ? `${new Date(booking.checkIn).toLocaleDateString(isAr ? 'ar' : 'en', { timeZone: 'UTC' })} - ${new Date(booking.checkOut).toLocaleDateString(isAr ? 'ar' : 'en', { timeZone: 'UTC' })}`
       : ''
 
   return (

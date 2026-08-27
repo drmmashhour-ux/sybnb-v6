@@ -546,7 +546,10 @@ export async function handleAdmin(req, res, url, context) {
             include: {
               listing: {
                 include: {
-                  owner: { select: { id: true, displayName: true, email: true } },
+                  // idDocumentStatus feeds the admin payout screen's host-verification label --
+                  // it was previously hardcoded "Verified host" for every host regardless of real
+                  // status (found by an independent re-audit).
+                  owner: { select: { id: true, displayName: true, email: true, idDocumentStatus: true } },
                 },
               },
             },

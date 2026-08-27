@@ -38,6 +38,7 @@ export type PlatformListing = {
   owner?: {
     id: string
     displayName: string
+    idDocumentStatus?: string | null
   }
   media?: Array<Record<string, unknown>>
   location?: Record<string, unknown> | null

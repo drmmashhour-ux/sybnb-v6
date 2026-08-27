@@ -574,6 +574,17 @@ function ShortRentAdminCommandDashboard({
   // Real, per-host checks only — no fabricated score or unconditional "all clear" checklist next
   // to the payout-release button. Each line is derived from data already fetched for this
   // payment/booking, not a static claim shown identically for every host.
+  // A real bug caught by an independent re-audit: this label was hardcoded "Verified host" for
+  // every host, with the backend not even fetching idDocumentStatus for this view. Same
+  // real-status-driven pattern as DashboardPage.tsx's guest membership badge.
+  const hostIdDocumentStatus = previewPayment?.booking?.listing?.owner?.idDocumentStatus
+  const hostVerificationLabel =
+    hostIdDocumentStatus === 'APPROVED'
+      ? isAr ? 'مضيف موثق' : 'Verified host'
+      : hostIdDocumentStatus === 'PENDING_REVIEW'
+        ? isAr ? 'التحقق قيد المراجعة' : 'Verification in review'
+        : isAr ? 'غير موثق بعد' : 'Not yet verified'
+
   const hostChecks = [
     {
       ok: previewPayment?.booking?.listing?.status === 'APPROVED',
@@ -694,7 +705,7 @@ function ShortRentAdminCommandDashboard({
               <span style={commandStyles.hostAvatar}>{(hostName || 'A').slice(0, 1).toUpperCase()}</span>
               <div>
                 <h2>{hostName}</h2>
-                <small>{isAr ? 'مضيف موثق' : 'Verified host'}</small>
+                <small>{hostVerificationLabel}</small>
               </div>
             </div>
             {hostChecks.map((check) => (
@@ -1067,7 +1078,7 @@ function ShortRentAdminCommandDashboard({
             <div style={commandStyles.hostRow}>
               <div>
                 <strong>{hostName}</strong>
-                <small>Verified Host</small>
+                <small>{hostVerificationLabel}</small>
               </div>
               <span style={commandStyles.hostAvatar}>{(hostName || 'A').slice(0, 1).toUpperCase()}</span>
             </div>

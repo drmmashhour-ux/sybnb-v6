@@ -545,10 +545,25 @@ export async function handleAdmin(req, res, url, context) {
     // waiting indefinitely. idDocuments orders by the real submission timestamp
     // (idDocumentSubmittedAt), not createdAt (account-creation date, unrelated to when the ID was
     // actually submitted for review).
-    const [listings, payments, gifts, bookings, idDocuments] = await Promise.all([
-      db().listing.findMany({ where: { status: 'PENDING_REVIEW' }, orderBy: { createdAt: 'asc' }, take: 25 }),
+    //
+    // Follow-up: a moderation queue is different from public search -- items leave it permanently
+    // once an admin acts, so a temporarily-oversized backlog self-heals as it's processed, rather
+    // than permanently burying real inventory the way the uncapped public search did. Raised the
+    // cap 25->100 (a real reduction in the invisible-backlog window, not a full pagination UI,
+    // which isn't justified for a queue that drains under normal admin use) and added an honest
+    // total count alongside each list so a genuine surge is visible rather than silently capped
+    // with no signal -- the same reasoning already applied to the fake-trust-signal fixes elsewhere
+    // in this codebase, just for "how big is the real backlog" instead of "is this badge real".
+    const REVIEW_QUEUE_LIMIT = 100
+    const listingsWhere = { status: 'PENDING_REVIEW' }
+    const paymentsWhere = { status: 'PENDING_ADMIN_REVIEW' }
+    const giftsWhere = { status: { in: ['CLAIM_PENDING', 'LOCKED'] } }
+    const bookingsWhere = { status: { in: ['REQUESTED', 'DISPUTED'] } }
+    const idDocumentsWhere = { idDocumentStatus: 'PENDING_REVIEW' }
+    const [listings, payments, gifts, bookings, idDocuments, listingsTotal, paymentsTotal, giftsTotal, bookingsTotal, idDocumentsTotal] = await Promise.all([
+      db().listing.findMany({ where: listingsWhere, orderBy: { createdAt: 'asc' }, take: REVIEW_QUEUE_LIMIT }),
       db().paymentProof.findMany({
-        where: { status: 'PENDING_ADMIN_REVIEW' },
+        where: paymentsWhere,
         include: {
           booking: {
             include: {
@@ -565,23 +580,35 @@ export async function handleAdmin(req, res, url, context) {
           payer: { select: { id: true, displayName: true, email: true } },
         },
         orderBy: { createdAt: 'asc' },
-        take: 25,
+        take: REVIEW_QUEUE_LIMIT,
       }),
-      db().walletGift.findMany({ where: { status: { in: ['CLAIM_PENDING', 'LOCKED'] } }, orderBy: { createdAt: 'asc' }, take: 25 }),
+      db().walletGift.findMany({ where: giftsWhere, orderBy: { createdAt: 'asc' }, take: REVIEW_QUEUE_LIMIT }),
       db().booking.findMany({
-        where: { status: { in: ['REQUESTED', 'DISPUTED'] } },
+        where: bookingsWhere,
         include: { listing: true },
         orderBy: { createdAt: 'desc' },
-        take: 25,
+        take: REVIEW_QUEUE_LIMIT,
       }),
       db().user.findMany({
-        where: { idDocumentStatus: 'PENDING_REVIEW' },
+        where: idDocumentsWhere,
         select: { id: true, displayName: true, email: true, idDocumentMimeType: true, idDocumentSubmittedAt: true },
         orderBy: { idDocumentSubmittedAt: 'asc' },
-        take: 25,
+        take: REVIEW_QUEUE_LIMIT,
       }),
+      db().listing.count({ where: listingsWhere }),
+      db().paymentProof.count({ where: paymentsWhere }),
+      db().walletGift.count({ where: giftsWhere }),
+      db().booking.count({ where: bookingsWhere }),
+      db().user.count({ where: idDocumentsWhere }),
     ])
-    return json(res, 200, { ok: true, queue: { listings, payments, gifts, bookings, idDocuments } })
+    return json(res, 200, {
+      ok: true,
+      queue: { listings, payments, gifts, bookings, idDocuments },
+      // Additive, not yet declared on the frontend's PlatformReviewQueue type -- safe for existing
+      // callers (extra JSON fields are simply ignored) and ready for the frontend to surface once
+      // that type is free to edit.
+      queueTotals: { listings: listingsTotal, payments: paymentsTotal, gifts: giftsTotal, bookings: bookingsTotal, idDocuments: idDocumentsTotal },
+    })
   }
 
   const idDocumentFileMatch = url.pathname.match(/^\/api\/admin\/id-document\/([^/]+)\/file$/)

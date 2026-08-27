@@ -23,6 +23,21 @@ async function approvePlan(token, plan) {
   return { proofStatus: p.status, approveStatus: r.status }
 }
 
+// Publish gate (server/routes/listings.mjs) requires an admin-approved ID document plus an
+// accepted 'listing-agreement' legal consent before ANY division's submit() can leave DRAFT --
+// satisfy it for both sellers up front so the handoff assertions further down are genuinely
+// exercised against an APPROVED listing instead of stopping at 403 ID_VERIFICATION_REQUIRED.
+async function verifySellerKyc(token, userId) {
+  await call('PATCH', '/api/me/id-document', token, { fileBase64: 'ZmFrZQ==', mimeType: 'image/png' })
+  await call('PATCH', `/api/admin/review-queue/iddocument/${userId}`, A, { decision: 'APPROVE' })
+  const legal = await call('GET', '/api/legal', null)
+  const doc = legal.j.documents.find((d) => d.key === 'listing-agreement')
+  await call('POST', '/api/legal/consent', token, { documentKey: 'listing-agreement', version: doc.version })
+}
+console.log('=== 0. KYC + LEGAL-CONSENT BOOTSTRAP (required by the listings.mjs publish gate) ===')
+await verifySellerKyc(SA, sellerA.id)
+await verifySellerKyc(SB, sellerB.id)
+
 console.log('=== 1. PAID-PLAN SELLER JOURNEY through /sell (Cars) ===')
 // seller starts with NO profile (reset in wrapper): plan requirement must be enforced
 const carBlocked = await call('POST','/api/listings', SA, {division:'CARS', titleAr:'BMW 320i 2020', priceMinor:14000000, currency:'SYP', metadata:{visualFilters:{carBrand:'bmw'}}})

@@ -4,32 +4,50 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
-import { fetchApprovedListings, sendListingInquiryMessage, type PlatformListing } from '../../shared/api/platformApi'
+import { fetchApprovedListings, getStoredGuestSession, sendListingInquiryMessage, uploadPaymentProofFile, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
-import { PaymentCapsule } from '../payments/PaymentCapsule'
 
 type Props = {
   lang: Lang
   mode?: 'rentals' | 'buy'
 }
 
+// A real bug caught by an independent re-audit: this used to capture only the File object's
+// `name` -- no bytes were ever uploaded, despite the UI presenting a real upload control and the
+// outbound message telling the guest (only after the fact, buried in text they never saw) to send
+// the actual files separately over WhatsApp/email. Now uses the same real
+// uploadPaymentProofFile() path the seller side already had wired up.
+type UploadedDocument = { name: string; url: string }
+
 type RentalRequest = {
   id: string
   listingId: string
   listingTitle: string
-  documents: string[]
+  documents: UploadedDocument[]
   createdAt: string
   status: 'SENT_TO_IMMOCONTACT'
 }
 
-type SearchPanel = 'governorate' | 'city' | 'street' | 'date' | null
+// A real bug caught by an independent re-audit: this used to include a 'date' search panel
+// ('This week'/'This month'/'3 months'/'Open date') that was purely cosmetic -- the chosen value
+// was shown in the search summary but never sent to fetchApprovedListings, and RENTALS/BUY have
+// no backend concept of availability dates at all (they're commission/contact-based, not
+// booking-based). Removed entirely rather than left as a filter that silently does nothing.
+type SearchPanel = 'governorate' | 'city' | 'street' | null
 type SortMode = 'newest' | 'lowest'
 
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 const GUEST_TOKEN_KEY = 'sybnb-v6-guest-token'
 
-const dateOptions = ['هذا الأسبوع', 'هذا الشهر', '3 أشهر', 'تاريخ مفتوح']
+// Map governorate key -> the English city name stored in listing.location.city (Syria's 5 governorates).
+const GOV_TO_CITY: Record<string, string> = {
+  damascus: 'Damascus',
+  aleppo: 'Aleppo',
+  latakia: 'Latakia',
+  homs: 'Homs',
+  tartus: 'Tartus',
+}
 const mainGroupOptions = [
   { id: 'apartment', ar: 'شقة', en: 'Apartment' },
   { id: 'villa', ar: 'فيلا', en: 'Villa' },
@@ -49,7 +67,7 @@ const copy = {
     signup: 'إنشاء حساب',
     search: 'بحث',
     searchCapsule: 'كبسولة البحث',
-    searchCapsuleHint: 'اختر الموقع والتاريخ ثم افتح خيارات الباحث.',
+    searchCapsuleHint: 'اختر الموقع ثم افتح خيارات الباحث.',
     rouletteHint: 'اسحب الشريط لاختيار المنطقة بسرعة.',
     applied: 'تم تطبيق كبسولة البحث.',
     beforeSearch: 'ابدأ من كبسولة البحث لاختيار نوع العقار والموقع. بعد الضغط على بحث تظهر النتائج ثم تفاصيل العقار.',
@@ -57,14 +75,14 @@ const copy = {
     chooseGovernorate: 'اختر المحافظة',
     chooseCity: 'اختر المدينة',
     chooseStreet: 'اختر الحي / الشارع',
-    chooseDate: 'اختر التاريخ',
     governorate: 'المحافظة',
     city: 'المدينة',
     street: 'حي / شارع',
-    dateOptional: 'التاريخ اختياري',
     newest: 'الأحدث',
     lowestPrice: 'الأقل سعراً',
     availableResults: 'النتائج المتاحة',
+    loadMore: 'عرض المزيد',
+    loadingMore: 'جار التحميل...',
     sendRequest: 'إرسال طلب',
     viewDetails: 'عرض التفاصيل',
     chooseAfterAccount: 'افتح الحساب أولاً',
@@ -95,6 +113,13 @@ const copy = {
     docsHint: 'ارفع الهوية، إثبات العمل أو الدخل، وأي ملف يدعم طلب الإيجار الشهري. PDF / PNG / JPG.',
     docsUpload: 'رفع المستندات',
     docsReady: 'مستندات مرفوعة',
+    uploading: 'جارٍ رفع الملفات...',
+    uploadFailed: 'تعذر رفع الملف',
+    requestStatusTitle: 'حالة الطلب',
+    stepAccountOpened: 'فتح الحساب',
+    stepDocumentsUploaded: 'رفع المستندات',
+    stepSentToImmoContact: 'إرسال الطلب إلى IMMOContact',
+    referenceLabel: 'رقم المرجع',
     agreementTitle: 'اتفاقية طلب الإيجار الشهري',
     agreementCopy: 'أوافق أن بياناتي صحيحة، وأن التواصل والعقد والمستندات تتم عبر SYBNB و IMMOContact، وأن أي نزاع أو تغيير في الشروط يراجع عبر المنصة قبل أي اتفاق خارجي.',
     send: 'إرسال طلب التواصل',
@@ -119,7 +144,7 @@ const copy = {
     signup: 'Create account',
     search: 'Search',
     searchCapsule: 'Search capsule',
-    searchCapsuleHint: 'Choose location and date, then open searcher choices.',
+    searchCapsuleHint: 'Choose location, then open searcher choices.',
     rouletteHint: 'Swipe the strip to choose the area quickly.',
     applied: 'Search capsule applied.',
     beforeSearch: 'Start with the search capsule to choose property type and location. After Search, results and property details appear.',
@@ -127,14 +152,14 @@ const copy = {
     chooseGovernorate: 'Choose governorate',
     chooseCity: 'Choose city',
     chooseStreet: 'Choose district / street',
-    chooseDate: 'Choose date',
     governorate: 'Governorate',
     city: 'City',
     street: 'District / street',
-    dateOptional: 'Date optional',
     newest: 'Newest',
     lowestPrice: 'Lowest price',
     availableResults: 'Available results',
+    loadMore: 'Load more',
+    loadingMore: 'Loading...',
     sendRequest: 'Send request',
     viewDetails: 'View details',
     chooseAfterAccount: 'Open account first',
@@ -165,6 +190,13 @@ const copy = {
     docsHint: 'Upload ID, work or income proof, and any file supporting the monthly rental request. PDF / PNG / JPG.',
     docsUpload: 'Upload documents',
     docsReady: 'Documents uploaded',
+    uploading: 'Uploading files...',
+    uploadFailed: 'Could not upload file',
+    requestStatusTitle: 'Request status',
+    stepAccountOpened: 'Account opened',
+    stepDocumentsUploaded: 'Documents uploaded',
+    stepSentToImmoContact: 'Sent to IMMOContact',
+    referenceLabel: 'Reference',
     agreementTitle: 'Monthly Rental Request Agreement',
     agreementCopy: 'I agree my details are accurate, and that contact, contract, and documents remain inside SYBNB and IMMOContact. Any dispute or term change must be reviewed through the platform before any outside agreement.',
     send: 'Send contact request',
@@ -254,8 +286,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const t = isBuyMode ? { ...copy[lang], ...buyerCopy[lang] } : copy[lang]
   const isAr = lang === 'ar'
   const [listings, setListings] = useState<PlatformListing[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [lastQuery, setLastQuery] = useState<{ division: string; filters?: Parameters<typeof fetchApprovedListings>[1] } | null>(null)
   const [selectedId, setSelectedId] = useState('')
-  const [documents, setDocuments] = useState<string[]>([])
+  const [documents, setDocuments] = useState<UploadedDocument[]>([])
+  const [uploadingCount, setUploadingCount] = useState(0)
+  const [uploadError, setUploadError] = useState('')
   const [acceptedAgreement, setAcceptedAgreement] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
@@ -268,17 +305,21 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [selectedGovernorate, setSelectedGovernorate] = useState('damascus')
   const [selectedCity, setSelectedCity] = useState('damascus-city')
   const [selectedStreet, setSelectedStreet] = useState('old-city')
-  const [selectedDate, setSelectedDate] = useState('')
+  // A real bug caught by an independent re-audit: amenities/trust used to default to
+  // pre-checked ('wifi','parking','verifiedHost') even though none of these reach the backend
+  // for RENTALS/BUY (only propertyType and numeric price/bedrooms/bathrooms are ever forwarded --
+  // see server/routes/listings.mjs) -- so a first-time visitor saw active-looking filter
+  // checkmarks that silently did nothing. Default to unselected, same as `access`, until the
+  // filtering these groups imply is actually wired up server-side.
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>({
     sort: 'newest',
     priceBand: 'any',
-    propertyType: 'apartment',
+    propertyType: 'any',
     roomType: 'any',
     bedType: 'any',
-    amenities: ['wifi', 'parking'],
+    amenities: [],
     access: [],
-    trust: ['verifiedHost'],
-    payments: ['shamCash'],
+    trust: [],
   })
   const hasGuestAccount = typeof window !== 'undefined' && Boolean(sessionStorage.getItem(GUEST_TOKEN_KEY))
   const activeFilterLabels = useMemo(
@@ -296,9 +337,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       ? SYRIA_GOVERNORATES.map((item) => ({ key: item.key, label: labelFor(lang, item) }))
       : activeSearchPanel === 'city'
         ? (selectedGovernorateData?.cities || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
-        : activeSearchPanel === 'street'
-          ? (selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
-          : dateOptions.map((item) => ({ key: item, label: item }))
+        : (selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
   )
   const visibleListings = useMemo(() => {
     if (sortMode === 'lowest') {
@@ -316,18 +355,27 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     void loadRentals()
   }, [mode])
 
-  async function loadRentals() {
+  async function loadRentals(explicit = false) {
     setStatus('loading')
     setMessage('')
     try {
       // Forward the renter's visual-filter selection so the search actually narrows results.
-      // fetchApprovedListings only forwards server-backed scalar keys (propertyType); 'any' and
-      // unsupported keys (roomType/bedType/amenities) are ignored, so nothing over-filters.
-      const nextListings = await fetchApprovedListings(isBuyMode ? 'BUY' : 'RENTALS', {
+      // fetchApprovedListings forwards server-backed scalar keys (propertyType) and the
+      // multi-select amenities/views/access arrays; 'any', empty, and other unsupported keys
+      // (roomType/bedType) are ignored, so nothing over-filters. Location narrows only on an
+      // explicit capsule search, so the first broad load stays rich.
+      const division = isBuyMode ? 'BUY' : 'RENTALS'
+      const filters = {
         attributes: visualFilters,
-      })
-      setListings(nextListings)
-      setSelectedId(nextListings[0]?.id || '')
+        city: explicit ? GOV_TO_CITY[selectedGovernorate] : undefined,
+        sort: typeof visualFilters.sort === 'string' ? visualFilters.sort : undefined,
+        priceBand: typeof visualFilters.priceBand === 'string' ? visualFilters.priceBand : undefined,
+      }
+      const results = await fetchApprovedListings(division, filters)
+      setListings(results.listings)
+      setNextCursor(results.nextCursor)
+      setLastQuery({ division, filters })
+      setSelectedId(results.listings[0]?.id || '')
       setStatus('ready')
       // Show available results by default — consistent with Stays/Cars/Marketplace/New Construction,
       // which auto-populate. The search capsule still refines; this removes the empty-looking
@@ -335,8 +383,25 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       setHasSearched(true)
     } catch (error) {
       setListings([])
+      setNextCursor(null)
+      setLastQuery(null)
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function loadMoreListings() {
+    if (!nextCursor || loadingMore || !lastQuery) return
+    setLoadingMore(true)
+    try {
+      const results = await fetchApprovedListings(lastQuery.division, lastQuery.filters, nextCursor)
+      setListings((prev) => [...prev, ...results.listings])
+      setNextCursor(results.nextCursor)
+    } catch {
+      // Keep whatever is already shown; just stop offering more rather than clearing real results.
+      setNextCursor(null)
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -380,18 +445,31 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setActiveSearchPanel(null)
     setHasSearched(true)
     setShowFilters(false)
-    // Re-run the fetch so the selected filters actually apply to the results.
-    void loadRentals()
+    // Re-run the fetch so the selected filters (incl. location) actually apply to the results.
+    void loadRentals(true)
   }
 
   function chooseMainGroup(value: string) {
     setVisualFilters((current) => ({ ...current, propertyType: value }))
   }
 
-  function uploadDocuments(files: FileList | null) {
-    const names = Array.from(files || []).map((file) => file.name)
-    if (!names.length) return
-    setDocuments((current) => [...current, ...names])
+  async function uploadDocuments(files: FileList | null) {
+    const fileList = Array.from(files || [])
+    if (!fileList.length) return
+    setUploadError('')
+    setUploadingCount(fileList.length)
+    try {
+      const session = getStoredGuestSession()
+      if (!session) throw new Error(t.required)
+      const uploaded = await Promise.all(
+        fileList.map(async (file) => ({ name: file.name, url: await uploadPaymentProofFile(file, session.token) })),
+      )
+      setDocuments((current) => [...current, ...uploaded])
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : t.required)
+    } finally {
+      setUploadingCount(0)
+    }
   }
 
   async function sendRequest() {
@@ -404,15 +482,20 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setSendState('saving')
     setMessage('')
 
+    // Documents are now real, already-uploaded files (see uploadDocuments above) -- their URLs are
+    // included directly, not a "send it separately" instruction the guest never saw.
+    const docLines = documents.map((doc) => `${doc.name}: ${doc.url}`).join(isAr ? '، ' : ', ')
     const introBody = isAr
-      ? `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nالمستندات المرفوعة: ${documents.join('، ')}`
-      : `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nUploaded documents: ${documents.join(', ')}`
+      ? `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nالمستندات المرفوعة: ${docLines}`
+      : `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nUploaded documents: ${docLines}`
 
     try {
-      await sendListingInquiryMessage(selectedListing.id, introBody)
+      // Use the real persisted message id as the reference -- not a client-fabricated
+      // "RENTAL-CAPSULE-<timestamp>" code implying a tracked transaction that doesn't exist.
+      const sentMessage = await sendListingInquiryMessage(selectedListing.id, introBody)
 
       const request: RentalRequest = {
-        id: `${isBuyMode ? 'BUY' : 'MR'}-${Date.now().toString(36).toUpperCase()}`,
+        id: sentMessage.id,
         listingId: selectedListing.id,
         listingTitle: listingTitleText(selectedListing, lang),
         documents,
@@ -455,7 +538,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           <button style={activeSearchPanel === 'governorate' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'governorate' ? null : 'governorate')}>{selectedGovernorateLabel || t.governorate}</button>
           <button style={activeSearchPanel === 'city' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'city' ? null : 'city')}>{selectedCityLabel || t.city}</button>
           <button style={activeSearchPanel === 'street' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'street' ? null : 'street')}>{selectedStreetLabel || t.street}</button>
-          <button style={activeSearchPanel === 'date' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'date' ? null : 'date')}>{selectedDate || t.dateOptional}</button>
           <button style={styles.searchPillActive} onClick={() => setShowFilters((current) => !current)}>
             {showFilters ? t.hideFilters : t.showFilters}
           </button>
@@ -468,9 +550,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   ? t.chooseGovernorate
                   : activeSearchPanel === 'city'
                     ? t.chooseCity
-                    : activeSearchPanel === 'street'
-                      ? t.chooseStreet
-                      : t.chooseDate}
+                    : t.chooseStreet}
               </strong>
               <span>{t.rouletteHint}</span>
             </div>
@@ -481,9 +561,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                     ? selectedGovernorate
                     : activeSearchPanel === 'city'
                       ? selectedCity
-                      : activeSearchPanel === 'street'
-                        ? selectedStreet
-                        : selectedDate
+                      : selectedStreet
                 )
                 return (
                   <button
@@ -496,10 +574,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                       }
                       if (activeSearchPanel === 'street') {
                         setSelectedStreet(option.key)
-                        setActiveSearchPanel(null)
-                      }
-                      if (activeSearchPanel === 'date') {
-                        setSelectedDate(option.key)
                         setActiveSearchPanel(null)
                       }
                     }}
@@ -515,9 +589,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   ? selectedGovernorate
                   : activeSearchPanel === 'city'
                     ? selectedCity
-                    : activeSearchPanel === 'street'
-                      ? selectedStreet
-                      : selectedDate
+                    : selectedStreet
               )) + 1} / {currentPanelOptions.length}
             </div>
           </section>
@@ -531,7 +603,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
       {hasSearched ? <section style={styles.searchSummary}>
         <strong>{selectedGovernorateLabel} · {selectedCityLabel} · {selectedStreetLabel}</strong>
-        <span>{selectedDate || t.dateOptional}</span>
         <span>{mainGroupOptions.find((option) => option.id === visualFilters.propertyType)?.[isAr ? 'ar' : 'en']}</span>
       </section> : null}
 
@@ -568,13 +639,30 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                     <span>{t.price}</span>
                     <strong>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
                   </div>
-                  <button style={styles.primaryButton} onClick={() => chooseListing(listing.id)}>
+                  <button
+                    style={styles.primaryButton}
+                    onClick={() => {
+                      // Open the rich shared listing detail (map/specs/reviews/inquiry) instead of the
+                      // lightweight inline panel — parity with Stays/Cars/Marketplace/New-Construction.
+                      if (typeof window !== 'undefined') {
+                        window.sessionStorage.setItem('sybnb-v6-listing-return-path', isBuyMode ? '/buy' : '/rentals')
+                      }
+                      window.location.hash = `/listing/${listing.id}`
+                    }}
+                  >
                     {t.viewDetails}
                   </button>
                 </div>
               </article>
             )) : status !== 'loading' ? <p style={styles.empty} role="status">{t.empty}</p> : null}
           </div>
+          {nextCursor && (
+            <div style={styles.loadMoreRow}>
+              <button style={styles.secondaryButton} onClick={() => void loadMoreListings()} disabled={loadingMore}>
+                {loadingMore ? t.loadingMore : t.loadMore}
+              </button>
+            </div>
+          )}
         </section>
 
         <aside style={styles.tunnelPanel}>
@@ -608,7 +696,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
               <section style={styles.selectedCard}>
                 <img src={listingImage(selectedListing, isBuyMode)} alt={listingTitleText(selectedListing, lang)} style={styles.selectedImage} />
                 <div style={styles.selectedContent}>
-                  <span style={styles.statusPill}>{t.protected}</span>
                   <h2 style={styles.selectedTitle}>{listingTitleText(selectedListing, lang)}</h2>
                   <p style={styles.cardBody}>{listingDescriptionText(selectedListing, lang)}</p>
                   <Info label={t.price} value={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)} />
@@ -621,25 +708,28 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
               <section style={styles.detailPanel}>
                 <strong>{t.detailTitle}</strong>
-                <div style={styles.trustGrid}>
-                  <span>{t.trustedOwner}</span>
-                  <span>{t.fastContact}</span>
-                  <span>{t.protected}</span>
-                </div>
                 <ol style={styles.detailSteps}>
                   {t.detailSteps.map((step) => <li key={step}>{step}</li>)}
                 </ol>
               </section>
 
-              <PaymentCapsule
-                lang={lang}
-                methodLabel="SYBNB / IMMOContact"
-                amountLabel={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)}
-                destinationCode={isBuyMode ? 'BUYER-CAPSULE' : 'RENTAL-CAPSULE'}
-                followCode={sentRequest?.id || 'WAITING'}
-                proofCount={documents.length}
-                status={sentRequest ? 'admin' : documents.length ? 'proof' : hasGuestAccount ? 'ready' : 'locked'}
-              />
+              {/* A real bug caught by an independent re-audit: this used to be a <PaymentCapsule>
+                  reused verbatim from the real-money STAYS wallet-payment flow -- a hardcoded
+                  literal as the "payment code," the renter/buyer's ID documents relabeled
+                  "payment proofs," and a status machine implying progress toward "Payment
+                  confirmed" for a division that structurally has no in-app payment mechanism at
+                  all (RENTALS/BUY are commission/contact-based, see server/routes/listings.mjs).
+                  Replaced with an honest status list reflecting only what's actually true.
+                  CAPSULE_RULES.noFakeTrustSignal. */}
+              <section style={styles.detailPanel}>
+                <strong>{t.requestStatusTitle}</strong>
+                <ol style={styles.detailSteps}>
+                  <li>{hasGuestAccount ? '✓ ' : '○ '}{t.stepAccountOpened}</li>
+                  <li>{documents.length ? '✓ ' : '○ '}{t.stepDocumentsUploaded}{documents.length ? ` (${documents.length})` : ''}</li>
+                  <li>{sentRequest ? '✓ ' : '○ '}{t.stepSentToImmoContact}</li>
+                </ol>
+                {sentRequest ? <small>{t.referenceLabel}: {sentRequest.id}</small> : null}
+              </section>
             </>
           ) : <p style={styles.empty}>{t.noSelection}</p>}
 
@@ -656,19 +746,21 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 <strong>{t.docsTitle}</strong>
                 <p>{t.docsHint}</p>
                 <label style={styles.uploadBox}>
-                  {t.docsUpload}
+                  {uploadingCount ? t.uploading : t.docsUpload}
                   <input
                     type="file"
                     accept=".pdf,.png,.jpg,.jpeg"
                     multiple
+                    disabled={uploadingCount > 0}
                     style={styles.fileInput}
-                    onChange={(event) => uploadDocuments(event.target.files)}
+                    onChange={(event) => void uploadDocuments(event.target.files)}
                   />
                 </label>
+                {uploadError ? <p style={styles.empty} role="alert">{t.uploadFailed}: {uploadError}</p> : null}
                 {documents.length ? (
                   <div style={styles.docList}>
                     <span>{documents.length} {t.docsReady}</span>
-                    {documents.slice(0, 6).map((name) => <small key={name}>{name}</small>)}
+                    {documents.slice(0, 6).map((doc) => <small key={doc.url}>{doc.name}</small>)}
                   </div>
                 ) : null}
               </section>
@@ -752,6 +844,7 @@ const styles: Record<string, CSSProperties> = {
   sortButton: { minHeight: 40, border: 0, borderRadius: 999, background: colors.panel2, color: colors.muted, fontWeight: 850, padding: '0 18px' },
   sortButtonActive: { minHeight: 40, border: 0, borderRadius: 999, background: colors.blue, color: colors.text, fontWeight: 950, padding: '0 20px' },
   resultGrid: { display: 'grid', gap: 28, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' },
+  loadMoreRow: { display: 'grid', justifyContent: 'center', marginTop: 22 },
   resultCard: { border: '1px solid rgba(255,255,255,.08)', borderRadius: 24, background: colors.panel, overflow: 'hidden', display: 'grid', boxShadow: '0 20px 45px rgba(0,0,0,.24)', minHeight: 380 },
   resultCardActive: { border: `1px solid ${colors.blue}`, borderRadius: 24, background: withAlpha(colors.blue, 0.1), overflow: 'hidden', display: 'grid', boxShadow: `0 0 0 1px ${withAlpha(colors.blue, 0.24)}, 0 20px 45px rgba(0,0,0,.24)`, minHeight: 380 },
   resultImage: { width: '100%', aspectRatio: '1 / 1.25', objectFit: 'cover', background: colors.bg2 },

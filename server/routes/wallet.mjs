@@ -1,14 +1,17 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
+import { giftClaimCode, hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { giftReviewThresholdMinor, recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
+import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 
 export async function handleWallet(req, res, url, context) {
   if (url.pathname === '/api/wallet') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
     const wallet = await db().wallet.findUnique({
-      where: { userId_currency: { userId: context.user.id, currency: 'SYP' } },
+      where: { userId_currency: { userId: context.user.id, currency: defaultCurrency() } },
       include: { entries: { orderBy: { createdAt: 'desc' }, take: 25 } },
     })
     return json(res, 200, { ok: true, wallet })
@@ -27,18 +30,48 @@ export async function handleWallet(req, res, url, context) {
       throw error
     }
 
-    const gift = await db().walletGift.create({
-      data: {
-        senderUserId: context.user.id,
-        recipientPhoneHash: hashPhone(body.recipientPhone),
+    const currency = body.currency ? String(body.currency).toUpperCase() : defaultCurrency()
+    if (!isCurrencyAllowed(currency)) {
+      const error = new Error(`Currency '${currency}' is not supported for this country.`)
+      error.statusCode = 400
+      error.code = 'GIFT_CURRENCY_NOT_ALLOWED'
+      error.expose = true
+      throw error
+    }
+
+    // A gift must be funded from the sender's own wallet balance — debit it atomically with creating
+    // the gift, so a gift can never mint unbacked ledger money. recordWalletEntry's negative-balance
+    // guard rejects this (409 WALLET_INSUFFICIENT_FUNDS) if the sender doesn't have the funds.
+    const gift = await db().$transaction(async (tx) => {
+      const created = await tx.walletGift.create({
+        data: {
+          senderUserId: context.user.id,
+          recipientPhoneHash: hashPhone(body.recipientPhone),
+          amountMinor,
+          currency,
+          message: body.message || undefined,
+          status: amountMinor >= giftReviewThresholdMinor(currency) ? 'CLAIM_PENDING' : 'SENT',
+          expiresAt: body.expiresAt ? new Date(body.expiresAt) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
+        },
+      })
+      await recordWalletEntry(tx, {
+        userId: context.user.id,
+        type: 'DEBIT',
         amountMinor,
-        currency: body.currency || 'SYP',
-        message: body.message || undefined,
-        status: amountMinor >= 100000 ? 'CLAIM_PENDING' : 'SENT',
-        expiresAt: body.expiresAt ? new Date(body.expiresAt) : new Date(Date.now() + 1000 * 60 * 60 * 24 * 14),
-      },
+        currency,
+        referenceType: 'wallet_gift_sent',
+        referenceId: created.id,
+        keyParts: ['wallet-gift-sent', created.id],
+        note: 'Wallet gift sent.',
+      })
+      return created
     })
-    return json(res, 201, { ok: true, gift })
+    // The claim code was previously never delivered to anyone (no SMS — Syria is email-only per
+    // countries/syria/profile.mjs communications.sms=false — and no email exists on this model), so a
+    // funded gift could never actually be claimed. Return it to the SENDER now (their own gift, they
+    // are authenticated) so they can share it with the recipient directly, the same pattern already
+    // used for document delivery elsewhere on this platform (WhatsApp/email, out of band).
+    return json(res, 201, { ok: true, gift, claimCode: giftClaimCode(gift) })
   }
 
   const giftPreviewMatch = url.pathname.match(/^\/api\/wallet\/gifts\/([^/]+)$/)
@@ -114,17 +147,21 @@ export async function handleWallet(req, res, url, context) {
     requireAuth(context)
     const body = await readJson(req)
     const phoneHash = hashPhone(body.phone)
+    await expireStaleWalletGifts()
     const gift = await db().walletGift.findUnique({
       where: { id: claimMatch[1] },
     })
 
-    if (!gift || gift.status !== 'SENT') throw giftClaimError()
-    // A gift carries an expiry (expiresAt) but the claim path never enforced it, so a SENT gift
-    // past its window stayed claimable and the modelled EXPIRED status was never reached. Reject
-    // expired gifts before any credit so the entitlement genuinely lapses.
-    if (gift.expiresAt && gift.expiresAt <= new Date()) {
+    if (!gift) throw giftClaimError()
+    // expireStaleWalletGifts() above is the authoritative expiry check -- by the time this row is
+    // re-fetched, a past-due gift's status is already EXPIRED (never still SENT). Check that
+    // specific status BEFORE the generic SENT check below, so a genuinely expired gift gets the
+    // specific GIFT_EXPIRED code instead of the generic GIFT_NOT_CLAIMABLE the broader check would
+    // otherwise throw first.
+    if (gift.status === 'EXPIRED') {
       throw giftClaimError('This gift has expired and can no longer be claimed.', 'GIFT_EXPIRED')
     }
+    if (gift.status !== 'SENT') throw giftClaimError()
     if (gift.recipientPhoneHash !== phoneHash) {
       await registerFailedGiftClaim(gift)
       throw giftClaimError()

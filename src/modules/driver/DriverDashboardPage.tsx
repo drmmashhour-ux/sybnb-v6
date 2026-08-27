@@ -1,12 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   claimPrototypeSrRide,
+  enablePushNotifications,
+  fetchDriverIdentityStatus,
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
+  fetchPrototypeSrRideThread,
+  reportPrototypeDriverLocation,
+  sendPrototypeSrRideMessage,
+  submitDriverPhoto,
+  updatePrototypeDriverAccessibility,
   updatePrototypeDriverRideStatus,
   type PlatformDriverOverview,
+  type PlatformMessage,
   type PlatformRideRequest,
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
@@ -14,6 +22,15 @@ import { moneyText, statusText } from '../../shared/i18n/display'
 type Props = {
   lang: Lang
 }
+
+// Matches MESSAGING_ELIGIBLE_RIDE_STATUSES in server/routes/messages.mjs.
+const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']
+// Matches LIVE_TRACKING_STATUSES in server/routes/sr-rides.mjs.
+const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+// Throttles how often an actual network post goes out -- watchPosition can fire far more often
+// than this, and the server only needs roughly this cadence to stay within getDriverLocation()'s
+// 2-minute freshness window (server/lib/live-map.mjs) with comfortable margin.
+const LOCATION_REPORT_INTERVAL_MS = 8000
 
 const copy = {
   ar: {
@@ -28,6 +45,7 @@ const copy = {
     active: 'نشطة',
     completed: 'مكتملة',
     earnings: 'إيراد مكتمل',
+    rating: 'تقييمك',
     rider: 'الراكب',
     pickup: 'الانطلاق',
     dropoff: 'الوجهة',
@@ -37,6 +55,22 @@ const copy = {
     start: 'بدء الرحلة',
     complete: 'إنهاء',
     cancel: 'إلغاء',
+    messageRider: 'راسل الراكب',
+    hideChat: 'إخفاء المحادثة',
+    chatEmpty: 'لا توجد رسائل بعد.',
+    chatPlaceholder: 'اكتب رسالة...',
+    chatSend: 'إرسال',
+    shareLocation: 'مشاركة موقعي',
+    stopSharing: 'إيقاف المشاركة',
+    locationDenied: 'تعذر الوصول إلى الموقع. تحقق من إذن الموقع.',
+    locationUnsupported: 'الموقع الجغرافي غير مدعوم على هذا الجهاز.',
+    accessibilityCapable: 'مركبتي تسمح بالوصول لذوي الاحتياجات الخاصة',
+    accessibilityRequired: 'يحتاج مركبة لذوي الاحتياجات الخاصة',
+    stopsCount: 'محطات',
+    stopLabel: 'محطة',
+    shareable: 'رحلة مشتركة',
+    enableNotifications: 'تفعيل الإشعارات',
+    enablingNotifications: 'جار التفعيل...',
     empty: 'لا توجد رحلات مسندة بعد.',
     dispatch: 'مركز التوجيه',
     safety: 'أمان الرحلة',
@@ -46,26 +80,24 @@ const copy = {
     nextBestText: 'ابدأ بالرحلات النشطة، ثم حدّث الحالة فور الوصول لتفعيل ثقة العميل.',
     openOperations: 'فتح العمليات',
     openFinance: 'فتح المالية',
-    connected: 'متصل',
-    disconnected: 'غير متصل',
     available: 'متاح',
-    aiSuggested: 'مقترح AI',
     accept: 'قبول',
     pendingEmpty: 'لا توجد طلبات رحلات بانتظار سائق الآن.',
     pendingLoading: 'جار البحث عن طلبات قريبة...',
     claiming: 'جار القبول...',
     claimError: 'تعذر قبول الرحلة، ربما قبلها سائق آخر للتو.',
     distance: 'المسافة',
-    smartRoute: 'تحليل المسار الذكي',
-    nextDriverAdvice: 'توجيه القائد التالي',
-    highDemand: 'الطلب في المنطقة الحرة الآن مرتفع جداً وتوقعات دخل مرتفعة.',
     docsStatus: 'حالة الأمان والوثائق',
     verifiedIdentity: 'الهوية الموثقة',
-    license: 'رخصة القيادة',
-    carInsurance: 'تأمين المركبة',
-    renewInsurance: 'تنبيه: أجدد التأمين خلال ١٤ يوم لتجنب إيقاف الحساب.',
-    todayEarnings: 'أرباح اليوم',
-    nextBatch: 'الدفعة القادمة',
+    identityVerified: 'موثق',
+    identityPending: 'قيد المراجعة',
+    identityNotVerified: 'غير موثق',
+    photoTitle: 'صورتك الشخصية',
+    photoCopy: 'ارفع صورة واضحة لوجهك ليتعرف عليك الراكب قبل الرحلة.',
+    uploadPhoto: 'رفع صورة',
+    uploading: 'جار الرفع...',
+    photoSubmitted: 'تم حفظ صورتك.',
+    photoError: 'تعذر رفع الصورة.',
     reportIssue: 'إبلاغ عن مشكلة',
     sos: 'طوارئ SOS',
   },
@@ -81,6 +113,7 @@ const copy = {
     active: 'Active',
     completed: 'Completed',
     earnings: 'Completed earnings',
+    rating: 'Your rating',
     rider: 'Rider',
     pickup: 'Pickup',
     dropoff: 'Dropoff',
@@ -90,6 +123,22 @@ const copy = {
     start: 'Start ride',
     complete: 'Complete',
     cancel: 'Cancel',
+    messageRider: 'Message rider',
+    hideChat: 'Hide chat',
+    chatEmpty: 'No messages yet.',
+    chatPlaceholder: 'Type a message...',
+    chatSend: 'Send',
+    shareLocation: 'Share my location',
+    stopSharing: 'Stop sharing',
+    locationDenied: 'Could not access location. Check your location permission.',
+    locationUnsupported: 'Geolocation is not supported on this device.',
+    accessibilityCapable: 'My vehicle is wheelchair accessible',
+    accessibilityRequired: 'Needs accessible vehicle',
+    stopsCount: 'stops',
+    stopLabel: 'Stop',
+    shareable: 'Shared ride',
+    enableNotifications: 'Enable notifications',
+    enablingNotifications: 'Enabling...',
     empty: 'No assigned rides yet.',
     dispatch: 'Dispatch center',
     safety: 'Ride safety',
@@ -99,26 +148,24 @@ const copy = {
     nextBestText: 'Start with active rides, then update arrival state immediately to increase rider confidence.',
     openOperations: 'Open operations',
     openFinance: 'Open finance',
-    connected: 'Connected',
-    disconnected: 'Offline',
     available: 'Available',
-    aiSuggested: 'AI suggested',
     accept: 'Accept',
     pendingEmpty: 'No ride requests waiting for a driver right now.',
     pendingLoading: 'Looking for nearby requests...',
     claiming: 'Claiming...',
     claimError: 'Could not claim this ride, another driver may have just accepted it.',
     distance: 'Distance',
-    smartRoute: 'Smart route analysis',
-    nextDriverAdvice: 'Next driver guidance',
-    highDemand: 'Demand in the free zone is very high now with elevated income expectations.',
     docsStatus: 'Safety and document status',
     verifiedIdentity: 'Verified identity',
-    license: 'Driver license',
-    carInsurance: 'Vehicle insurance',
-    renewInsurance: 'Warning: renew insurance within 14 days to avoid account pause.',
-    todayEarnings: 'Today earnings',
-    nextBatch: 'Next batch',
+    identityVerified: 'Verified',
+    identityPending: 'Pending review',
+    identityNotVerified: 'Not verified',
+    photoTitle: 'Your photo',
+    photoCopy: 'Upload a clear photo of your face so riders can recognize you before the ride.',
+    uploadPhoto: 'Upload photo',
+    uploading: 'Uploading...',
+    photoSubmitted: 'Your photo was saved.',
+    photoError: 'Could not upload the photo.',
     reportIssue: 'Report issue',
     sos: 'SOS emergency',
   },
@@ -135,13 +182,58 @@ export function DriverDashboardPage({ lang }: Props) {
   const [pendingStatus, setPendingStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [claimingRideId, setClaimingRideId] = useState('')
   const [claimError, setClaimError] = useState('')
+  const [idDocumentStatus, setIdDocumentStatus] = useState<'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null>(null)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [photoStatus, setPhotoStatus] = useState<'idle' | 'uploading' | 'submitted' | 'error'>('idle')
+  const [pushStatus, setPushStatus] = useState<'idle' | 'enabling' | 'enabled' | 'error'>('idle')
 
   useEffect(() => {
     void loadOverview()
     void loadPendingRides()
+    void loadIdentityStatus()
     const interval = window.setInterval(() => void loadPendingRides(), 6000)
     return () => window.clearInterval(interval)
   }, [])
+
+  async function loadIdentityStatus() {
+    try {
+      setIdDocumentStatus(await fetchDriverIdentityStatus())
+    } catch {
+      setIdDocumentStatus(null)
+    }
+  }
+
+  async function submitPhoto() {
+    if (!photoFile) return
+    setPhotoStatus('uploading')
+    try {
+      await submitDriverPhoto(photoFile)
+      setPhotoStatus('submitted')
+    } catch {
+      setPhotoStatus('error')
+    }
+  }
+
+  async function enableNotifications() {
+    setPushStatus('enabling')
+    try {
+      await enablePushNotifications(true)
+      setPushStatus('enabled')
+    } catch {
+      setPushStatus('error')
+    }
+  }
+
+  async function toggleAccessibility(next: boolean) {
+    try {
+      const driverProfile = await updatePrototypeDriverAccessibility(next)
+      setOverview((previous) =>
+        previous ? { ...previous, driver: { ...previous.driver, accessibilityCapable: driverProfile.accessibilityCapable } } : previous,
+      )
+    } catch {
+      // Non-critical toggle -- the checkbox simply won't reflect the change; no dedicated error slot.
+    }
+  }
 
   async function loadPendingRides() {
     try {
@@ -167,15 +259,20 @@ export function DriverDashboardPage({ lang }: Props) {
     }
   }
 
-  const stats = useMemo(
-    () => [
+  const stats = useMemo(() => {
+    const base = [
       { label: t.assigned, value: String(overview?.totals.assigned || 0) },
       { label: t.active, value: String(overview?.totals.active || 0) },
       { label: t.completed, value: String(overview?.totals.completed || 0) },
       { label: t.earnings, value: moneyText(overview?.totals.earningsMinor || 0, 'SYP', lang) },
-    ],
-    [lang, overview, t],
-  )
+    ]
+    // Only ever a real, rider-submitted average -- never a placeholder for a driver with zero
+    // ratings yet (CAPSULE_RULES.noFakeTrustSignal).
+    if (overview?.rating.ratingCount) {
+      base.push({ label: t.rating, value: `★${overview.rating.averageRating} (${overview.rating.ratingCount})` })
+    }
+    return base
+  }, [lang, overview, t])
 
   async function loadOverview() {
     setStatus('loading')
@@ -213,18 +310,19 @@ export function DriverDashboardPage({ lang }: Props) {
         {t.back}
       </button>
 
-      <section style={styles.driverTop}>
-        <div style={styles.availability}>
-          <button style={styles.availableButton} onClick={() => void loadOverview()}>{t.connected}</button>
-          <button style={styles.offlineButton} onClick={() => (window.location.hash = '/status')}>{t.disconnected}</button>
-        </div>
-        <h1 style={styles.driverTitle}>{t.title}</h1>
-      </section>
-
       <section style={styles.hero}>
         <p style={styles.eyebrow}>SR / SYBNB</p>
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
+        {pushStatus !== 'enabled' && (
+          <button
+            style={styles.secondaryButton}
+            disabled={pushStatus === 'enabling'}
+            onClick={() => void enableNotifications()}
+          >
+            {pushStatus === 'enabling' ? t.enablingNotifications : t.enableNotifications}
+          </button>
+        )}
         <div style={styles.stats}>
           {stats.map((item) => (
             <div key={item.label} style={styles.statBox}>
@@ -249,14 +347,20 @@ export function DriverDashboardPage({ lang }: Props) {
             {pendingRides.length === 0 ? (
               <p style={{ color: '#9aa6ba' }}>{pendingStatus === 'loading' ? t.pendingLoading : t.pendingEmpty}</p>
             ) : (
-              pendingRides.map((pendingRide, index) => (
-                <article key={pendingRide.id} style={index === 0 ? styles.suggestedOffer : styles.offerCard}>
-                  {index === 0 && <small>{t.aiSuggested}</small>}
+              pendingRides.map((pendingRide) => (
+                <article key={pendingRide.id} style={styles.offerCard}>
                   <span>{String(pendingRide.metadata.dropoff || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
                   <i dir="ltr">
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
                   </i>
+                  {pendingRide.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {t.accessibilityRequired}</span>}
+                  {pendingRide.shareable && <span style={styles.accessibilityBadge}>🤝 {t.shareable}</span>}
+                  {(pendingRide.stops || []).length > 0 && (
+                    <span style={styles.accessibilityBadge}>
+                      {pendingRide.stops.length} {t.stopsCount}
+                    </span>
+                  )}
                   <button disabled={claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
                     {claimingRideId === pendingRide.id ? t.claiming : t.accept}
                   </button>
@@ -267,37 +371,58 @@ export function DriverDashboardPage({ lang }: Props) {
         </article>
       </section>
 
-      <section style={styles.driverIntelligence}>
-        <article style={styles.routePanel}>
-          <h2>{t.smartRoute}</h2>
-          <div style={styles.mapMock}>
-            <strong>91%</strong>
-          </div>
-          <div style={styles.routeAdvice}>
-            <strong>{t.nextDriverAdvice}</strong>
-            <span>{t.highDemand}</span>
-          </div>
-        </article>
+      <section style={{ ...styles.driverIntelligence, gridTemplateColumns: '1fr' }}>
         <article style={styles.docsPanel}>
           <h2>{t.docsStatus}</h2>
-          <Info label={t.verifiedIdentity} value={isAr ? 'موثق' : 'Verified'} dir={isAr ? 'rtl' : 'ltr'} />
-          <Info label={t.license} value={isAr ? 'سارية' : 'Valid'} dir={isAr ? 'rtl' : 'ltr'} />
-          <Info label={t.carInsurance} value={isAr ? 'ينتهي قريباً' : 'Expiring soon'} dir={isAr ? 'rtl' : 'ltr'} />
-          <p style={styles.insuranceWarning}>{t.renewInsurance}</p>
+          <Info
+            label={t.verifiedIdentity}
+            value={
+              idDocumentStatus === 'APPROVED'
+                ? t.identityVerified
+                : idDocumentStatus === 'PENDING_REVIEW'
+                  ? t.identityPending
+                  : t.identityNotVerified
+            }
+            dir={isAr ? 'rtl' : 'ltr'}
+          />
+          <label style={styles.locationRow}>
+            <input
+              type="checkbox"
+              checked={overview?.driver.accessibilityCapable || false}
+              onChange={(event) => void toggleAccessibility(event.target.checked)}
+            />
+            {t.accessibilityCapable}
+          </label>
+          <div style={styles.photoUpload}>
+            <strong>{t.photoTitle}</strong>
+            <span>{t.photoCopy}</span>
+            <label style={styles.photoInputLabel}>
+              <input
+                accept="image/png,image/jpeg,image/webp"
+                style={{ display: 'none' }}
+                type="file"
+                onChange={(event) => setPhotoFile(event.target.files?.[0] || null)}
+              />
+              {photoFile ? photoFile.name : t.uploadPhoto}
+            </label>
+            {photoStatus === 'submitted' && <p style={styles.photoNote}>✓ {t.photoSubmitted}</p>}
+            {photoStatus === 'error' && <p style={styles.photoNote}>{t.photoError}</p>}
+            <button
+              style={styles.photoSubmitButton}
+              disabled={!photoFile || photoStatus === 'uploading'}
+              onClick={() => void submitPhoto()}
+            >
+              {photoStatus === 'uploading' ? t.uploading : t.uploadPhoto}
+            </button>
+          </div>
         </article>
       </section>
 
-      <section style={styles.earningsPanel}>
-        <div style={styles.bars}>{[38, 52, 28, 88, 62, 42, 78].map((bar, index) => <span key={bar} style={{ height: bar, background: index === 3 ? '#d5a915' : '#1e2230' }} />)}</div>
+      <section style={{ ...styles.earningsPanel, gridTemplateColumns: '1fr' }}>
         <div>
-          <span>{t.nextBatch}</span>
-          <strong>{isAr ? '١٥ مايو ٢٠٢٤' : 'May 15, 2024'}</strong>
-          <small>{isAr ? 'قيد المعالجة: ١٤:٠٤' : 'Processing: 14:04'}</small>
-        </div>
-        <div>
-          <span>{t.todayEarnings}</span>
-          <strong>AED 540.00</strong>
-          <small>{isAr ? '١٤ رحلة مكتملة' : '14 completed rides'}</small>
+          <span>{t.earnings}</span>
+          <strong dir="ltr">{moneyText(overview?.totals.earningsMinor || 0, 'SYP', lang)}</strong>
+          <small>{isAr ? `${overview?.totals.completed || 0} رحلة مكتملة` : `${overview?.totals.completed || 0} completed rides`}</small>
         </div>
       </section>
 
@@ -359,6 +484,11 @@ function RideCard({
       <Info label={labels.dropoff} value={String(ride.metadata.dropoff || '-')} />
       <Info label={labels.status} value={statusText(ride.status, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
       <Info label={labels.fare} value={moneyText(ride.fareMinor || 0, ride.currency, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
+      {ride.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {labels.accessibilityRequired}</span>}
+      {ride.shareable && <span style={styles.accessibilityBadge}>🤝 {labels.shareable}</span>}
+      {(ride.stops || []).map((stop, index) => (
+        <Info key={index} label={`${labels.stopLabel} ${index + 1}`} value={stop.address} />
+      ))}
       {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
         <div style={styles.actions}>
           <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>
@@ -375,7 +505,138 @@ function RideCard({
           </button>
         </div>
       )}
+      {LIVE_TRACKING_STATUSES.includes(ride.status) && <LocationSharingToggle rideId={ride.id} labels={labels} />}
+      {MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status) && <RideChatPanel rideId={ride.id} labels={labels} />}
     </article>
+  )
+}
+
+// SR Ride vs. Uber gap-closure (P0 #1): mounted only while the ride is in a live-tracking status
+// (RideCard's own gate), so leaving that window (completed/cancelled) unmounts this component and
+// its cleanup effect stops the watch automatically -- no separate "is this ride still active"
+// bookkeeping needed here.
+function LocationSharingToggle({ rideId, labels }: { rideId: string; labels: typeof copy.en }) {
+  const [sharing, setSharing] = useState(false)
+  const [error, setError] = useState('')
+  const watchIdRef = useRef<number | null>(null)
+  const lastSentAtRef = useRef(0)
+
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
+    }
+  }, [])
+
+  function toggle() {
+    if (sharing) {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
+      watchIdRef.current = null
+      setSharing(false)
+      return
+    }
+    if (!navigator.geolocation) {
+      setError(labels.locationUnsupported)
+      return
+    }
+    setError('')
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const now = Date.now()
+        if (now - lastSentAtRef.current < LOCATION_REPORT_INTERVAL_MS) return
+        lastSentAtRef.current = now
+        void reportPrototypeDriverLocation(position.coords.latitude, position.coords.longitude)
+      },
+      () => setError(labels.locationDenied),
+      { enableHighAccuracy: true, maximumAge: 5000 },
+    )
+    setSharing(true)
+  }
+
+  return (
+    <div style={styles.locationRow}>
+      <button style={sharing ? styles.dangerButton : styles.secondaryButton} onClick={toggle}>
+        {sharing ? labels.stopSharing : labels.shareLocation}
+      </button>
+      {error && <span style={styles.chatEmpty}>{error}</span>}
+    </div>
+  )
+}
+
+// SR Ride vs. Uber gap-closure (P0 #4): each ride card manages its own chat state independently
+// (collapsed by default -- a list of several active rides would otherwise show every thread open
+// at once), reusing the same rideId + thread endpoints the rider's SrRidePage.tsx uses, just with
+// the driver-session variant of the API calls.
+function RideChatPanel({ rideId, labels }: { rideId: string; labels: typeof copy.en }) {
+  const [open, setOpen] = useState(false)
+  const [messages, setMessages] = useState<PlatformMessage[]>([])
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    function poll() {
+      fetchPrototypeSrRideThread(rideId, true)
+        .then((thread) => {
+          if (!cancelled) setMessages(thread.messages)
+        })
+        .catch(() => {})
+    }
+    poll()
+    const interval = window.setInterval(poll, 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [open, rideId])
+
+  async function send() {
+    if (!input.trim()) return
+    setSending(true)
+    try {
+      const sent = await sendPrototypeSrRideMessage(rideId, input.trim(), true)
+      setMessages((previous) => [...previous, sent])
+      setInput('')
+    } catch {
+      // Surfacing a dedicated error here would need its own status slot per card; the send button
+      // simply re-enables so the driver can retry, consistent with this card's compact footprint.
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div style={styles.chatPanel}>
+      <button style={styles.secondaryButton} onClick={() => setOpen((value) => !value)}>
+        {open ? labels.hideChat : labels.messageRider}
+      </button>
+      {open && (
+        <>
+          <div style={styles.chatMessages}>
+            {messages.length === 0 && <span style={styles.chatEmpty}>{labels.chatEmpty}</span>}
+            {messages.map((entry) => (
+              <div key={entry.id} style={entry.senderRole === 'DRIVER' ? styles.chatBubbleMine : styles.chatBubbleTheirs}>
+                {entry.body}
+              </div>
+            ))}
+          </div>
+          <div style={styles.chatInputRow}>
+            <input
+              style={styles.chatInput}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder={labels.chatPlaceholder}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void send()
+              }}
+            />
+            <button disabled={!input.trim() || sending} style={styles.secondaryButton} onClick={() => void send()}>
+              {labels.chatSend}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -400,11 +661,6 @@ function DispatchItem({ label, value, tone }: { label: string; value: string; to
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: '100vh', background: '#08090f', color: '#fff', padding: '24px 16px 90px', display: 'grid', gap: 22, maxWidth: 1120, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #263651', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
-  driverTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 },
-  availability: { border: '1px solid #1d2433', borderRadius: 999, background: '#11131c', display: 'flex', padding: 5 },
-  availableButton: { border: 0, borderRadius: 999, background: '#20d29b', color: '#04100d', fontWeight: 950, minHeight: 48, padding: '0 22px' },
-  offlineButton: { border: 0, borderRadius: 999, background: 'transparent', color: '#8f96a8', fontWeight: 900, minHeight: 48, padding: '0 22px' },
-  driverTitle: { margin: 0, fontSize: 34 },
   hero: { border: '1px solid #1e2a3c', borderRadius: 8, padding: 18, background: '#101722', display: 'grid', gap: 14 },
   eyebrow: { color: '#19d7ff', letterSpacing: 2, fontWeight: 900, fontSize: 11, margin: 0 },
   title: { margin: 0, fontSize: 38, lineHeight: 1.08 },
@@ -416,15 +672,14 @@ const styles: Record<string, CSSProperties> = {
   dispatchHero: { border: '1px solid rgba(82,108,255,.9)', borderRadius: 14, background: '#101119', padding: 28, display: 'grid', gap: 24 },
   offerGrid: { display: 'grid', gap: 18, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' },
   offerCard: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
-  suggestedOffer: { border: '2px solid #d5a915', borderRadius: 14, background: '#0b0d14', padding: 16, display: 'grid', gap: 10 },
   driverIntelligence: { display: 'grid', gap: 34, gridTemplateColumns: '1fr 1fr' },
-  routePanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 16 },
   docsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 12 },
-  mapMock: { minHeight: 180, borderRadius: 12, background: 'radial-gradient(circle at 50% 50%, rgba(25,215,255,.35), transparent 24%), #020304', display: 'grid', placeItems: 'center' },
-  routeAdvice: { borderRadius: 10, background: 'rgba(82,108,255,.14)', padding: 16, display: 'grid', gap: 8, color: '#cfd6ff' },
+  photoUpload: { display: 'grid', gap: 8, borderTop: '1px solid #1e2a3c', paddingTop: 14, marginTop: 4 },
+  photoInputLabel: { border: '1px dashed #2f3b52', borderRadius: 10, padding: 12, textAlign: 'center', color: '#9aa6ba', cursor: 'pointer', fontWeight: 800 },
+  photoNote: { margin: 0, color: '#9aa6ba', fontSize: 13 },
+  photoSubmitButton: { minHeight: 44, border: 0, borderRadius: 10, background: '#19d7ff', color: '#051014', fontWeight: 950 },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },
   earningsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 22, gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center' },
-  bars: { display: 'flex', gap: 8, alignItems: 'end', minHeight: 110 },
   driverCtas: { display: 'grid', gap: 28, gridTemplateColumns: '1fr 1fr 1fr' },
   sosButton: { border: 0, borderRadius: 12, background: '#ff5274', color: '#06070c', fontWeight: 950, minHeight: 72, fontSize: 22 },
   reportButton: { border: '1px solid #30384d', borderRadius: 12, background: '#0b0d14', color: '#fff', fontWeight: 950, minHeight: 72, fontSize: 22 },
@@ -439,4 +694,13 @@ const styles: Record<string, CSSProperties> = {
   dangerButton: { minHeight: 44, border: '1px solid rgba(255,96,96,.5)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 900, padding: '0 12px' },
   panel: { border: '1px solid #263651', borderRadius: 8, background: '#101722', color: '#9aa6ba', padding: 14 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
+  locationRow: { display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid #263651', paddingTop: 10 },
+  accessibilityBadge: { display: 'inline-block', width: 'fit-content', borderRadius: 999, background: 'rgba(25,215,255,.14)', border: '1px solid rgba(25,215,255,.4)', color: '#19d7ff', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
+  chatPanel: { display: 'grid', gap: 8, borderTop: '1px solid #263651', paddingTop: 10 },
+  chatMessages: { display: 'grid', gap: 6, maxHeight: 180, overflowY: 'auto' },
+  chatEmpty: { color: '#5c6b85', fontSize: 13 },
+  chatBubbleMine: { justifySelf: 'end', maxWidth: '80%', borderRadius: '10px 10px 2px 10px', background: 'rgba(25,215,255,.14)', border: '1px solid rgba(25,215,255,.35)', color: '#e7fbff', padding: '8px 10px', fontSize: 13 },
+  chatBubbleTheirs: { justifySelf: 'start', maxWidth: '80%', borderRadius: '10px 10px 10px 2px', background: '#0d1420', border: '1px solid #263651', color: '#e7ecf5', padding: '8px 10px', fontSize: 13 },
+  chatInputRow: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 },
+  chatInput: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
 }

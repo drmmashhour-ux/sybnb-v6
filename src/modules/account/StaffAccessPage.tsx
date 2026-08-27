@@ -24,14 +24,14 @@ const labels = {
     password: 'كلمة المرور',
     phone: 'رقم الهاتف',
     code: 'رمز الدخول',
-    sendCode: 'إرسال الرمز',
-    codeSent: 'تم إرسال الرمز إلى رقم الهاتف. أدخل الرمز ثم تابع.',
+    sendCode: 'إرسال الرمز إلى البريد',
+    codeSent: 'تم إرسال الرمز إلى بريدك الإلكتروني. أدخل الرمز ثم تابع.',
     codeInvalid: 'رمز الدخول غير صحيح. اطلب الرمز وأدخله قبل المتابعة.',
     demoCode: 'رمز الدخول المرسل',
     opening: 'جار فتح الجلسة...',
     note: 'العميل لا يرى هذه اللوحات أثناء رحلة الحجز.',
     error: 'تعذر فتح الجلسة الداخلية.',
-    required: 'أدخل البريد الإلكتروني ورقم الهاتف وكلمة المرور قبل طلب الدخول.',
+    required: 'أدخل البريد الإلكتروني وكلمة المرور قبل طلب الدخول.',
   },
   en: {
     title: 'Internal Access Gate',
@@ -45,14 +45,14 @@ const labels = {
     password: 'Password',
     phone: 'Phone number',
     code: 'Access code',
-    sendCode: 'Send code',
-    codeSent: 'Code sent to the phone number. Enter the code, then continue.',
+    sendCode: 'Email me the code',
+    codeSent: 'Code sent to your email. Enter the code, then continue.',
     codeInvalid: 'Incorrect access code. Send the code and enter it before continuing.',
     demoCode: 'Sent access code',
     opening: 'Opening session...',
     note: 'Guests do not see these dashboards during the booking trip.',
     error: 'Could not open internal session.',
-    required: 'Enter email, phone, and password before requesting access.',
+    required: 'Enter email and password before requesting access.',
   },
 }
 
@@ -61,15 +61,23 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const isAr = lang === 'ar'
   const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn')
   const [status, setStatus] = useState<'idle' | 'codeSent' | 'loading' | 'error'>('idle')
-  const [email, setEmail] = useState(defaultEmail(role))
+  // HOST is a real customer-facing role (see below) — pre-filling a shared default identity risks a
+  // first-time host missing it and having their OTP sent to a mailbox they don't control. Start blank.
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [phone, setPhone] = useState(defaultPhone(role))
+  const [phone, setPhone] = useState('')
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState('')
 
   const actionLabel = role === 'ADMIN' ? t.admin : role === 'DRIVER' ? t.driver : t.host
-  // HOST is a real customer-facing role → email verification (email-only Syria config), phone optional.
-  // ADMIN/DRIVER remain on their existing internal phone flow (out of scope).
+  // Every role signs in over email OTP -- an independent admin-experience audit found ADMIN/DRIVER
+  // were still hardcoded to the phone/SMS channel here, and Syria's country profile has SMS
+  // disabled entirely (communications.sms: false). requestOtp/confirmOtp over phone therefore
+  // always 403s (OTP_CHANNEL_NOT_ENABLED), and openSession() requires the OTP to succeed before it
+  // ever calls the real login -- so there was literally no way for an admin or driver to sign in
+  // through this screen. createStaffAccountSession() already treats email as the account identity
+  // and phone as optional contact for every role (see its own comment), so switching the OTP
+  // channel to match is a pure bug fix, not a new design.
   const isHost = role === 'HOST'
   // A stay host is a customer, not internal staff — show host-oriented wording (no "internal team
   // only" framing). ADMIN/DRIVER keep the internal-gate copy.
@@ -85,17 +93,15 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       : 'Manage your stays, guest requests, and protected payments here.'
     : t.note
   const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
-  const requiredMsg = isHost ? (isAr ? 'أدخل البريد الإلكتروني وكلمة المرور قبل طلب الدخول.' : 'Enter email and password before requesting access.') : t.required
+  const requiredMsg = t.required
 
   async function openSession() {
-    const identityMissing = isHost ? !emailValid || !password.trim() : !email.trim() || !phone.trim() || !password.trim()
+    const identityMissing = !emailValid || !password.trim()
     if (identityMissing) {
       setCodeError(requiredMsg)
       return
     }
-    const verified = await confirmOtp(
-      isHost ? { email: email.trim(), purpose: 'staff-login', code: code.trim() } : { phone: phone.trim(), purpose: 'staff-login', code: code.trim() },
-    ).catch(() => false)
+    const verified = await confirmOtp({ email: email.trim(), purpose: 'staff-login', code: code.trim() }).catch(() => false)
     if (!verified) {
       setCodeError(t.codeInvalid)
       return
@@ -117,12 +123,12 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   }
 
   async function sendCode() {
-    if (isHost && !emailValid) {
+    if (!emailValid) {
       setCodeError(requiredMsg)
       return
     }
     try {
-      await requestOtp(isHost ? { email: email.trim(), purpose: 'staff-login' } : { phone: phone.trim(), purpose: 'staff-login' })
+      await requestOtp({ email: email.trim(), purpose: 'staff-login' })
       setCodeError('')
       setStatus('codeSent')
     } catch (err) {
@@ -160,23 +166,22 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             />
           </label>
           <label style={styles.label}>
-            {isHost ? (isAr ? 'رقم الهاتف (اختياري)' : 'Phone number (optional)') : t.phone}
+            {isAr ? 'رقم الهاتف (اختياري)' : 'Phone number (optional)'}
             <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
           </label>
           <label style={styles.label}>
             {t.code}
             <div style={styles.codeRow}>
               <input style={styles.input} value={code} onChange={(event) => setCode(event.target.value)} dir="ltr" />
-              <button style={styles.codeButton} onClick={sendCode} disabled={isHost && !emailValid}>
-                {status === 'codeSent' ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : isHost ? (isAr ? 'إرسال الرمز إلى البريد' : 'Email me the code') : t.sendCode}
+              <button style={styles.codeButton} onClick={sendCode} disabled={!emailValid}>
+                {status === 'codeSent' ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : t.sendCode}
               </button>
             </div>
           </label>
         </div>
         {status === 'codeSent' && (
           <p style={styles.note}>
-            {isHost ? (isAr ? 'تم إرسال رمز الدخول إلى بريدك الإلكتروني.' : 'Access code sent to your email.') : t.codeSent}{' '}
-            <b dir="ltr">{isHost ? email : phone}</b>
+            {t.codeSent} <b dir="ltr">{email}</b>
           </p>
         )}
         {codeError && <p style={styles.error}>{codeError}</p>}
@@ -188,18 +193,6 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       </section>
     </main>
   )
-}
-
-function defaultEmail(role: StaffRole) {
-  if (role === 'ADMIN') return 'admin@sybnb.local'
-  if (role === 'DRIVER') return 'driver@sybnb.local'
-  return 'host@sybnb.local'
-}
-
-function defaultPhone(role: StaffRole) {
-  if (role === 'ADMIN') return '+963900000099'
-  if (role === 'DRIVER') return '+963900000077'
-  return '+963900000050'
 }
 
 const styles: Record<string, CSSProperties> = {

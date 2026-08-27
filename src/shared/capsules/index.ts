@@ -26,9 +26,24 @@ export type PaymentCapsuleState = {
   adminMustConfirmMoney: boolean
 }
 
+export type CaseStatusStep = {
+  key: string
+  label: string
+  done: boolean
+  active: boolean
+}
+
+export type CaseStatusCapsuleState = {
+  status: string
+  steps: CaseStatusStep[]
+  currentStepIndex: number
+}
+
 export const CAPSULE_RULES = {
   accountFirst: 'Every client, renter, seller, host, advertiser, and admin action that changes platform state must pass account/sign-in first.',
   searchFirst: 'Search pages show the capsule first; results and details appear only after the client presses Search.',
   noOutsidePayment: 'Any payment capsule must keep proof upload and admin confirmation before publishing, confirmation, or service delivery.',
   reusableFilters: 'STR, renter, seller, and future country versions reuse the same visual filter capsule pattern with division-specific groups.',
+  noFabricatedResolution: 'A case/dispute status screen must render steps strictly from the real backend status field; it must never mark a step complete, a decision made, or a case closed unless the fetched status says so.',
+  noFakeTrustSignal: 'A filter option, checkbox, or badge that implies vetting (verified, checked, approved) must be backed by a real, backend-tracked field. If no such field exists, remove the claim instead of showing it decoratively or pre-checked.',
 } as const

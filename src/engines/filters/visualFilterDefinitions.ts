@@ -118,7 +118,6 @@ const visualFilterPhotoSrc: Partial<Record<VisualFilterArt, string>> = {
   'sr-ride-intercity': '/assets/filter-photos/sr-ride/intercity.webp',
   'sr-ride-hourly': '/assets/filter-photos/sr-ride/hourly.webp',
   'sr-ride-instant': '/assets/filter-photos/sr-ride/instant-confirm.webp',
-  'sr-ride-verified-driver': '/assets/filter-photos/sr-ride/verified-driver.webp',
   'sr-ride-ac': '/assets/filter-photos/sr-ride/ac.webp',
   'sr-ride-wifi': '/assets/filter-photos/sr-ride/wifi.webp',
   'sr-ride-luggage': '/assets/filter-photos/sr-ride/luggage.webp',
@@ -430,8 +429,10 @@ export const srRideFeatureFilterGroup: VisualFilterGroup = {
   title: { ar: 'مزايا الرحلة', en: 'Ride features' },
   mode: 'multi',
   options: [
+    // A pre-checked "Verified driver" option used to live here, but no verification concept exists
+    // anywhere in the driver data model and it was never sent to the backend -- removed rather than
+    // implying vetting that never happened. See CAPSULE_RULES.noFakeTrustSignal in shared/capsules.
     { id: 'instantConfirm', label: { ar: 'تأكيد فوري', en: 'Instant confirm' }, art: 'sr-ride-instant' },
-    { id: 'verifiedDriver', label: { ar: 'سائق موثق', en: 'Verified driver' }, art: 'sr-ride-verified-driver' },
     { id: 'ac', label: { ar: 'تكييف', en: 'A/C' }, art: 'sr-ride-ac' },
     { id: 'wifi', label: { ar: 'Wi-Fi', en: 'Wi-Fi' }, art: 'sr-ride-wifi' },
     { id: 'luggage', label: { ar: 'حقائب', en: 'Luggage' }, art: 'sr-ride-luggage' },
@@ -448,7 +449,11 @@ export function visualFilterGroupsForDivision(division: SearchDivision): VisualF
 }
 
 function carVisualFilterGroups() {
-  return visualFilterGroupsById(['sort', 'priceBand', 'carBody', 'carBrand', 'carFuel', 'carTransmission', 'condition', 'trust']).map((group) => {
+  // No 'trust' group: none of its options (Verified host / Rating 8+ / Fast response / Family
+  // friendly / Instant booking / Featured host) have any real backing data for a car listing --
+  // they were copy-pasted STAYS trust filters (see CARS_MARKETPLACE audit) and none of them reach
+  // the backend filter (server/routes/listings.mjs's attributeKeys). CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['sort', 'priceBand', 'carBody', 'carBrand', 'carFuel', 'carTransmission', 'condition']).map((group) => {
     if (group.id === 'priceBand') {
       return {
         ...group,
@@ -471,7 +476,12 @@ function carVisualFilterGroups() {
 }
 
 function newConstructionVisualFilterGroups() {
-  return visualFilterGroupsById(['sort', 'priceBand', 'propertyType', 'amenities', 'views', 'access', 'trust', 'payments']).map((group) => {
+  // No 'trust'/'payments': NEW_CONSTRUCTION, like CARS/MARKETPLACE/RENTALS/BUY, has no in-app
+  // transactional payment mechanism at all (routes through the lightweight inquiry API, never a
+  // paid booking -- see server/routes/listings.mjs), and 'trust' has no real per-project backing
+  // data either. Same reasoning as SR Ride's/RENTALS-BUY's payments-group removal.
+  // CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['sort', 'priceBand', 'propertyType', 'amenities', 'views', 'access']).map((group) => {
     if (group.id === 'priceBand') {
       return {
         ...group,
@@ -513,7 +523,11 @@ function newConstructionVisualFilterGroups() {
 }
 
 function marketplaceVisualFilterGroups() {
-  return visualFilterGroupsById(['sort', 'priceBand', 'marketCategory', 'condition', 'payments']).map((group) => {
+  // No 'payments' group: MARKETPLACE has no in-app transactional payment mechanism (same
+  // reasoning as CARS/NEW_CONSTRUCTION/RENTALS/BUY above). 'marketCategory' is wired end-to-end:
+  // sellers set it via sellerMarketFilterGroups, it's stored at metadata.visualFilters.marketCategory,
+  // and GET /api/listings' attributeKeys filters on it.
+  return visualFilterGroupsById(['sort', 'priceBand', 'marketCategory', 'condition']).map((group) => {
     if (group.id === 'priceBand') {
       return {
         ...group,
@@ -539,12 +553,26 @@ export function sellerPropertyFilterGroupsFromConfig() {
   return visualFilterGroupsById(['popular', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'payments'])
 }
 
+export function sellerRealEstateFilterGroupsFromConfig() {
+  // No 'payments' group: RENTALS/BUY/NEW_CONSTRUCTION sellers have no in-app transactional
+  // payment mechanism (same reasoning as renterPropertyFilterGroupsFromConfig above) -- unlike
+  // STAYS, which keeps 'payments' in sellerPropertyFilterGroups. CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['popular', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access'])
+}
+
 export function sellerCarFilterGroupsFromConfig() {
   return visualFilterGroupsById(['carBody', 'carBrand', 'carFuel', 'carTransmission', 'condition'])
 }
 
+export function sellerMarketFilterGroupsFromConfig() {
+  return visualFilterGroupsById(['marketCategory', 'condition'])
+}
+
 export function renterPropertyFilterGroupsFromConfig() {
-  return visualFilterGroupsById(['popular', 'sort', 'priceBand', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'trust', 'payments'])
+  // No 'payments' group: RENTALS/BUY are commission/contact-based with no in-app payment
+  // collection at all (no booking, no checkout, no quote) -- same reasoning as SR Ride below.
+  // CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['popular', 'sort', 'priceBand', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'trust'])
 }
 
 export function hostInventoryFilterGroupsFromConfig() {
@@ -552,11 +580,16 @@ export function hostInventoryFilterGroupsFromConfig() {
 }
 
 export function srRideFilterGroupsFromConfig() {
-  return visualFilterGroupsById(['srRideCategory', 'srRideRoute', 'srRideFeatures', 'payments'])
+  // No 'payments' group here: SR Ride has no in-app payment-collection mechanism at all (no
+  // PaymentProof relation on RideRequest, fares are informational only) -- offering a payment-method
+  // choice would imply a capability that doesn't exist. CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['srRideCategory', 'srRideRoute', 'srRideFeatures'])
 }
 
 export const sellerPropertyFilterGroups = sellerPropertyFilterGroupsFromConfig()
+export const sellerRealEstateFilterGroups = sellerRealEstateFilterGroupsFromConfig()
 export const sellerCarFilterGroups = sellerCarFilterGroupsFromConfig()
+export const sellerMarketFilterGroups = sellerMarketFilterGroupsFromConfig()
 export const renterPropertyFilterGroups = renterPropertyFilterGroupsFromConfig()
 export const hostInventoryFilterGroups = hostInventoryFilterGroupsFromConfig()
 
@@ -680,7 +713,6 @@ export const visualFilterArtOptions: VisualFilterArt[] = [
   'sr-ride-intercity',
   'sr-ride-hourly',
   'sr-ride-instant',
-  'sr-ride-verified-driver',
   'sr-ride-ac',
   'sr-ride-wifi',
   'sr-ride-luggage',

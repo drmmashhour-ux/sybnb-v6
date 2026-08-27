@@ -33,14 +33,16 @@ export function GiftFlowRoutes({ lang, path }: GiftFlowRoutesProps) {
   const giftId = claimMatch?.[1] || codeMatch?.[1] || ''
   const [phone, setPhone] = useState('+963900000001')
   const [giftPreview, setGiftPreview] = useState<PlatformWalletGift | null>(null)
+  const [giftPreviewFailed, setGiftPreviewFailed] = useState(false)
   const [claimResult, setClaimResult] = useState<ClaimResult | null>(null)
 
   useEffect(() => {
     setGiftPreview(null)
+    setGiftPreviewFailed(false)
     if (!giftId) return
     void fetchPrototypeWalletGift(giftId)
       .then(setGiftPreview)
-      .catch(() => undefined)
+      .catch(() => setGiftPreviewFailed(true))
   }, [giftId])
 
   if (codeMatch) {
@@ -84,15 +86,31 @@ export function GiftFlowRoutes({ lang, path }: GiftFlowRoutesProps) {
     return <GiftAdminAudit lang={lang} />
   }
 
+  // No gift id in the URL, or the lookup failed (bad/expired link) — show the real "not found" state
+  // instead of rendering the claim form with no data. GiftRecipientLanding has no honest fallback for
+  // a missing sender/amount, so it must never be reached without a real, fetched gift.
+  if (!giftId || giftPreviewFailed) {
+    return (
+      <GiftErrorStates
+        lang={lang}
+        initialState="not_found"
+        onPrimary={() => navigate('/wallet/gift/claim')}
+        onSupport={() => navigate('/immocontact')}
+      />
+    )
+  }
+
+  if (!giftPreview) return null
+
   return (
     <GiftRecipientLanding
       lang={lang}
-      amount={giftPreview ? moneyText(giftPreview.amountMinor, giftPreview.currency, lang) : undefined}
-      senderName={giftPreview?.sender?.displayName}
-      codeLast4={giftPreview ? giftPreview.id.slice(-4).toUpperCase() : undefined}
+      amount={moneyText(giftPreview.amountMinor, giftPreview.currency, lang)}
+      senderName={giftPreview.sender?.displayName}
+      codeLast4={giftPreview.id.slice(-4).toUpperCase()}
       onContinue={({ phone: nextPhone }) => {
         setPhone(nextPhone)
-        navigate(giftId ? `/wallet/gift/code/${giftId}` : '/wallet/gift/code')
+        navigate(`/wallet/gift/code/${giftId}`)
       }}
     />
   )
@@ -103,10 +121,12 @@ async function finishGiftClaim(
   phone: string,
   code: string,
   setClaimResult: (result: ClaimResult | null) => void,
-) {
+): Promise<true | { code?: string; message?: string }> {
   if (!giftId) {
-    navigate('/wallet/gift/success')
-    return true
+    // Never fabricate a claim success with no real gift ID / no API call — reroute to the claim
+    // entry screen instead of a fake "redeemed" confirmation.
+    navigate('/wallet/gift/claim')
+    return { code: 'GIFT_NOT_FOUND' }
   }
 
   try {
@@ -114,8 +134,9 @@ async function finishGiftClaim(
     setClaimResult({ gift: result.gift, wallet: result.wallet })
     navigate('/wallet/gift/success')
     return true
-  } catch {
-    return false
+  } catch (error) {
+    const err = error as (Error & { code?: string }) | undefined
+    return { code: err?.code, message: err?.message }
   }
 }
 

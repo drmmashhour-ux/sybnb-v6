@@ -24,8 +24,17 @@
 //
 // PRODUCT GAP (documented, intentionally NOT implemented here): the landing "Featured ads"
 // marquee is static (hardcoded AD_SPONSORS) — approved advertising campaigns do not dynamically
-// appear there; an approved ad surfaces as a normal APPROVED listing in its division. Dynamic ad
-// placement is NOT SUPPORTED and is out of scope for the payment-tunnel gate.
+// appear there. Dynamic ad placement is NOT SUPPORTED and is out of scope for the payment-tunnel
+// gate.
+//
+// An approved ad IS a real APPROVED listing row (individually fetchable, administratively real —
+// see "activation" below), but is deliberately excluded from GET /api/listings' ordinary
+// division/city search results (commit c411043). A prior version of this suite asserted the
+// opposite — that an approved ad SHOULD appear in real product search — which was true only
+// because that exclusion didn't exist yet; an independent re-audit found 62 real approved ads
+// showing up disguised as real MARKETPLACE products in genuine buyer search results, and the fix
+// closed exactly that leak. This suite was not re-run against that fix at the time (only verified
+// live via curl), so its own assertion went stale until this regression pass caught it.
 
 import { createSessionToken } from '../../server/lib/security.mjs'
 
@@ -56,6 +65,21 @@ function adBody(extra = {}) { return { division:'MARKETPLACE', titleAr:'Featured
 async function submitProof(token, ref, amount=1900) {
   return call('POST','/api/payments/seller-plan-proof', token, {planCode:'advertising-plus', amountMinor:amount, currency:'USD', providerRef:ref, legalName:'Advertiser Co', sellerType:'advertiser'})
 }
+
+// Publish gate (server/routes/listings.mjs) requires an admin-approved ID document plus an
+// accepted 'listing-agreement' legal consent before ANY division's submit() can leave DRAFT --
+// satisfy it for both advertisers up front so the submit/approve assertions below are genuinely
+// exercised instead of stopping at 403 ID_VERIFICATION_REQUIRED.
+async function verifySellerKyc(token, userId) {
+  await call('PATCH', '/api/me/id-document', token, { fileBase64: 'ZmFrZQ==', mimeType: 'image/png' })
+  await call('PATCH', `/api/admin/review-queue/iddocument/${userId}`, A, { decision: 'APPROVE' })
+  const legal = await call('GET', '/api/legal', null)
+  const doc = legal.j.documents.find((d) => d.key === 'listing-agreement')
+  await call('POST', '/api/legal/consent', token, { documentKey: 'listing-agreement', version: doc.version })
+}
+console.log('=== 0. KYC + LEGAL-CONSENT BOOTSTRAP (required by the listings.mjs publish gate) ===')
+await verifySellerKyc(AA, advA.id)
+await verifySellerKyc(AB, advB.id)
 
 console.log('=== 1. GATE: activation blocked before payment/approval ===')
 const preCreate = await call('POST','/api/listings', AA, adBody())
@@ -91,7 +115,13 @@ check('ad submit -> PENDING_REVIEW', (await call('PATCH', `/api/listings/${adId}
 check('pending ad NOT publicly visible before review', !has(await call('GET','/api/listings?division=MARKETPLACE',null), adId), 'leaked')
 check('advertiser cannot self-approve ad (403)', (await call('PATCH', `/api/admin/review-queue/listing/${adId}`, AA, {decision:'APPROVE'})).status === 403)
 check('admin approves ad listing (200)', (await call('PATCH', `/api/admin/review-queue/listing/${adId}`, A, {decision:'APPROVE'})).status === 200)
-check('approved ad now publicly visible (activation)', has(await call('GET','/api/listings?division=MARKETPLACE',null), adId), 'missing')
+// Activation proof: the listing itself is a real, individually-fetchable APPROVED row (GET
+// /api/listings/:id only ever returns status='APPROVED' rows -- see server/routes/listings.mjs).
+// NOT a search-visibility check -- see this file's header for why an approved ad is deliberately
+// excluded from ordinary product search.
+const activated = await call('GET', `/api/listings/${adId}`, null)
+check('approved ad now individually fetchable (activation)', activated.status === 200 && activated.j?.listing?.id === adId, activated.status+' '+JSON.stringify(activated.j))
+check('approved ad still excluded from ordinary product search (no disguised leak)', !has(await call('GET','/api/listings?division=MARKETPLACE',null), adId), 'leaked')
 
 console.log('\n=== 4. ADVERTISER STATUS SURFACE (/api/me/overview) ===')
 const overview = await call('GET','/api/me/overview', AA)

@@ -1,11 +1,100 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.mjs'
+import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
+import { updateDriverLocation } from '../lib/live-map.mjs'
+import { activateScheduledRides } from '../lib/ride-schedule.mjs'
+import { sendPushNotification } from '../lib/push-notifications.mjs'
+
+const RIDER_STATUS_PUSH_COPY = {
+  DRIVER_ARRIVING: { title: 'Your driver is arriving', body: 'Your SR driver is on the way to your pickup point.' },
+  IN_PROGRESS: { title: 'Trip started', body: 'Your SR ride is now in progress.' },
+  COMPLETED: { title: 'Trip completed', body: 'Thanks for riding with SR. Your receipt is ready.' },
+}
 
 export async function handleDriver(req, res, url, context) {
+  // SR Ride vs. Uber gap-closure (P0 #1): the driver client reports its own GPS position here
+  // while sharing is on; never gated to a specific ride (a real driver app reports continuously,
+  // same as the location column itself belongs to the driver, not to any one ride).
+  if (url.pathname === '/api/driver/location') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    const lat = Number(body.lat)
+    const lng = Number(body.lng)
+
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      const error = new Error('A valid lat/lng is required.')
+      error.statusCode = 400
+      error.code = 'DRIVER_LOCATION_INVALID'
+      error.expose = true
+      throw error
+    }
+
+    await updateDriverLocation(context.user.id, lat, lng)
+    return json(res, 200, { ok: true })
+  }
+
+  // SR Ride vs. Uber gap-closure (P2 #16): self-declared, like the vehicle make/model/plate fields
+  // already are -- shown to riders as real data, never dressed up as a verified trust badge.
+  if (url.pathname === '/api/driver/accessibility') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    const profile = await db().driverProfile.upsert({
+      where: { userId: context.user.id },
+      create: { userId: context.user.id, accessibilityCapable: Boolean(body.accessibilityCapable) },
+      update: { accessibilityCapable: Boolean(body.accessibilityCapable) },
+      select: { accessibilityCapable: true },
+    })
+    return json(res, 200, { ok: true, driverProfile: profile })
+  }
+  // SR Ride vs. Uber gap-closure: a driver's own photo, so a rider can actually recognize who
+  // they're getting into a car with (previously nothing beyond name + vehicle text existed).
+  // Mirrors PATCH /api/me/id-document exactly -- same validation shape, same storage discipline.
+  if (url.pathname === '/api/driver/photo') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : ''
+    const mimeType = typeof body.mimeType === 'string' ? body.mimeType : ''
+
+    if (!fileBase64 || !mimeType) {
+      const error = new Error('A photo file is required.')
+      error.statusCode = 400
+      error.code = 'DRIVER_PHOTO_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
+    const storageKey = await saveDriverPhoto(fileBase64, mimeType)
+    const previous = await db().driverProfile.findUnique({ where: { userId: context.user.id }, select: { photoRef: true } })
+
+    const profile = await db().driverProfile.upsert({
+      where: { userId: context.user.id },
+      create: { userId: context.user.id, photoRef: storageKey, photoMimeType: mimeType },
+      update: { photoRef: storageKey, photoMimeType: mimeType },
+      select: { photoRef: true, photoMimeType: true },
+    })
+
+    // Replacing a previous photo -- remove the old file now that the new one is safely written and
+    // the DB row points at the new one (same ordering as the ID-document replace path).
+    if (previous?.photoRef && previous.photoRef !== storageKey) {
+      await deleteDriverPhoto(previous.photoRef)
+    }
+
+    return json(res, 200, { ok: true, driverProfile: profile })
+  }
+
   if (url.pathname === '/api/driver/rides/pending') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['DRIVER'])
+    // SR Ride vs. Uber gap-closure (P1 #6): activate any scheduled ride whose pickup time has
+    // come within the driver-visibility window -- see server/lib/ride-schedule.mjs. Unscoped here
+    // (unlike the single-ride GET) since this is exactly the read path meant to surface every
+    // ride ready for dispatch, scheduled or not.
+    await activateScheduledRides()
     const rides = await db().rideRequest.findMany({
       where: { driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
       include: {
@@ -16,6 +105,7 @@ export async function handleDriver(req, res, url, context) {
             email: true,
           },
         },
+        stops: { select: { address: true, lat: true, lng: true }, orderBy: { sequence: 'asc' } },
       },
       orderBy: { requestedAt: 'asc' },
       take: 20,
@@ -36,9 +126,15 @@ export async function handleDriver(req, res, url, context) {
             email: true,
           },
         },
+        stops: { select: { address: true, lat: true, lng: true }, orderBy: { sequence: 'asc' } },
       },
       orderBy: { requestedAt: 'desc' },
       take: 50,
+    })
+    const ratingSummary = await getDriverRatingSummary(context.user.id)
+    const driverProfile = await db().driverProfile.findUnique({
+      where: { userId: context.user.id },
+      select: { accessibilityCapable: true },
     })
     return json(res, 200, {
       ok: true,
@@ -48,6 +144,7 @@ export async function handleDriver(req, res, url, context) {
           email: context.user.email,
           displayName: context.user.displayName,
           roles: context.roles,
+          accessibilityCapable: driverProfile?.accessibilityCapable || false,
         },
         totals: {
           assigned: rides.length,
@@ -57,6 +154,7 @@ export async function handleDriver(req, res, url, context) {
             .filter((ride) => ride.status === 'COMPLETED')
             .reduce((sum, ride) => sum + (ride.fareMinor || 0), 0),
         },
+        rating: ratingSummary,
         rides,
       },
     })
@@ -121,6 +219,14 @@ export async function handleDriver(req, res, url, context) {
         after: ride,
       },
     })
+
+    // SR Ride vs. Uber gap-closure (P1 #7): fire-and-forget -- sendPushNotification() never throws
+    // (see server/lib/push-notifications.mjs), so a missing/expired subscription or unconfigured
+    // VAPID keys can never fail the status update itself.
+    const pushCopy = RIDER_STATUS_PUSH_COPY[nextStatus]
+    if (pushCopy) {
+      void sendPushNotification(ride.riderId, { ...pushCopy, url: '/#/ride' })
+    }
 
     return json(res, 200, { ok: true, ride })
   }

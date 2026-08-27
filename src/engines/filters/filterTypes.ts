@@ -120,7 +120,6 @@ export type VisualFilterArt =
   | 'sr-ride-intercity'
   | 'sr-ride-hourly'
   | 'sr-ride-instant'
-  | 'sr-ride-verified-driver'
   | 'sr-ride-ac'
   | 'sr-ride-wifi'
   | 'sr-ride-luggage'

@@ -133,9 +133,9 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
               <div key={row.bookingId} style={styles.tableRow}>
                 <span>{row.listingTitle}</span>
                 <span dir="ltr">
-                  {row.checkIn ? new Date(row.checkIn).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en')) : '-'}
+                  {row.checkIn ? new Date(row.checkIn).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en'), { timeZone: 'UTC' }) : '-'}
                   {' → '}
-                  {row.checkOut ? new Date(row.checkOut).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en')) : '-'}
+                  {row.checkOut ? new Date(row.checkOut).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en'), { timeZone: 'UTC' }) : '-'}
                 </span>
                 <span>{statusText(row.status, lang)}</span>
                 <b dir="ltr">{moneyText(row.hostGrossMinor, row.currency, lang)}</b>

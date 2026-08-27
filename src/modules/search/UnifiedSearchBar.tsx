@@ -14,6 +14,10 @@ export type UnifiedSearchValue = {
   governorate: string
   city: string
   area: string
+  // True only once the guest actually picks a governorate/city/area via LocationCascade --
+  // lets callers tell "user chose Damascus" apart from "field defaults to Damascus" so an
+  // untouched location never turns into a silent city filter on search.
+  locationTouched: boolean
   customPlaceName: string
   checkIn: string
   checkOut: string
@@ -73,19 +77,6 @@ type UnifiedSearchBarProps = {
   onSearch?: (value: UnifiedSearchValue) => void
 }
 
-type LearnedPlace = {
-  id: string
-  division: SearchDivision
-  governorate: string
-  city: string
-  area: string
-  customPlaceName: string
-  keyword: string
-  status: 'pending_ai_review'
-  createdAt: string
-}
-
-const LEARNED_PLACES_KEY = 'sybnb_ai_learned_places'
 
 const T = {
   ar: {
@@ -150,9 +141,7 @@ const T = {
     priceHigh: 'السعر من الأعلى',
     customPlace: 'اسم منطقة أو شارع غير موجود',
     customPlacePlaceholder: 'اكتب الاسم إذا لم تجده في القائمة...',
-    aiLearnHint: 'سيحفظه SYBNB Brain كملاحظة تعلم ويراجعه قبل إضافته رسمياً.',
-    learnedSaved: 'تم حفظ الاسم لمراجعة SYBNB Brain.',
-    learnedPending: 'بانتظار مراجعة AI Brain',
+    customPlaceHint: 'سيُستخدم هذا الاسم في طلب البحث الحالي فقط.',
     search: 'بحث',
     resultPreview: 'معاينة الطلب',
     locationDepth: 'المحافظة ← المدينة ← المنطقة',
@@ -219,9 +208,7 @@ const T = {
     priceHigh: 'Highest price',
     customPlace: 'New area or street name',
     customPlacePlaceholder: 'Type it here if it is not in the list...',
-    aiLearnHint: 'SYBNB Brain will save it as a learning note and review it before official addition.',
-    learnedSaved: 'Saved for SYBNB Brain review.',
-    learnedPending: 'Pending AI Brain review',
+    customPlaceHint: 'This name is used for the current search request only.',
     search: 'Search',
     resultPreview: 'Request preview',
     locationDepth: 'Governorate → City → Area',
@@ -229,6 +216,53 @@ const T = {
 }
 
 const DIVISIONS: SearchDivision[] = ['stays', 'rentals', 'buy', 'newConstruction', 'cars', 'marketplace']
+
+// Division-specific attribute fields (e.g. Cars' carBrand, Marketplace's marketCategory) reset to
+// their defaults whenever the division changes, mirroring SellerListingWizard's setVisualFilters({})
+// on division switch -- otherwise a filter picked under one division (Brand=Toyota on CARS) silently
+// follows the guest into a division where it makes no sense and over-filters results unseen.
+const DIVISION_ATTRIBUTE_DEFAULTS: Pick<
+  UnifiedSearchValue,
+  | 'propertyType'
+  | 'furnishing'
+  | 'carBrand'
+  | 'carYear'
+  | 'carFuel'
+  | 'carTransmission'
+  | 'marketCategory'
+  | 'condition'
+  | 'roomType'
+  | 'bedType'
+  | 'carBody'
+  | 'bedrooms'
+  | 'amenities'
+  | 'trust'
+  | 'popular'
+  | 'views'
+  | 'access'
+  | 'meals'
+  | 'payments'
+> = {
+  propertyType: 'any',
+  furnishing: 'any',
+  carBrand: '',
+  carYear: '',
+  carFuel: 'any',
+  carTransmission: 'any',
+  marketCategory: 'any',
+  condition: 'any',
+  roomType: 'any',
+  bedType: 'any',
+  carBody: 'any',
+  bedrooms: 'any',
+  amenities: [],
+  trust: [],
+  popular: [],
+  views: [],
+  access: [],
+  meals: [],
+  payments: [],
+}
 
 type FilterOption = {
   icon: string
@@ -270,12 +304,6 @@ const conditionOptions: FilterOption[] = [
   { key: 'new', labelKey: 'new', icon: 'N' },
   { key: 'used', labelKey: 'used', icon: 'U' },
 ]
-const sortOptions: FilterOption[] = [
-  { key: 'newest', labelKey: 'newest', icon: '↓' },
-  { key: 'priceLow', labelKey: 'priceLow', icon: '$-' },
-  { key: 'priceHigh', labelKey: 'priceHigh', icon: '$+' },
-]
-
 export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivision = false, onSearch }: UnifiedSearchBarProps) {
   const t = T[lang]
   const isAr = lang === 'ar'
@@ -285,6 +313,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     governorate: 'damascus',
     city: 'damascus-city',
     area: '',
+    locationTouched: false,
     customPlaceName: '',
     checkIn: '',
     checkOut: '',
@@ -318,7 +347,6 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     ...loadSearchDraft(),
     division: initialDivision,
   }))
-  const [learnedMessage, setLearnedMessage] = useState('')
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -375,10 +403,11 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
   }, [value.division])
 
   useEffect(() => {
-    if (lockedDivision && value.division !== initialDivision) update({ division: initialDivision })
+    if (lockedDivision && value.division !== initialDivision) switchDivision(initialDivision)
   }, [initialDivision, lockedDivision, value.division])
 
   const update = (patch: Partial<UnifiedSearchValue>) => setValue((current) => ({ ...current, ...patch }))
+  const switchDivision = (division: SearchDivision) => update({ division, ...DIVISION_ATTRIBUTE_DEFAULTS })
   const updateFilters = (selection: VisualFilterSelection) => {
     setValue((current) => ({
       ...current,
@@ -403,51 +432,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     }))
   }
 
-  const saveLearnedPlace = (current: UnifiedSearchValue) => {
-    const customPlaceName = current.customPlaceName.trim()
-    if (!customPlaceName || typeof window === 'undefined') return false
-
-    const storedRaw = window.localStorage.getItem(LEARNED_PLACES_KEY)
-    let stored: LearnedPlace[] = []
-    try {
-      stored = storedRaw ? (JSON.parse(storedRaw) as LearnedPlace[]) : []
-    } catch {
-      stored = []
-    }
-    const normalized = customPlaceName.toLocaleLowerCase()
-    const exists = stored.some(
-      (item) =>
-        item.customPlaceName.toLocaleLowerCase() === normalized &&
-        item.governorate === current.governorate &&
-        item.city === current.city,
-    )
-
-    if (exists) return true
-
-    const id =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `learned-place-${Date.now()}`
-
-    const next: LearnedPlace = {
-      id,
-      division: current.division,
-      governorate: current.governorate,
-      city: current.city,
-      area: current.area,
-      customPlaceName,
-      keyword: current.keyword,
-      status: 'pending_ai_review',
-      createdAt: new Date().toISOString(),
-    }
-
-    window.localStorage.setItem(LEARNED_PLACES_KEY, JSON.stringify([next, ...stored].slice(0, 200)))
-    return true
-  }
-
   const handleSearch = () => {
-    const didSave = saveLearnedPlace(value)
-    setLearnedMessage(didSave ? t.learnedSaved : '')
     onSearch?.(value)
   }
 
@@ -471,7 +456,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
             <button
               key={division}
               type="button"
-              onClick={() => update({ division })}
+              onClick={() => switchDivision(division)}
               style={{ ...styles.tab, ...(value.division === division ? styles.tabActive : {}) }}
             >
               {t[division]}
@@ -484,7 +469,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
         <LocationCascade
           lang={lang}
           value={{ governorate: value.governorate, city: value.city, area: value.area }}
-          onChange={(next) => update(next)}
+          onChange={(next) => update({ ...next, locationTouched: true })}
         />
         <div style={styles.depthNote}>{t.locationDepth}</div>
 
@@ -569,21 +554,16 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
           {t.customPlace}
           <input
             value={value.customPlaceName}
-            onChange={(event) => {
-              update({ customPlaceName: event.target.value })
-              setLearnedMessage('')
-            }}
+            onChange={(event) => update({ customPlaceName: event.target.value })}
             placeholder={t.customPlacePlaceholder}
             style={styles.input}
           />
         </label>
-        <div style={{ ...styles.aiLearnBox, ...(value.customPlaceName.trim() ? styles.aiLearnBoxActive : {}) }}>
-          <span>🧠</span>
-          <div>
-            <b>{value.customPlaceName.trim() ? t.learnedPending : 'SYBNB Brain'}</b>
-            <p style={styles.aiLearnText}>{learnedMessage || t.aiLearnHint}</p>
+        {value.customPlaceName.trim() ? (
+          <div style={{ ...styles.aiLearnBox, ...styles.aiLearnBoxActive }}>
+            <p style={styles.aiLearnText}>{t.customPlaceHint}</p>
           </div>
-        </div>
+        ) : null}
 
         {!isStay ? (
           <label style={styles.label}>

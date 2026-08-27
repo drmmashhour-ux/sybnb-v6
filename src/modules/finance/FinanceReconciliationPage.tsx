@@ -2,9 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
+  fetchAdminPayouts,
   fetchPrototypeAdminAuditLog,
+  fetchPrototypeAdminMetrics,
   fetchPrototypeReviewQueue,
+  releaseAdminPayout,
+  reviewPrototypePaymentProof,
+  type AdminPayout,
   type PlatformAdminAuditLog,
+  type PlatformAdminMetrics,
   type PlatformPaymentProof,
   type PlatformReviewBooking,
   type PlatformReviewQueue,
@@ -30,13 +36,12 @@ const copy = {
     adminReviewTitle: 'مراجعة الدفعات - الإدارة',
     approve: 'موافقة',
     reject: 'رفض',
-    aiConfidence: 'ثقة الذكاء',
     riskFlags: 'إشارات المخاطر',
-    highTransaction: 'مبلغ غير معتاد',
-    multipleFailures: 'محاولات رفض متعددة',
+    highTransaction: 'دفعات أعلى من المتوسط',
+    recentRejections: 'رفض حديث',
     ledgerStatus: 'حالة السجل المالي',
-    released: 'تم صرفه',
-    heldLedger: 'معلق',
+    refunded: 'مسترد',
+    heldLedger: 'قيد المراجعة',
     rejected: 'مرفوض',
     approved: 'موافق عليه',
     hostPayoutReview: 'مراجعة صرف المضيفين',
@@ -45,7 +50,7 @@ const copy = {
     ledger: 'سجل المصالحة',
     risk: 'تنبيه المخاطر',
     release: 'تحرير التحويل',
-    hold: 'إبقاء معلق',
+    hold: 'ضمن فترة الحماية',
     review: 'مراجعة',
     receipt: 'الإيصال',
     booking: 'الحجز',
@@ -55,6 +60,7 @@ const copy = {
     empty: 'لا توجد عناصر حالياً.',
     loading: 'جار التحميل',
     error: 'تعذر تحميل بيانات المصالحة',
+    releaseError: 'تعذر تحرير التحويل',
     lanes: ['استلام الإثبات', 'مراجعة الإدارة', 'تأكيد الحجز', 'تحرير المالك'],
     refundLanes: ['فتح النزاع', 'تجميع الأدلة', 'قرار الإدارة', 'إرجاع للمحفظة'],
   },
@@ -72,13 +78,12 @@ const copy = {
     adminReviewTitle: 'Admin Payment Review',
     approve: 'Approve',
     reject: 'Reject',
-    aiConfidence: 'AI Confidence',
     riskFlags: 'Risk Flags',
-    highTransaction: 'High single transaction volume',
-    multipleFailures: 'Multiple card failure',
+    highTransaction: 'Above-average pending amounts',
+    recentRejections: 'Recent rejections',
     ledgerStatus: 'Ledger Status',
-    released: 'Released',
-    heldLedger: 'Held',
+    refunded: 'Refunded',
+    heldLedger: 'Under review',
     rejected: 'Rejected',
     approved: 'Approved',
     hostPayoutReview: 'Host Payout Review',
@@ -87,7 +92,7 @@ const copy = {
     ledger: 'Reconciliation ledger',
     risk: 'Risk alert',
     release: 'Release payout',
-    hold: 'Keep held',
+    hold: 'In protection hold',
     review: 'Review',
     receipt: 'Receipt',
     booking: 'Booking',
@@ -97,29 +102,26 @@ const copy = {
     empty: 'No items right now.',
     loading: 'Loading',
     error: 'Could not load reconciliation data',
+    releaseError: 'Could not release payout',
     lanes: ['Proof received', 'Admin review', 'Booking confirmed', 'Owner released'],
     refundLanes: ['Dispute opened', 'Evidence collected', 'Admin decision', 'Wallet refund'],
   },
 }
-
-const payoutSamples = [
-  { id: 'PO-2026-1004', ownerAr: 'مالك فيلا النخيل', ownerEn: 'Palm Villa owner', amountMinor: 187500000, statusAr: 'معلق للحماية', statusEn: 'Held for protection', risk: 'gold' },
-  { id: 'PO-2026-1005', ownerAr: 'مضيف شقة المزة', ownerEn: 'Mezzeh apartment host', amountMinor: 82500000, statusAr: 'جاهز للتحرير', statusEn: 'Ready to release', risk: 'green' },
-  { id: 'PO-2026-1006', ownerAr: 'مالك مشروع سكني', ownerEn: 'New project owner', amountMinor: 312000000, statusAr: 'نزاع مفتوح', statusEn: 'Open dispute', risk: 'red' },
-]
-
-const refundSamples = [
-  { id: 'RF-2026-421', titleAr: 'اختلاف وصف الشقة', titleEn: 'Listing description mismatch', amountMinor: 45000000, statusAr: 'تجميع الأدلة', statusEn: 'Evidence review', risk: 'gold' },
-  { id: 'RF-2026-422', titleAr: 'إلغاء من المضيف', titleEn: 'Host cancellation', amountMinor: 19900000, statusAr: 'جاهز للمحفظة', statusEn: 'Ready to wallet', risk: 'green' },
-]
 
 export function FinanceReconciliationPage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [queue, setQueue] = useState<PlatformReviewQueue | null>(null)
   const [auditLog, setAuditLog] = useState<PlatformAdminAuditLog[]>([])
+  const [payouts, setPayouts] = useState<AdminPayout[]>([])
+  const [metrics, setMetrics] = useState<PlatformAdminMetrics | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
+  const [releasingId, setReleasingId] = useState<string | null>(null)
+  const [releaseError, setReleaseError] = useState('')
+  const [decidingId, setDecidingId] = useState<string | null>(null)
+  const [decisionError, setDecisionError] = useState('')
+  const [recentRejectionCount, setRecentRejectionCount] = useState(0)
 
   useEffect(() => {
     void loadFinance()
@@ -129,12 +131,18 @@ export function FinanceReconciliationPage({ lang }: Props) {
     setStatus('loading')
     setMessage('')
     try {
-      const [nextQueue, nextAuditLog] = await Promise.all([
+      const [nextQueue, nextAuditLog, nextPayouts, nextMetrics, nextRejections] = await Promise.all([
         fetchPrototypeReviewQueue(),
         fetchPrototypeAdminAuditLog(10),
+        fetchAdminPayouts(),
+        fetchPrototypeAdminMetrics(),
+        fetchPrototypeAdminAuditLog(100, { entityType: 'payments', action: 'REVIEW_REJECTED' }),
       ])
       setQueue(nextQueue)
       setAuditLog(nextAuditLog)
+      setPayouts(nextPayouts.payouts)
+      setMetrics(nextMetrics)
+      setRecentRejectionCount(nextRejections.length)
       setStatus('ready')
     } catch (error) {
       setStatus('error')
@@ -142,15 +150,48 @@ export function FinanceReconciliationPage({ lang }: Props) {
     }
   }
 
+  async function handleRelease(bookingId: string) {
+    setReleasingId(bookingId)
+    setReleaseError('')
+    try {
+      await releaseAdminPayout(bookingId)
+      await loadFinance()
+    } catch (error) {
+      setReleaseError(error instanceof Error ? error.message : t.releaseError)
+    } finally {
+      setReleasingId(null)
+    }
+  }
+
+  async function handlePaymentDecision(proofId: string, decision: 'APPROVE' | 'REJECT') {
+    setDecidingId(proofId)
+    setDecisionError('')
+    try {
+      await reviewPrototypePaymentProof(proofId, decision)
+      await loadFinance()
+    } catch (error) {
+      // Sham Cash payments require reconciliation input the full review screen (/admin/review)
+      // collects — this page has no field for it, so surface that clearly instead of a silent no-op.
+      setDecisionError(error instanceof Error ? error.message : t.error)
+    } finally {
+      setDecidingId(null)
+    }
+  }
+
   const payments = queue?.payments || []
   const bookings = queue?.bookings || []
+  const disputedBookings = useMemo(() => bookings.filter((booking) => booking.status === 'DISPUTED'), [bookings])
   const protectedMinor = useMemo(() => {
     const paymentTotal = payments.reduce((sum, payment) => sum + payment.amountMinor, 0)
     const bookingTotal = bookings.reduce((sum, booking) => sum + booking.amountMinor, 0)
     return paymentTotal + bookingTotal
   }, [bookings, payments])
-  const payoutHoldMinor = payoutSamples.reduce((sum, item) => sum + item.amountMinor, 0)
-  const refundReserveMinor = refundSamples.reduce((sum, item) => sum + item.amountMinor, 0)
+  const payoutHoldMinor = payouts.reduce((sum, item) => sum + item.hostPayoutMinor, 0)
+  const refundReserveMinor = disputedBookings.reduce((sum, item) => sum + item.amountMinor, 0)
+  const averagePendingMinor = payments.length
+    ? payments.reduce((sum, item) => sum + item.amountMinor, 0) / payments.length
+    : 0
+  const aboveAverageCount = payments.filter((item) => item.amountMinor > averagePendingMinor).length
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -187,76 +228,82 @@ export function FinanceReconciliationPage({ lang }: Props) {
       <section style={styles.grid}>
         <article style={styles.card}>
           <div style={styles.reviewHeader}>
-            <span style={styles.pendingPill}>{payments.length || 24} Pending</span>
+            <span style={styles.pendingPill}>{payments.length} Pending</span>
             <h2 style={styles.cardTitle}>{t.adminReviewTitle}</h2>
           </div>
+          {decisionError && (
+            <section style={styles.error}>
+              <strong>{t.error}</strong>
+              <span>{decisionError}</span>
+            </section>
+          )}
           {status === 'loading' && <p style={styles.empty}>{t.loading}</p>}
           {payments.length ? payments.slice(0, 4).map((payment) => (
-            <PaymentProofRow key={payment.id} payment={payment} lang={lang} labels={t} />
-          )) : status !== 'loading' && [12400, 3200, 1500, 45000].map((amount, index) => (
             <PaymentProofRow
-              key={amount}
-              payment={{
-                id: `USR-${index + 7700}`,
-                bookingId: `BK-${index + 42}`,
-                userId: `USR-${index}`,
-                provider: index % 2 === 0 ? 'SHAM_CASH' : 'BANK_TRANSFER',
-                status: 'PENDING_ADMIN_REVIEW',
-                amountMinor: amount,
-                currency: 'SAR',
-                proofAssetUrl: null,
-                providerRef: `USR-${index + 7700}`,
-                adminNote: null,
-                reviewedById: null,
-                reviewedAt: null,
-              }}
+              key={payment.id}
+              payment={payment}
               lang={lang}
               labels={t}
+              disabled={decidingId === payment.id}
+              onApprove={() => void handlePaymentDecision(payment.id, 'APPROVE')}
+              onReject={() => void handlePaymentDecision(payment.id, 'REJECT')}
             />
-          ))}
+          )) : status !== 'loading' && <p style={styles.empty}>{t.empty}</p>}
         </article>
 
         <article style={styles.card}>
           <h2 style={styles.cardTitle}>{t.riskFlags}</h2>
           <section style={styles.riskGrid}>
             <article style={styles.riskCard}>
-              <strong>94%</strong>
+              <strong>{aboveAverageCount}</strong>
               <span>{t.highTransaction}</span>
-              <button onClick={() => (window.location.hash = '/operations')}>{t.review}</button>
+              <button onClick={() => (window.location.hash = '/admin/review')}>{t.review}</button>
             </article>
             <article style={styles.riskCard}>
-              <strong>88%</strong>
-              <span>{t.multipleFailures}</span>
+              <strong>{recentRejectionCount}</strong>
+              <span>{t.recentRejections}</span>
               <button onClick={() => (window.location.hash = '/admin/review')}>{t.review}</button>
             </article>
           </section>
           <h2 style={styles.cardTitle}>{t.ledgerStatus}</h2>
           <section style={styles.ledgerStats}>
-            <FinanceStat label={t.released} value="14,200" tone="#5268ff" />
-            <FinanceStat label={t.heldLedger} value="8,940" tone="#e5b80b" />
-            <FinanceStat label={t.rejected} value="2,100" tone="#ff5f7d" />
-            <FinanceStat label={t.approved} value="42,500" tone="#20d29b" />
+            <FinanceStat label={t.refunded} value={String(metrics?.paymentsByStatus.REFUNDED || 0)} tone="#5268ff" />
+            <FinanceStat label={t.heldLedger} value={String(metrics?.paymentsByStatus.PENDING_ADMIN_REVIEW || 0)} tone="#e5b80b" />
+            <FinanceStat label={t.rejected} value={String(metrics?.paymentsByStatus.REJECTED || 0)} tone="#ff5f7d" />
+            <FinanceStat label={t.approved} value={String(metrics?.paymentsByStatus.APPROVED || 0)} tone="#20d29b" />
           </section>
         </article>
       </section>
 
       <section style={styles.card}>
         <h2 style={styles.cardTitle}>{t.hostPayoutReview}</h2>
+        {releaseError && (
+          <section style={styles.error}>
+            <strong>{t.releaseError}</strong>
+            <span>{releaseError}</span>
+          </section>
+        )}
         <div style={styles.payoutTable}>
-          {payoutSamples.map((payout) => (
-            <article key={payout.id} style={styles.financeRow}>
-              <span style={{ ...styles.riskDot, background: riskColor(payout.risk) }} />
+          {payouts.map((payout) => (
+            <article key={payout.bookingId} style={styles.financeRow}>
+              <span style={{ ...styles.riskDot, background: riskColor(payout.eligibleNow ? 'green' : 'gold') }} />
               <div>
-                <strong>{isAr ? payout.ownerAr : payout.ownerEn}</strong>
-                <small dir="ltr">{payout.id}</small>
+                <strong>{payout.hostName || payout.listingTitle || payout.bookingId.slice(0, 8).toUpperCase()}</strong>
+                <small dir="ltr">{payout.bookingId.slice(0, 8).toUpperCase()}</small>
               </div>
-              <b>{moneyText(payout.amountMinor, 'SYP', lang)}</b>
+              <b>{moneyText(payout.hostPayoutMinor, payout.currency, lang)}</b>
               <div style={styles.rowActions}>
-                <button onClick={() => (window.location.hash = '/admin/review')}>{payout.risk === 'green' ? t.release : t.hold}</button>
-                <button onClick={() => (window.location.hash = '/operations')}>{t.review}</button>
+                <button
+                  disabled={!payout.eligibleNow || releasingId === payout.bookingId}
+                  onClick={() => handleRelease(payout.bookingId)}
+                >
+                  {payout.eligibleNow ? t.release : t.hold}
+                </button>
+                <button onClick={() => (window.location.hash = `/booking/${payout.bookingId}`)}>{t.review}</button>
               </div>
             </article>
           ))}
+          {!payouts.length && status !== 'loading' && <p style={styles.empty}>{t.empty}</p>}
         </div>
       </section>
 
@@ -268,17 +315,18 @@ export function FinanceReconciliationPage({ lang }: Props) {
               <span key={lane} style={index <= 1 ? styles.timelineActive : undefined}>{lane}</span>
             ))}
           </div>
-          {refundSamples.map((refund) => (
-            <article key={refund.id} style={styles.financeRow}>
-              <span style={{ ...styles.riskDot, background: riskColor(refund.risk) }} />
+          {disputedBookings.map((booking) => (
+            <article key={booking.id} style={styles.financeRow}>
+              <span style={{ ...styles.riskDot, background: riskColor('red') }} />
               <div>
-                <strong>{isAr ? refund.titleAr : refund.titleEn}</strong>
-                <small dir="ltr">{refund.id}</small>
+                <strong>{isAr ? booking.listing?.titleAr : booking.listing?.titleEn}</strong>
+                <small dir="ltr">{booking.id.slice(0, 8).toUpperCase()}</small>
               </div>
-              <b>{moneyText(refund.amountMinor, 'SYP', lang)}</b>
-              <button onClick={() => (window.location.hash = `/booking/dispute/${refund.id}`)}>{t.review}</button>
+              <b>{moneyText(booking.amountMinor, booking.currency, lang)}</b>
+              <button onClick={() => (window.location.hash = `/booking/dispute/${booking.id}`)}>{t.review}</button>
             </article>
           ))}
+          {!disputedBookings.length && status !== 'loading' && <p style={styles.empty}>{t.empty}</p>}
         </article>
 
         <article style={styles.card}>
@@ -321,22 +369,31 @@ function FinanceStat({ label, value, tone }: { label: string; value: string; ton
   )
 }
 
-function PaymentProofRow({ payment, lang, labels }: { payment: PlatformPaymentProof; lang: Lang; labels: typeof copy.ar }) {
-  const confidence = Math.min(96, Math.max(38, payment.amountMinor % 100))
+function PaymentProofRow({
+  payment,
+  lang,
+  labels,
+  disabled,
+  onApprove,
+  onReject,
+}: {
+  payment: PlatformPaymentProof
+  lang: Lang
+  labels: typeof copy.ar
+  disabled: boolean
+  onApprove: () => void
+  onReject: () => void
+}) {
   return (
     <article style={styles.financeRow}>
       <span style={{ ...styles.riskDot, background: payment.status === 'PENDING_REVIEW' ? '#e5b80b' : '#20d29b' }} />
       <div style={styles.rowActions}>
-        <button style={styles.approveButton} onClick={() => (window.location.hash = '/admin/review')}>{labels.approve}</button>
-        <button style={styles.rejectButton} onClick={() => (window.location.hash = '/admin/review')}>{labels.reject}</button>
+        <button disabled={disabled} style={styles.approveButton} onClick={onApprove}>{labels.approve}</button>
+        <button disabled={disabled} style={styles.rejectButton} onClick={onReject}>{labels.reject}</button>
       </div>
       <div>
         <strong>{payment.providerRef || payment.id.slice(0, 8).toUpperCase()}</strong>
         <small>{labels.provider}: {providerText(payment.provider, lang)}</small>
-      </div>
-      <div style={styles.confidence}>
-        <small>{labels.aiConfidence}</small>
-        <span style={styles.confidenceTrack}><b style={{ ...styles.confidenceFill, width: `${confidence}%` }} /></span>
       </div>
       <b>{moneyText(payment.amountMinor, payment.currency, lang)}</b>
       <button onClick={() => (window.location.hash = `/payment/receipt/${payment.id}`)}>{labels.receipt}</button>
@@ -384,9 +441,6 @@ const styles: Record<string, CSSProperties> = {
   rowActions: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
   approveButton: { minHeight: 38, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 12px' },
   rejectButton: { minHeight: 38, border: 0, borderRadius: 8, background: '#ff5f7d', color: '#fff', fontWeight: 950, padding: '0 12px' },
-  confidence: { display: 'grid', gap: 6, color: '#697386' },
-  confidenceTrack: { height: 6, borderRadius: 999, background: '#202333', overflow: 'hidden' },
-  confidenceFill: { display: 'block', height: '100%', borderRadius: 999, background: '#ff5f7d' },
   reviewHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   pendingPill: { border: '1px solid rgba(229,184,11,.55)', borderRadius: 999, color: '#e5b80b', padding: '6px 10px', fontWeight: 950, fontSize: 12 },
   riskGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' },

@@ -16,6 +16,7 @@ import { divisionText, listingDescriptionText, listingTitleText, moneyText, stat
 import { propertyFilterGroup, sellerCarFilterGroupsFromConfig } from '../../engines/filters'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
+import { guestFeeSummary } from '../bookings/guestFeeSummary'
 import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
 
@@ -75,8 +76,12 @@ const copy = {
     protectedCopy: 'أضف حماية الإلغاء المفاجئ واسترد قيمة الحجز بدون رسوم إلغاء.',
     protectionFee: 'رسوم الحماية',
     totalDue: 'الإجمالي المستحق',
+    stayAmount: 'قيمة الحجز',
+    cleaningFee: 'رسوم الإزالة والتنظيف',
+    taxes: 'الضرائب والرسوم المحلية',
+    feesIncluded: 'شامل رسوم التنظيف والضرائب',
     agreementTitle: 'اتفاقية الإيجار اليومي',
-    agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي. أعلم أن SYBNB تخصم عمولة خدمة (10% من قيمة الإيجار) من مستحقات المضيف مقابل إدارة الحجز والدفع والحماية.',
+    agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي. أعلم أن SYBNB تخصم عمولة خدمة (12% من قيمة الإيجار) من مستحقات المضيف مقابل إدارة الحجز والدفع والحماية.',
     agreementRequired: 'يجب قبول اتفاقية الإيجار اليومي قبل إرسال طلب الحجز.',
     datesTitle: 'اختر تاريخ الإقامة',
     datesRequired: 'اختر تاريخ الدخول والخروج قبل إرسال طلب الحجز.',
@@ -157,8 +162,12 @@ const copy = {
     protectedCopy: 'Add sudden-cancellation protection and recover the booking amount without cancellation fee.',
     protectionFee: 'Protection fee',
     totalDue: 'Total due',
+    stayAmount: 'Booking amount',
+    cleaningFee: 'Cleaning fee',
+    taxes: 'Taxes and local fees',
+    feesIncluded: 'Includes cleaning fee and taxes',
     agreementTitle: 'Short-Term Rental Agreement',
-    agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action. I understand SYBNB deducts a service commission (10% of the rent amount) from the host payout for managing the booking, payment, and protection.',
+    agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action. I understand SYBNB deducts a service commission (12% of the rent amount) from the host payout for managing the booking, payment, and protection.',
     agreementRequired: 'You must accept the short-term rental agreement before sending the booking request.',
     datesTitle: 'Choose your stay dates',
     datesRequired: 'Choose check-in and check-out dates before sending the booking request.',
@@ -220,6 +229,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const [acceptedGuestAgreement, setAcceptedGuestAgreement] = useState(bookingDraft.acceptedGuestAgreement ?? false)
   const [customerReady, setCustomerReady] = useState(false)
   const [offlineMapReady, setOfflineMapReady] = useState(false)
+  const [activeMedia, setActiveMedia] = useState(0)
   const [activeTab, setActiveTab] = useState<'terms' | 'host' | 'location' | 'reviews'>('terms')
   const [dateRange, setDateRange] = useState<DateRange>(
     bookingDraft.dateRange || loadSearchDatesDraft() || { checkIn: '', checkOut: '' },
@@ -239,8 +249,20 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const detailCopy = useMemo(() => detailCopyForDivision(listing?.division || 'STAYS', lang, t), [lang, listing?.division, t])
   const returnPath = useMemo(() => readListingReturnPath(), [])
   const displayedTotalMinor = stayQuote?.totalMinor ?? listing?.priceMinor ?? 0
-  const protectionFeeMinor = Math.round(displayedTotalMinor * 0.03)
-  const protectedTotalMinor = displayedTotalMinor + protectionFeeMinor
+  // Same guestFeeSummary() the real receipt (BookingDetailPage) uses, so the price a guest evaluates
+  // here already includes the cleaning fee + tax the receipt would otherwise reveal only after
+  // booking -- CAPSULE_RULES.noFakeTrustSignal extends to prices, not just verification claims.
+  const feeInput = useMemo(
+    () => (listing ? { division: listing.division, metadata: listing.metadata } : undefined),
+    [listing],
+  )
+  const feesStandard = useMemo(() => guestFeeSummary({ amountMinor: displayedTotalMinor, listing: feeInput }), [displayedTotalMinor, feeInput])
+  const feesProtected = useMemo(
+    () => guestFeeSummary({ amountMinor: displayedTotalMinor, listing: feeInput, metadata: { cancellationProtectionPurchased: true } }),
+    [displayedTotalMinor, feeInput],
+  )
+  const protectionFeeMinor = feesProtected.cancellationProtectionFeeMinor
+  const protectedTotalMinor = feesProtected.totalMinor
   const mapTarget = listing ? listingMapTarget(listing, title, lang) : null
 
   useEffect(() => {
@@ -482,16 +504,42 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               →
             </button>
             <div style={styles.media}>
-              <img
-                src={listingImage(listing)}
-                alt={title}
-                style={styles.mediaImage}
-                onError={(event) => {
-                  const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
-                  if (event.currentTarget.src.endsWith(fallback)) return
-                  event.currentTarget.src = fallback
-                }}
-              />
+              {(() => {
+                const mediaUrls = (listing.media || [])
+                  .map((item) => item.url || item.src || item.assetUrl)
+                  .filter((value): value is string => typeof value === 'string')
+                const heroSrc = mediaUrls[activeMedia] || listingImage(listing)
+                return (
+                  <>
+                    <img
+                      src={heroSrc}
+                      alt={title}
+                      style={styles.mediaImage}
+                      onError={(event) => {
+                        const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+                        if (event.currentTarget.src.endsWith(fallback)) return
+                        event.currentTarget.src = fallback
+                      }}
+                    />
+                    {mediaUrls.length > 1 && (
+                      <div style={styles.thumbStrip} role="group" aria-label={lang === 'ar' ? 'صور الإعلان' : 'Listing photos'}>
+                        {mediaUrls.map((url, index) => (
+                          <button
+                            key={`${url}-${index}`}
+                            type="button"
+                            onClick={() => setActiveMedia(index)}
+                            aria-label={`${title} ${index + 1}`}
+                            aria-current={index === activeMedia}
+                            style={index === activeMedia ? styles.thumbActive : styles.thumb}
+                          >
+                            <img src={url} alt="" style={styles.thumbImg} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
               <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
               {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
             </div>
@@ -511,11 +559,10 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             </div>
 
             <section style={styles.figmaTrustCard}>
-              <strong>{t.protectedTitle}</strong>
-              <div style={styles.trustPills}>
-                <span>{t.verifiedOwner}</span>
-                <span>{t.fastResponse}</span>
-              </div>
+              {/* "Protected" only applies to Stays, the one division that actually transacts through
+                  SYBNB — showing it on contact-only divisions would overclaim (matches the gating
+                  already applied to the payment-protected card further down). */}
+              {listing.division === 'STAYS' && <strong>{t.protectedTitle}</strong>}
               <small>
                 {reviewSummary.count > 0
                   ? `${t.rating} ${reviewSummary.average} ★ (${reviewSummary.count})`
@@ -588,9 +635,10 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                           {quoteLoading
                             ? t.quoteLoading
                             : stayQuote
-                              ? `${moneyText(stayQuote.totalMinor, listing.currency, lang)} · ${stayQuote.nights} ${isAr ? 'ليالٍ' : 'nights'}`
-                              : moneyText(listing.priceMinor, listing.currency, lang)}
+                              ? `${moneyText(feesStandard.totalMinor, listing.currency, lang)} · ${stayQuote.nights} ${isAr ? 'ليالٍ' : 'nights'}`
+                              : moneyText(feesStandard.totalMinor, listing.currency, lang)}
                         </small>
+                        {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
                       </button>
                       <button
                         style={cancellationProtection ? styles.protectionOptionActive : styles.protectionOption}
@@ -601,8 +649,18 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                         <em style={styles.cancellationCutoff}>{freeCancellationLabel(dateRange.checkIn, true, lang)}</em>
                         <small>{t.protectionFee}: {moneyText(protectionFeeMinor, listing.currency, lang)}</small>
                         <small>{t.totalDue}: {moneyText(protectedTotalMinor, listing.currency, lang)}</small>
+                        {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
                       </button>
                     </div>
+                    {!quoteLoading && (feesStandard.cleaningFeeMinor > 0 || feesStandard.taxesMinor > 0) && (
+                      <div style={styles.feeBreakdownRow}>
+                        <span>{t.stayAmount}: {moneyText(feesStandard.stayAmountMinor, listing.currency, lang)}</span>
+                        {feesStandard.cleaningFeeMinor > 0 && (
+                          <span>{t.cleaningFee}: {moneyText(feesStandard.cleaningFeeMinor, listing.currency, lang)}</span>
+                        )}
+                        {feesStandard.taxesMinor > 0 && <span>{t.taxes}: {moneyText(feesStandard.taxesMinor, listing.currency, lang)}</span>}
+                      </div>
+                    )}
                   </section>
                 </>
               )}
@@ -627,7 +685,11 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                   <div style={styles.mapLocationCard}>
                     <span style={styles.mapPin}>{detailCopy.mapPin}</span>
                     <strong>{mapTarget?.label}</strong>
-                    <small>{mapTarget?.hasCoordinates ? mapTarget.query : t.mapApproximate}</small>
+                    {mapTarget?.hasCoordinates ? (
+                      <small>{mapTarget.query}</small>
+                    ) : mapTarget?.hasRealLocation ? (
+                      <small>{t.mapApproximate}</small>
+                    ) : null}
                   </div>
                 </div>
                 <a href={googleMapsSearchUrl(listing, title, lang)} rel="noreferrer" target="_blank" style={styles.secondaryLinkButton}>
@@ -650,28 +712,23 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           {activeTab === 'host' && (
             <section style={styles.trustGrid}>
               <article style={styles.trustCard}>
-                <strong>{t.verifiedOwner}</strong>
-                <span>✓ {listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}</span>
+                <strong>{t.host}</strong>
+                <span>{listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}</span>
               </article>
-              <article style={styles.trustCard}>
-                <strong>{t.fastResponse}</strong>
-                <span>{isAr ? '١٨ دقيقة' : '18 minutes'}</span>
-              </article>
-              <article style={styles.trustCard}>
-                <strong>{t.paymentProtected}</strong>
-                <span>{t.protected}</span>
-              </article>
-              <article style={styles.trustCard}>
-                <strong>{t.aiFit}</strong>
-                <span>91%</span>
-              </article>
+              {/* Payment protection only applies to the division that actually transacts (Stays);
+                  showing it on contact-only divisions (Rentals/Buy/Cars/Marketplace) would overclaim. */}
+              {listing.division === 'STAYS' && (
+                <article style={styles.trustCard}>
+                  <strong>{t.paymentProtected}</strong>
+                  <span>{t.protected}</span>
+                </article>
+              )}
             </section>
           )}
 
           {activeTab === 'reviews' && (
             <>
               <section style={styles.grid}>
-                <Info label={t.trustScore} value="94/100" />
                 <Info
                   label={t.rating}
                   value={reviewSummary.count > 0 ? `${reviewSummary.average} ★ (${t.reviewsCount(reviewSummary.count)})` : t.noReviewsYet}
@@ -695,7 +752,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           )}
 
           <section style={styles.grid}>
-            <Info label={t.price} value={moneyText(displayedTotalMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+            <Info label={t.price} value={moneyText(feesStandard.totalMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
             <Info label={t.owner} value={listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()} />
             <Info label={t.division} value={divisionText(listing.division, lang)} dir={isAr ? 'rtl' : 'ltr'} />
             {customerReady ? <Info label={t.accountReady} value="✓" dir={isAr ? 'rtl' : 'ltr'} /> : null}
@@ -760,9 +817,7 @@ function toISODate(date: Date) {
 }
 
 function listingImage(listing: PlatformListing) {
-  if (listing.division === 'CARS' || listing.division === 'NEW_CONSTRUCTION' || listing.division === 'MARKETPLACE') {
-    return DIVISION_IMAGES[listing.division]
-  }
+  // Prefer the listing's real uploaded photo for every division; generic image is only a fallback.
   const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
   if (typeof mediaUrl === 'string') return mediaUrl
   return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
@@ -968,6 +1023,10 @@ const styles: Record<string, CSSProperties> = {
   heroNextButton: { position: 'absolute', top: 18, insetInlineEnd: 18, zIndex: 2, width: 52, height: 52, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.42)', color: '#fff', fontSize: 28, fontWeight: 900, display: 'grid', placeItems: 'center', backdropFilter: 'blur(10px)' },
   media: { minHeight: 330, background: '#0b1120', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 950, textTransform: 'uppercase', position: 'relative', overflow: 'hidden' },
   mediaImage: { width: '100%', height: '100%', minHeight: 330, objectFit: 'cover', display: 'block' },
+  thumbStrip: { position: 'absolute', left: 0, right: 0, bottom: 8, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', padding: '0 8px' },
+  thumb: { width: 56, height: 42, borderRadius: 8, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.5)', padding: 0, cursor: 'pointer', background: 'transparent' },
+  thumbActive: { width: 56, height: 42, borderRadius: 8, overflow: 'hidden', border: '2px solid #6f86ff', padding: 0, cursor: 'pointer', background: 'transparent' },
+  thumbImg: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
   mediaBadge: { position: 'absolute', insetInlineStart: 14, bottom: 14, borderRadius: 999, background: 'rgba(8,9,15,.78)', border: '1px solid rgba(255,255,255,.18)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   instantBookBadge: { position: 'absolute', insetInlineStart: 14, top: 14, borderRadius: 999, background: 'rgba(213,169,21,.9)', color: '#1a1400', fontWeight: 950, border: '1px solid rgba(255,255,255,.25)', padding: '8px 12px', backdropFilter: 'blur(12px)' },
   detailBody: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', padding: 20, display: 'grid', gap: 18 },
@@ -1014,6 +1073,8 @@ const styles: Record<string, CSSProperties> = {
   protectionOption: { minHeight: 118, border: '1px solid #30384d', borderRadius: 8, background: '#0d1320', color: '#fff', padding: 14, textAlign: 'start', display: 'grid', gap: 8 },
   protectionOptionActive: { minHeight: 118, border: '1px solid #20d29b', borderRadius: 8, background: 'rgba(32,210,155,.12)', color: '#fff', padding: 14, textAlign: 'start', display: 'grid', gap: 8 },
   cancellationCutoff: { color: '#20d29b', fontStyle: 'normal', fontWeight: 800, fontSize: 13 },
+  feesIncludedNote: { color: '#82899b', fontWeight: 700, fontSize: 12 },
+  feeBreakdownRow: { display: 'flex', flexWrap: 'wrap', gap: '4px 16px', color: '#a5adc2', fontSize: 12, fontWeight: 700, padding: '2px 2px 0' },
   agreementBox: { border: '1px solid rgba(229,184,11,.58)', borderRadius: 8, background: 'rgba(229,184,11,.08)', color: '#f7d45f', padding: 14, display: 'grid', gap: 12, gridTemplateColumns: '34px minmax(0, 1fr)', alignItems: 'start', lineHeight: 1.5 },
   agreementInput: { width: 28, height: 28, accentColor: '#20d29b', margin: 0 },
   info: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 6, color: '#9aa6ba' },

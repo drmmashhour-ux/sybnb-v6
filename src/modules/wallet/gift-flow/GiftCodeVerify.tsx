@@ -2,21 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 
 type Lang = 'ar' | 'en'
 
+type GiftClaimFailure = { code?: string; message?: string }
+
 type GiftCodeVerifyProps = {
   lang?: Lang
   phoneMasked?: string
-  onVerified?: (code: string) => void | boolean | Promise<void | boolean>
+  onVerified?: (code: string) => true | GiftClaimFailure | Promise<true | GiftClaimFailure>
   onBack?: () => void
 }
 
 const T = {
   ar: {
-    title: 'أدخل رمز التحقق',
-    subtitle: 'أرسلنا رمزاً من 6 أرقام إلى رقم الهاتف المرتبط بالهدية.',
-    codeLabel: 'رمز التحقق',
+    title: 'أدخل رمز الاستلام',
+    subtitle: 'اطلب رمز الاستلام المكون من 6 أرقام من الشخص الذي أرسل لك الهدية.',
+    codeLabel: 'رمز الاستلام',
     attempts: 'المحاولات المتبقية',
-    resendIn: 'إعادة الإرسال بعد',
-    resend: 'إعادة إرسال الرمز',
     wrong: 'الرمز غير صحيح. حاول مرة أخرى.',
     locked: 'تم إيقاف المحاولة مؤقتاً لحماية الهدية.',
     security: 'لن تطلب SYBNB هذا الرمز منك أبداً.',
@@ -24,12 +24,10 @@ const T = {
     verify: 'تأكيد الرمز',
   },
   en: {
-    title: 'Enter verification code',
-    subtitle: 'We sent a 6-digit code to the phone number linked to this gift.',
-    codeLabel: 'Verification code',
+    title: 'Enter claim code',
+    subtitle: 'Ask the person who sent you this gift for the 6-digit claim code.',
+    codeLabel: 'Claim code',
     attempts: 'Attempts left',
-    resendIn: 'Resend in',
-    resend: 'Resend code',
     wrong: 'The code is not correct. Try again.',
     locked: 'Attempts are paused temporarily to protect this gift.',
     security: 'SYBNB will never ask you for this code.',
@@ -52,7 +50,6 @@ const boxStyle: React.CSSProperties = {
 
 export function GiftCodeVerify({ lang = 'ar', phoneMasked = '+963 9•• ••• ••42', onVerified, onBack }: GiftCodeVerifyProps) {
   const [digits, setDigits] = useState(['', '', '', '', '', ''])
-  const [seconds, setSeconds] = useState(30)
   const [attempts, setAttempts] = useState(3)
   const [error, setError] = useState('')
   const [verifying, setVerifying] = useState(false)
@@ -62,12 +59,6 @@ export function GiftCodeVerify({ lang = 'ar', phoneMasked = '+963 9•• ••
 
   const code = useMemo(() => digits.join(''), [digits])
   const complete = code.length === 6
-
-  useEffect(() => {
-    if (seconds <= 0) return
-    const timer = window.setTimeout(() => setSeconds((value) => value - 1), 1000)
-    return () => window.clearTimeout(timer)
-  }, [seconds])
 
   function setDigit(index: number, value: string) {
     const nextChar = value.replace(/\D/g, '').slice(-1)
@@ -98,15 +89,20 @@ export function GiftCodeVerify({ lang = 'ar', phoneMasked = '+963 9•• ••
     setError('')
 
     try {
-      const accepted = await onVerified?.(code)
-      if (accepted === false) {
-        throw new Error('verification_failed')
+      const result = await onVerified?.(code)
+      if (result && result !== true) {
+        // Only a genuinely wrong code should cost the recipient an attempt. Every other real
+        // failure reason (expired, locked, gift not claimable) means retrying this same code can
+        // never succeed — show the real reason instead of the misleading "code incorrect" message.
+        if (result.code === 'GIFT_CODE_INVALID' || !result.code) {
+          setDigits(['', '', '', '', '', ''])
+          setAttempts((value) => Math.max(0, value - 1))
+          setError(attempts - 1 <= 0 ? t.locked : t.wrong)
+        } else {
+          setError(result.message || t.wrong)
+        }
+        inputs.current[0]?.focus()
       }
-    } catch {
-      setDigits(['', '', '', '', '', ''])
-      setAttempts((value) => Math.max(0, value - 1))
-      setError(attempts - 1 <= 0 ? t.locked : t.wrong)
-      inputs.current[0]?.focus()
     } finally {
       setVerifying(false)
     }
@@ -145,19 +141,9 @@ export function GiftCodeVerify({ lang = 'ar', phoneMasked = '+963 9•• ••
 
           {error && <div style={{ marginTop: 14, color: '#ff5f76', fontWeight: 800 }}>{error}</div>}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 18 }}>
-            <div style={{ borderRadius: 14, background: '#171b29', padding: 12 }}>
-              <div style={{ color: '#9aa6ba', fontSize: 12 }}>{t.attempts}</div>
-              <strong>{attempts}</strong>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSeconds(30)}
-              disabled={seconds > 0}
-              style={{ minHeight: 52, borderRadius: 14, border: '1px solid #2c3448', background: '#171b29', color: '#fff', fontWeight: 900, opacity: seconds > 0 ? .55 : 1 }}
-            >
-              {seconds > 0 ? `${t.resendIn} ${seconds}s` : t.resend}
-            </button>
+          <div style={{ borderRadius: 14, background: '#171b29', padding: 12, marginTop: 18 }}>
+            <div style={{ color: '#9aa6ba', fontSize: 12 }}>{t.attempts}</div>
+            <strong>{attempts}</strong>
           </div>
 
           <div style={{ marginTop: 14, borderRadius: 14, border: '1px solid rgba(213,169,21,.35)', background: 'rgba(213,169,21,.10)', color: '#d5a915', padding: 12, lineHeight: 1.6 }}>

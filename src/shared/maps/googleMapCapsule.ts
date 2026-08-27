@@ -3,6 +3,7 @@ import type { PlatformListing } from '../api/platformApi'
 
 export type GoogleMapTarget = {
   hasCoordinates: boolean
+  hasRealLocation: boolean
   label: string
   query: string
 }
@@ -56,13 +57,25 @@ export function listingMapTarget(listing: PlatformListing, title: string, lang: 
     stringFrom(location.governorate ?? metadata.governorate),
   ].filter(Boolean)
   const uniqueParts = Array.from(new Set(addressParts))
+  const hasRealLocation = uniqueParts.length > 0
+  const hasCoordinates = typeof lat === 'number' && typeof lng === 'number'
   const country = lang === 'ar' ? 'سوريا' : 'Syria'
-  const fallbackCity = lang === 'ar' ? 'دمشق' : 'Damascus'
-  const label = uniqueParts.length > 0 ? uniqueParts.join(lang === 'ar' ? '، ' : ', ') : `${title}, ${fallbackCity}, ${country}`
+  // A listing with no real address text used to silently fabricate `${title}, Damascus, Syria` --
+  // a specific, disprovable city claim that could (and did) contradict the listing's own title.
+  // "Syria" alone stays true (SYBNB is Syria-only today, no other country profile is active), but a
+  // specific city was never confirmed and must never be invented. CAPSULE_RULES.noFakeTrustSignal.
+  const pinnedLocation = lang === 'ar' ? 'موقع محدد على الخريطة' : 'Pinned location'
+  const locationNotProvided = lang === 'ar' ? 'لم يتم تحديد الموقع' : 'Location not provided'
+  const label = hasRealLocation
+    ? uniqueParts.join(lang === 'ar' ? '، ' : ', ')
+    : hasCoordinates
+      ? pinnedLocation
+      : locationNotProvided
 
-  if (typeof lat === 'number' && typeof lng === 'number') {
+  if (hasCoordinates) {
     return {
       hasCoordinates: true,
+      hasRealLocation,
       label,
       query: `${lat},${lng}`,
     }
@@ -70,8 +83,9 @@ export function listingMapTarget(listing: PlatformListing, title: string, lang: 
 
   return {
     hasCoordinates: false,
+    hasRealLocation,
     label,
-    query: uniqueParts.length > 0 ? [title, ...uniqueParts, country].filter(Boolean).join(', ') : `${title}, ${fallbackCity}, ${country}`,
+    query: hasRealLocation ? [title, ...uniqueParts, country].filter(Boolean).join(', ') : `${title}, ${country}`,
   }
 }
 

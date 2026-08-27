@@ -24,11 +24,15 @@ const T = {
     liveResults: 'نتائج مباشرة من قاعدة البيانات',
     sampleResults: 'بيانات تجريبية - قاعدة البيانات غير متصلة',
     pendingOnly: 'الإعلانات قيد المراجعة لا تظهر هنا حتى يوافق فريق SYBNB.',
+    noResults: 'لا توجد نتائج مطابقة لبحثك. جرّب توسيع الفلاتر أو تغيير الموقع.',
     price: 'السعر',
     book: 'فتح تفاصيل الغرفة',
     details: 'عرض التفاصيل',
     filterTitle: 'اختيار ذكي',
     resultTitle: 'النتائج المناسبة',
+    loadMore: 'عرض المزيد',
+    loadingMore: 'جار التحميل...',
+    noPhotoYet: 'لا توجد صور بعد',
     ready: 'جاهز للبحث',
     staysReady: 'جاهز لحجز استضافة',
     staysTitle: 'بحث الإيجار اليومي',
@@ -83,11 +87,15 @@ const T = {
     liveResults: 'Live database results',
     sampleResults: 'Sample data - database unavailable',
     pendingOnly: 'Listings under review stay hidden here until SYBNB approves them.',
+    noResults: 'No results match your search. Try widening the filters or changing the location.',
     price: 'Price',
     book: 'Open room details',
     details: 'View details',
     filterTitle: 'Smart selection',
     resultTitle: 'Matched results',
+    loadMore: 'Load more',
+    loadingMore: 'Loading...',
+    noPhotoYet: 'No photos yet',
     ready: 'Ready to search',
     staysReady: 'Ready to book a stay',
     staysTitle: 'Daily Stay Search',
@@ -148,6 +156,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   const [state, setState] = useState<'loading' | 'empty' | 'error'>('empty')
   const [lastSearch, setLastSearch] = useState<UnifiedSearchValue | null>(null)
   const [listings, setListings] = useState<PlatformListing[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [lastQuery, setLastQuery] = useState<{ division: string; filters?: Parameters<typeof fetchApprovedListings>[1] } | null>(null)
   const isStaysEntry = entry === 'stays'
   const isDirectDivisionEntry = isStaysEntry || initialDivision !== 'stays'
   const divisionCopy = t.divisionCopy[effectiveInitialDivision]
@@ -175,19 +186,59 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               carTransmission: value.carTransmission,
               condition: value.condition,
               propertyType: value.propertyType,
+              marketCategory: value.marketCategory,
+              amenities: value.amenities,
+              views: value.views,
+              access: value.access,
             },
             priceMin: Number(value.minPrice) || undefined,
             priceMax: Number(value.maxPrice) || undefined,
-            bedroomsMin: value.bedroomsCount || undefined,
-            bathroomsMin: value.bathrooms || undefined,
+            sort: value.sort,
+            priceBand: value.priceBand,
+            // A real bug caught by an independent re-audit: bedroomsCount/bathrooms default to 1
+            // and their only editable UI (the counter steppers in UnifiedSearchBar) is gated to
+            // isStay -- so for every other division these were silently sent as bedroomsMin=1/
+            // bathroomsMin=1 on every explicit search. CARS/MARKETPLACE listings have no
+            // bedrooms/bathrooms metadata at all, so that JSON-path filter matched nothing and
+            // every filtered search returned zero results while blaming the user's filters. Only
+            // send these for the divisions that actually carry that metadata.
+            bedroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) ? value.bedroomsCount || undefined : undefined,
+            bathroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) ? value.bathrooms || undefined : undefined,
+            // Wire the chosen location to the server so results actually narrow to the selected
+            // governorate (maps the capsule key to the stored English city name). Only once the
+            // guest actually touches the location picker -- UnifiedSearchBar's governorate/city
+            // default to Damascus for display, and CARS/MARKETPLACE listings are almost never
+            // geotagged, so applying that untouched default as a filter silently zeroed out
+            // every explicit search in those divisions.
+            city: value.locationTouched ? GOV_TO_CITY[value.governorate] || undefined : undefined,
           }
         : undefined
-      const results = await fetchApprovedListings(toApiDivision(value?.division || effectiveInitialDivision), filters)
-      setListings(results)
+      const division = toApiDivision(value?.division || effectiveInitialDivision)
+      const results = await fetchApprovedListings(division, filters)
+      setListings(results.listings)
+      setNextCursor(results.nextCursor)
+      setLastQuery({ division, filters })
       setState('empty')
     } catch {
       setListings([])
+      setNextCursor(null)
+      setLastQuery(null)
       setState('error')
+    }
+  }
+
+  async function loadMoreResults() {
+    if (!nextCursor || loadingMore || !lastQuery) return
+    setLoadingMore(true)
+    try {
+      const results = await fetchApprovedListings(lastQuery.division, lastQuery.filters, nextCursor)
+      setListings((prev) => [...prev, ...results.listings])
+      setNextCursor(results.nextCursor)
+    } catch {
+      // Keep whatever is already shown; just stop offering more rather than clearing real results.
+      setNextCursor(null)
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -243,7 +294,13 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
       />
 
       {(state !== 'empty' || listings.length === 0) && (
-        <SearchStateCard lang={lang} state={state} onReset={() => setLastSearch(null)} />
+        <SearchStateCard
+          lang={lang}
+          state={state}
+          onReset={() => { setLastSearch(null); void runLiveSearch() }}
+          onShowAll={() => { setLastSearch(null); void runLiveSearch() }}
+          onRetry={() => void runLiveSearch(lastSearch || undefined)}
+        />
       )}
 
       <section className="search-results">
@@ -255,13 +312,16 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           <div className="search-result-grid">
             {listings.map((listing) => (
               <article key={listing.id} className="search-result-card">
-                <img src={listingImage(listing)} alt={listingTitleText(listing, lang)} loading="lazy" />
+                <div className="search-result-media">
+                  <img src={listingImage(listing)} alt={listingTitleText(listing, lang)} loading="lazy" />
+                  {!hasRealPhoto(listing) && <span className="search-result-no-photo">{t.noPhotoYet}</span>}
+                </div>
                 <div className="search-result-body">
                   {listing.status !== 'APPROVED' && (
                     <span className="search-result-status">{statusText(listing.status, lang)}</span>
                   )}
                   <h2>{listingTitleText(listing, lang)}</h2>
-                  <p>{listingDescriptionText(listing, lang) || t.pendingOnly}</p>
+                  <p>{listingDescriptionText(listing, lang)}</p>
                   <div className="search-result-meta">
                     <span>{t.price}</span>
                     <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
@@ -278,8 +338,13 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               </article>
             ))}
           </div>
-        ) : (
-          <p className="search-empty-copy" role="status">{t.pendingOnly}</p>
+        ) : null}
+        {nextCursor && (
+          <div className="search-results-load-more">
+            <button type="button" onClick={() => void loadMoreResults()} disabled={loadingMore}>
+              {loadingMore ? t.loadingMore : t.loadMore}
+            </button>
+          </div>
         )}
       </section>
 
@@ -297,12 +362,19 @@ const flowStyles = {
 } as const
 
 function listingImage(listing: PlatformListing) {
-  if (listing.division === 'CARS' || listing.division === 'NEW_CONSTRUCTION' || listing.division === 'MARKETPLACE') {
-    return DIVISION_IMAGES[listing.division]
-  }
+  // Always prefer the listing's own uploaded photo; fall back to a generic division image only when
+  // no media exists — never force the generic over a real photo (cars/marketplace/new-construction).
   const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
   if (typeof mediaUrl === 'string') return mediaUrl
   return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+}
+
+// CAPSULE_RULES.noFakeTrustSignal: the fallback image looks like a real, professional listing photo
+// -- without this flag, a guest has no way to tell a real uploaded photo from a generic placeholder,
+// making every result look equally "real" (the audit's exact complaint). Mirrors listingImage()'s own
+// real-media check rather than re-deriving it separately.
+function hasRealPhoto(listing: PlatformListing) {
+  return Boolean(listing.media?.some((item) => typeof (item.url || item.src || item.assetUrl) === 'string'))
 }
 
 function searchSummary(value: UnifiedSearchValue, lang: Lang) {
@@ -321,6 +393,21 @@ function searchSummary(value: UnifiedSearchValue, lang: Lang) {
     value.checkOut,
     value.keyword,
   ].filter(Boolean).join(' · ')
+}
+
+// Map the search capsule's governorate key to the English city name listings store in location.city,
+// so the server-side city filter actually matches (Syria's 5 covered governorates).
+// Only real-estate divisions carry bedrooms/bathrooms metadata server-side (see
+// server/routes/listings.mjs's bedroomsMin/bathroomsMin JSON-path filter) -- CARS and
+// MARKETPLACE listings never do, so sending these for them matches nothing.
+const HAS_BEDROOM_BATHROOM_FILTERS = new Set<UnifiedSearchValue['division']>(['stays', 'rentals', 'buy', 'newConstruction'])
+
+const GOV_TO_CITY: Record<string, string> = {
+  damascus: 'Damascus',
+  aleppo: 'Aleppo',
+  latakia: 'Latakia',
+  homs: 'Homs',
+  tartus: 'Tartus',
 }
 
 function toApiDivision(division: UnifiedSearchValue['division']) {

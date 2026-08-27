@@ -1,9 +1,12 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, originalAdminShareRecipient, recordWalletEntry } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, executeManualRailRefund, finalizeCancellationLedgerEffects, recordWalletEntry, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
+import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
+import { idempotencyKey } from '../lib/security.mjs'
 
 export async function handleAdmin(req, res, url, context) {
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)
@@ -109,6 +112,20 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
 
+    // Paying the host out is its own operation (payout_release), distinct from capturing or
+    // refunding the guest's payment — no third-party disbursement processor is called anywhere in
+    // this codebase, so it's classified under the same 'manual'/internal-ledger provider as the
+    // other admin-driven wallet operations.
+    authorizePaymentOperation({
+      operation: 'payout_release',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: booking.listing.division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
     if (!isPayoutEligible(booking)) {
       const error = new Error(
         `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,
@@ -123,6 +140,21 @@ export async function handleAdmin(req, res, url, context) {
     const split = bookingFinanceSplit(booking, approvedPayment?.amountMinor || booking.amountMinor)
 
     const entry = await db().$transaction(async (tx) => {
+      // Re-check eligibility inside the transaction against a fresh read: the outer check above ran
+      // before this transaction opened, so a dispute filed in that window (or any other status
+      // change) would otherwise still get released. This closes that race with no added cost — the
+      // idempotencyKey on recordWalletEntry already prevents an actual double-release.
+      const freshBooking = await tx.booking.findUnique({ where: { id: booking.id } })
+      if (!freshBooking || !isPayoutEligible(freshBooking)) {
+        const error = new Error(
+          `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,
+        )
+        error.statusCode = 400
+        error.code = 'PAYOUT_NOT_ELIGIBLE'
+        error.expose = true
+        throw error
+      }
+
       const released = await recordWalletEntry(tx, {
         userId: booking.listing.ownerId,
         type: 'RELEASE',
@@ -151,42 +183,468 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, walletEntry: entry })
   }
 
+  // Item 2 Phase 2b round 3: finalizes the commission-reversal + cancellation-fee wallet entries a
+  // guest/host cancellation used to post inline, atomically, as part of their own action.
+  // createRefundRequest() (still triggered directly by the booking's own guest/host at cancel time)
+  // moves zero money; THIS is where the real wallet money movement actually happens now, and it
+  // stays ADMIN-only end to end -- see finalizeCancellationLedgerEffects() in finance-ledger.mjs
+  // and the policy-split comment at the top of bookings.mjs's/host.mjs's cancel handlers.
+  const finalizeCancellationMatch = url.pathname.match(/^\/api\/admin\/bookings\/([^/]+)\/finalize-cancellation$/)
+  if (finalizeCancellationMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+
+    const bookingId = finalizeCancellationMatch[1]
+    const existing = await db().booking.findUnique({
+      where: { id: bookingId },
+      include: { listing: true, payments: true },
+    })
+    if (!existing) {
+      const error = new Error('Booking not found.')
+      error.statusCode = 404
+      error.code = 'BOOKING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (existing.status !== 'CANCELLED') {
+      const error = new Error('Only a cancelled booking can have its cancellation finalized.')
+      error.statusCode = 400
+      error.code = 'BOOKING_NOT_CANCELLED'
+      error.expose = true
+      throw error
+    }
+    // The cancel handlers mark the payment proof REFUNDED (not delete it), so this is the durable
+    // signal a real approved-then-reversed payment actually exists here to finalize against --
+    // structurally impossible for a booking that was cancelled with no approved payment at all
+    // (nothing to reverse, no fee to charge), matching the same guard the cancel handlers apply to
+    // createRefundRequest() itself.
+    const approvedPayment = existing.payments.find((payment) => payment.status === 'REFUNDED')
+    if (!approvedPayment) {
+      const error = new Error('This booking has no reversed payment to finalize (it was cancelled with no approved payment).')
+      error.statusCode = 409
+      error.code = 'NOTHING_TO_FINALIZE'
+      error.expose = true
+      throw error
+    }
+
+    // Who initiated the cancellation determines who owes the cancellation fee -- derived from the
+    // durable audit trail the cancel handlers already write, never from caller input.
+    const cancellationAuditEntry = await db().adminAuditLog.findFirst({
+      where: { entityType: 'bookings', entityId: bookingId, action: { in: ['BOOKING_GUEST_CANCELLED', 'HOST_CANCELLED'] } },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!cancellationAuditEntry) {
+      const error = new Error('No recorded cancellation source (guest or host) was found for this booking.')
+      error.statusCode = 409
+      error.code = 'CANCELLATION_SOURCE_UNKNOWN'
+      error.expose = true
+      throw error
+    }
+    const cancelledBy = cancellationAuditEntry.action === 'BOOKING_GUEST_CANCELLED' ? 'GUEST' : 'HOST'
+
+    authorizePaymentOperation({
+      operation: 'refund',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: existing.listing.division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
+    // A genuinely concurrent second finalize call for the same booking can lose a race inside
+    // recordWalletEntry's idempotency-by-key check (see WALLET_ENTRY_RACE_LOST in
+    // finance-ledger.mjs) -- by the time that happens, the winning transaction has already
+    // committed every entry this call would have posted. One retry re-enters
+    // finalizeCancellationLedgerEffects with everything now genuinely idempotent (every
+    // recordWalletEntry call finds its existing entry via the normal findUnique path, not a race),
+    // so the loser still gets a correct, non-error 200 rather than a raw 500 -- exactly like any
+    // other idempotent re-call of this endpoint.
+    //
+    // An independent revenue audit found a real ordering hazard: for a GUEST cancellation without
+    // purchased protection, this reverses commission AND debits the guest's own SYBNB wallet for
+    // the cancellation fee -- but a manual-proof guest's wallet is never funded until their refund
+    // is actually executed (PATCH /api/admin/refunds/:id/execute credits it). Calling this before
+    // that happens fails safe today (recordWalletEntry's balance guard refuses to overdraw, the
+    // transaction rolls back cleanly, nothing corrupts) but with a generic, confusing
+    // WALLET_INSUFFICIENT_FUNDS -- neither route is wired to any frontend yet, so this has never
+    // actually been hit by a real workflow, but it's a real footgun for whoever eventually builds
+    // one. Translated into a clear, actionable error naming the exact required order instead of
+    // silently re-architecting the money movement (Uber's own model nets the fee into one refund
+    // settlement instead of two separately-ordered operations -- a deeper fix worth doing when this
+    // is actually wired up and exercised for real, not guessed at now).
+    let result
+    try {
+      result = await db().$transaction((tx) =>
+        finalizeCancellationLedgerEffects(tx, { booking: existing, approvedPayment, cancelledBy }),
+      )
+    } catch (err) {
+      if (err.code === 'WALLET_INSUFFICIENT_FUNDS') {
+        const error = new Error(
+          "This guest's cancellation fee can't be charged yet because their refund hasn't been executed " +
+            '(their SYBNB wallet has no funds until PATCH /api/admin/refunds/:id/execute runs). Execute the ' +
+            'refund first, then finalize this cancellation.',
+        )
+        error.statusCode = 409
+        error.code = 'REFUND_MUST_EXECUTE_FIRST'
+        error.expose = true
+        throw error
+      }
+      if (err.code !== 'WALLET_ENTRY_RACE_LOST') throw err
+      result = await db().$transaction((tx) =>
+        finalizeCancellationLedgerEffects(tx, { booking: existing, approvedPayment, cancelledBy }),
+      )
+    }
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'BOOKING_CANCELLATION_FINALIZED',
+        entityType: 'bookings',
+        entityId: bookingId,
+        before: existing,
+        after: { cancelledBy, ...result },
+      },
+    })
+
+    return json(res, 200, { ok: true, cancelledBy, ...result })
+  }
+
+  // Item 2 Phase 2b round 3 (guest-refund gap closure): executes a real, non-legacy refund request
+  // by crediting the original payer's wallet -- see executeManualRailRefund() in finance-ledger.mjs
+  // for the full reasoning (internal wallet credit, not an external provider call; no real provider
+  // is connected or approved anywhere in this codebase). Stays under the existing 'refund'
+  // operation, ADMIN-only, unchanged -- this is exactly the real wallet-money-movement half of the
+  // round-3 actor-policy split, same as finalize-cancellation above.
+  const executeRefundMatch = url.pathname.match(/^\/api\/admin\/refunds\/([^/]+)\/execute$/)
+  if (executeRefundMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+
+    const refundId = executeRefundMatch[1]
+    const refund = await db().refund.findUnique({
+      where: { id: refundId },
+      include: { paymentProof: { include: { booking: { include: { listing: true } } } } },
+    })
+    if (!refund) {
+      const error = new Error('Refund not found.')
+      error.statusCode = 404
+      error.code = 'REFUND_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const division = refund.paymentProof?.booking?.listing?.division || 'PLATFORM'
+
+    authorizePaymentOperation({
+      operation: 'refund',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
+    const result = await db().$transaction((tx) => executeManualRailRefund(tx, { refundId, actorUserId: context.user.id }))
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_REFUND_EXECUTED',
+        entityType: 'refunds',
+        entityId: refundId,
+        before: refund,
+        after: result,
+      },
+    })
+
+    return json(res, 200, { ok: true, ...result })
+  }
+
+  const legacyRefundAcceptMatch = url.pathname.match(/^\/api\/admin\/refunds\/([^/]+)\/legacy-accept$/)
+  if (legacyRefundAcceptMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+
+    const refundId = legacyRefundAcceptMatch[1]
+    const body = await readJson(req)
+    const reason = typeof body.reason === 'string' ? body.reason.trim().replace(/\s+/g, ' ') : ''
+    if (!reason || reason.length > 2000) {
+      const error = new Error('reason must be a non-empty string of at most 2000 characters.')
+      error.statusCode = 400
+      error.code = 'INVALID_ACCEPTANCE_REASON'
+      error.expose = true
+      throw error
+    }
+
+    const refund = await db().refund.findUnique({
+      where: { id: refundId },
+      include: { paymentProof: { include: { booking: { include: { listing: true } } } } },
+    })
+    if (!refund) {
+      const error = new Error('Refund not found.')
+      error.statusCode = 404
+      error.code = 'REFUND_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    // Item 2 Phase 2b round 1, mandatory boundary: this operation exists ONLY for migrated legacy
+    // refunds -- it must never become a route to fast-track a real, non-legacy ACTION_REQUIRED
+    // refund. Step 2's LEGACY_PENDING_CONFIRMATION requirement below already makes that
+    // structurally impossible (that status is CHECK-constrained to migratedFromLegacy=true rows
+    // only), but this explicit, early check gives a clear, honest error instead of a confusing
+    // "no eligible attempt found" for an obviously-wrong request.
+    if (!refund.migratedFromLegacy) {
+      const error = new Error('legacy_refund_accept only applies to refunds migrated from legacy data.')
+      error.statusCode = 400
+      error.code = 'REFUND_NOT_LEGACY'
+      error.expose = true
+      throw error
+    }
+
+    const division = refund.paymentProof?.booking?.listing?.division || 'PLATFORM'
+
+    authorizePaymentOperation({
+      operation: 'legacy_refund_accept',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
+    const acceptedAt = new Date()
+
+    const result = await db().$transaction(async (tx) => {
+      // Step 1: claim -- the PRIMARY refund-level serializer. Guarded on the exact precondition a
+      // legacy ACTION_REQUIRED refund is created with (see scripts/migrate-legacy-refunds-2a.mjs);
+      // 0 rows means already claimed, already resolved, or genuinely not eligible.
+      const claimed = await tx.refund.updateMany({
+        where: { id: refundId, status: 'ACTION_REQUIRED', reservationHeld: true },
+        data: { status: 'IN_PROGRESS' },
+      })
+      if (claimed.count !== 1) {
+        const error = new Error('Refund is not currently claimable (already in progress, already resolved, or not reservation-held).')
+        error.statusCode = 409
+        error.code = 'REFUND_NOT_CLAIMABLE'
+        error.expose = true
+        throw error
+      }
+      const claimedRefund = await tx.refund.findUniqueOrThrow({ where: { id: refundId } })
+
+      // Step 2: derive the original attempt from claimedRefund.id, never from a caller-supplied id
+      // (closes the substitution risk an earlier design revision was rejected for). Matches ONLY
+      // LEGACY_PENDING_CONFIRMATION -- deliberately excludes LEGACY_UNVERIFIED, which is the
+      // explicit owner decision (Finding 8) that zero-evidence legacy rows get no automated
+      // acceptance path at all in this phase.
+      const candidates = await tx.refundAttempt.findMany({
+        where: { refundId: claimedRefund.id, status: 'LEGACY_PENDING_CONFIRMATION', supersededByAttemptId: null },
+      })
+      if (candidates.length !== 1) {
+        const error = new Error(
+          `Expected exactly one LEGACY_PENDING_CONFIRMATION attempt to accept for this refund; found ${candidates.length}. ` +
+          'LEGACY_UNVERIFIED refunds have no automated acceptance path and are not eligible here.',
+        )
+        error.statusCode = 409
+        error.code = 'NO_ACCEPTABLE_LEGACY_ATTEMPT'
+        error.expose = true
+        throw error
+      }
+      const original = candidates[0]
+
+      // Step 3: insert the new LEGACY_ACCOUNTING_ACCEPTED attempt. The evidence digest binds the
+      // refund, the original attempt/evidence being accepted, the amount/currency, the actor, the
+      // acceptance timestamp, and the normalized reason -- reusing the same sha256-of-joined-parts
+      // primitive every idempotency key in this codebase already uses, not a new mechanism.
+      const evidenceDigest = idempotencyKey([
+        'legacy_refund_accept',
+        claimedRefund.id,
+        original.id,
+        original.legacyPaymentEventId,
+        String(claimedRefund.amountMinor),
+        claimedRefund.currency,
+        context.user.id,
+        acceptedAt.toISOString(),
+        reason,
+      ])
+      const newAttempt = await tx.refundAttempt.create({
+        data: {
+          refundId: claimedRefund.id,
+          status: 'LEGACY_ACCOUNTING_ACCEPTED',
+          migratedFromLegacy: true,
+          completedAt: acceptedAt,
+          legacyPaymentEventId: original.legacyPaymentEventId,
+          legacyAcceptedByUserId: context.user.id,
+          legacyAcceptedAt: acceptedAt,
+          legacyAcceptanceReason: reason,
+          legacyAcceptanceEvidenceDigest: evidenceDigest,
+        },
+      })
+
+      // Step 4: mark the original attempt superseded -- an independent, attempt-scoped
+      // defense-in-depth guard (the primary invariant is the refund_attempt_supersession_once
+      // trigger, which holds regardless of caller).
+      const superseded = await tx.refundAttempt.updateMany({
+        where: { id: original.id, supersededByAttemptId: null },
+        data: { supersededByAttemptId: newAttempt.id },
+      })
+      if (superseded.count !== 1) {
+        const error = new Error('Could not mark the original attempt as superseded.')
+        error.statusCode = 409
+        error.code = 'SUPERSESSION_FAILED'
+        error.expose = true
+        throw error
+      }
+
+      // Step 5: transfer reserved -> accepted on the payment proof. The guard requires the EXACT
+      // expected reserved amount for this migrated refund, not merely "at least this much" --
+      // round-2 corrective fix, independent review finding: refunds_one_active_per_payment_proof
+      // (Phase 2a) guarantees at most one active refund per proof, so once Step 1 has claimed THIS
+      // refund, reservedRefundMinor must equal exactly claimedRefund.amountMinor. A `gte` guard
+      // would let this transaction silently succeed even if the proof happened to carry MORE
+      // reserved capacity than this specific refund accounts for -- masking a genuine data
+      // inconsistency (e.g. a phantom leftover reservation from elsewhere) as a normal transfer
+      // instead of surfacing it as the anomaly it actually is. Must affect EXACTLY one row; anything
+      // else rolls back Steps 1-4 too. Uses ONLY claimedRefund's own fields, never a caller-supplied
+      // proof id or amount.
+      const transferred = await tx.paymentProof.updateMany({
+        where: { id: claimedRefund.paymentProofId, reservedRefundMinor: claimedRefund.amountMinor },
+        data: {
+          reservedRefundMinor: { decrement: claimedRefund.amountMinor },
+          acceptedRefundMinor: { increment: claimedRefund.amountMinor },
+        },
+      })
+      if (transferred.count !== 1) {
+        const error = new Error('Anomaly: payment proof counter transfer did not affect exactly one row.')
+        error.statusCode = 500
+        error.code = 'COUNTER_TRANSFER_ANOMALY'
+        throw error
+      }
+
+      // Step 6: finalize. Same exactly-one-row discipline as Step 5. succeededAt is deliberately
+      // NEVER set here -- ACCOUNTING_ACCEPTED is a materially different epistemic claim (an
+      // owner's acceptance of incomplete evidence) from genuine provider/ledger-confirmed SUCCEEDED,
+      // and must never become indistinguishable from it anywhere downstream.
+      const finalized = await tx.refund.updateMany({
+        where: { id: claimedRefund.id, status: 'IN_PROGRESS', reservationHeld: true },
+        data: { status: 'ACCOUNTING_ACCEPTED', reservationHeld: false },
+      })
+      if (finalized.count !== 1) {
+        const error = new Error('Anomaly: refund finalize did not affect exactly one row.')
+        error.statusCode = 500
+        error.code = 'REFUND_FINALIZE_ANOMALY'
+        throw error
+      }
+
+      const auditLog = await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'ADMIN_LEGACY_REFUND_ACCEPTED',
+          entityType: 'refunds',
+          entityId: claimedRefund.id,
+          before: { refund: claimedRefund, originalAttemptId: original.id },
+          after: { refundStatus: 'ACCOUNTING_ACCEPTED', newAttemptId: newAttempt.id, evidenceDigest },
+        },
+      })
+
+      return { refundId: claimedRefund.id, newAttemptId: newAttempt.id, auditLogId: auditLog.id }
+    })
+
+    const refreshed = await db().refund.findUnique({ where: { id: result.refundId }, include: { attempts: true } })
+    return json(res, 200, { ok: true, refund: refreshed })
+  }
+
   if (url.pathname === '/api/admin/review-queue') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     await completeExpiredBookings()
-    const [listings, payments, gifts, bookings, idDocuments] = await Promise.all([
-      db().listing.findMany({ where: { status: 'PENDING_REVIEW' }, take: 25 }),
+    await expireStaleWalletGifts()
+    // Scale-readiness audit: 4 of these 5 queues had a `take` cap with no `orderBy` at all --
+    // Postgres gives no guarantee which rows come back once a queue's real backlog exceeds 25, so
+    // admins could see an arbitrary, shuffling subset on every refresh, with some pending items
+    // never surfacing at all while others repeat. Oldest-first (FIFO) is the correct ordering for
+    // a moderation/review queue -- it's what keeps a real backlog from leaving any one item
+    // waiting indefinitely. idDocuments orders by the real submission timestamp
+    // (idDocumentSubmittedAt), not createdAt (account-creation date, unrelated to when the ID was
+    // actually submitted for review).
+    //
+    // Follow-up: a moderation queue is different from public search -- items leave it permanently
+    // once an admin acts, so a temporarily-oversized backlog self-heals as it's processed, rather
+    // than permanently burying real inventory the way the uncapped public search did. Raised the
+    // cap 25->100 (a real reduction in the invisible-backlog window, not a full pagination UI,
+    // which isn't justified for a queue that drains under normal admin use) and added an honest
+    // total count alongside each list so a genuine surge is visible rather than silently capped
+    // with no signal -- the same reasoning already applied to the fake-trust-signal fixes elsewhere
+    // in this codebase, just for "how big is the real backlog" instead of "is this badge real".
+    const REVIEW_QUEUE_LIMIT = 100
+    const listingsWhere = { status: 'PENDING_REVIEW' }
+    const paymentsWhere = { status: 'PENDING_ADMIN_REVIEW' }
+    const giftsWhere = { status: { in: ['CLAIM_PENDING', 'LOCKED'] } }
+    const bookingsWhere = { status: { in: ['REQUESTED', 'DISPUTED'] } }
+    const idDocumentsWhere = { idDocumentStatus: 'PENDING_REVIEW' }
+    const [listings, payments, gifts, bookings, idDocuments, listingsTotal, paymentsTotal, giftsTotal, bookingsTotal, idDocumentsTotal] = await Promise.all([
+      db().listing.findMany({
+        where: listingsWhere,
+        // Admin satisfaction audit finding: the review card showed only a title/division/status --
+        // no price, host, or image, so an admin had to open "Details" for every single item just to
+        // make an approve/reject call. Price is already a scalar on Listing; owner/media are
+        // relations that need an explicit include to come back at all.
+        include: {
+          owner: { select: { id: true, displayName: true } },
+          media: { orderBy: { sortOrder: 'asc' }, take: 1 },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: REVIEW_QUEUE_LIMIT,
+      }),
       db().paymentProof.findMany({
-        where: { status: 'PENDING_ADMIN_REVIEW' },
+        where: paymentsWhere,
         include: {
           booking: {
             include: {
               listing: {
                 include: {
-                  owner: { select: { id: true, displayName: true, email: true } },
+                  // idDocumentStatus feeds the admin payout screen's host-verification label --
+                  // it was previously hardcoded "Verified host" for every host regardless of real
+                  // status (found by an independent re-audit).
+                  owner: { select: { id: true, displayName: true, email: true, idDocumentStatus: true } },
                 },
               },
             },
           },
           payer: { select: { id: true, displayName: true, email: true } },
         },
-        take: 25,
+        orderBy: { createdAt: 'asc' },
+        take: REVIEW_QUEUE_LIMIT,
       }),
-      db().walletGift.findMany({ where: { status: { in: ['CLAIM_PENDING', 'LOCKED'] } }, take: 25 }),
+      db().walletGift.findMany({ where: giftsWhere, orderBy: { createdAt: 'asc' }, take: REVIEW_QUEUE_LIMIT }),
       db().booking.findMany({
-        where: { status: { in: ['REQUESTED', 'DISPUTED'] } },
+        where: bookingsWhere,
         include: { listing: true },
         orderBy: { createdAt: 'desc' },
-        take: 25,
+        take: REVIEW_QUEUE_LIMIT,
       }),
       db().user.findMany({
-        where: { idDocumentStatus: 'PENDING_REVIEW' },
+        where: idDocumentsWhere,
         select: { id: true, displayName: true, email: true, idDocumentMimeType: true, idDocumentSubmittedAt: true },
-        take: 25,
+        orderBy: { idDocumentSubmittedAt: 'asc' },
+        take: REVIEW_QUEUE_LIMIT,
       }),
+      db().listing.count({ where: listingsWhere }),
+      db().paymentProof.count({ where: paymentsWhere }),
+      db().walletGift.count({ where: giftsWhere }),
+      db().booking.count({ where: bookingsWhere }),
+      db().user.count({ where: idDocumentsWhere }),
     ])
-    return json(res, 200, { ok: true, queue: { listings, payments, gifts, bookings, idDocuments } })
+    return json(res, 200, {
+      ok: true,
+      queue: { listings, payments, gifts, bookings, idDocuments },
+      // Additive, not yet declared on the frontend's PlatformReviewQueue type -- safe for existing
+      // callers (extra JSON fields are simply ignored) and ready for the frontend to surface once
+      // that type is free to edit.
+      queueTotals: { listings: listingsTotal, payments: paymentsTotal, gifts: giftsTotal, bookings: bookingsTotal, idDocuments: idDocumentsTotal },
+    })
   }
 
   const idDocumentFileMatch = url.pathname.match(/^\/api\/admin\/id-document\/([^/]+)\/file$/)
@@ -207,6 +665,18 @@ export async function handleAdmin(req, res, url, context) {
     }
 
     const buffer = await readIdDocument(targetUser.idDocumentRef)
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_ID_DOCUMENT_VIEWED',
+        entityType: 'user_id_document',
+        entityId: idDocumentFileMatch[1],
+        before: null,
+        after: null,
+      },
+    })
+
     res.writeHead(200, {
       'content-type': targetUser.idDocumentMimeType || 'application/octet-stream',
       'cache-control': 'private, no-store',
@@ -242,6 +712,17 @@ export async function handleAdmin(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_USER_LOOKUP',
+        entityType: 'user',
+        entityId: foundUser.id,
+        before: null,
+        after: null,
+      },
+    })
 
     return json(res, 200, { ok: true, user: foundUser })
   }
@@ -308,7 +789,13 @@ export async function handleAdmin(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     const limit = Math.min(Number(url.searchParams.get('limit') || 50), 100)
+    const entityType = url.searchParams.get('entityType')
+    const action = url.searchParams.get('action')
     const auditLog = await db().adminAuditLog.findMany({
+      where: {
+        ...(entityType ? { entityType } : {}),
+        ...(action ? { action } : {}),
+      },
       include: {
         actor: {
           select: {
@@ -378,6 +865,31 @@ export async function handleAdmin(req, res, url, context) {
     const body = await readJson(req)
     const [entityType, entityId] = reviewMatch.slice(1)
     const decision = normalizeDecision(body.decision || body.action)
+
+    // Money-moving entity types only — listing/iddocument decisions never touch payment/wallet
+    // state and are deliberately not gated by a payment policy (see payment-policy-routes.mjs).
+    // An APPROVED booking decision is a pure status confirm (no wallet effect — see
+    // updateReviewEntity's booking branch, only reachable for decision !== 'APPROVED'), so it's
+    // intentionally excluded here rather than mislabeled as a refund.
+    const normalizedEntityType = String(entityType).toLowerCase()
+    let moneyMovingOperation
+    if (normalizedEntityType === 'payment' || normalizedEntityType === 'payments') {
+      moneyMovingOperation = decision === 'APPROVED' ? 'capture' : 'refund'
+    } else if ((normalizedEntityType === 'booking' || normalizedEntityType === 'bookings') && decision !== 'APPROVED') {
+      moneyMovingOperation = 'refund'
+    }
+    if (moneyMovingOperation) {
+      authorizePaymentOperation({
+        operation: moneyMovingOperation,
+        rail: 'manual_proof',
+        provider: 'manual',
+        division: 'PLATFORM',
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+        actor: { roles: context.roles },
+      })
+    }
+
     const result = await db().$transaction(async (tx) => {
       const before = await findReviewEntity(tx, entityType, entityId)
       const after = await updateReviewEntity(tx, entityType, entityId, decision, context.user.id, body)
@@ -528,6 +1040,21 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
       data: { status: decision === 'APPROVED' ? 'SENT' : 'ADMIN_BLOCKED' },
     })
     if (updated.count === 0) throw reviewStateError('GIFT_NOT_REVIEWABLE')
+    // The sender was debited atomically when the gift was created (server/routes/wallet.mjs). A
+    // blocked gift must never just vanish that money — refund the sender in the same transaction as
+    // the block decision, exactly like a rejected payment proof triggers a refund elsewhere.
+    if (decision !== 'APPROVED') {
+      await recordWalletEntry(tx, {
+        userId: existing.senderUserId,
+        type: 'REFUND',
+        amountMinor: existing.amountMinor,
+        currency: existing.currency,
+        referenceType: 'wallet_gift_blocked',
+        referenceId: existing.id,
+        keyParts: ['wallet-gift-blocked-refund', existing.id],
+        note: 'Wallet gift blocked by admin review; sender refunded.',
+      })
+    }
     return tx.walletGift.findUnique({ where: { id: entityId } })
   }
 
@@ -567,8 +1094,15 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (decision !== 'APPROVED') {
     const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
     if (approvedPayment) {
-      const split = bookingFinanceSplit(existing, approvedPayment.amountMinor)
-      const adminRecipientId = await originalAdminShareRecipient(tx, existing.id)
+      // Card-network payments (Stripe Checkout, the electronic PaymentIntent rail) never had their
+      // money enter the platform's own wallet ledger — it went to the card network directly. This
+      // app has no real provider-side refund call anywhere, so crediting the guest's wallet here
+      // would represent money the platform doesn't actually hold for this payment, unlike a manual
+      // proof (local wallet / Sham Cash / bank transfer) where the guest's money genuinely is the
+      // platform's liability to return. Mirrors the same principle applyPaymentIntentRefund already
+      // establishes for the provider-confirmed refund path — a card payment needs a REAL refund
+      // issued through the provider directly, not a wallet credit standing in for one.
+      const isCardPayment = ['stripe', 'payment_intent'].includes(approvedPayment.provider)
 
       await tx.paymentProof.updateMany({
         where: {
@@ -577,32 +1111,40 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
         },
         data: {
           status: 'REFUNDED',
-          adminNote: 'Auto-refunded after admin rejected/ruled against this booking.',
+          adminNote: isCardPayment
+            ? 'Admin rejected/ruled against this booking. Card payment — issue the real refund through the payment provider directly; no wallet credit was recorded.'
+            : 'Auto-refunded after admin rejected/ruled against this booking.',
           reviewedById: actorUserId,
           reviewedAt: new Date(),
         },
       })
 
-      await recordWalletEntry(tx, {
-        userId: existing.guestId,
-        type: 'REFUND',
-        amountMinor: approvedPayment.amountMinor,
-        currency: existing.currency,
-        referenceType: 'booking_refund',
-        referenceId: existing.id,
-        keyParts: ['booking-admin-reject-refund', existing.id, approvedPayment.id],
-        note: 'Guest refund after admin rejected/ruled against this booking.',
-      })
+      if (!isCardPayment) {
+        // Item 2 Phase 2b round 2: creates a Refund + initial RefundAttempt instead of an immediate
+        // wallet credit -- owner-confirmed replacement; fulfillment deferred to a later phase.
+        // reasonCode distinguishes an admin rejecting a still-REQUESTED booking from a ruling
+        // against the host in an already-DISPUTED one -- existing.status is the ORIGINAL status,
+        // captured before this transaction's own booking.updateMany above.
+        await createRefundRequest(tx, {
+          paymentProofId: approvedPayment.id,
+          bookingId: existing.id,
+          requestedByUserId: actorUserId,
+          amountMinor: approvedPayment.amountMinor,
+          currency: existing.currency,
+          reason: 'Guest refund after admin rejected/ruled against this booking.',
+          reasonCode: existing.status === 'DISPUTED' ? 'DISPUTE_RULING' : 'ADMIN_REJECTED_BOOKING',
+        })
+      }
 
-      await recordWalletEntry(tx, {
-        userId: adminRecipientId,
-        type: 'DEBIT',
-        amountMinor: split.adminShareMinor,
-        currency: existing.currency,
-        referenceType: 'booking_admin_share_reversal',
-        referenceId: existing.id,
-        keyParts: ['booking-admin-reject-admin-share-reversal', existing.id, approvedPayment.id],
-        note: 'Admin/SYBNB share reversed because the admin rejected/ruled against this booking.',
+      // Reverses the platform's own position (admin-share CREDIT, and a host payout clawback if
+      // it was already RELEASED) — shared with the PaymentIntent refund webhook path so both
+      // reversal routes stay in lockstep instead of two independent implementations drifting.
+      await reverseBookingPlatformShare(tx, {
+        booking: existing,
+        approvedPayment,
+        keyPrefix: 'booking-admin-reject',
+        adminShareReversalNote: 'Admin/SYBNB share reversed because the admin rejected/ruled against this booking.',
+        payoutClawbackNote: 'Host payout clawed back after admin rejected/ruled against this booking post-release.',
       })
     }
   }

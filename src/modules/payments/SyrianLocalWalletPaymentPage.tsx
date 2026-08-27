@@ -15,7 +15,9 @@ import {
 } from '../../../countries/syria/payments/localWallet'
 import {
   fetchPrototypeBooking,
+  getStoredGuestSession,
   submitPrototypeLocalWalletProof,
+  uploadPaymentProofFile,
   type PlatformPaymentProof,
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
@@ -77,9 +79,9 @@ const copy = {
     apiError: 'تعذر الاتصال بواجهة الدفع',
     saving: 'جار الحفظ',
     adminConfirmedTitle: 'تم تأكيد الدفع والحجز',
-    adminConfirmedBody: 'أكدت الإدارة والذكاء الاصطناعي استلام المال ومطابقة إثبات الدفع. أصبح الحجز مؤكداً ويمكن للعميل متابعة رحلته من حسابه.',
-    phoneMessageTitle: 'رسالة الهاتف للعميل',
-    phoneMessageBody: 'تم تأكيد حجزك في SYBNB. استخدم تسجيل الدخول برقم هاتفك لمتابعة تفاصيل الحجز والرحلة حتى الانتهاء.',
+    adminConfirmedBody: 'أكدت الإدارة استلام المال ومطابقة إثبات الدفع. أصبح الحجز مؤكداً ويمكن للعميل متابعة رحلته من حسابه.',
+    phoneMessageTitle: 'متابعة الحجز',
+    phoneMessageBody: 'تم تأكيد حجزك في SYBNB. سجّل الدخول بالبريد الإلكتروني لمتابعة تفاصيل الحجز والرحلة حتى الانتهاء.',
     reservationConfirmed: 'الحجز مؤكد',
     adminReviewApproved: 'الإدارة أكدت الاستلام',
     continueTrip: 'متابعة الرحلة من حسابي',
@@ -130,9 +132,9 @@ const copy = {
     apiError: 'Payment API request failed',
     saving: 'Saving',
     adminConfirmedTitle: 'Payment and booking confirmed',
-    adminConfirmedBody: 'Admin and AI Brain confirmed the money was received and the proof matches. The reservation is now confirmed and the guest can continue the trip from the account.',
-    phoneMessageTitle: 'Phone message to guest',
-    phoneMessageBody: 'Your SYBNB booking is confirmed. Sign in with your phone number to follow booking and trip details until completion.',
+    adminConfirmedBody: 'Admin confirmed the money was received and the proof matches. The reservation is now confirmed and the guest can continue the trip from the account.',
+    phoneMessageTitle: 'Continue your booking',
+    phoneMessageBody: 'Your SYBNB booking is confirmed. Sign in with your email to follow booking and trip details until completion.',
     reservationConfirmed: 'Reservation confirmed',
     adminReviewApproved: 'Admin confirmed receipt',
     continueTrip: 'Continue trip from my account',
@@ -162,6 +164,11 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
   const [senderName, setSenderName] = useState(isAr ? 'ضيف SYBNB' : 'SYBNB Guest')
   const [senderPhone, setSenderPhone] = useState('+963 900 000 001')
   const [uploadedProofFiles, setUploadedProofFiles] = useState<string[]>([])
+  // Real uploaded proof URLs (payment-proof:// references), parallel to uploadedProofFiles' names —
+  // the last one wins as the proof actually sent to admin. Previously this whole flow only ever
+  // captured the file's NAME, so admin had nothing real to review before releasing money.
+  const [uploadedProofUrls, setUploadedProofUrls] = useState<string[]>([])
+  const [proofUploadError, setProofUploadError] = useState('')
   const [submission, setSubmission] = useState<SyrianLocalWalletSubmission>(() =>
     createSyrianLocalWalletSubmission({
       bookingId,
@@ -198,7 +205,9 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     [submission.status],
   )
   const amountDue = Math.max(Number(amountMinor || 10), 1)
-  const proofReference = paymentProofReference('local-wallet-proof', uploadedProofFiles)
+  // Real uploaded file reference sent to admin — falls back to the old name-only reference only if
+  // an upload is still in flight (validation below requires at least one real URL to submit).
+  const proofReference = uploadedProofUrls[0] || paymentProofReference('local-wallet-proof', uploadedProofFiles)
   const qrPayload = useMemo(
     () =>
       createSyrianLocalWalletQrPayload({
@@ -280,7 +289,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     senderPhone,
     proofUrl: proofReference || undefined,
   }, paymentProof ? [] : [submission.status === 'PENDING_REVIEW' ? '' : submission.transactionReference].filter(Boolean))
-  const canSubmitProof = validation.ok && uploadedProofFiles.length > 0
+  const canSubmitProof = validation.ok && uploadedProofUrls.length > 0
 
   async function submitProof() {
     if (!canSubmitProof) return
@@ -303,6 +312,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
         amountMinor: amountDue,
         currency,
         proofAssetUrl: proofReference,
+        proofAssetUrls: uploadedProofUrls,
         providerRef: transactionReference,
       })
 
@@ -315,16 +325,22 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     }
   }
 
-  function addProofFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
-    if (!names.length) return
-    setUploadedProofFiles((current) => Array.from(new Set([...current, ...names])))
-  }
-
-  function addDemoProofFile() {
-    setUploadedProofFiles((current) =>
-      Array.from(new Set([...current, `SYBNB-payment-proof-${bookingId.slice(0, 8).toUpperCase()}.png`])),
-    )
+  async function addProofFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
+    const session = getStoredGuestSession()
+    if (!session) {
+      setProofUploadError(isAr ? 'سجّل الدخول أولاً لرفع إثبات الدفع.' : 'Sign in first to upload payment proof.')
+      return
+    }
+    setProofUploadError('')
+    setUploadedProofFiles((current) => Array.from(new Set([...current, ...files.map((file) => file.name)])))
+    try {
+      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
+      setUploadedProofUrls((current) => [...current, ...urls])
+    } catch (error) {
+      setProofUploadError(error instanceof Error ? error.message : t.apiError)
+    }
   }
 
   function paymentExportPayload() {
@@ -467,11 +483,8 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
             <span>{t.senderPhone}</span>
             <input dir="ltr" value={senderPhone} onChange={(event) => setSenderPhone(event.target.value)} />
           </label>
-          <PaymentProofUpload lang={lang} files={uploadedProofFiles} onAddFiles={addProofFiles} />
-          <button type="button" className="wallet-secondary" onClick={addDemoProofFile}>
-            {t.demoProof}
-          </button>
-          <p className="wallet-note">{t.demoProofHelp}</p>
+          <PaymentProofUpload lang={lang} files={uploadedProofFiles} onAddFiles={(files) => void addProofFiles(files)} />
+          {proofUploadError && <p className="wallet-note" style={{ color: '#ff5f76' }}>{proofUploadError}</p>}
           <button className="wallet-primary" disabled={apiState === 'saving' || !canSubmitProof} onClick={submitProof}>
             {apiState === 'saving' ? t.saving : t.submit}
           </button>

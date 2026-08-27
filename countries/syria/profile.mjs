@@ -16,7 +16,10 @@ export const profile = {
   operatingEntity: { name: '9375-7649 QUÉBEC INC.', country: 'CA-QC' },
 
   // Currency policy (owner-confirmed): USD quoted; SYP for local settlement. No CAD.
-  currencies: { allowed: ['SYP', 'USD'], advertisingDefault: 'USD' },
+  // `default` is the settlement currency used wherever a route needs to create or look up a
+  // currency-scoped record (a wallet, a fallback price) with no explicit currency supplied —
+  // read via server/lib/country.mjs's defaultCurrency(), never hardcoded at the call site.
+  currencies: { allowed: ['SYP', 'USD'], default: 'SYP', advertisingDefault: 'USD' },
 
   // Localization defaults:
   phoneCountryCode: '+963',

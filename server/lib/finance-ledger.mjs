@@ -1,10 +1,49 @@
 import { idempotencyKey } from './security.mjs'
 import { isPayoutEligible, payoutEligibleAt } from './booking-lifecycle.mjs'
 
-export const CANCELLATION_ADMIN_FEE_MINOR = 1000
-export const CANCELLATION_ADMIN_FEE_CURRENCY = 'USD'
+// The cancellation admin fee is charged against a guest/host wallet, and every wallet in this
+// platform is created SYP-denominated (single-currency-per-country; see server/lib/country.mjs) —
+// nothing ever funds a USD wallet. A USD-denominated fee here meant this DEBIT always targeted a
+// fresh, always-zero USD wallet and (once the negative-balance guard was added) hard-failed every
+// cancellation's refund transaction. Express the fee in SYP, converted from the original $10 intent
+// via the same placeholder FX rate used for Stripe (SYP_PER_USD) so the real-money value is unchanged
+// once a live rate is configured.
+const CANCELLATION_ADMIN_FEE_USD_MINOR = 1000
+export const CANCELLATION_ADMIN_FEE_CURRENCY = 'SYP'
+export const CANCELLATION_ADMIN_FEE_MINOR = Math.round(
+  (CANCELLATION_ADMIN_FEE_USD_MINOR / 100) * Number(process.env.SYP_PER_USD || 15000),
+)
+
+// A booking's currency is whatever its listing was priced in (SYP or USD, the only two the Syria
+// country profile allows), and every wallet entry for that booking — refund, HOLD/RELEASE, admin
+// share reversal — is denominated in it. The cancellation fee must match, or it targets a wallet
+// the booking never touched: a USD-priced booking's guest has no SYP wallet activity, so debiting
+// the always-hardcoded SYP fee there fails the negative-balance guard and rolls back the guest's
+// entire (legitimate) refund along with it.
+export function cancellationAdminFee(currency) {
+  const normalized = String(currency || CANCELLATION_ADMIN_FEE_CURRENCY).toUpperCase()
+  if (normalized === 'USD') {
+    return { amountMinor: CANCELLATION_ADMIN_FEE_USD_MINOR, currency: 'USD' }
+  }
+  return { amountMinor: CANCELLATION_ADMIN_FEE_MINOR, currency: CANCELLATION_ADMIN_FEE_CURRENCY }
+}
+// Gifts at/above this real value require admin review before they can be claimed (server/routes/
+// wallet.mjs). The threshold has to be expressed in whatever currency the gift was actually sent
+// in — a flat "100000 minor units" cutoff meant a ~$1,000 USD gift auto-sent with no review while
+// a few-dollar SYP gift already needed one, since SYP minor units are 1:1 (not cents) and USD
+// minor units are cents.
+const GIFT_REVIEW_THRESHOLD_SYP_MINOR = 100000
+export function giftReviewThresholdMinor(currency) {
+  const normalized = String(currency || CANCELLATION_ADMIN_FEE_CURRENCY).toUpperCase()
+  if (normalized === 'USD') {
+    return Math.round((GIFT_REVIEW_THRESHOLD_SYP_MINOR / Number(process.env.SYP_PER_USD || 15000)) * 100)
+  }
+  return GIFT_REVIEW_THRESHOLD_SYP_MINOR
+}
+
 export const CANCELLATION_PROTECTION_RATE = 0.03
-export const STR_ADMIN_COMMISSION_RATE = 0.1
+// Contractual STR (STAYS/short-term-rental) platform commission — owner-confirmed at 12%.
+export const STR_ADMIN_COMMISSION_RATE = 0.12
 export const STR_CLEANING_RATE = 0.05
 export const STR_TAX_RATE = 0.02
 
@@ -37,6 +76,10 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     const extraFeesMinor = expectedExtraFeesMinor || Math.max(0, staySplitBaseMinor - stayAmountMinor)
     const hostGrossMinor = Math.min(staySplitBaseMinor, stayAmountMinor + extraFeesMinor)
     const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
+    // Owner-confirmed: RENTALS/BUY/CARS/MARKETPLACE/NEW_CONSTRUCTION intentionally charge 0%
+    // booking commission — these divisions monetize via the separate seller-plan subscription fee
+    // instead (server/routes/payments.mjs's 'seller_plan' provider), not a per-booking cut. Only
+    // STR (STAYS) has a contractual per-booking commission (STR_ADMIN_COMMISSION_RATE, see below).
     return {
       stayAmountMinor,
       cleaningFeeMinor: 0,
@@ -55,8 +98,14 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
   const rentMinor = metadataNumber(listingMetadata, 'rentMinor') || Math.round(staySplitBaseMinor / divisor)
   const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.round(rentMinor * STR_CLEANING_RATE)
   const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor)
-  const adminCommissionMinor = Math.round(rentMinor * STR_ADMIN_COMMISSION_RATE)
-  const hostGrossMinor = Math.max(0, rentMinor + cleaningFeeMinor - adminCommissionMinor)
+  // rentMinor/cleaningFeeMinor/taxesMinor come from seller-controlled listing.metadata (unvalidated)
+  // and are informational only (the rent/cleaning/tax breakdown shown to admin/host). The actual
+  // money split is always computed from staySplitBaseMinor — the real, server-trusted paid amount —
+  // never from rentMinor. Deriving the commission from rentMinor let a host inflate it to drive
+  // hostGrossMinor toward the paid-amount cap while adminShareMinor (the platform's cut) collapsed
+  // toward zero; anchoring both to staySplitBaseMinor makes the commission unconditional.
+  const adminCommissionMinor = Math.round(staySplitBaseMinor * STR_ADMIN_COMMISSION_RATE)
+  const hostGrossMinor = Math.max(0, staySplitBaseMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
 
   return {
@@ -96,19 +145,6 @@ export async function recordWalletEntry(tx, {
     update: {},
   })
 
-  const entry = await tx.walletEntry.create({
-    data: {
-      walletId: wallet.id,
-      type,
-      amountMinor: normalizedAmount,
-      currency,
-      referenceType,
-      referenceId,
-      idempotencyKey: key,
-      note,
-    },
-  })
-
   const balanceDelta =
     type === 'CREDIT' || type === 'RELEASE' || type === 'REFUND'
       ? normalizedAmount
@@ -116,14 +152,65 @@ export async function recordWalletEntry(tx, {
         ? -normalizedAmount
         : 0
 
-  if (balanceDelta) {
-    await tx.wallet.update({
-      where: { id: wallet.id },
-      data: { cachedBalanceMinor: { increment: balanceDelta } },
+  if (balanceDelta < 0) {
+    // Atomic, race-safe guard: the WHERE clause re-checks the balance at update time (not from a
+    // stale read), so two concurrent debits against the same wallet can't both pass and jointly
+    // overdraw it — mirrors the updateMany-guard pattern used elsewhere (e.g. approvePaymentProof).
+    const guarded = await tx.wallet.updateMany({
+      where: { id: wallet.id, cachedBalanceMinor: { gte: normalizedAmount } },
+      data: { cachedBalanceMinor: { decrement: normalizedAmount } },
     })
+    if (guarded.count === 0) {
+      const error = new Error('Insufficient wallet balance for this debit.')
+      error.statusCode = 409
+      error.code = 'WALLET_INSUFFICIENT_FUNDS'
+      error.expose = true
+      throw error
+    }
+  } else if (balanceDelta > 0) {
+    await tx.wallet.update({ where: { id: wallet.id }, data: { cachedBalanceMinor: { increment: balanceDelta } } })
   }
 
-  return entry
+  try {
+    return await tx.walletEntry.create({
+      data: {
+        walletId: wallet.id,
+        type,
+        amountMinor: normalizedAmount,
+        currency,
+        referenceType,
+        referenceId,
+        idempotencyKey: key,
+        note,
+      },
+    })
+  } catch (err) {
+    if (isWalletEntryIdempotencyViolation(err)) {
+      // Item 2 Phase 2b round 3: the findUnique check above is NOT atomic with this create -- two
+      // genuinely concurrent callers with the SAME idempotencyKey (e.g. two simultaneous admin
+      // finalize-cancellation calls for the same booking) can both pass it before either commits,
+      // then race here. Re-throwing a well-typed, recognizable error (rather than letting the raw
+      // P2002 propagate as an unhandled 500) lets a caller treat the loser exactly like a genuine
+      // idempotent retry -- the balance mutation this losing transaction made above is safely
+      // rolled back with the rest of it, since throwing here aborts the whole $transaction; the
+      // winner's already-committed entry is the only one that ever takes effect.
+      const error = new Error('This wallet entry was already recorded by a concurrent request.')
+      error.statusCode = 409
+      error.code = 'WALLET_ENTRY_RACE_LOST'
+      error.idempotencyKey = key
+      error.expose = true
+      throw error
+    }
+    throw err
+  }
+}
+
+// Same P2002-recognition pattern as isProviderRefUniqueViolation/isActiveRefundUniqueViolation,
+// for wallet_entries_idempotency_key_key.
+function isWalletEntryIdempotencyViolation(err) {
+  const target = err?.meta?.target
+  return err?.code === 'P2002' && (target === 'wallet_entries_idempotency_key_key' ||
+    (Array.isArray(target) && target.includes('idempotency_key')) || String(target || '').includes('idempotency_key'))
 }
 
 // Shared by the admin manual-review path and any automatic payment confirmation (e.g. Stripe)
@@ -185,9 +272,13 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       keyParts: ['booking-host-hold', proof.bookingId, proof.id],
       note: 'Host payout is protected until booking confirmation and completion.',
     })
+    // Platform revenue goes to a fixed house account (PLATFORM_ACCOUNT_ID) rather than the individual
+    // admin who happened to approve — otherwise revenue fragments across operators' personal wallets.
+    // Falls back to the actor only when no house account is configured (dev/e2e).
+    const revenueAccount = process.env.PLATFORM_ACCOUNT_ID || actorUserId
     if (actorUserId) {
       await recordWalletEntry(tx, {
-        userId: actorUserId,
+        userId: revenueAccount,
         type: 'CREDIT',
         amountMinor: split.adminShareMinor,
         currency: proof.currency,
@@ -202,7 +293,7 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       // unlike adminShareMinor it is never reversed on cancellation (see bookings.mjs/host.mjs).
       if (split.cancellationProtectionPurchased && split.cancellationProtectionFeeMinor > 0) {
         await recordWalletEntry(tx, {
-          userId: actorUserId,
+          userId: revenueAccount,
           type: 'CREDIT',
           amountMinor: split.cancellationProtectionFeeMinor,
           currency: proof.currency,
@@ -221,6 +312,56 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       where: { userId: proof.userId },
       data: { documentStatus: 'APPROVED' },
     })
+    // Grant the SELLER role here (authoritatively) rather than trusting the client to have set it at
+    // registration — approving the plan is what actually entitles paid-plan listing.
+    await tx.userRole.upsert({
+      where: { userId_role: { userId: proof.userId, role: 'SELLER' } },
+      update: {},
+      create: { userId: proof.userId, role: 'SELLER' },
+    })
+    // The full plan fee is 100% platform revenue (there's no host/counterparty to split with,
+    // unlike a booking) -- this approval previously recorded no wallet entry at all, so real,
+    // already-collected seller-plan revenue -- the entire monetization model for the 0%-commission
+    // divisions (CARS/MARKETPLACE/NEW_CONSTRUCTION) -- was invisible everywhere a WalletEntry is
+    // the source of truth: admin finance totals, income projections, payout rows. Recorded the
+    // same way booking commission is: a CREDIT to the approving admin's own wallet.
+    if (actorUserId) {
+      await recordWalletEntry(tx, {
+        userId: actorUserId,
+        type: 'CREDIT',
+        amountMinor: proof.amountMinor,
+        currency: proof.currency,
+        referenceType: 'seller_plan_fee',
+        referenceId: proof.id,
+        keyParts: ['seller-plan-fee', proof.id, actorUserId],
+        note: 'SYBNB/admin collected a seller/dealer/developer plan fee.',
+      })
+    }
+  } else if (proof.rideId) {
+    // SR Ride vs. Uber gap-closure: no booking-style HOLD/release two-step -- a ride completes in
+    // one continuous session (unlike a multi-day stay), so there's no equivalent dispute window to
+    // hold funds against. 100% of the fare goes straight to the driver: SR Ride has no owner-set
+    // commission rate yet, the same "0% until a real business decision is made" placeholder already
+    // used for CARS/MARKETPLACE/NEW_CONSTRUCTION above -- not an assumption, a documented gap.
+    const ride = await tx.rideRequest.findUnique({ where: { id: proof.rideId }, select: { driverId: true, status: true } })
+    if (ride?.driverId) {
+      // A ride is either COMPLETED (this is the fare) or CANCELLED-with-a-fee (this is the
+      // cancellation fee, capsule 20) -- never both, so the ride's own status at approval time is
+      // enough to label the ledger entry correctly for finance reconciliation.
+      const isCancellationFee = ride.status === 'CANCELLED'
+      await recordWalletEntry(tx, {
+        userId: ride.driverId,
+        type: 'CREDIT',
+        amountMinor: proof.amountMinor,
+        currency: proof.currency,
+        referenceType: isCancellationFee ? 'ride_cancellation_fee' : 'ride_fare',
+        referenceId: proof.rideId,
+        keyParts: [isCancellationFee ? 'ride-cancellation-fee' : 'ride-fare', proof.rideId, proof.id],
+        note: isCancellationFee
+          ? 'Driver cancellation fee collected after verified rider payment proof.'
+          : 'Driver fare collected after verified rider payment proof.',
+      })
+    }
   }
 
   return proof
@@ -238,6 +379,462 @@ export async function originalAdminShareRecipient(tx, bookingId) {
     include: { wallet: true },
   })
   return entry?.wallet?.userId
+}
+
+// Cancellation/refund reversal of the platform's own position on a booking: the admin-share
+// CREDIT taken at approval time, plus a host payout clawback if it was already released. Does NOT
+// touch the guest's wallet — callers that also owe the guest a refund (e.g. the admin
+// dispute-rejection path) record that separately, since not every reversal implies a wallet refund
+// (a card refund via a payment-provider webhook already returned the guest's money through the
+// card network; crediting the wallet too would create money from nothing).
+export async function reverseBookingPlatformShare(tx, {
+  booking,
+  approvedPayment,
+  keyPrefix,
+  adminShareReversalNote,
+  payoutClawbackNote,
+}) {
+  const split = bookingFinanceSplit(booking, approvedPayment.amountMinor)
+  const adminRecipientId = await originalAdminShareRecipient(tx, booking.id)
+
+  await recordWalletEntry(tx, {
+    userId: adminRecipientId,
+    type: 'DEBIT',
+    amountMinor: split.adminShareMinor,
+    currency: booking.currency,
+    referenceType: 'booking_admin_share_reversal',
+    referenceId: booking.id,
+    keyParts: [`${keyPrefix}-admin-share-reversal`, booking.id, approvedPayment.id],
+    note: adminShareReversalNote,
+  })
+
+  // A HOLD entry never touches cachedBalanceMinor, so there's nothing to claw back from the host
+  // if the payout was only held. But if it was already RELEASED, the host's wallet genuinely
+  // holds that money now — without this, the host keeps the full payout while the platform's
+  // share and (at the call site) the guest's money are both reversed, creating money out of nothing.
+  const priorRelease = await tx.walletEntry.findFirst({
+    where: { referenceType: 'booking_payout', type: 'RELEASE', referenceId: booking.id },
+  })
+  let hostClawedBack = false
+  if (priorRelease) {
+    await recordWalletEntry(tx, {
+      userId: booking.listing.ownerId,
+      type: 'DEBIT',
+      amountMinor: split.hostGrossMinor,
+      currency: booking.currency,
+      referenceType: 'booking_payout_clawback',
+      referenceId: booking.id,
+      keyParts: [`${keyPrefix}-payout-clawback`, booking.id, approvedPayment.id],
+      note: payoutClawbackNote,
+    })
+    hostClawedBack = true
+  }
+
+  return { split, adminRecipientId, hostClawedBack }
+}
+
+// Item 2 Phase 2b round 3: the commission-reversal + cancellation-fee side effects a guest/host
+// cancellation used to post inline, atomically, in the SAME actor-triggered transaction that also
+// created the refund request. Splitting them out is what makes the actor-policy split possible:
+// createRefundRequest() is genuinely money-safe for the booking's own guest/host to trigger
+// directly (zero wallet entries, zero provider calls -- proven since Phase 2b round 2), but
+// reversing the platform's commission and charging/crediting a cancellation fee IS real wallet
+// money movement, so it now happens only via a separate, ADMIN-only finalize action (see
+// POST/PATCH /api/admin/bookings/:id/finalize-cancellation in admin.mjs), after the cancellation
+// itself has already happened. Reuses reverseBookingPlatformShare (the same admin-share-reversal +
+// payout-clawback-if-released logic the admin dispute-rejection path already relies on) rather than
+// re-deriving it a third time -- this is the "reusable service function" this round asked for, not
+// a fresh implementation. recordWalletEntry's own idempotency-by-key means calling this function
+// twice for the same booking is always safe (a no-op second time), so no separate "already
+// finalized" guard is needed here.
+export async function finalizeCancellationLedgerEffects(tx, {
+  booking, // must include `listing` (for listing.ownerId / listing.division)
+  approvedPayment,
+  cancelledBy, // 'GUEST' | 'HOST' -- who initiated the original cancellation
+}) {
+  const keyPrefix = cancelledBy === 'GUEST' ? 'booking-guest-cancel' : 'booking-host-cancel'
+  const { split, adminRecipientId, hostClawedBack } = await reverseBookingPlatformShare(tx, {
+    booking,
+    approvedPayment,
+    keyPrefix,
+    adminShareReversalNote: `Admin/SYBNB share reversed because the ${cancelledBy.toLowerCase()}-cancelled booking was refunded.`,
+    payoutClawbackNote: `Host payout clawed back after the ${cancelledBy.toLowerCase()}-cancelled booking was refunded.`,
+  })
+
+  let feeCharged = false
+  if (cancelledBy === 'GUEST') {
+    // Mirrors the guest-cancel path's own original rule exactly: no fee when the guest purchased
+    // cancellation protection.
+    if (!split.cancellationProtectionPurchased) {
+      const fee = cancellationAdminFee(booking.currency)
+      await recordWalletEntry(tx, {
+        userId: booking.guestId,
+        type: 'DEBIT',
+        amountMinor: fee.amountMinor,
+        currency: fee.currency,
+        referenceType: 'booking_guest_cancel_fee',
+        referenceId: booking.id,
+        keyParts: ['booking-guest-cancel-fee-guest', booking.id, approvedPayment.id],
+        note: 'Guest cancellation admin fee after cancelling a paid booking without cancellation protection.',
+      })
+      await recordWalletEntry(tx, {
+        userId: adminRecipientId,
+        type: 'CREDIT',
+        amountMinor: fee.amountMinor,
+        currency: fee.currency,
+        referenceType: 'booking_guest_cancel_fee',
+        referenceId: booking.id,
+        keyParts: ['booking-guest-cancel-fee-admin', booking.id, approvedPayment.id],
+        note: 'Admin received guest cancellation fee for paid booking without cancellation protection.',
+      })
+      feeCharged = true
+    }
+  } else {
+    // host.mjs's original fee charge was unconditional (no protection-status check, unlike the
+    // guest-cancel path) -- preserved exactly as-is here, not silently changed by this
+    // restructuring. This asymmetry was already flagged as a separate, out-of-scope finding in the
+    // Phase 2b round 2 report; still not this round's to fix.
+    const fee = cancellationAdminFee(booking.currency)
+    await recordWalletEntry(tx, {
+      userId: booking.listing.ownerId,
+      type: 'DEBIT',
+      amountMinor: fee.amountMinor,
+      currency: fee.currency,
+      referenceType: 'booking_host_cancel_fee',
+      referenceId: booking.id,
+      keyParts: ['booking-host-cancel-fee-host', booking.id, approvedPayment.id],
+      note: 'Host cancellation admin fee after cancelling a protected paid booking.',
+    })
+    await recordWalletEntry(tx, {
+      userId: adminRecipientId,
+      type: 'CREDIT',
+      amountMinor: fee.amountMinor,
+      currency: fee.currency,
+      referenceType: 'booking_host_cancel_fee',
+      referenceId: booking.id,
+      keyParts: ['booking-host-cancel-fee-admin', booking.id, approvedPayment.id],
+      note: 'Admin received host cancellation fee for protected paid booking.',
+    })
+    feeCharged = true
+  }
+
+  return { split, adminRecipientId, hostClawedBack, feeCharged }
+}
+
+// Translates a DB unique-constraint violation on (provider, provider_ref) into a recognizable
+// signal. This is what closes the TOCTOU race on payment-proof creation: even if two concurrent
+// deliveries both pass an app-level "does a proof already exist" check, only one insert can win —
+// the other raises P2002 here, which callers use to gracefully recover (re-fetch the winner)
+// instead of surfacing a raw DB error. Shared by every payment rail that creates a PaymentProof
+// (Stripe, local wallet, PaymentIntent) so they all recognize this race the same way.
+export function isProviderRefUniqueViolation(err) {
+  const target = err?.meta?.target
+  return err?.code === 'P2002' && (target === 'payment_proofs_provider_provider_ref_key' ||
+    (Array.isArray(target) && target.includes('provider_ref')) || String(target || '').includes('provider_ref'))
+}
+
+// Same P2002-recognition pattern, for the refunds_one_active_per_payment_proof partial unique
+// index (Item 2 Phase 2a) -- a second, genuinely different refund request against a payment proof
+// that already has an active (REQUESTED/IN_PROGRESS/ACTION_REQUIRED) refund hits this.
+function isActiveRefundUniqueViolation(err) {
+  const target = err?.meta?.target
+  return err?.code === 'P2002' && (target === 'refunds_one_active_per_payment_proof' ||
+    (Array.isArray(target) && target.includes('payment_proof_id')) || String(target || '').includes('payment_proof_id'))
+}
+
+// Mirrors the manual-family allowlist scripts/migrate-legacy-refunds-2a.mjs already uses for the
+// exact same reasoning: these are the only providers with no external processor to canonicalize
+// against, so the PaymentProof itself can stand in as the refunded object's identity.
+const MANUAL_REFUND_PROVIDER_FAMILY = new Set(['manual', 'syrian_local_wallet', 'sham_cash'])
+
+// The closed, code-level catalogue this refund-request layer accepts -- matches the approved
+// design's REFUND_ELIGIBILITY_POLICY reason codes exactly. 'LEGACY_UNKNOWN' is deliberately absent:
+// it is a migration-only historical value written once by the Phase 2a backfill for rows with no
+// recoverable source route, and must never be reachable from a NEW refund request (Item 2 Phase 2b
+// round 2, explicit owner instruction).
+const NEW_REFUND_REASON_CODES = new Set(['GUEST_CANCELLED', 'HOST_CANCELLED', 'ADMIN_REJECTED_BOOKING', 'DISPUTE_RULING'])
+
+// Item 2 Phase 2b round 2: creates a Refund + initial (non-legacy) RefundAttempt for a live
+// host/guest/admin refund-triggering action, REPLACING the immediate wallet credit these three
+// flows previously issued directly (owner-confirmed: fulfillment is deferred to a later phase that
+// adds real outbound execution -- this function makes zero wallet entries and zero provider calls).
+//
+// Every field the caller supplies is what that flow ALREADY computed for its own refund amount
+// (unchanged from before this round) -- this function does not re-derive eligibility, it only
+// atomically reserves the given amount against the hard, unconditional payment_proofs.amount_minor
+// cap (never a policy-dependent ceiling) and records the request.
+//
+// Idempotent by (proofId, reasonCode, amountMinor, currency): a genuine retry of the exact same
+// logical request (e.g. a double-submit) returns the existing attempt, no new writes. A genuinely
+// DIFFERENT request against a proof that already has an active refund is refused with
+// DUPLICATE_REFUND_REQUEST -- refunds_one_active_per_payment_proof is the real, database-enforced
+// authority; this function's own idempotency check is a convenience layer in front of it, not a
+// substitute.
+//
+// The manual-rail canonical-request shape (provider='manual', providerPaymentObjectType=
+// 'payment_proof', providerPaymentObjectId=paymentProofId) is deliberate: this codebase's manual/
+// wallet rail has no external processor object to reference (no Stripe charge id, nothing) -- the
+// PaymentProof record itself is the real, stable, always-present identity being refunded against.
+// Card-rail proofs are NOT supported by this function -- PaymentProof.providerPaymentObjectType/Id
+// are still null on every existing proof (no live code populates them yet; that is a distinct,
+// separate change to finalizeStripeSession, out of this round's scope) -- callers must not invoke
+// this for a card-family proof.
+export async function createRefundRequest(tx, {
+  paymentProofId,
+  bookingId,
+  requestedByUserId,
+  amountMinor,
+  currency,
+  reason,
+  reasonCode,
+}) {
+  if (!NEW_REFUND_REASON_CODES.has(reasonCode)) {
+    throw new Error(`createRefundRequest: reasonCode '${reasonCode}' is not in the closed catalogue for new refund requests.`)
+  }
+  const normalizedAmount = Math.round(amountMinor || 0)
+  if (!paymentProofId || !normalizedAmount || normalizedAmount <= 0) {
+    throw new Error('createRefundRequest: paymentProofId and a positive amountMinor are required.')
+  }
+
+  // Defense in depth, not just caller convention: this function's canonical-request shape claims
+  // provider='manual' -- refuse rather than silently mislabel a card-family proof (mirrors the
+  // manual-family allowlist the Phase 2a classification script already uses, same reasoning: a
+  // wrongly-typed match here would be worse than the pre-existing, already-flagged gap where
+  // host.mjs/bookings.mjs credit the wallet for a card payment with no isCardPayment guard).
+  const targetProof = await tx.paymentProof.findUnique({ where: { id: paymentProofId }, select: { provider: true } })
+  if (!targetProof) {
+    const error = new Error('Payment proof not found.')
+    error.statusCode = 404
+    error.code = 'PAYMENT_PROOF_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
+  if (!MANUAL_REFUND_PROVIDER_FAMILY.has(targetProof.provider)) {
+    const error = new Error(`createRefundRequest does not support provider '${targetProof.provider}' -- this refund needs a real provider-issued refund, not a wallet-rail request.`)
+    error.statusCode = 400
+    error.code = 'REFUND_PROVIDER_NOT_SUPPORTED'
+    error.expose = true
+    throw error
+  }
+
+  const provider = 'manual'
+  const providerEndpointKey = 'sybnb-manual-review'
+  const providerPaymentObjectType = 'payment_proof'
+  const providerPaymentObjectId = paymentProofId
+  const canonicalRequestVersion = 1
+
+  const key = idempotencyKey(['refund-request', paymentProofId, reasonCode, String(normalizedAmount), currency])
+  const existingAttempt = await tx.refundAttempt.findUnique({ where: { idempotencyKey: key }, include: { refund: true } })
+  if (existingAttempt) {
+    return { refund: existingAttempt.refund, attempt: existingAttempt, idempotent: true }
+  }
+
+  // Atomic, cumulative, database-enforced reservation -- checked in THIS single guarded statement,
+  // never a separate pre-check: reserved + succeeded + accepted (the two other terminal buckets, so
+  // a proof partially consumed by an earlier, now-terminal refund correctly has less headroom) plus
+  // this new request must not exceed the proof's own amount_minor. 0 rows means insufficient
+  // capacity -- refused before any Refund/RefundAttempt row is ever created.
+  const reserved = await tx.$executeRaw`
+    UPDATE payment_proofs
+    SET reserved_refund_minor = reserved_refund_minor + ${normalizedAmount}
+    WHERE id = ${paymentProofId}::uuid
+      AND reserved_refund_minor + succeeded_refund_minor + accepted_refund_minor + ${normalizedAmount} <= amount_minor
+  `
+  if (reserved !== 1) {
+    const error = new Error('This payment proof does not have enough remaining refundable capacity for this request.')
+    error.statusCode = 409
+    error.code = 'INSUFFICIENT_REFUND_CAPACITY'
+    error.expose = true
+    throw error
+  }
+
+  let refund
+  try {
+    refund = await tx.refund.create({
+      data: {
+        paymentProofId, bookingId, requestedByUserId, amountMinor: normalizedAmount, currency,
+        reason, reasonCode, rail: 'manual_proof', status: 'IN_PROGRESS', reservationHeld: true,
+        migratedFromLegacy: false,
+      },
+    })
+  } catch (err) {
+    if (isActiveRefundUniqueViolation(err)) {
+      const error = new Error('A refund is already active for this payment proof.')
+      error.statusCode = 409
+      error.code = 'DUPLICATE_REFUND_REQUEST'
+      error.expose = true
+      throw error
+    }
+    throw err
+  }
+
+  const requestFingerprint = idempotencyKey([
+    provider, providerPaymentObjectType, providerPaymentObjectId, providerEndpointKey,
+    String(normalizedAmount), currency, String(canonicalRequestVersion),
+  ])
+
+  const attempt = await tx.refundAttempt.create({
+    data: {
+      refundId: refund.id, status: 'CLAIMED', migratedFromLegacy: false,
+      canonicalRequestVersion, provider, providerPaymentObjectType, providerPaymentObjectId,
+      providerEndpointKey, amountMinor: normalizedAmount, currency,
+      idempotencyKey: key, requestFingerprint,
+    },
+  })
+
+  return { refund, attempt, idempotent: false }
+}
+
+// Item 2 Phase 2b round 3 (guest-refund gap closure): executes a real, non-legacy manual-rail
+// Refund by crediting the original payer's SYBNB wallet -- the same internal ledger mechanism this
+// platform already uses for host payouts and admin commission, not an external provider call.
+// There is no real payment provider connected or approved anywhere in this codebase (Stripe/
+// PaymentIntent are both unapproved); the manual/local-wallet rail's actual operating model has
+// always been human-reviewed money moving through the internal wallet ledger, so "executing" a
+// refund on this rail means the platform recognizes its own debt to the guest as fulfilled the
+// same way it already recognizes a host's payout as fulfilled -- via a wallet credit, not a
+// reversal of the original external (Sham Cash / bank transfer) payment method.
+//
+// Mirrors legacy_refund_accept's exact discipline (claim -> exact-amount counter transfer ->
+// finalize), adapted for a genuine SUCCEEDED outcome rather than an accounting reclassification:
+// the primary serializer is the RefundAttempt's own CLAIMED->SUCCEEDED transition (a conditional
+// updateMany, matching the CAS-claim pattern used throughout this codebase) rather than the
+// Refund's own status (which has no distinct "about to execute" value to transition through, since
+// createRefundRequest() already leaves it at IN_PROGRESS). A concurrent second call loses at this
+// step -- 0 rows matched -- and is refused before touching any counter or wallet balance.
+export async function executeManualRailRefund(tx, { refundId, actorUserId }) {
+  const refund = await tx.refund.findUnique({
+    where: { id: refundId },
+    include: { paymentProof: true, attempts: true },
+  })
+  if (!refund) {
+    const error = new Error('Refund not found.')
+    error.statusCode = 404
+    error.code = 'REFUND_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
+  // Legacy refunds have their own, materially different acceptance path (legacy_refund_accept,
+  // round 1) -- an owner's acknowledgement of incomplete historical evidence, never a genuine
+  // wallet credit. Keeping them structurally separate here, the same way createRefundRequest()
+  // structurally cannot produce a LEGACY_UNKNOWN reasonCode, so the two paths can never collide.
+  if (refund.migratedFromLegacy) {
+    const error = new Error('This is a migrated legacy refund -- use legacy_refund_accept, not execute.')
+    error.statusCode = 400
+    error.code = 'REFUND_IS_LEGACY'
+    error.expose = true
+    throw error
+  }
+  if (!MANUAL_REFUND_PROVIDER_FAMILY.has(refund.paymentProof?.provider)) {
+    const error = new Error(`executeManualRailRefund does not support provider '${refund.paymentProof?.provider}' -- this refund needs a real provider-issued refund, not a wallet-rail execution.`)
+    error.statusCode = 400
+    error.code = 'REFUND_PROVIDER_NOT_SUPPORTED'
+    error.expose = true
+    throw error
+  }
+  const claimableAttempt = refund.attempts.find((a) => a.status === 'CLAIMED' && a.supersededByAttemptId === null && !a.migratedFromLegacy)
+  if (!claimableAttempt) {
+    const error = new Error('No claimable (non-legacy, CLAIMED) refund attempt exists for this refund.')
+    error.statusCode = 409
+    error.code = 'NO_CLAIMABLE_ATTEMPT'
+    error.expose = true
+    throw error
+  }
+
+  // Step 1: claim the attempt -- the primary serializer.
+  const claimed = await tx.refundAttempt.updateMany({
+    where: { id: claimableAttempt.id, status: 'CLAIMED' },
+    data: { status: 'SUCCEEDED', completedAt: new Date(), providerStatus: 'wallet_credited' },
+  })
+  if (claimed.count !== 1) {
+    const error = new Error('This refund attempt is not currently executable (already executed or claimed by a concurrent request).')
+    error.statusCode = 409
+    error.code = 'REFUND_NOT_EXECUTABLE'
+    error.expose = true
+    throw error
+  }
+
+  // Step 2: transfer reserved -> succeeded on the proof. Exact-amount guard, same reasoning as
+  // legacy_refund_accept's Step 5: refunds_one_active_per_payment_proof guarantees at most one
+  // active refund per proof, so once Step 1 has claimed THIS refund's only attempt,
+  // reservedRefundMinor must equal exactly refund.amountMinor -- a `gte` guard would mask a real
+  // data inconsistency as a normal transfer.
+  const transferred = await tx.paymentProof.updateMany({
+    where: { id: refund.paymentProofId, reservedRefundMinor: refund.amountMinor },
+    data: {
+      reservedRefundMinor: { decrement: refund.amountMinor },
+      succeededRefundMinor: { increment: refund.amountMinor },
+    },
+  })
+  if (transferred.count !== 1) {
+    const error = new Error('Anomaly: payment proof counter transfer did not affect exactly one row.')
+    error.statusCode = 500
+    error.code = 'COUNTER_TRANSFER_ANOMALY'
+    throw error
+  }
+
+  // Step 3: finalize the refund. succeededAt IS set here (unlike legacy_refund_accept's
+  // ACCOUNTING_ACCEPTED) -- this is a genuine, ledger-confirmed success, not an accounting
+  // reclassification of incomplete evidence.
+  const finalized = await tx.refund.updateMany({
+    where: { id: refund.id, status: 'IN_PROGRESS', reservationHeld: true },
+    data: { status: 'SUCCEEDED', reservationHeld: false, succeededAt: new Date() },
+  })
+  if (finalized.count !== 1) {
+    const error = new Error('Anomaly: refund finalize did not affect exactly one row.')
+    error.statusCode = 500
+    error.code = 'REFUND_FINALIZE_ANOMALY'
+    throw error
+  }
+
+  // Step 4: the actual money movement -- credit the original payer's wallet. By this point the
+  // attempt claim above has already made this call the sole owner of this refund's execution, so
+  // this recordWalletEntry call cannot race with another executeManualRailRefund call for the same
+  // refund; its own idempotency-by-key still protects against any other coincidental replay.
+  const walletEntry = await recordWalletEntry(tx, {
+    userId: refund.paymentProof.userId,
+    type: 'REFUND',
+    amountMinor: refund.amountMinor,
+    currency: refund.currency,
+    referenceType: 'booking_refund',
+    referenceId: refund.bookingId || refund.paymentProofId,
+    keyParts: ['refund-execution-wallet-credit', refund.id],
+    note: 'Refund executed as an internal SYBNB wallet credit (manual/local-wallet rail -- no external provider call).',
+  })
+
+  return {
+    refund: { ...refund, status: 'SUCCEEDED', reservationHeld: false },
+    attempt: { ...claimableAttempt, status: 'SUCCEEDED' },
+    walletEntry,
+  }
+}
+
+// Picks the actor for a system/webhook-driven auto-approval that has no human context.user — e.g.
+// a Stripe or PaymentIntent webhook confirming a charge with nobody reviewing it in an admin tab.
+export async function firstAdminId(tx) {
+  const admin = await tx.userRole.findFirst({ where: { role: 'ADMIN' }, select: { userId: true } })
+  return admin?.userId
+}
+
+// The full amount a guest owes for a booking: rent/stay plus cleaning fee, tax, extra fees, and
+// the cancellation-protection add-on if purchased. Mirrors src/modules/bookings/guestFeeSummary.ts
+// so every payment rail (Stripe, local wallet, PaymentIntent) charges the same figure the guest saw,
+// and never trusts a client-supplied amount for a booking-linked payment.
+export function expectedTotalMinor(booking) {
+  const stayAmountMinor = Math.max(0, Math.round(booking.amountMinor || 0))
+  const listingMetadata = booking.listing?.metadata || {}
+  const bookingMetadata = booking.metadata || {}
+  const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
+
+  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
+  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
+  const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
+  const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
+  const cancellationProtectionFeeMinor = cancellationProtectionPurchased
+    ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') || Math.round(stayAmountMinor * CANCELLATION_PROTECTION_RATE)
+    : 0
+
+  return stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
 }
 
 // Shared by admin's payout queue and the host earnings report so both read the same numbers

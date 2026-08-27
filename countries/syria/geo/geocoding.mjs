@@ -94,15 +94,40 @@ function isValidCoords(value) {
 
 // pickupCoordsOverride comes from the rider's device GPS (navigator.geolocation), which is more
 // accurate than gazetteer text-matching and should win whenever it's available.
-export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoordsOverride, dropoffCoordsOverride }) {
+// SR Ride vs. Uber gap-closure (P2 #14): multi-stop rides. `stops` is an ordered list of
+// intermediate address texts between pickup and dropoff -- resolved the exact same way pickup/
+// dropoff already are (device-GPS override wins, else gazetteer text match). The base fare and
+// surcharge apply once for the whole trip, not once per leg -- only distance accumulates across
+// legs, matching how Uber's own multi-stop pricing extends a single trip rather than stacking
+// multiple flat fares.
+export function quoteSrRide({
+  pickup,
+  dropoff,
+  category,
+  lowDataMode,
+  pickupCoordsOverride,
+  dropoffCoordsOverride,
+  stops,
+  stopCoordsOverrides,
+}) {
   const rates = CATEGORY_RATES[category] || CATEGORY_RATES['SR Economy']
   const pickupCoords = isValidCoords(pickupCoordsOverride) ? pickupCoordsOverride : resolvePlaceText(pickup)
   const dropoffCoords = isValidCoords(dropoffCoordsOverride) ? dropoffCoordsOverride : resolvePlaceText(dropoff)
+  const stopList = Array.isArray(stops) ? stops : []
+  const stopCoords = stopList.map((stopText, index) => {
+    const override = Array.isArray(stopCoordsOverrides) ? stopCoordsOverrides[index] : undefined
+    return isValidCoords(override) ? override : resolvePlaceText(stopText)
+  })
 
   let distanceKm = DEFAULT_DISTANCE_KM
   let estimated = true
-  if (pickupCoords && dropoffCoords) {
-    distanceKm = Math.max(1, haversineKm(pickupCoords, dropoffCoords))
+  const routePoints = [pickupCoords, ...stopCoords, dropoffCoords]
+  if (routePoints.every(Boolean)) {
+    let total = 0
+    for (let i = 0; i < routePoints.length - 1; i += 1) {
+      total += haversineKm(routePoints[i], routePoints[i + 1])
+    }
+    distanceKm = Math.max(1, total)
     estimated = false
   }
 
@@ -115,5 +140,6 @@ export function quoteSrRide({ pickup, dropoff, category, lowDataMode, pickupCoor
     estimated,
     pickupCoords,
     dropoffCoords,
+    stopCoords,
   }
 }

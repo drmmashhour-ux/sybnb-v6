@@ -1,5 +1,12 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:3051'
 
+// A server-relative signed storage URL (e.g. driver photoUrl) must resolve against the API's own
+// origin, not the page's -- a bare `<img src="/api/...">` would otherwise ask the frontend's own
+// dev/static server for it. Already-absolute URLs pass through unchanged.
+export function resolveApiUrl(path: string) {
+  return /^https?:\/\//.test(path) ? path : `${API_BASE_URL}${path}`
+}
+
 type ApiUser = {
   id: string
   email: string | null
@@ -31,6 +38,7 @@ export type PlatformListing = {
   owner?: {
     id: string
     displayName: string
+    idDocumentStatus?: string | null
   }
   media?: Array<Record<string, unknown>>
   location?: Record<string, unknown> | null
@@ -45,6 +53,7 @@ export type PlatformPaymentProof = {
   amountMinor: number
   currency: string
   proofAssetUrl: string | null
+  proofAssetUrls?: string[]
   providerRef: string | null
   adminNote: string | null
   reviewedById: string | null
@@ -78,6 +87,13 @@ export type PlatformRideRequest = {
   status: string
   requestedAt: string
   fareMinor: number | null
+  cancellationFeeMinor: number | null
+  scheduledFor: string | null
+  accessibilityRequired: boolean
+  stops: Array<{ address: string; lat: number | null; lng: number | null }>
+  discountMinor: number | null
+  businessAccountId: string | null
+  shareable: boolean
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string
@@ -86,6 +102,28 @@ export type PlatformRideRequest = {
     displayName: string
     email: string | null
   }
+  driver?: {
+    id: string
+    displayName: string
+    isVerified: boolean
+    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; photoUrl: string | null } | null
+    averageRating: number | null
+    ratingCount: number
+    location: { lat: number; lng: number; updatedAt: string } | null
+  } | null
+  review?: PlatformRideReview | null
+  paymentProofs?: Array<{ id: string; status: string; amountMinor: number; currency: string }>
+  pickupCoords?: { lat: number; lng: number } | null
+  dropoffCoords?: { lat: number; lng: number } | null
+}
+
+export type PlatformRideReview = {
+  id: string
+  rideId: string
+  riderId: string
+  rating: number
+  comment: string | null
+  createdAt: string
 }
 
 export type PlatformBooking = {
@@ -111,210 +149,6 @@ export type PlatformBooking = {
   }
 }
 
-const PROTOTYPE_OWNER = {
-  id: 'prototype-owner-sybnb',
-  displayName: 'SYBNB Verified Provider',
-}
-
-const FALLBACK_APPROVED_LISTINGS: PlatformListing[] = [
-  {
-    id: 'fallback-stay-malki-apartment',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'STAYS',
-    titleAr: 'إقامة مفروشة وسط دمشق',
-    titleEn: 'Furnished stay in central Damascus',
-    description: 'Ready-to-live apartment with quick service access.',
-    status: 'APPROVED',
-    priceMinor: 220000,
-    currency: 'SYP',
-    metadata: { roomType: 'entireApartment', beds: 2, bathrooms: 1, trustScore: 94 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/divisions/daily-rental.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Al-Malki', lat: 33.514, lng: 36.292 },
-  },
-  {
-    id: 'fallback-stay-heritage-courtyard',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'STAYS',
-    titleAr: 'بيت دمشقي تراثي',
-    titleEn: 'Damascene heritage courtyard stay',
-    description: 'Heritage home with calm courtyard and verified host.',
-    status: 'APPROVED',
-    priceMinor: 275000,
-    currency: 'SYP',
-    metadata: { roomType: 'heritageHome', beds: 3, bathrooms: 2, trustScore: 96 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/filter-photos/properties/heritage-home.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Old City', lat: 33.511, lng: 36.306 },
-  },
-  {
-    id: 'fallback-rental-villa-malki',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'RENTALS',
-    titleAr: 'فيلا النخيل الملكية',
-    titleEn: 'Royal Palm Villa',
-    description: 'Monthly rental villa with protected contact flow and verified owner.',
-    status: 'APPROVED',
-    priceMinor: 900000,
-    currency: 'SYP',
-    metadata: { propertyType: 'villa', bedrooms: 4, bathrooms: 3, bedType: 'king', trustScore: 98 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/filter-photos/properties/villa.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Yafour', lat: 33.489, lng: 36.221 },
-  },
-  {
-    id: 'fallback-rental-modern-apartment',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'RENTALS',
-    titleAr: 'شقة عصرية بلس',
-    titleEn: 'Modern Plus Apartment',
-    description: 'Monthly apartment near services with elevator and parking.',
-    status: 'APPROVED',
-    priceMinor: 550000,
-    currency: 'SYP',
-    metadata: { propertyType: 'apartment', bedrooms: 3, bathrooms: 2, bedType: 'queen', trustScore: 95 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/divisions/monthly-rental.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Mezzeh', lat: 33.502, lng: 36.258 },
-  },
-  {
-    id: 'fallback-buy-villa-yafour',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'BUY',
-    titleAr: 'فيلا للبيع في يعفور',
-    titleEn: 'Villa for sale in Yafour',
-    description: 'Verified owner sale with documents ready for platform review.',
-    status: 'APPROVED',
-    priceMinor: 1250000000,
-    currency: 'SYP',
-    metadata: { propertyType: 'villa', bedrooms: 5, bathrooms: 4, trustScore: 97 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/divisions/buy-property.webp' }],
-    location: { country: 'SY', governorate: 'Rif Dimashq', city: 'Yafour', area: 'Main road', lat: 33.493, lng: 36.189 },
-  },
-  {
-    id: 'fallback-buy-office-kafr-souseh',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'BUY',
-    titleAr: 'مكتب تجاري فاخر',
-    titleEn: 'Premium commercial office',
-    description: 'Commercial property with clean documentation and visit request flow.',
-    status: 'APPROVED',
-    priceMinor: 840000000,
-    currency: 'SYP',
-    metadata: { propertyType: 'office', rooms: 6, bathrooms: 2, trustScore: 92 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/filter-photos/properties/office.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Kafr Souseh', lat: 33.486, lng: 36.282 },
-  },
-  {
-    id: 'fallback-car-sedan-damascus',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'CARS',
-    titleAr: 'سيارة سيدان موثوقة',
-    titleEn: 'Verified sedan listing',
-    description: 'Clean car listing with seller contact and protected request flow.',
-    status: 'APPROVED',
-    priceMinor: 180000000,
-    currency: 'SYP',
-    metadata: { carShape: 'sedan', transmission: 'automatic', fuel: 'gas', trustScore: 93 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/filter-photos/cars/sedan.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Abu Rummaneh', lat: 33.516, lng: 36.284 },
-  },
-  {
-    id: 'fallback-car-suv-showroom',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'CARS',
-    titleAr: 'SUV عائلية من معرض موثق',
-    titleEn: 'Verified family SUV',
-    description: 'SUV listing from a verified dealer with inspection notes.',
-    status: 'APPROVED',
-    priceMinor: 260000000,
-    currency: 'SYP',
-    metadata: { carShape: 'suv', transmission: 'automatic', fuel: 'hybrid', trustScore: 95 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/filter-photos/cars/suv.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Mazzeh', lat: 33.501, lng: 36.258 },
-  },
-  {
-    id: 'fallback-market-furniture',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'MARKETPLACE',
-    titleAr: 'مجموعة أثاث منزلية',
-    titleEn: 'Home furniture set',
-    description: 'Marketplace item with seller verification and protected request.',
-    status: 'APPROVED',
-    priceMinor: 4500000,
-    currency: 'SYP',
-    metadata: { category: 'furniture', condition: 'used', trustScore: 90 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/filter-photos/market/furniture.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Old City', lat: 33.511, lng: 36.306 },
-  },
-  {
-    id: 'fallback-market-appliance',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'MARKETPLACE',
-    titleAr: 'أجهزة منزلية بحالة ممتازة',
-    titleEn: 'Excellent home appliances',
-    description: 'Verified marketplace offer ready for buyer request.',
-    status: 'APPROVED',
-    priceMinor: 3200000,
-    currency: 'SYP',
-    metadata: { category: 'appliances', condition: 'new', trustScore: 91 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/filter-photos/market/appliances.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Kafr Souseh', lat: 33.486, lng: 36.282 },
-  },
-  {
-    id: 'fallback-project-residence',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'NEW_CONSTRUCTION',
-    titleAr: 'مشروع سكني جديد',
-    titleEn: 'New residential project',
-    description: 'Builder project with visit booking and document review flow.',
-    status: 'APPROVED',
-    priceMinor: 650000000,
-    currency: 'SYP',
-    metadata: { projectType: 'residential', units: 28, trustScore: 96 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/filter-photos/properties/new-project.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Mezzeh', lat: 33.502, lng: 36.258 },
-  },
-  {
-    id: 'fallback-project-tower',
-    ownerId: PROTOTYPE_OWNER.id,
-    division: 'NEW_CONSTRUCTION',
-    titleAr: 'برج مكاتب قيد الإنجاز',
-    titleEn: 'Office tower under construction',
-    description: 'New construction opportunity with builder dashboard workflow.',
-    status: 'APPROVED',
-    priceMinor: 980000000,
-    currency: 'SYP',
-    metadata: { projectType: 'commercial', units: 16, trustScore: 94 },
-    owner: PROTOTYPE_OWNER,
-    media: [{ url: '/assets/filter-photos/properties/office.webp' }],
-    location: { country: 'SY', governorate: 'Damascus', city: 'Damascus', area: 'Kafr Souseh', lat: 33.486, lng: 36.282 },
-  },
-]
-
-function fallbackApprovedListings(division = 'STAYS') {
-  return FALLBACK_APPROVED_LISTINGS
-    .filter((listing) => listing.division === division)
-    .map(markSampleListing)
-}
-
-function markSampleListing(listing: PlatformListing): PlatformListing {
-  return {
-    ...listing,
-    metadata: {
-      ...listing.metadata,
-      sybnbDataMode: 'sample',
-    },
-  }
-}
-
 export function isSampleListing(listing: PlatformListing) {
   return listing.metadata?.sybnbDataMode === 'sample'
 }
@@ -332,12 +166,28 @@ export type PlatformIdDocumentReview = {
   idDocumentStatus?: string | null
 }
 
+// The real backlog size per category, independent of the (currently 100-item) cap on the arrays
+// below. Added server-side (e59ab6f) specifically so a genuine backlog surge would be visible
+// instead of silently capped -- an admin-satisfaction audit found this never reached the UI, so
+// the review page had no way to show "showing 100 of 319" and just looked like the backlog was
+// however many rows happened to fit under the cap. Optional (not every fetchPrototypeReviewQueue
+// caller populates it -- see that function's own comment) rather than a separate parallel type,
+// so every existing PlatformReviewQueue consumer keeps working unchanged.
+export type PlatformReviewQueueTotals = {
+  listings: number
+  payments: number
+  gifts: number
+  bookings: number
+  idDocuments: number
+}
+
 export type PlatformReviewQueue = {
   listings: PlatformListing[]
   payments: PlatformPaymentProof[]
   gifts: PlatformWalletGift[]
   bookings: PlatformReviewBooking[]
   idDocuments: PlatformIdDocumentReview[]
+  queueTotals?: PlatformReviewQueueTotals
 }
 
 export type PlatformAdminAuditLog = {
@@ -440,13 +290,14 @@ export type PlatformHostOverview = {
 }
 
 export type PlatformDriverOverview = {
-  driver: ApiUser
+  driver: ApiUser & { accessibilityCapable: boolean }
   totals: {
     assigned: number
     active: number
     completed: number
     earningsMinor: number
   }
+  rating: { averageRating: number | null; ratingCount: number }
   rides: PlatformRideRequest[]
 }
 
@@ -630,6 +481,19 @@ function readFileAsBase64(file: File): Promise<string> {
 // Previously this only ever sent the file's *name* to the server — the actual image was never
 // uploaded, so nothing (human or automated) could ever review what was actually submitted. This
 // now reads and sends the real file bytes.
+// Real payment-proof file upload (was previously filename-only for booking/seller-plan/advertising
+// payments, so nothing an admin could actually review before releasing real money). Accepts a token
+// directly since this is called from guest, seller, and host sessions alike.
+export async function uploadPaymentProofFile(file: File, token: string) {
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{ ok: true; proofAssetUrl: string }>('/api/payments/proof-upload', {
+    method: 'POST',
+    token,
+    body: { fileBase64, contentType: file.type },
+  })
+  return response.proofAssetUrl
+}
+
 export async function submitGuestIdDocument(file: File) {
   const session = await ensurePrototypeGuestSession()
   const fileBase64 = await readFileAsBase64(file)
@@ -754,6 +618,16 @@ export async function createAndApprovePrototypeListing(input: CreateListingInput
   return approved as PlatformListing
 }
 
+export type FetchApprovedListingsResult = {
+  listings: PlatformListing[]
+  nextCursor: string | null
+}
+
+// A real scale-readiness audit found this had no pagination at all — the server capped at a
+// fixed 250 rows with no way to reach anything past that, so once a division+city passed ~250
+// approved listings, older inventory became permanently unreachable. The server now does real
+// keyset pagination (see server/routes/listings.mjs); pass the previous call's `nextCursor` back
+// in to fetch the next page, and stop once it comes back null.
 export async function fetchApprovedListings(
   division = 'STAYS',
   filters?: {
@@ -763,16 +637,26 @@ export async function fetchApprovedListings(
     bedroomsMin?: number
     bathroomsMin?: number
     city?: string
+    sort?: string
+    priceBand?: string
   },
-) {
+  cursor?: string | null,
+): Promise<FetchApprovedListingsResult> {
   const params = new URLSearchParams({ division })
   // Single-select scalar attributes only (Cars: carBrand/…; Buy/Rentals: propertyType). Skip
   // 'any', empty, and multi-select array values — only scalar constraints reach the server.
-  const ATTRIBUTE_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType']
+  const ATTRIBUTE_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType', 'marketCategory']
   if (filters?.attributes) {
     for (const key of ATTRIBUTE_KEYS) {
       const value = filters.attributes[key]
       if (typeof value === 'string' && value && value !== 'any') params.set(key, value)
+    }
+    // Multi-select attribute filters (amenities/views/access): a listing must have ALL selected
+    // values (server-side AND), sent as one comma-separated param per key.
+    const ARRAY_ATTRIBUTE_KEYS = ['amenities', 'views', 'access']
+    for (const key of ARRAY_ATTRIBUTE_KEYS) {
+      const value = filters.attributes[key]
+      if (Array.isArray(value) && value.length) params.set(key, value.join(','))
     }
   }
   if (filters?.priceMin && filters.priceMin > 0) params.set('priceMin', String(filters.priceMin))
@@ -780,11 +664,16 @@ export async function fetchApprovedListings(
   if (filters?.bedroomsMin && filters.bedroomsMin > 0) params.set('bedroomsMin', String(filters.bedroomsMin))
   if (filters?.bathroomsMin && filters.bathroomsMin > 0) params.set('bathroomsMin', String(filters.bathroomsMin))
   if (filters?.city) params.set('city', filters.city)
+  if (filters?.sort && filters.sort !== 'newest') params.set('sort', filters.sort)
+  if (filters?.priceBand && filters.priceBand !== 'any') params.set('priceBand', filters.priceBand)
+  if (cursor) params.set('cursor', cursor)
   // Real customer journeys must show real inventory only. A legitimate zero-result search returns an
   // empty list (callers render a genuine localized no-results state) — never substitute mock/demo
   // fixtures. API/network errors propagate to the caller's try/catch, which shows the error state.
-  const response = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings?${params.toString()}`)
-  return response.listings
+  const response = await apiRequest<{ ok: true; listings: PlatformListing[]; nextCursor: string | null }>(
+    `/api/listings?${params.toString()}`,
+  )
+  return { listings: response.listings, nextCursor: response.nextCursor }
 }
 
 export type ListingAvailabilityEntry = {
@@ -858,7 +747,7 @@ export type PlatformMessage = {
   id: string
   threadId: string
   senderUserId: string
-  senderRole: 'GUEST' | 'HOST' | 'ADMIN' | 'SUPPORT'
+  senderRole: 'GUEST' | 'HOST' | 'ADMIN' | 'SUPPORT' | 'DRIVER' | 'RIDER'
   body: string
   createdAt: string
   sender?: { id: string; displayName: string }
@@ -866,8 +755,10 @@ export type PlatformMessage = {
 
 export type PlatformMessageThread = {
   id: string
-  bookingId: string
+  bookingId?: string
+  rideId?: string
   messages: PlatformMessage[]
+  hasMore: boolean
 }
 
 function resolveViewerSession(preferStaff = false) {
@@ -891,9 +782,10 @@ function resolveViewerSession(preferStaff = false) {
   throw new Error('Sign in before opening this conversation.')
 }
 
-export async function fetchBookingThread(bookingId: string, preferStaff = false) {
+export async function fetchBookingThread(bookingId: string, preferStaff = false, before?: string) {
   const session = resolveViewerSession(preferStaff)
-  const response = await apiRequest<{ ok: true; thread: PlatformMessageThread }>(`/api/bookings/${bookingId}/thread`, {
+  const query = before ? `?before=${encodeURIComponent(before)}` : ''
+  const response = await apiRequest<{ ok: true; thread: PlatformMessageThread }>(`/api/bookings/${bookingId}/thread${query}`, {
     token: session.token,
   })
   return response.thread
@@ -914,6 +806,7 @@ export type PlatformListingInquiryThread = {
   listingId: string
   guestId: string
   messages: PlatformMessage[]
+  hasMore: boolean
 }
 
 export type PlatformHostInquiryThread = {
@@ -928,9 +821,10 @@ export type PlatformHostInquiryThread = {
 
 // Real, persistent "contact the owner" thread for RENTALS/BUY listings, reusing the same
 // messages system built for STAYS bookings instead of writing to localStorage only.
-export async function fetchListingInquiryThread(listingId: string) {
+export async function fetchListingInquiryThread(listingId: string, before?: string) {
   const session = await ensurePrototypeGuestSession()
-  const response = await apiRequest<{ ok: true; thread: PlatformListingInquiryThread }>(`/api/listings/${listingId}/thread`, {
+  const query = before ? `?before=${encodeURIComponent(before)}` : ''
+  const response = await apiRequest<{ ok: true; thread: PlatformListingInquiryThread }>(`/api/listings/${listingId}/thread${query}`, {
     token: session.token,
   })
   return response.thread
@@ -946,6 +840,25 @@ export async function sendListingInquiryMessage(listingId: string, body: string)
   return response.message
 }
 
+export type PlatformMyInquiryThread = {
+  id: string
+  listingId: string | null
+  updatedAt: string
+  listing: { id: string; titleAr: string; titleEn: string | null; division: string; priceMinor: number; currency: string } | null
+  messages: PlatformMessage[]
+}
+
+// Guest-side inbox: every real inquiry thread the guest has started across any listing (Rentals/Buy/
+// Cars/Marketplace/New-Construction) — mirrors fetchHostInquiries. Without this, a guest who sends a
+// listing inquiry has no way to ever see the host's reply.
+export async function fetchMyInquiries() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; threads: PlatformMyInquiryThread[] }>('/api/me/inquiries', {
+    token: session.token,
+  })
+  return response.threads
+}
+
 // Owner-side inbox: every real inquiry thread across the owner's own listings.
 export async function fetchHostInquiries(mode: HostDashboardMode = 'host') {
   const session = await getHostDashboardSession(mode)
@@ -955,10 +868,17 @@ export async function fetchHostInquiries(mode: HostDashboardMode = 'host') {
   return response.threads
 }
 
-export async function fetchListingInquiryThreadAsOwner(listingId: string, guestId: string, mode: HostDashboardMode = 'host') {
+export async function fetchListingInquiryThreadAsOwner(
+  listingId: string,
+  guestId: string,
+  mode: HostDashboardMode = 'host',
+  before?: string,
+) {
   const session = await getHostDashboardSession(mode)
+  const params = new URLSearchParams({ guestId })
+  if (before) params.set('before', before)
   const response = await apiRequest<{ ok: true; thread: PlatformListingInquiryThread }>(
-    `/api/listings/${listingId}/thread?guestId=${encodeURIComponent(guestId)}`,
+    `/api/listings/${listingId}/thread?${params.toString()}`,
     { token: session.token },
   )
   return response.thread
@@ -997,22 +917,22 @@ export async function updateHostListingAvailability(
   return response.availability
 }
 
+// Real customer journeys must show real inventory only — never substitute a fabricated fixture
+// listing (fake title/price/photos/owner) on an API error. A guest reaching this page is normally
+// about to send a real booking request; letting them do that against fake data is worse than
+// showing the real error. See fetchApprovedListings for the same rule on the list view.
 export async function fetchPrototypeListing(listingId: string) {
-  try {
-    const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`)
-    return response.listing
-  } catch (error) {
-    const fallbackListing = FALLBACK_APPROVED_LISTINGS.find((listing) => listing.id === listingId)
-    if (fallbackListing) return fallbackListing
-    throw error
-  }
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`)
+  return response.listing
 }
 
 export async function submitPrototypeLocalWalletProof(input: {
   bookingId?: string
+  rideId?: string
   amountMinor: number
   currency: string
   proofAssetUrl?: string
+  proofAssetUrls?: string[]
   providerRef: string
 }) {
   const session = await ensurePrototypeGuestSession()
@@ -1080,14 +1000,22 @@ export async function reviewPrototypePaymentProof(
 }
 
 export async function fetchPrototypeReviewQueue() {
-  const response = await runAdminRequest((token) => apiRequest<{ ok: true; queue: PlatformReviewQueue }>('/api/admin/review-queue', {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; queue: PlatformReviewQueue; queueTotals: PlatformReviewQueueTotals }>('/api/admin/review-queue', {
     token,
   }))
-  return response.queue
+  // queueTotals is attached alongside the existing per-category arrays (not a breaking change to
+  // this function's return shape) -- every existing caller (OperationsCalendarPage, GiftAdminAudit,
+  // FinanceReconciliationPage) keeps working unchanged; only AdminReviewPage reads the new field.
+  return { ...response.queue, queueTotals: response.queueTotals }
 }
 
-export async function fetchPrototypeAdminAuditLog(limit = 50) {
+export async function fetchPrototypeAdminAuditLog(
+  limit = 50,
+  filters?: { entityType?: string; action?: string },
+) {
   const params = new URLSearchParams({ limit: String(limit) })
+  if (filters?.entityType) params.set('entityType', filters.entityType)
+  if (filters?.action) params.set('action', filters.action)
   const response = await runAdminRequest((token) => apiRequest<{ ok: true; auditLog: PlatformAdminAuditLog[] }>(
     `/api/admin/audit-log?${params.toString()}`,
     {
@@ -1173,6 +1101,17 @@ async function runAdminRequest<T>(request: (token: string) => Promise<T>) {
   }
 }
 
+// Resolve a stored `payment-proof://<key>` reference to a short-lived signed URL admin can actually
+// open/view. Previously admin only ever checked truthiness of proofAssetUrl — there was no way to
+// see the real file even after real uploads were wired in.
+export async function fetchAdminPaymentProofUrl(proofAssetUrl: string) {
+  const key = proofAssetUrl.replace(/^payment-proof:\/\//, '')
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; url: string }>(`/api/admin/payment-proof/${encodeURIComponent(key)}/url`, { token }),
+  )
+  return response.url
+}
+
 // Supports the WhatsApp/email ID-submission channel: an admin who received a document outside
 // the platform looks the customer up by their account email, then attaches the file for them.
 export async function lookupAdminUserByEmail(email: string) {
@@ -1224,6 +1163,14 @@ export async function createPrototypeSrRide(input: {
   lowDataMode: boolean
   accuracyMeters?: number
   pickupCoords?: { lat: number; lng: number }
+  routeType?: string
+  features?: string[]
+  scheduledFor?: string
+  accessibilityRequired?: boolean
+  stops?: string[]
+  promoCode?: string
+  billToBusinessAccount?: boolean
+  shareable?: boolean
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -1236,9 +1183,19 @@ export async function createPrototypeSrRide(input: {
       currency: input.currency,
       lowDataMode: input.lowDataMode,
       pickupCoords: input.pickupCoords,
+      scheduledFor: input.scheduledFor,
+      accessibilityRequired: input.accessibilityRequired,
+      stops: input.stops,
+      promoCode: input.promoCode,
+      billToBusinessAccount: input.billToBusinessAccount,
+      shareable: input.shareable,
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',
+        // Recorded as the rider's stated preference, not an enforced match -- no driver-matching
+        // logic reads these yet. Real, not decorative: previously selected but silently discarded.
+        requestedRouteType: input.routeType,
+        requestedFeatures: input.features,
       },
     },
   })
@@ -1262,12 +1219,320 @@ export async function cancelPrototypeSrRide(rideId: string) {
   return response.ride
 }
 
+export async function submitPrototypeSrRideReview(input: { rideId: string; rating: number; comment?: string }) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; review: PlatformRideReview }>(`/api/sr/rides/${input.rideId}/review`, {
+    method: 'POST',
+    token: session.token,
+    body: { rating: input.rating, comment: input.comment },
+  })
+  return response.review
+}
+
+export async function fetchPrototypeSrRideThread(rideId: string, asDriver = false, before?: string) {
+  const session = asDriver ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
+  const query = before ? `?before=${encodeURIComponent(before)}` : ''
+  const response = await apiRequest<{ ok: true; thread: PlatformMessageThread }>(`/api/sr/rides/${rideId}/thread${query}`, {
+    token: session.token,
+  })
+  return response.thread
+}
+
+export async function sendPrototypeSrRideMessage(rideId: string, body: string, asDriver = false) {
+  const session = asDriver ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; message: PlatformMessage }>(`/api/sr/rides/${rideId}/thread/messages`, {
+    method: 'POST',
+    token: session.token,
+    body: { body },
+  })
+  return response.message
+}
+
+export async function sharePrototypeSrRide(rideId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; rideId: string; exp: number; sig: string }>(`/api/sr/rides/${rideId}/share`, {
+    method: 'POST',
+    token: session.token,
+  })
+  return response
+}
+
+export type PlatformSharedRide = {
+  status: string
+  pickupCoords: { lat: number; lng: number } | null
+  dropoffCoords: { lat: number; lng: number } | null
+  driver: {
+    displayName: string
+    isVerified: boolean
+    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; photoUrl: string | null } | null
+    location: { lat: number; lng: number; updatedAt: string } | null
+  } | null
+}
+
+// Public -- no session, verified purely by the signed exp/sig pair (server/lib/ride-share.mjs).
+export async function fetchSharedSrRide(rideId: string, exp: string, sig: string) {
+  const response = await apiRequest<{ ok: true; ride: PlatformSharedRide }>(
+    `/api/sr/rides/${rideId}/shared?exp=${encodeURIComponent(exp)}&sig=${encodeURIComponent(sig)}`,
+  )
+  return response.ride
+}
+
+export type PlatformSavedPlace = {
+  id: string
+  userId: string
+  label: string
+  address: string
+  lat: number | null
+  lng: number | null
+  createdAt: string
+}
+
+export async function fetchSavedPlaces() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; places: PlatformSavedPlace[] }>('/api/me/saved-places', {
+    token: session.token,
+  })
+  return response.places
+}
+
+export async function createSavedPlace(input: { label: string; address: string; lat?: number; lng?: number }) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; place: PlatformSavedPlace }>('/api/me/saved-places', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return response.place
+}
+
+export async function deleteSavedPlace(placeId: string) {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/me/saved-places/${placeId}`, {
+    method: 'DELETE',
+    token: session.token,
+  })
+}
+
+export type PlatformPromoCode = {
+  id: string
+  code: string
+  discountType: 'PERCENT' | 'FLAT'
+  discountValue: number
+  maxDiscountMinor: number | null
+  active: boolean
+  expiresAt: string | null
+  createdAt: string
+}
+
+export async function fetchPromoCodes() {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; promoCodes: PlatformPromoCode[] }>('/api/admin/sr/promo-codes', {
+    token: session.token,
+  })
+  return response.promoCodes
+}
+
+export async function createPromoCode(input: {
+  code: string
+  discountType: 'PERCENT' | 'FLAT'
+  discountValue: number
+  maxDiscountMinor?: number
+  expiresAt?: string
+}) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; promoCode: PlatformPromoCode }>('/api/admin/sr/promo-codes', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return response.promoCode
+}
+
+export async function setPromoCodeActive(promoCodeId: string, active: boolean) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; promoCode: PlatformPromoCode }>(`/api/admin/sr/promo-codes/${promoCodeId}`, {
+    method: 'PATCH',
+    token: session.token,
+    body: { active },
+  })
+  return response.promoCode
+}
+
+// SR Ride vs. Uber gap-closure: business/corporate accounts.
+export type PlatformBusinessAccount = {
+  id: string
+  name: string
+  billingContactEmail: string
+  adminUserId: string
+  active: boolean
+  createdAt: string
+  admin?: { id: string; displayName: string; email: string | null }
+}
+
+export type PlatformBusinessAccountMember = {
+  id: string
+  businessAccountId: string
+  userId: string
+  addedAt: string
+  user: { id: string; displayName: string; email: string | null }
+}
+
+export async function fetchBusinessAccounts() {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; businessAccounts: PlatformBusinessAccount[] }>('/api/admin/sr/business-accounts', {
+    token: session.token,
+  })
+  return response.businessAccounts
+}
+
+export async function createBusinessAccount(input: { name: string; billingContactEmail: string; adminEmail: string }) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; businessAccount: PlatformBusinessAccount }>('/api/admin/sr/business-accounts', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return response.businessAccount
+}
+
+export async function fetchBusinessMembership() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; isMember: boolean; businessAccountName: string | null }>(
+    '/api/business/membership',
+    { token: session.token },
+  )
+  return response
+}
+
+export async function fetchMyBusinessAccount() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; account: PlatformBusinessAccount; members: PlatformBusinessAccountMember[] }>(
+    '/api/business/account',
+    { token: session.token },
+  )
+  return response
+}
+
+export async function addBusinessMember(email: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; member: PlatformBusinessAccountMember }>('/api/business/members', {
+    method: 'POST',
+    token: session.token,
+    body: { email },
+  })
+  return response.member
+}
+
+export async function removeBusinessMember(userId: string) {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/business/members/${userId}`, {
+    method: 'DELETE',
+    token: session.token,
+  })
+}
+
+export async function fetchBusinessUsage() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; rides: PlatformRideRequest[]; totalMinor: number }>('/api/business/usage', {
+    token: session.token,
+  })
+  return response
+}
+
+// SR Ride vs. Uber gap-closure (P1 #7): standard Web Push -- no third-party push-provider account.
+export async function fetchPushConfig() {
+  const response = await apiRequest<{ ok: true; enabled: boolean; publicKey: string | null }>('/api/push/vapid-public-key')
+  return response
+}
+
+async function registerPushSubscription(subscription: PushSubscriptionJSON, asDriver: boolean) {
+  const session = asDriver ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true; subscriptionId: string }>('/api/push/subscribe', {
+    method: 'POST',
+    token: session.token,
+    body: subscription,
+  })
+}
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
+}
+
+// Browser-side flow: register the service worker, request permission, subscribe, then hand the
+// subscription to the server. Throws a clear message at whichever step isn't available/granted
+// rather than silently no-op'ing, so the UI can show the rider/driver why it didn't work.
+export async function enablePushNotifications(asDriver = false) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('Push notifications are not supported on this device.')
+  }
+  const config = await fetchPushConfig()
+  if (!config.enabled || !config.publicKey) {
+    throw new Error('Push notifications are not configured on the server yet.')
+  }
+  const permission = await Notification.requestPermission()
+  if (permission !== 'granted') {
+    throw new Error('Notification permission was not granted.')
+  }
+  const registration = await navigator.serviceWorker.register('/sw.js')
+  const existing = await registration.pushManager.getSubscription()
+  const subscription =
+    existing ||
+    (await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(config.publicKey),
+    }))
+  await registerPushSubscription(subscription.toJSON(), asDriver)
+}
+
 export async function fetchPrototypeDriverOverview() {
   const session = await ensurePrototypeDriverSession()
   const response = await apiRequest<{ ok: true; overview: PlatformDriverOverview }>('/api/driver/rides', {
     token: session.token,
   })
   return response.overview
+}
+
+export async function submitDriverPhoto(file: File) {
+  const session = await ensurePrototypeDriverSession()
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{ ok: true; driverProfile: { photoRef: string; photoMimeType: string } }>('/api/driver/photo', {
+    method: 'PATCH',
+    token: session.token,
+    body: { fileBase64, mimeType: file.type },
+  })
+  return response.driverProfile
+}
+
+export async function updatePrototypeDriverAccessibility(accessibilityCapable: boolean) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; driverProfile: { accessibilityCapable: boolean } }>('/api/driver/accessibility', {
+    method: 'PATCH',
+    token: session.token,
+    body: { accessibilityCapable },
+  })
+  return response.driverProfile
+}
+
+export async function reportPrototypeDriverLocation(lat: number, lng: number) {
+  const session = await ensurePrototypeDriverSession()
+  await apiRequest<{ ok: true }>('/api/driver/location', {
+    method: 'PATCH',
+    token: session.token,
+    body: { lat, lng },
+  })
+}
+
+// CAPSULE_RULES.noFakeTrustSignal: the driver dashboard's own docs-status panel must reflect the
+// same real idDocumentStatus field the host/guest verification badges already use, not a static claim.
+export async function fetchDriverIdentityStatus() {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; overview: PlatformOverview }>('/api/me/overview', {
+    token: session.token,
+  })
+  return response.overview.user.idDocumentStatus ?? null
 }
 
 export async function fetchPendingSrRides() {
@@ -1370,6 +1635,7 @@ export async function submitSellerPlanProof(input: {
   currency?: string
   providerRef: string
   proofAssetUrl?: string
+  proofAssetUrls?: string[]
   planCode?: string
   legalName?: string
   sellerType?: string
@@ -1418,6 +1684,24 @@ export async function fetchPrototypeHostEarnings(mode: HostDashboardMode = 'host
     token: session.token,
   })
   return response.earnings
+}
+
+// The KYC gate on /api/listings/:id/submit requires idDocumentStatus === 'APPROVED' for every
+// division. This is the host/seller-side counterpart to submitGuestIdDocument() — same endpoint,
+// same one-document-per-user model, just resolved through the host/seller session instead of the
+// guest one so a host actually has a way to satisfy the gate.
+export async function submitHostIdDocument(file: File, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{
+    ok: true
+    user: { id: string; idDocumentRef: string; idDocumentSubmittedAt: string; idDocumentStatus: string }
+  }>('/api/me/id-document', {
+    method: 'PATCH',
+    token: session.token,
+    body: { fileBase64, mimeType: file.type },
+  })
+  return response.user
 }
 
 export async function decidePrototypeHostRequest(
@@ -1472,6 +1756,18 @@ export async function updatePrototypeHostListingStatus(
   return response.listing
 }
 
+export async function deletePrototypeHostListing(listingId: string, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; deleted: string }>(
+    `/api/host/listings/${listingId}`,
+    {
+      method: 'DELETE',
+      token: session.token,
+    },
+  )
+  return response.deleted
+}
+
 export async function updatePrototypeHostInstantBook(
   listingId: string,
   enabled: boolean,
@@ -1496,12 +1792,15 @@ export async function createPrototypeWalletGift(input: {
   message?: string
 }) {
   const session = await ensurePrototypeGuestSession()
-  const response = await apiRequest<{ ok: true; gift: PlatformWalletGift }>('/api/wallet/gifts', {
+  // The 6-digit claim code is never delivered by SMS/email (Syria is email-only and this model has
+  // no recipient email) — the server now returns it here so the sender can share it with the
+  // recipient directly, same as any gift-card PIN.
+  const response = await apiRequest<{ ok: true; gift: PlatformWalletGift; claimCode: string }>('/api/wallet/gifts', {
     method: 'POST',
     token: session.token,
     body: input,
   })
-  return response.gift
+  return { gift: response.gift, claimCode: response.claimCode }
 }
 
 export async function claimPrototypeWalletGift(giftId: string, phone: string, code: string) {
@@ -1535,6 +1834,20 @@ export async function fetchPrototypeWallet() {
   return response.wallet
 }
 
+// Record the seller/host's acceptance of the platform listing agreement (required, alongside a
+// verified ID, before /api/listings/:id/submit will publish a listing — see server/lib/legal.mjs).
+export async function acceptListingAgreement() {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const manifest = await apiRequest<{ ok: true; documents: Array<{ key: string; version: string }> }>('/api/legal')
+  const doc = manifest.documents.find((d) => d.key === 'listing-agreement')
+  if (!doc) throw new Error('Listing agreement is not available.')
+  return apiRequest<{ ok: true; consent: unknown }>('/api/legal/consent', {
+    method: 'POST',
+    token: session.token,
+    body: { documentKey: 'listing-agreement', version: doc.version },
+  })
+}
+
 async function ensurePrototypeHostSession() {
   const stored = getStoredStaffSession('HOST') || getStoredStaffSession('SELLER')
   if (stored) return stored
@@ -1546,13 +1859,12 @@ async function ensurePrototypeGuestSession() {
   const guestSession = getStoredGuestSession()
   if (guestSession) return guestSession
 
-  return ensurePrototypeSession({
-    email: 'guest@sybnb.local',
-    password: 'StrongPass123',
-    displayName: 'SYBNB Guest',
-    role: 'GUEST',
-    phone: '+963900000001',
-  })
+  // No shared fallback account. Customer actions are gated behind real account creation (email OTP),
+  // so reaching here means the caller is not signed in — surface a clear 'sign in required' error
+  // instead of silently transacting under a shared demo identity (and no credentials in the bundle).
+  const error = new Error('Please create an account or sign in to continue.') as Error & { code?: string }
+  error.code = 'GUEST_SESSION_REQUIRED'
+  throw error
 }
 
 async function ensurePrototypeAdminSession() {
@@ -1569,31 +1881,12 @@ async function ensurePrototypeDriverSession() {
   throw new Error('Driver staff session required')
 }
 
+// Non-sensitive display defaults only. The real email/password always come from the staff sign-in
+// form (see the account assembly), so no credentials are embedded in the shipped bundle.
 function staffPrototypeAccount(role: 'ADMIN' | 'HOST' | 'DRIVER') {
-  if (role === 'ADMIN') {
-    return {
-      email: 'admin@sybnb.local',
-      displayName: 'SYBNB Admin',
-      role: 'ADMIN',
-      phone: '+963900000099',
-    }
-  }
-
-  if (role === 'DRIVER') {
-    return {
-      email: 'driver@sybnb.local',
-      displayName: 'SYBNB Driver',
-      role: 'DRIVER',
-      phone: '+963900000077',
-    }
-  }
-
-  return {
-    email: 'host@sybnb.local',
-    displayName: 'SYBNB Host',
-    role: 'HOST',
-    phone: '+963900000050',
-  }
+  if (role === 'ADMIN') return { displayName: 'SYBNB Admin', role: 'ADMIN' as const, phone: '' }
+  if (role === 'DRIVER') return { displayName: 'SYBNB Driver', role: 'DRIVER' as const, phone: '' }
+  return { displayName: 'SYBNB Host', role: 'HOST' as const, phone: '' }
 }
 
 async function ensurePrototypeSession(account: {
@@ -1680,8 +1973,10 @@ async function apiRequest<T>(
   const payload = (await response.json()) as unknown
   if (!response.ok || isApiErrorBody(payload)) {
     const message = isApiErrorBody(payload) ? payload.error?.message : undefined
-    const error = new Error(message || `SYBNB API request failed: ${response.status}`) as Error & { status?: number }
+    const code = isApiErrorBody(payload) ? payload.error?.code : undefined
+    const error = new Error(message || `SYBNB API request failed: ${response.status}`) as Error & { status?: number; code?: string }
     error.status = response.status
+    if (code) error.code = code
     throw error
   }
 

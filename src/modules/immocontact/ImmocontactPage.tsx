@@ -2,14 +2,18 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchBookingThread,
+  fetchListingInquiryThread,
+  fetchMyInquiries,
   fetchPrototypeHostOverview,
   fetchPrototypeOverview,
   fetchPrototypeReviewQueue,
   getStoredStaffSession,
   sendBookingMessage,
+  sendListingInquiryMessage,
   type PlatformBooking,
   type PlatformListing,
   type PlatformMessage,
+  type PlatformMyInquiryThread,
   type PlatformOverview,
   type PlatformPaymentProof,
   type PlatformRideRequest,
@@ -34,7 +38,8 @@ type Thread = {
   status: string
   rawStatus?: string
   href: string
-  type: 'booking' | 'payment' | 'ride' | 'gift'
+  type: 'booking' | 'payment' | 'ride' | 'gift' | 'inquiry'
+  listingId?: string
   priority: 'urgent' | 'waiting' | 'new' | 'closed'
 }
 
@@ -66,6 +71,7 @@ const copy = {
     payments: 'مدفوعات',
     rides: 'رحلات SR',
     gifts: 'هدايا',
+    inquiries: 'استفسارات',
     empty: 'لا توجد محادثات أو طلبات بعد.',
     balance: 'رصيد المحفظة',
     sla: 'SLA',
@@ -85,6 +91,8 @@ const copy = {
     send: 'إرسال',
     sending: 'جار الإرسال...',
     sendError: 'تعذر إرسال الرسالة.',
+    loadEarlier: 'تحميل رسائل أقدم',
+    loadingEarlier: 'جار التحميل...',
   },
   en: {
     back: 'Back to landing',
@@ -113,6 +121,7 @@ const copy = {
     payments: 'Payments',
     rides: 'SR rides',
     gifts: 'Gifts',
+    inquiries: 'Inquiries',
     empty: 'No conversations or requests yet.',
     balance: 'Wallet balance',
     sla: 'SLA',
@@ -132,6 +141,8 @@ const copy = {
     send: 'Send',
     sending: 'Sending...',
     sendError: 'Could not send the message.',
+    loadEarlier: 'Load earlier messages',
+    loadingEarlier: 'Loading...',
   },
 }
 
@@ -139,6 +150,7 @@ export function ImmocontactPage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [overview, setOverview] = useState<PlatformOverview | null>(null)
+  const [inquiryThreadsRaw, setInquiryThreadsRaw] = useState<PlatformMyInquiryThread[]>([])
   const [staffBookings, setStaffBookings] = useState<Array<PlatformBooking & { listing?: StaffBookingListing }>>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
@@ -146,6 +158,8 @@ export function ImmocontactPage({ lang }: Props) {
   const [activeThreadId, setActiveThreadId] = useState('')
   const [threadMessages, setThreadMessages] = useState<PlatformMessage[]>([])
   const [messagesStatus, setMessagesStatus] = useState<'idle' | 'loading' | 'locked' | 'error'>('idle')
+  const [hasMoreMessages, setHasMoreMessages] = useState(false)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [messageInput, setMessageInput] = useState('')
   const [sendStatus, setSendStatus] = useState<'idle' | 'sending' | 'error'>('idle')
 
@@ -181,9 +195,13 @@ export function ImmocontactPage({ lang }: Props) {
     ],
     [lang, overview?.gifts.claimed, overview?.gifts.sent],
   )
+  const inquiryThreads = useMemo(
+    () => inquiryThreadsRaw.map((thread) => inquiryThread(thread, lang)),
+    [inquiryThreadsRaw, lang],
+  )
   const allThreads = useMemo(
-    () => [...bookingThreads, ...paymentThreads, ...rideThreads, ...giftThreads],
-    [bookingThreads, giftThreads, paymentThreads, rideThreads],
+    () => [...bookingThreads, ...paymentThreads, ...rideThreads, ...giftThreads, ...inquiryThreads],
+    [bookingThreads, giftThreads, paymentThreads, rideThreads, inquiryThreads],
   )
   const visibleThreads = activeType === 'all' ? allThreads : allThreads.filter((thread) => thread.type === activeType)
   const activeThread = visibleThreads.find((thread) => thread.id === activeThreadId) || visibleThreads[0]
@@ -193,6 +211,7 @@ export function ImmocontactPage({ lang }: Props) {
     { id: 'payment', label: t.payments, count: paymentThreads.length },
     { id: 'ride', label: t.rides, count: rideThreads.length },
     { id: 'gift', label: t.gifts, count: giftThreads.length },
+    { id: 'inquiry', label: t.inquiries, count: inquiryThreads.length },
   ]
 
   async function loadOverview() {
@@ -209,7 +228,12 @@ export function ImmocontactPage({ lang }: Props) {
           setStaffBookings(hostOverview.requests)
         }
       } else {
-        setOverview(await fetchPrototypeOverview())
+        const [nextOverview, nextInquiries] = await Promise.all([
+          fetchPrototypeOverview(),
+          fetchMyInquiries().catch(() => []),
+        ])
+        setOverview(nextOverview)
+        setInquiryThreadsRaw(nextInquiries)
       }
       setStatus('ready')
     } catch (error) {
@@ -219,23 +243,30 @@ export function ImmocontactPage({ lang }: Props) {
   }
 
   useEffect(() => {
-    if (!activeThread || activeThread.type !== 'booking') {
+    if (!activeThread || (activeThread.type !== 'booking' && activeThread.type !== 'inquiry')) {
       setThreadMessages([])
       setMessagesStatus('idle')
+      setHasMoreMessages(false)
       return
     }
-    if (activeThread.rawStatus && !MESSAGING_ELIGIBLE_BOOKING_STATUSES.includes(activeThread.rawStatus)) {
+    if (activeThread.type === 'booking' && activeThread.rawStatus && !MESSAGING_ELIGIBLE_BOOKING_STATUSES.includes(activeThread.rawStatus)) {
       setThreadMessages([])
       setMessagesStatus('locked')
+      setHasMoreMessages(false)
       return
     }
 
     let cancelled = false
     setMessagesStatus('loading')
-    fetchBookingThread(activeThread.id, isStaff)
+    const load =
+      activeThread.type === 'inquiry' && activeThread.listingId
+        ? fetchListingInquiryThread(activeThread.listingId)
+        : fetchBookingThread(activeThread.id, isStaff)
+    load
       .then((thread) => {
         if (!cancelled) {
           setThreadMessages(thread.messages)
+          setHasMoreMessages(thread.hasMore)
           setMessagesStatus('idle')
         }
       })
@@ -245,13 +276,32 @@ export function ImmocontactPage({ lang }: Props) {
     return () => {
       cancelled = true
     }
-  }, [activeThread?.id, activeThread?.type, activeThread?.rawStatus, isStaff])
+  }, [activeThread?.id, activeThread?.type, activeThread?.rawStatus, activeThread?.listingId, isStaff])
+
+  async function loadEarlierMessages() {
+    if (!activeThread || (activeThread.type !== 'booking' && activeThread.type !== 'inquiry') || !threadMessages.length) return
+    setLoadingEarlier(true)
+    try {
+      const oldestId = threadMessages[0].id
+      const thread =
+        activeThread.type === 'inquiry' && activeThread.listingId
+          ? await fetchListingInquiryThread(activeThread.listingId, oldestId)
+          : await fetchBookingThread(activeThread.id, isStaff, oldestId)
+      setThreadMessages((current) => [...thread.messages, ...current])
+      setHasMoreMessages(thread.hasMore)
+    } finally {
+      setLoadingEarlier(false)
+    }
+  }
 
   async function sendMessage() {
-    if (!activeThread || activeThread.type !== 'booking' || !messageInput.trim()) return
+    if (!activeThread || (activeThread.type !== 'booking' && activeThread.type !== 'inquiry') || !messageInput.trim()) return
     setSendStatus('sending')
     try {
-      const sent = await sendBookingMessage(activeThread.id, messageInput.trim(), isStaff)
+      const sent =
+        activeThread.type === 'inquiry' && activeThread.listingId
+          ? await sendListingInquiryMessage(activeThread.listingId, messageInput.trim())
+          : await sendBookingMessage(activeThread.id, messageInput.trim(), isStaff)
       setThreadMessages((current) => [...current, sent])
       setMessageInput('')
       setSendStatus('idle')
@@ -362,7 +412,7 @@ export function ImmocontactPage({ lang }: Props) {
                 <p>{activeThread.subtitle}</p>
               </article>
               <div className="immo-message-stack">
-                {activeThread.type !== 'booking' ? (
+                {activeThread.type !== 'booking' && activeThread.type !== 'inquiry' ? (
                   <p className="immo-empty">{t.noMessagingForType}</p>
                 ) : messagesStatus === 'loading' ? (
                   <p className="immo-empty">{t.loading}</p>
@@ -371,16 +421,23 @@ export function ImmocontactPage({ lang }: Props) {
                 ) : threadMessages.length === 0 ? (
                   <p className="immo-empty">{t.noMessagesYet}</p>
                 ) : (
-                  threadMessages.map((msg) => (
+                  <>
+                  {hasMoreMessages && (
+                    <button className="immo-load-earlier" disabled={loadingEarlier} onClick={() => void loadEarlierMessages()}>
+                      {loadingEarlier ? t.loadingEarlier : t.loadEarlier}
+                    </button>
+                  )}
+                  {threadMessages.map((msg) => (
                     <MessageBubble
                       key={msg.id}
                       align={msg.senderRole === 'GUEST' ? 'user' : 'admin'}
                       text={`${msg.sender?.displayName || msg.senderRole}: ${msg.body}`}
                     />
-                  ))
+                  ))}
+                  </>
                 )}
               </div>
-              {activeThread.type === 'booking' && messagesStatus === 'idle' && (
+              {(activeThread.type === 'booking' || activeThread.type === 'inquiry') && messagesStatus === 'idle' && (
                 <div className="immo-message-input-row">
                   <textarea
                     value={messageInput}
@@ -427,7 +484,6 @@ export function ImmocontactPage({ lang }: Props) {
             <>
               <ContextRow label={t.linkedRecord} value={activeThread.id.slice(0, 12).toUpperCase()} />
               <ContextRow label={t.status} value={activeThread.status} />
-              {isStaff && <ContextRow label={t.assigned} value={isAr ? 'أحمد علي' : 'Ahmad Ali'} />}
               {isStaff && (
                 <ContextRow label={t.teamHandoff} value={activeThread.priority === 'urgent' ? (isAr ? 'الدعم + المالية' : 'Support + finance') : (isAr ? 'الدعم' : 'Support')} />
               )}
@@ -487,6 +543,7 @@ function threadTypeText(type: Thread['type'], lang: Lang) {
     payment: { ar: 'دفع', en: 'Payment' },
     ride: { ar: 'رحلة', en: 'Ride' },
     gift: { ar: 'هدية', en: 'Gift' },
+    inquiry: { ar: 'استفسار', en: 'Inquiry' },
   }
   return labels[type][lang]
 }
@@ -536,6 +593,21 @@ function rideThread(ride: PlatformRideRequest, lang: Lang): Thread {
     href: '/ride',
     type: 'ride',
     priority: ride.status === 'REQUESTED' ? 'new' : ride.status === 'COMPLETED' ? 'closed' : 'waiting',
+  }
+}
+
+function inquiryThread(thread: PlatformMyInquiryThread, lang: Lang): Thread {
+  const listing = thread.listing
+  const lastMessage = thread.messages[0]
+  return {
+    id: thread.id,
+    listingId: thread.listingId || listing?.id,
+    title: listing ? listingTitleText(listing, lang) : thread.id,
+    subtitle: listing ? moneyText(listing.priceMinor, listing.currency, lang) : '',
+    status: lastMessage ? (lastMessage.senderRole === 'GUEST' ? (lang === 'ar' ? 'بانتظار الرد' : 'Awaiting reply') : (lang === 'ar' ? 'تم الرد' : 'Replied')) : (lang === 'ar' ? 'جديد' : 'New'),
+    href: listing ? `/listing/${listing.id}` : '/',
+    type: 'inquiry',
+    priority: lastMessage?.senderRole === 'GUEST' ? 'waiting' : 'new',
   }
 }
 

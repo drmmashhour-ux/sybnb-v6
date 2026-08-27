@@ -2,8 +2,36 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isBookingViewable } from './bookings.mjs'
+import { sendPushNotification } from '../lib/push-notifications.mjs'
 
 const MESSAGING_ELIGIBLE_BOOKING_STATUSES = ['CONFIRMED', 'COMPLETED', 'DISPUTED']
+
+// Scale-readiness audit: thread detail was `orderBy: asc, take: 200` with no pagination, so once a
+// thread (e.g. a long DISPUTED-booking negotiation) passed 200 messages, everything sent after that
+// point became permanently invisible to both sides. Fetch the newest page instead (desc + reverse),
+// and expose `hasMore` + a `before` cursor so the client can page further back on demand.
+const THREAD_MESSAGE_PAGE_SIZE = 200
+
+async function fetchThreadMessagePage(threadId, beforeId) {
+  const rows = await db().message.findMany({
+    where: { threadId },
+    include: { sender: { select: { id: true, displayName: true } } },
+    orderBy: { createdAt: 'desc' },
+    take: THREAD_MESSAGE_PAGE_SIZE + 1,
+    ...(beforeId ? { cursor: { id: beforeId }, skip: 1 } : {}),
+  })
+
+  const hasMore = rows.length > THREAD_MESSAGE_PAGE_SIZE
+  const messages = rows.slice(0, THREAD_MESSAGE_PAGE_SIZE).reverse()
+  return { messages, hasMore }
+}
+
+// SR Ride vs. Uber gap-closure (P0 #4): a rider and driver only have anything to coordinate once
+// a driver actually exists (never REQUESTED/MATCHING) up through a short window after the trip
+// ends (mirrors Uber's own in-app chat window, e.g. reporting a lost item) -- not CANCELLED,
+// which has no live coordination need and would otherwise reopen a channel disputes should go
+// through support for instead.
+const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED']
 
 async function loadBookingForThread(bookingId, context) {
   const booking = await db().booking.findUnique({
@@ -90,6 +118,55 @@ async function ensureListingThread(listingId, guestId) {
   })
 }
 
+async function loadRideForThread(rideId, context) {
+  const ride = await db().rideRequest.findUnique({ where: { id: rideId } })
+
+  if (!ride) {
+    const error = new Error('Ride request not found.')
+    error.statusCode = 404
+    error.code = 'RIDE_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
+
+  const isParticipant =
+    context.roles.includes('ADMIN') ||
+    context.roles.includes('SUPPORT') ||
+    ride.riderId === context.user.id ||
+    ride.driverId === context.user.id
+  if (!isParticipant) {
+    const error = new Error('This ride is not available for this account.')
+    error.statusCode = 403
+    error.code = 'RIDE_FORBIDDEN'
+    error.expose = true
+    throw error
+  }
+
+  if (!MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status)) {
+    const error = new Error('Messaging opens once a driver is assigned to the ride.')
+    error.statusCode = 400
+    error.code = 'MESSAGING_NOT_ELIGIBLE'
+    error.expose = true
+    throw error
+  }
+
+  return ride
+}
+
+function rideSenderRoleFor(ride, context) {
+  if (context.roles.includes('ADMIN')) return 'ADMIN'
+  if (context.roles.includes('SUPPORT')) return 'SUPPORT'
+  return ride.driverId === context.user.id ? 'DRIVER' : 'RIDER'
+}
+
+async function ensureRideThread(rideId) {
+  return db().messageThread.upsert({
+    where: { rideId },
+    create: { rideId },
+    update: {},
+  })
+}
+
 export async function handleMessages(req, res, url, context) {
   const listingThreadMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/thread$/)
   if (listingThreadMatch) {
@@ -129,14 +206,10 @@ export async function handleMessages(req, res, url, context) {
       throw error
     }
 
-    const messages = await db().message.findMany({
-      where: { threadId: thread.id },
-      include: { sender: { select: { id: true, displayName: true } } },
-      orderBy: { createdAt: 'asc' },
-      take: 200,
-    })
+    const before = url.searchParams.get('before') || undefined
+    const { messages, hasMore } = await fetchThreadMessagePage(thread.id, before)
 
-    return json(res, 200, { ok: true, thread: { id: thread.id, listingId: listing.id, guestId, messages } })
+    return json(res, 200, { ok: true, thread: { id: thread.id, listingId: listing.id, guestId, messages, hasMore } })
   }
 
   const listingSendMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/thread\/messages$/)
@@ -197,6 +270,26 @@ export async function handleMessages(req, res, url, context) {
     return json(res, 201, { ok: true, message })
   }
 
+  // Mirror of /api/host/inquiries for the guest side — without this, a guest who sends a listing
+  // inquiry (Rentals/Buy/Cars/Marketplace/New-Construction) has no way to ever see the host's reply;
+  // the inbox only supported booking/payment/ride/gift threads.
+  if (url.pathname === '/api/me/inquiries') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+
+    const threads = await db().messageThread.findMany({
+      where: { guestId: context.user.id, listingId: { not: null } },
+      include: {
+        listing: { select: { id: true, titleAr: true, titleEn: true, division: true, priceMinor: true, currency: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 50,
+    })
+
+    return json(res, 200, { ok: true, threads })
+  }
+
   if (url.pathname === '/api/host/inquiries') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
@@ -222,14 +315,10 @@ export async function handleMessages(req, res, url, context) {
 
     const booking = await loadBookingForThread(threadMatch[1], context)
     const thread = await ensureThread(booking.id)
-    const messages = await db().message.findMany({
-      where: { threadId: thread.id },
-      include: { sender: { select: { id: true, displayName: true } } },
-      orderBy: { createdAt: 'asc' },
-      take: 200,
-    })
+    const before = url.searchParams.get('before') || undefined
+    const { messages, hasMore } = await fetchThreadMessagePage(thread.id, before)
 
-    return json(res, 200, { ok: true, thread: { id: thread.id, bookingId: booking.id, messages } })
+    return json(res, 200, { ok: true, thread: { id: thread.id, bookingId: booking.id, messages, hasMore } })
   }
 
   const sendMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/thread\/messages$/)
@@ -267,6 +356,69 @@ export async function handleMessages(req, res, url, context) {
       },
       include: { sender: { select: { id: true, displayName: true } } },
     })
+
+    return json(res, 201, { ok: true, message })
+  }
+
+  const rideThreadMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/thread$/)
+  if (rideThreadMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+
+    const ride = await loadRideForThread(rideThreadMatch[1], context)
+    const thread = await ensureRideThread(ride.id)
+    const before = url.searchParams.get('before') || undefined
+    const { messages, hasMore } = await fetchThreadMessagePage(thread.id, before)
+
+    return json(res, 200, { ok: true, thread: { id: thread.id, rideId: ride.id, messages, hasMore } })
+  }
+
+  const rideSendMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/thread\/messages$/)
+  if (rideSendMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+
+    const ride = await loadRideForThread(rideSendMatch[1], context)
+    const body = await readJson(req)
+    const text = typeof body.body === 'string' ? body.body.trim() : ''
+
+    if (!text) {
+      const error = new Error('Message body is required.')
+      error.statusCode = 400
+      error.code = 'MESSAGE_BODY_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
+    if (text.length > 4000) {
+      const error = new Error('Message body is too long.')
+      error.statusCode = 400
+      error.code = 'MESSAGE_BODY_TOO_LONG'
+      error.expose = true
+      throw error
+    }
+
+    const thread = await ensureRideThread(ride.id)
+    const message = await db().message.create({
+      data: {
+        threadId: thread.id,
+        senderUserId: context.user.id,
+        senderRole: rideSenderRoleFor(ride, context),
+        body: text,
+      },
+      include: { sender: { select: { id: true, displayName: true } } },
+    })
+
+    // SR Ride vs. Uber gap-closure (P1 #7): notify whichever side didn't just send this --
+    // fire-and-forget, never fails the send itself.
+    const recipientId = ride.driverId === context.user.id ? ride.riderId : ride.driverId
+    if (recipientId) {
+      void sendPushNotification(recipientId, {
+        title: `${message.sender.displayName} sent a message`,
+        body: text.length > 120 ? `${text.slice(0, 117)}...` : text,
+        url: '/#/ride',
+      })
+    }
 
     return json(res, 201, { ok: true, message })
   }

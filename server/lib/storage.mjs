@@ -34,6 +34,7 @@ const BUCKETS = {
   kyc: { private: true, mime: ['image/jpeg', 'image/png', 'application/pdf'], maxBytes: 8 * 1024 * 1024 },
   'payment-proof': { private: true, mime: ['image/jpeg', 'image/png', 'application/pdf'], maxBytes: 8 * 1024 * 1024 },
   'listing-media': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
+  'driver-photo': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
 }
 
 function bucketPolicy(bucket) {
@@ -122,7 +123,15 @@ export async function getObjectBytes(bucket, key) {
   validateKey(key)
   assertProviderAllowed()
   if (provider() === 'local') {
-    return readFile(path.join(LOCAL_ROOT, bucket, key))
+    // An independent admin-experience audit found this ENOENT was never caught -- a missing local
+    // file (the referenced storage key has no matching file on disk, e.g. a stale/orphaned
+    // reference) surfaced as an opaque 500 to every caller instead of a clear, expose:true 404.
+    // Reproduced live against real ID-document records. Any other filesystem error (permissions,
+    // I/O) still propagates unchanged -- this only reclassifies "file genuinely doesn't exist".
+    return await readFile(path.join(LOCAL_ROOT, bucket, key)).catch((err) => {
+      if (err?.code === 'ENOENT') throw storageError(404, 'STORAGE_OBJECT_NOT_FOUND', 'The requested file could not be found.')
+      throw err
+    })
   }
   const cfg = s3Config()
   if (!cfg) requireS3Config()

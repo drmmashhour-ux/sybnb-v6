@@ -6,7 +6,7 @@ import {
   fetchPrototypeOverview,
   type PlatformOverview,
 } from '../../shared/api/platformApi'
-import { listingTitleText, moneyText } from '../../shared/i18n/display'
+import { listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 
 type Props = {
   lang: Lang
@@ -51,17 +51,19 @@ const copy = {
     saveTrip: 'حفظ نسخة شخصية',
     printTrip: 'طباعة الرحلة',
     member: 'العضوية الموثقة',
+    pendingVerification: 'التوثيق قيد المراجعة',
+    verifyNow: 'وثّق هويتك',
     inTrip: 'في الرحلة',
+    upcomingTrip: 'رحلة قادمة',
     noActiveTrip: 'لا توجد رحلة نشطة حالياً',
     noActiveTripCopy: 'ابحث عن إقامة واحجزها لتظهر تفاصيل رحلتك هنا.',
     invoice: 'الفاتورة',
     contact: 'الاتصال',
     sos: 'SOS',
     trustCopy: 'حجزك محمي بالكامل مع نظام SYBNB Trust',
-    trustScore: 'درجة الأمان 100%',
+    trustScore: 'مركز الثقة',
     currentTrip: 'رحلتي الحالية',
     previousTrips: 'رحلاتي السابقة',
-    completed: 'مكتمل',
     tripDates: '12 - 15 فبراير',
     progressSteps: ['تم الحجز', 'تم الدفع', 'الوصول', 'المغادرة'],
     walletTitle: 'محفظتي وحركات الدفع',
@@ -112,17 +114,19 @@ const copy = {
     saveTrip: 'Save personal copy',
     printTrip: 'Print trip',
     member: 'Verified membership',
+    pendingVerification: 'Verification in review',
+    verifyNow: 'Verify your identity',
     inTrip: 'In trip',
+    upcomingTrip: 'Upcoming trip',
     noActiveTrip: 'No active trip right now',
     noActiveTripCopy: 'Search and book a stay to see your trip details here.',
     invoice: 'Invoice',
     contact: 'Contact',
     sos: 'SOS',
     trustCopy: 'Your booking is fully protected with SYBNB Trust',
-    trustScore: 'Safety score 100%',
+    trustScore: 'Trust Center',
     currentTrip: 'Current trip',
     previousTrips: 'Previous trips',
-    completed: 'Completed',
     tripDates: 'Feb 12 - 15',
     progressSteps: ['Booked', 'Paid', 'Arrival', 'Departure'],
     walletTitle: 'My Wallet and Payment Movements',
@@ -180,15 +184,31 @@ export function DashboardPage({ lang }: Props) {
     URL.revokeObjectURL(url)
   }
 
-  const activeBooking = overview?.bookings[0]
+  // CAPSULE_RULES.noFakeTrustSignal: "current trip" must be a real non-terminal booking, not just
+  // whichever booking was created most recently -- an old cancelled/completed booking could
+  // otherwise outrank a genuinely upcoming one that was requested earlier. bookings is already
+  // ordered by createdAt desc (server/routes/me.mjs), so the first non-terminal match is the most
+  // recent active one. The backend's completeExpiredBookings() keeps status honest (flips CONFIRMED
+  // to COMPLETED once checkOut has passed), so trusting status here is safe, not naive.
+  const TERMINAL_BOOKING_STATUSES = ['COMPLETED', 'CANCELLED']
+  const activeBooking = overview?.bookings.find((booking) => !TERMINAL_BOOKING_STATUSES.includes(booking.status))
+  const isDisputed = activeBooking?.status === 'DISPUTED'
   const activeListing = activeBooking?.listing
   const activeTitle = activeListing ? labelForListing(activeListing, lang) : ''
   const activeReference = activeBooking?.id ? `BK-${activeBooking.id.slice(0, 4).toUpperCase()}-${activeBooking.id.slice(4, 8).toUpperCase()}` : ''
   const activeTripDates = activeBooking?.checkIn && activeBooking?.checkOut ? tripDateRange(activeBooking.checkIn, activeBooking.checkOut, lang) : ''
   const displayName = overview?.user?.displayName || (isAr ? 'ضيف' : 'Guest')
   const avatarLetter = displayName.trim().charAt(0).toUpperCase() || (isAr ? 'ض' : 'G')
-  const activeStep = Math.max(2, activeTripStep(overview))
-  const pastTrips = overview?.bookings.slice(1, 3).map((booking) => normalizePastTrip(booking, lang)) || []
+  // CAPSULE_RULES.noFakeTrustSignal: mirrors the same real idDocumentStatus-driven pattern
+  // HostDashboardPage already uses for its own verification badge -- never a static claim.
+  const isMembershipVerified = overview?.user?.idDocumentStatus === 'APPROVED'
+  const isMembershipPendingReview = overview?.user?.idDocumentStatus === 'PENDING_REVIEW'
+  const activeStep = activeTripStep(activeBooking)
+  const pastTrips =
+    overview?.bookings
+      .filter((booking) => booking.id !== activeBooking?.id && TERMINAL_BOOKING_STATUSES.includes(booking.status))
+      .slice(0, 3)
+      .map((booking) => normalizePastTrip(booking, lang)) || []
   const walletRows = normalizeWalletRows(overview, lang)
   const protectedFunds = overview?.payments
     .filter((payment) => ['PENDING', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED'].includes(payment.status))
@@ -202,7 +222,18 @@ export function DashboardPage({ lang }: Props) {
           <span style={styles.avatar}>{avatarLetter}</span>
           <div>
             <strong>{displayName}</strong>
-            <span>SYBNB STAYS · {t.member}</span>
+            {isMembershipVerified ? (
+              <span>SYBNB STAYS · {t.member}</span>
+            ) : isMembershipPendingReview ? (
+              <span>SYBNB STAYS · {t.pendingVerification}</span>
+            ) : (
+              <span>
+                SYBNB STAYS ·{' '}
+                <button style={styles.verifyLink} onClick={() => (window.location.hash = '/trust-center/verification')}>
+                  {t.verifyNow}
+                </button>
+              </span>
+            )}
           </div>
         </div>
       </section>
@@ -215,10 +246,17 @@ export function DashboardPage({ lang }: Props) {
             <>
               <div style={styles.tripMeta}>
                 {activeTripDates && <span style={styles.datePill}>{activeTripDates}</span>}
-                <span style={styles.activePill}>{t.inTrip}</span>
+                {/* A real bug caught by an independent re-audit: this always said "In trip" for
+                    any active, non-disputed booking, even days before check-in -- directly
+                    contradicting the stepper below it on the same screen, which already has the
+                    real signal (activeStep/hasArrived, from activeTripStep()). Now the two agree. */}
+                <span style={isDisputed ? styles.disputePill : styles.activePill}>
+                  {isDisputed ? t.disputeOpen : activeStep === 2 ? t.inTrip : t.upcomingTrip}
+                </span>
               </div>
               <h1 style={styles.tripTitle}>{activeTitle}</h1>
               <p style={styles.tripRef}>{activeReference}</p>
+              {isDisputed && <p style={styles.disputeNotice}>{t.disputeCopy}</p>}
             </>
           ) : (
             <>
@@ -227,7 +265,7 @@ export function DashboardPage({ lang }: Props) {
             </>
           )}
           <div style={styles.tripActions}>
-            <button style={styles.sosButton} onClick={() => (window.location.hash = activeBooking ? `/booking/dispute/${activeBooking.id}` : '/immocontact')}>
+            <button style={styles.sosButton} onClick={() => (window.location.hash = '/trust-center/sos')}>
               {t.sos} ⚠
             </button>
             <button style={styles.goldButton} onClick={() => activeBooking?.payments?.[0]?.id ? (window.location.hash = `/payment/receipt/${activeBooking.payments[0].id}`) : window.print()}>
@@ -252,7 +290,6 @@ export function DashboardPage({ lang }: Props) {
             </button>
             <button style={styles.trustTile} onClick={() => (window.location.hash = '/trust-center')}>
               <span>{t.trustScore}</span>
-              <strong>94</strong>
               <small>{isAr ? 'مركز الثقة' : 'Trust Center'}</small>
             </button>
           </section>
@@ -320,7 +357,7 @@ export function DashboardPage({ lang }: Props) {
               <strong>{trip.title}</strong>
               <span>{trip.dates}</span>
             </div>
-            <b>{t.completed}</b>
+            <b>{trip.statusLabel}</b>
           </article>
         )) : <p style={styles.mutedText}>{t.empty}</p>}
       </section>
@@ -339,12 +376,16 @@ function normalizePastTrip(booking: PlatformOverview['bookings'][number], lang: 
     title: booking.listing ? labelForListing(booking.listing, lang) : booking.id.slice(0, 8).toUpperCase(),
     dates: booking.checkIn && booking.checkOut ? tripDateRange(booking.checkIn, booking.checkOut, lang) : lang === 'ar' ? 'رحلة محفوظة' : 'Saved trip',
     image: bookingImage(booking),
+    statusLabel: statusText(booking.status, lang),
   }
 }
 
 function tripDateRange(checkIn: string, checkOut: string, lang: Lang) {
   const locale = localeForLang(lang)
-  const format = (value: string) => new Date(value).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' })
+  // Check-in/check-out are stored/returned as midnight-UTC dates -- formatting without an
+  // explicit UTC timeZone rolls the date back a day for any viewer west of UTC (found by an
+  // independent re-audit: a real Aug 30 booking rendered as "Aug 29" in EDT).
+  const format = (value: string) => new Date(value).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   return `${format(checkIn)} - ${format(checkOut)}`
 }
 
@@ -352,16 +393,18 @@ function labelForListing(listing: NonNullable<PlatformOverview['bookings'][numbe
   return listingTitleText(listing, lang)
 }
 
-function activeTripStep(overview: PlatformOverview | null) {
-  const booking = overview?.bookings[0]
-  const payment = booking?.payments?.[0] || overview?.payments[0]
-
-  if (!booking) return 0
+function activeTripStep(booking: PlatformOverview['bookings'][number] | undefined) {
+  // "Arrival" (step 2) must reflect the real check-in date, not just booking+payment confirmation --
+  // a CONFIRMED booking used to force-show "Arrival" as done the instant it was paid, even for a
+  // stay weeks away. Scoped to this booking's own payments only -- a guest's unrelated payment from
+  // a different booking must never influence this booking's progress stepper.
+  if (!booking) return -1
   if (booking.status === 'COMPLETED') return 3
-  if (booking.status === 'CONFIRMED') return 2
-  if (payment?.status === 'APPROVED') return 2
-  if (payment) return 1
-  return 0
+  const payment = booking.payments?.[0]
+  const isPaid = booking.status === 'CONFIRMED' || payment?.status === 'APPROVED'
+  if (!isPaid) return 0
+  const hasArrived = booking.checkIn ? new Date(booking.checkIn).getTime() <= Date.now() : false
+  return hasArrived ? 2 : 1
 }
 
 function normalizeWalletRows(overview: PlatformOverview | null, lang: Lang) {
@@ -421,14 +464,17 @@ const styles: Record<string, CSSProperties> = {
   iconButton: { width: 50, height: 50, borderRadius: 999, border: '1px solid #242b3e', background: '#101522', color: '#fff', fontSize: 26, display: 'grid', placeItems: 'center' },
   profile: { display: 'flex', flexDirection: 'row-reverse', alignItems: 'center', gap: 12, textAlign: 'right' },
   avatar: { width: 48, height: 48, borderRadius: 999, border: '2px solid rgba(255,255,255,.24)', background: 'linear-gradient(145deg,#5268ff,#20d29b)', display: 'grid', placeItems: 'center', fontWeight: 950, color: '#fff' },
+  verifyLink: { border: 0, background: 'none', padding: 0, color: '#ffb020', fontWeight: 900, fontSize: 'inherit', textDecoration: 'underline', cursor: 'pointer' },
   desktopHero: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.42fr) minmax(330px, .78fr)', gap: 18, alignItems: 'stretch' },
   sidePanel: { display: 'grid', gap: 16, alignContent: 'stretch' },
   tripCard: { border: '1.5px solid #20d29b', borderRadius: 22, background: '#14141b', padding: 30, display: 'grid', gap: 18, alignContent: 'center', minHeight: 300, boxShadow: '0 18px 42px rgba(0,0,0,.34)' },
   tripMeta: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   datePill: { borderRadius: 999, background: '#25252f', color: '#d6d9e6', padding: '7px 12px', fontSize: 12, fontWeight: 900 },
   activePill: { color: '#20d29b', fontSize: 13, fontWeight: 950 },
+  disputePill: { color: '#ffb020', fontSize: 13, fontWeight: 950 },
   tripTitle: { margin: 0, fontSize: 38, lineHeight: 1.12, textAlign: 'right' },
   tripRef: { margin: 0, color: '#82899b', textAlign: 'right', fontWeight: 800 },
+  disputeNotice: { margin: 0, color: '#ffb020', textAlign: 'right', fontWeight: 800, fontSize: 13 },
   tripActions: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 },
   sosButton: { minHeight: 64, borderRadius: 14, border: '2px solid #ff4c73', background: 'transparent', color: '#ff4c73', fontWeight: 950, fontSize: 17 },
   goldButton: { minHeight: 64, border: 0, borderRadius: 14, background: '#e5b80b', color: '#fff', fontWeight: 950, fontSize: 17 },

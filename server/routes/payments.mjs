@@ -1,12 +1,28 @@
+import { createHash } from 'node:crypto'
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, CANCELLATION_PROTECTION_RATE, STR_CLEANING_RATE, STR_TAX_RATE } from '../lib/finance-ledger.mjs'
+import { expectedTotalMinor, isProviderRefUniqueViolation } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { putObject, signObjectUrl } from '../lib/storage.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
+import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
+import { log } from '../lib/logger.mjs'
+import { finalizeStripeSession, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
+import { applyPaymentEvent, intakeEvent, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
 function requireStripe() {
+  // Explicit kill switch: refuse to transact with a LIVE key unless payments are deliberately enabled.
+  // 'Off' must be intentional, not merely an unset env var. Test keys stay usable for sandbox/e2e.
+  if (process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_') && process.env.PAYMENTS_ENABLED !== 'true') {
+    const error = new Error('Live payments are not enabled on this server.')
+    error.statusCode = 503
+    error.code = 'PAYMENTS_DISABLED'
+    error.expose = true
+    throw error
+  }
   if (!stripe) {
     const error = new Error('Stripe is not configured on this server yet.')
     error.statusCode = 503
@@ -27,33 +43,45 @@ function paymentReferenceDuplicate() {
   error.expose = true
   return error
 }
-function isProviderRefUniqueViolation(err) {
-  const target = err?.meta?.target
-  return err?.code === 'P2002' && (target === 'payment_proofs_provider_provider_ref_key' ||
-    (Array.isArray(target) && target.includes('provider_ref')) || String(target || '').includes('provider_ref'))
+
+// expectedTotalMinor and firstAdminId now live in finance-ledger.mjs (shared with the PaymentIntent
+// webhook path) so both payment rails derive the guest total and the auto-approval actor from one
+// place instead of two copies that can drift.
+
+// An independent revenue audit found both no-booking/no-ride payment-proof paths below accepted a
+// raw client-supplied `currency` string with no validation at all -- proven live: a seller-plan
+// proof submitted with currency:"ZZZFAKECOIN" was admin-approvable without incident, creating a
+// real Wallet row denominated in a currency nothing else in the platform recognizes (invisible to
+// any real SYP/USD reporting), directly contradicting finance-ledger.mjs's own documented
+// invariant that every wallet here is SYP-denominated. Fails closed like every other client-input
+// validation in this file: an explicit currency must be one the active country actually allows;
+// omitting it falls back to the country's real default, same as before.
+function resolveClientCurrency(rawCurrency, fallback) {
+  if (!rawCurrency) return fallback
+  const currency = String(rawCurrency).trim().toUpperCase()
+  if (!isCurrencyAllowed(currency)) {
+    const error = new Error(`Unsupported currency: ${currency}.`)
+    error.statusCode = 400
+    error.code = 'PAYMENT_CURRENCY_NOT_ALLOWED'
+    error.expose = true
+    throw error
+  }
+  return currency
 }
 
-function metadataNumber(metadata, key) {
-  const value = metadata?.[key]
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
-}
-
-// Mirrors src/modules/bookings/guestFeeSummary.ts so the Stripe charge matches what the guest saw.
-function expectedTotalMinor(booking) {
-  const stayAmountMinor = Math.max(0, Math.round(booking.amountMinor || 0))
-  const listingMetadata = booking.listing?.metadata || {}
-  const bookingMetadata = booking.metadata || {}
-  const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
-
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
-  const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
-  const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
-  const cancellationProtectionFeeMinor = cancellationProtectionPurchased
-    ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') || Math.round(stayAmountMinor * CANCELLATION_PROTECTION_RATE)
-    : 0
-
-  return stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
+// Some upload flows (seller-plan documents, advertising payment files) genuinely upload several
+// real files. Only trust entries that are real object-storage references this server issued
+// (payment-proof://...) — never an arbitrary client-supplied string — and cap the count so a
+// malformed client can't stuff an unbounded array into the row.
+function normalizeProofAssetUrls(body) {
+  const raw = Array.isArray(body.proofAssetUrls) ? body.proofAssetUrls : []
+  const urls = raw
+    .filter((url) => typeof url === 'string' && url.startsWith('payment-proof://'))
+    .slice(0, 20)
+  if (urls.length) return urls
+  return typeof body.proofAssetUrl === 'string' && body.proofAssetUrl.startsWith('payment-proof://')
+    ? [body.proofAssetUrl]
+    : []
 }
 
 // SYP is not a Stripe-supported settlement currency, so test-mode charges run in STRIPE_CURRENCY
@@ -62,60 +90,66 @@ function expectedTotalMinor(booking) {
 function stripeChargeAmount(totalMinor) {
   const currency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
   if (currency === 'syp') return { currency, unitAmount: Math.max(100, Math.round(totalMinor)) }
+  // Fail closed on real money: a LIVE key must not silently charge real cards using the placeholder
+  // FX rate. Test keys keep working against the placeholder for sandbox/e2e.
+  if (process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_') && !process.env.SYP_PER_USD) {
+    const error = new Error('A live FX rate (SYP_PER_USD) is required before charging real cards.')
+    error.statusCode = 503
+    error.code = 'FX_RATE_NOT_CONFIGURED'
+    error.expose = true
+    throw error
+  }
   const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
   const unitAmount = Math.max(50, Math.round((totalMinor / sypPerUsd) * 100))
   return { currency, unitAmount }
 }
 
-async function firstAdminId(tx) {
-  const admin = await tx.userRole.findFirst({ where: { role: 'ADMIN' }, select: { userId: true } })
-  return admin?.userId
-}
+export async function handlePayments(req, res, url, context) {
+  // Real payment-proof file upload. Previously every payment-proof flow (booking local-wallet,
+  // seller-plan, advertising) only ever captured the selected file's NAME on the client and sent a
+  // fabricated `session://...` string as proofAssetUrl — no bytes were ever stored, so the manual
+  // admin-review safety net that gates real money release had nothing real to review. The
+  // 'payment-proof' storage bucket + policy already existed (private, jpeg/png/pdf, 8MB) but was
+  // never wired to an HTTP route. This stores the real bytes and returns a stable reference; admin
+  // resolves it to a short-lived signed URL on demand via the endpoint below.
+  if (url.pathname === '/api/payments/proof-upload') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const stored = await putObject('payment-proof', { base64: body.fileBase64, contentType: body.contentType })
+    return json(res, 201, { ok: true, proofAssetUrl: `payment-proof://${stored.key}` })
+  }
 
-async function finalizeStripeSession(session) {
-  const bookingId = session.metadata?.bookingId
-  if (!bookingId || session.payment_status !== 'paid') return null
-
-  try {
-   return await db().$transaction(async (tx) => {
-    const existingProof = await tx.paymentProof.findFirst({
-      where: { provider: 'stripe', providerRef: session.id },
+  // Admin/support resolve a stored proof reference to a short-lived signed URL to actually view it.
+  const proofViewMatch = url.pathname.match(/^\/api\/admin\/payment-proof\/([^/]+)\/url$/)
+  if (proofViewMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    authorizePaymentOperation({
+      operation: 'reconciliation_read',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
     })
-    if (existingProof) return existingProof
+    const url_ = signObjectUrl('payment-proof', proofViewMatch[1], 300)
 
-    const booking = await tx.booking.findUnique({ where: { id: bookingId } })
-    if (!booking || booking.status !== 'PAYMENT_PENDING') return null
-
-    const created = await tx.paymentProof.create({
+    await db().adminAuditLog.create({
       data: {
-        bookingId: booking.id,
-        userId: booking.guestId,
-        provider: 'stripe',
-        status: 'PENDING_ADMIN_REVIEW',
-        amountMinor: Number(session.metadata?.sypTotalMinor || booking.amountMinor),
-        currency: booking.currency,
-        providerRef: session.id,
-        proofAssetUrl: session.payment_intent ? `stripe://payment_intents/${session.payment_intent}` : undefined,
+        actorUserId: context.user.id,
+        action: 'ADMIN_PAYMENT_PROOF_VIEWED',
+        entityType: 'payment_proof_file',
+        entityId: proofViewMatch[1],
+        before: null,
+        after: null,
       },
     })
 
-    return approvePaymentProof(tx, {
-      proofId: created.id,
-      actorUserId: await firstAdminId(tx),
-      note: 'Auto-approved: Stripe confirmed the card charge was captured.',
-    })
-   })
-  } catch (err) {
-    // Concurrent webhook delivery may have finalized first — the unique constraint rejects the
-    // second insert; return the already-created proof so finalization stays idempotent.
-    if (isProviderRefUniqueViolation(err)) {
-      return db().paymentProof.findFirst({ where: { provider: 'stripe', providerRef: session.id } })
-    }
-    throw err
+    return json(res, 200, { ok: true, url: url_ })
   }
-}
 
-export async function handlePayments(req, res, url, context) {
   if (url.pathname === '/api/payments/stripe/create-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
@@ -150,6 +184,16 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
+
+    authorizePaymentOperation({
+      operation: 'create',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: booking.listing.division,
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
 
     const totalMinor = expectedTotalMinor(booking)
     const { currency, unitAmount } = stripeChargeAmount(totalMinor)
@@ -211,6 +255,16 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    authorizePaymentOperation({
+      operation: 'capture',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
     const proof = await finalizeStripeSession(session)
     if (!proof) {
       const error = new Error('Could not confirm this payment against the booking.')
@@ -235,13 +289,25 @@ export async function handlePayments(req, res, url, context) {
     }
 
     const chunks = []
-    for await (const chunk of req) chunks.push(chunk)
+    let totalBytes = 0
+    for await (const chunk of req) {
+      totalBytes += chunk.length
+      if (totalBytes > 1_000_000) {
+        const error = new Error('Webhook body too large.')
+        error.statusCode = 413
+        error.code = 'PAYLOAD_TOO_LARGE'
+        error.expose = true
+        throw error
+      }
+      chunks.push(chunk)
+    }
     const rawBody = Buffer.concat(chunks)
 
     let event
     try {
       event = stripe.webhooks.constructEvent(rawBody, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET)
     } catch {
+      // Invalid signature: never persisted, by construction -- nothing below this line executes.
       const error = new Error('Invalid Stripe webhook signature.')
       error.statusCode = 400
       error.code = 'STRIPE_WEBHOOK_INVALID_SIGNATURE'
@@ -249,11 +315,119 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    if (event.type === 'checkout.session.completed') {
-      await finalizeStripeSession(event.data.object)
+    // webhook_intake is deliberately division-blind, same as the payment_intent rail's own intake
+    // seam (server/routes/payment-intents.mjs) -- an authenticated event must be durably storable
+    // even when the rest of the policy would deny (country rollout off, the rail flag off, an
+    // emergency stop). See payment-policy.mjs's INTAKE_EXEMPT_OPERATIONS / RECOGNIZED_WEBHOOK_PROVIDERS.
+    authorizePaymentOperation({
+      operation: 'webhook_intake',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+    })
+
+    const payloadDigest = createHash('sha256').update(rawBody).digest('hex')
+    const obj = event.data?.object || {}
+    // The RAW, unvalidated local reference -- may be an empty string for an event type this rail
+    // doesn't otherwise track (its shape isn't a Checkout Session at all). Stored unconditionally
+    // below, before any interpretation, so an unresolvable/malformed/irrelevant event still leaves a
+    // durable, authenticated trace.
+    const providerReference = String(obj.metadata?.bookingId || '')
+
+    // Durable intake -- this rail's own PaymentEvent row (previously nonexistent entirely; this
+    // table could not hold a stripe_checkout event at all before migration 016). Race-safe under
+    // concurrent redelivery via the canonical (provider, providerEndpointKey, environment,
+    // providerEventId) unique constraint, mirroring payment-intents.mjs exactly.
+    const { eventRow: intaken, conflict } = await intakeEvent({
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      providerEndpointKey: 'stripe-checkout',
+      environment: policyEnvironment(),
+      subjectType: 'BOOKING',
+      providerReference,
+      providerEventId: event.id,
+      type: event.type,
+      amountMinor: obj.metadata?.sypTotalMinor ? Number(obj.metadata.sypTotalMinor) : null,
+      currency: obj.currency ?? null,
+      providerObjectId: obj.id ?? null,
+      // The real, authenticated payment_status -- durably stored so admin replay can reconstruct this
+      // session accurately later without guessing (migration 022; see that field's own schema comment).
+      paymentStatus: obj.payment_status ?? null,
+      payloadDigest,
+      processingStatus: 'RECEIVED',
+    })
+    if (conflict) {
+      log.warn('payment_webhook_identity_conflict', { eventId: event.id, rail: 'stripe_checkout' })
+      return json(res, 200, { ok: true, conflict: true, received: true })
+    }
+    let eventRow = intaken
+
+    if (['APPLIED', 'IGNORED'].includes(eventRow.processingStatus)) {
+      return json(res, 200, { ok: true, applied: false, duplicate: true, received: true })
+    }
+    if (eventRow.processingStatus === 'DEAD_LETTERED') {
+      // Don't auto-reprocess a known-broken event on provider redelivery -- needs a human via the
+      // admin replay endpoint (payment-intents.mjs, generalized to accept either rail). Still
+      // acknowledge with 200 so Stripe stops retrying.
+      log.warn('payment_webhook_dead_lettered_redelivery', { eventId: event.id, rail: 'stripe_checkout' })
+      return json(res, 200, { ok: true, applied: false, deadLettered: true, received: true })
     }
 
-    return json(res, 200, { ok: true, received: true })
+    // Interpretation, entirely AFTER durable persistence.
+    if (event.type !== 'checkout.session.completed') {
+      // Unrecognized/unhandled event type -- durably recorded above, now marked as a deterministic
+      // no-op rather than silently unpersisted (the defect an independent review found: this rail
+      // previously returned before ever reaching the durable insert for exactly this case).
+      eventRow = await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'IGNORED' } })
+      return json(res, 200, { ok: true, ignored: event.type })
+    }
+
+    const session = obj
+    // Resolve via the DURABLY STORED reference, not a fresh payload read, so a later redelivery or
+    // reconciliation pass always resolves consistently against what was actually authenticated.
+    const bookingId = eventRow.providerReference || null
+    const bookingRecord = bookingId
+      ? await db().booking.findUnique({ where: { id: bookingId }, select: { id: true, listing: { select: { division: true } } } })
+      : null
+    if (!bookingRecord) {
+      await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: bookingId ? 'BOOKING_NOT_FOUND' : 'BOOKING_REFERENCE_MISSING' } })
+      return json(res, 200, { ok: true, quarantined: true, received: true })
+    }
+    if (eventRow.bookingId !== bookingRecord.id) {
+      eventRow = await db().paymentEvent.update({
+        where: { id: eventRow.id },
+        data: { bookingId: bookingRecord.id, originalBookingId: bookingRecord.id },
+      })
+    }
+    const division = bookingRecord.listing?.division || 'PLATFORM'
+
+    try {
+      authorizePaymentOperation({
+        operation: 'webhook_apply',
+        rail: 'stripe_checkout',
+        provider: 'stripe',
+        division,
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+      })
+    } catch (denied) {
+      if (denied?.code !== 'PAYMENT_POLICY_DENIED') throw denied
+      // Durably received, application paused. Zero attempts consumed -- an intentional policy pause,
+      // not a processing failure. A later redelivery or an explicit reconciliation pass applies it
+      // once policy allows.
+      log.warn('payment_webhook_apply_denied', { rail: 'stripe_checkout', eventId: event.id, reason: denied.reason })
+      await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'POLICY_DEFERRED' } })
+      return json(res, 200, { ok: true, applied: false, policyDeferred: true, received: true })
+    }
+
+    const result = await applyPaymentEvent({
+      eventId: eventRow.id,
+      rail: 'stripe_checkout',
+      apply: (claimToken) => applyStripeCheckoutEvent({ eventId: eventRow.id, session, claimToken }),
+    })
+    return json(res, webhookAcknowledgeStatus(result), { ok: true, received: true, ...result })
   }
 
   if (url.pathname === '/api/payments/stripe/status') {
@@ -302,10 +476,21 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    authorizePaymentOperation({
+      operation: 'create',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
     const legalName = body.legalName ? String(body.legalName).trim() : context.user.displayName
     const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
     const planCode = body.planCode ? String(body.planCode).trim() : undefined
 
+    const proofAssetUrls = normalizeProofAssetUrls(body)
     let proof
     try {
       const [created] = await db().$transaction([
@@ -315,8 +500,9 @@ export async function handlePayments(req, res, url, context) {
             provider: 'seller_plan',
             status: 'PENDING_ADMIN_REVIEW',
             amountMinor,
-            currency: body.currency || 'USD',
-            proofAssetUrl: body.proofAssetUrl || undefined,
+            currency: resolveClientCurrency(body.currency, 'USD'),
+            proofAssetUrl: proofAssetUrls[0] || undefined,
+            proofAssetUrls,
             providerRef,
           },
         }),
@@ -346,6 +532,7 @@ export async function handlePayments(req, res, url, context) {
             id: body.bookingId,
             guestId: context.user.id,
           },
+          include: { listing: true },
         })
       : null
 
@@ -357,7 +544,46 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    const amountMinor = Number(body.amountMinor || booking?.amountMinor || 0)
+    // SR Ride vs. Uber gap-closure: a ride's fare, mirroring the booking case exactly -- only a
+    // COMPLETED ride has a final, real fare (mid-ride the distance/time isn't settled yet, matching
+    // Uber's own post-trip charge model), and only that ride's own rider may submit proof for it.
+    // A CANCELLED ride is also payable, but only when the cancel handler actually assessed a fee
+    // (cancellationFeeMinor set) -- a free cancellation (no driver committed yet) has nothing to pay.
+    const ride = body.rideId
+      ? await db().rideRequest.findFirst({
+          where: {
+            id: body.rideId,
+            riderId: context.user.id,
+            OR: [
+              { status: 'COMPLETED' },
+              { status: 'CANCELLED', cancellationFeeMinor: { not: null } },
+            ],
+          },
+        })
+      : null
+
+    if (body.rideId && !ride) {
+      const error = new Error('This ride is not available for payment proof upload.')
+      error.statusCode = 403
+      error.code = 'PAYMENT_RIDE_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+
+    // When a booking is linked, the real amount due is the full guest total — rent plus cleaning
+    // fee, tax, extra fees, and the cancellation-protection add-on if purchased (expectedTotalMinor,
+    // the same function the Stripe path uses so both rails charge the identical figure the guest was
+    // shown) — never a client-supplied figure (only a floor check existed before, with no ceiling,
+    // so a guest could claim an arbitrarily inflated amount) and never bare booking.amountMinor
+    // (which is rent only — using it here silently dropped the cleaning/tax/protection portion of
+    // every local-wallet payment from the ledger). A linked ride is the same discipline: its own
+    // locked fareMinor, never client input. Client input is only used for the no-booking-no-ride case
+    // (e.g. a standalone seller-plan/advertising payment), which has no independent amount to check.
+    const amountMinor = booking
+      ? expectedTotalMinor(booking)
+      : ride
+        ? (ride.status === 'CANCELLED' ? ride.cancellationFeeMinor : ride.fareMinor) || 0
+        : Number(body.amountMinor || 0)
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
       const error = new Error('Payment proof amount must be greater than zero.')
       error.statusCode = 400
@@ -366,13 +592,15 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    if (booking && amountMinor < booking.amountMinor) {
-      const error = new Error('Payment proof amount is lower than the booking amount.')
-      error.statusCode = 400
-      error.code = 'PAYMENT_AMOUNT_TOO_LOW'
-      error.expose = true
-      throw error
-    }
+    authorizePaymentOperation({
+      operation: 'create',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: booking?.listing?.division || (ride ? 'SR' : 'PLATFORM'),
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
 
     const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
     if (!providerRef) {
@@ -398,17 +626,36 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    if (ride) {
+      // A REJECTED proof must not block resubmission -- only a still-live one (awaiting review, or
+      // already approved) does. Mirrors the intent of the providerRef uniqueness check above, scoped
+      // to this ride instead of a global reference string.
+      const existingRideProof = await db().paymentProof.findFirst({
+        where: { rideId: ride.id, status: { in: ['PENDING_ADMIN_REVIEW', 'APPROVED'] } },
+      })
+      if (existingRideProof) {
+        const error = new Error('Payment proof was already submitted for this ride.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_RIDE_ALREADY_SUBMITTED'
+        error.expose = true
+        throw error
+      }
+    }
+
+    const walletProofAssetUrls = normalizeProofAssetUrls(body)
     let proof
     try {
       proof = await db().paymentProof.create({
         data: {
           bookingId: booking?.id || undefined,
+          rideId: ride?.id || undefined,
           userId: context.user.id,
           provider: 'syrian_local_wallet',
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
-          currency: booking?.currency || body.currency || 'SYP',
-          proofAssetUrl: body.proofAssetUrl || undefined,
+          currency: booking?.currency || ride?.currency || resolveClientCurrency(body.currency, defaultCurrency()),
+          proofAssetUrl: walletProofAssetUrls[0] || undefined,
+          proofAssetUrls: walletProofAssetUrls,
           providerRef,
         },
       })
@@ -424,6 +671,15 @@ export async function handlePayments(req, res, url, context) {
   if (paymentMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
+    authorizePaymentOperation({
+      operation: 'reconciliation_read',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: 'PLATFORM',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
     const proof = await db().paymentProof.findUnique({
       where: { id: paymentMatch[1] },
       include: {

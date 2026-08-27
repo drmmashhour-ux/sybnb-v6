@@ -7,8 +7,10 @@
 //   RESEND_CERT_TO='you@yourinbox' [RESEND_DOMAIN=notifications.sybnb.app] node scripts/certify-resend.mjs
 //
 // Verifies: domain verification status, live delivery, idempotency (same Idempotency-Key de-dupes),
-// and (offline) webhook signature+replay+dedup + suppression via the app's own email lib.
-import { verifyResendWebhook, createWebhookReplayGuard, createSuppressionList } from '../server/lib/email.mjs'
+// (offline) webhook signature+replay+dedup, and (DB-backed, skips if unreachable) bounce/complaint
+// suppression via the app's own email lib.
+import { verifyResendWebhook, createWebhookReplayGuard, suppressEmail, isEmailSuppressed } from '../server/lib/email.mjs'
+import { disconnectDb } from '../server/lib/prisma.mjs'
 import { createHmac } from 'node:crypto'
 
 const results = []
@@ -29,9 +31,24 @@ console.log('=== SYBNB RESEND CERTIFICATION (real API when RESEND_API_KEY set; s
   const good = verifyResendWebhook({ payload, svixId: id, svixTimestamp: String(now), svixSignature: sig, secret, nowSec: now })
   const stale = verifyResendWebhook({ payload, svixId: id, svixTimestamp: String(now - 9999), svixSignature: sig, secret, nowSec: now })
   const guard = createWebhookReplayGuard(); const dupOk = guard.seen('e1') === true && guard.seen('e1') === false
-  const supp = createSuppressionList(); supp.suppress('b@x.test', 'bounce'); const suppOk = supp.shouldDeliver('b@x.test') === false
   rec('webhook signature verifies + stale rejected', (good && !stale) ? 'PASS' : 'FAIL')
-  rec('duplicate-event guard + bounce suppression', (dupOk && suppOk) ? 'PASS' : 'FAIL')
+  rec('duplicate-event guard', dupOk ? 'PASS' : 'FAIL')
+}
+
+// Suppression is Postgres-backed (shared across instances, survives restarts) -- needs a DB, so this
+// check SKIPs rather than fails when DATABASE_URL isn't reachable from this standalone script.
+{
+  const addr = `cert-suppression-${Date.now()}@x.test`
+  try {
+    const before = await isEmailSuppressed(addr)
+    await suppressEmail(addr, 'bounce')
+    const after = await isEmailSuppressed(addr)
+    rec('bounce suppression recorded + consulted (DB-backed)', (before === false && after === true) ? 'PASS' : 'FAIL')
+  } catch (e) {
+    rec('bounce suppression recorded + consulted (DB-backed)', 'SKIP', `DB unreachable: ${e.message || e}`)
+  } finally {
+    await disconnectDb().catch(() => {})
+  }
 }
 
 if (!key || !from) {

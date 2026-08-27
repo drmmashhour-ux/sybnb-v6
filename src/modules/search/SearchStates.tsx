@@ -5,6 +5,8 @@ type SearchStatesProps = {
   lang: Lang
   state: 'loading' | 'empty' | 'error'
   onReset?: () => void
+  onShowAll?: () => void
+  onRetry?: () => void
 }
 
 const T = {
@@ -32,7 +34,7 @@ const T = {
   },
 }
 
-export function SearchStateCard({ lang, state, onReset }: SearchStatesProps) {
+export function SearchStateCard({ lang, state, onReset, onShowAll, onRetry }: SearchStatesProps) {
   const t = T[lang]
   const copy = {
     loading: { icon: '⌛', title: t.loadingTitle, body: t.loadingBody, tone: '#4f6cff' },
@@ -47,8 +49,8 @@ export function SearchStateCard({ lang, state, onReset }: SearchStatesProps) {
       <p style={styles.body}>{copy.body}</p>
       <div style={styles.actions}>
         <button type="button" style={styles.secondary} onClick={onReset}>{t.reset}</button>
-        <button type="button" style={styles.secondary} onClick={onReset}>{t.allSyria}</button>
-        <button type="button" style={styles.primary} onClick={onReset}>{t.retry}</button>
+        <button type="button" style={styles.secondary} onClick={onShowAll}>{t.allSyria}</button>
+        <button type="button" style={styles.primary} onClick={onRetry}>{t.retry}</button>
       </div>
     </section>
   )

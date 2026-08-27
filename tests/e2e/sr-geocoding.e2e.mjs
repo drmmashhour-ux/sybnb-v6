@@ -21,15 +21,30 @@ eq('malki->airport km (4dp)', Number(g.haversineKm({ lat: 33.5169, lng: 36.287 }
 
 console.log('=== quoteSrRide (fares, distance, estimated, coords, external-call = none) ===')
 eq('economy malki->airport (resolved, no surcharge)', g.quoteSrRide({ pickup: 'Malki', dropoff: 'Damascus Airport', category: 'SR Economy', lowDataMode: true }),
-  { fareMinor: 30000, distanceKm: 24.2, estimated: false, pickupCoords: { lat: 33.5169, lng: 36.287 }, dropoffCoords: { lat: 33.4114, lng: 36.5156 } })
+  { fareMinor: 30000, distanceKm: 24.2, estimated: false, pickupCoords: { lat: 33.5169, lng: 36.287 }, dropoffCoords: { lat: 33.4114, lng: 36.5156 }, stopCoords: [] })
 eq('suv unresolved -> DEFAULT 5km + estimated + live surcharge', g.quoteSrRide({ pickup: '???', dropoff: '???', category: 'SR SUV', lowDataMode: false }),
-  { fareMinor: 29500, distanceKm: 5, estimated: true, pickupCoords: null, dropoffCoords: null })
+  { fareMinor: 29500, distanceKm: 5, estimated: true, pickupCoords: null, dropoffCoords: null, stopCoords: [] })
 eq('comfort with device-GPS override (override wins)', g.quoteSrRide({ pickup: 'x', dropoff: 'y', category: 'SR Comfort', lowDataMode: true, pickupCoordsOverride: { lat: 33.51, lng: 36.29 }, dropoffCoordsOverride: { lat: 33.49, lng: 36.27 } }),
-  { fareMinor: 16000, distanceKm: 2.9, estimated: false, pickupCoords: { lat: 33.51, lng: 36.29 }, dropoffCoords: { lat: 33.49, lng: 36.27 } })
+  { fareMinor: 16000, distanceKm: 2.9, estimated: false, pickupCoords: { lat: 33.51, lng: 36.29 }, dropoffCoords: { lat: 33.49, lng: 36.27 }, stopCoords: [] })
 eq('out-of-Syria-bounds override REJECTED -> gazetteer fallback', g.quoteSrRide({ pickup: 'Malki', dropoff: 'Mezzeh', category: 'SR Economy', lowDataMode: true, pickupCoordsOverride: { lat: 5, lng: 5 } }),
-  { fareMinor: 12500, distanceKm: 5.1, estimated: false, pickupCoords: { lat: 33.5169, lng: 36.287 }, dropoffCoords: { lat: 33.503, lng: 36.235 } })
+  { fareMinor: 12500, distanceKm: 5.1, estimated: false, pickupCoords: { lat: 33.5169, lng: 36.287 }, dropoffCoords: { lat: 33.503, lng: 36.235 }, stopCoords: [] })
 eq('unknown category -> defaults to SR Economy rates', g.quoteSrRide({ pickup: '???', dropoff: '???', category: 'NONSENSE', lowDataMode: true }).fareMinor,
   g.quoteSrRide({ pickup: '???', dropoff: '???', category: 'SR Economy', lowDataMode: true }).fareMinor)
+
+console.log('=== quoteSrRide multi-stop (SR Ride vs. Uber gap-closure, capsule 27) ===')
+eq('one resolved stop -> distance sums pickup->stop->dropoff legs (5.4km via Shaalan, vs 5.1km direct), base fare charged once not per-leg',
+  g.quoteSrRide({ pickup: 'Malki', dropoff: 'Mezzeh', category: 'SR Economy', lowDataMode: true, stops: ['Shaalan'] }),
+  {
+    fareMinor: 13000,
+    distanceKm: 5.4,
+    estimated: false,
+    pickupCoords: { lat: 33.5169, lng: 36.287 },
+    dropoffCoords: { lat: 33.503, lng: 36.235 },
+    stopCoords: [{ lat: 33.5155, lng: 36.289 }],
+  })
+eq('one UNRESOLVED stop -> whole quote falls back to default distance + estimated, same as an unresolved pickup/dropoff would',
+  g.quoteSrRide({ pickup: 'Malki', dropoff: 'Mezzeh', category: 'SR Economy', lowDataMode: true, stops: ['???'] }),
+  { fareMinor: 12500, distanceKm: 5, estimated: true, pickupCoords: { lat: 33.5169, lng: 36.287 }, dropoffCoords: { lat: 33.503, lng: 36.235 }, stopCoords: [null] })
 
 console.log(`\n==== SR GEOCODING CHARACTERIZATION: ${pass} passed, ${fail} failed ====`)
 process.exit(fail ? 1 : 0)

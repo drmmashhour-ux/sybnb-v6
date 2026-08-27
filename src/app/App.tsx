@@ -33,6 +33,10 @@ const RentalsPage = lazyNamed(() => import('../modules/rentals/RentalsPage'), 'R
 const SearchPreviewPage = lazyNamed(() => import('../modules/search/SearchPreviewPage'), 'SearchPreviewPage')
 const SellerDivisionRoutes = lazyNamed(() => import('../modules/seller'), 'SellerDivisionRoutes')
 const SrRidePage = lazyNamed(() => import('../modules/sr/SrRidePage'), 'SrRidePage')
+const SharedRidePage = lazyNamed(() => import('../modules/sr/SharedRidePage'), 'SharedRidePage')
+const AdminPromoCodesPage = lazyNamed(() => import('../modules/sr/AdminPromoCodesPage'), 'AdminPromoCodesPage')
+const AdminBusinessAccountsPage = lazyNamed(() => import('../modules/sr/AdminBusinessAccountsPage'), 'AdminBusinessAccountsPage')
+const BusinessAccountPage = lazyNamed(() => import('../modules/sr/BusinessAccountPage'), 'BusinessAccountPage')
 const StaffAccessPage = lazyNamed(() => import('../modules/account/StaffAccessPage'), 'StaffAccessPage')
 const SyrianLocalWalletPaymentPage = lazyNamed(
   () => import('../modules/payments/SyrianLocalWalletPaymentPage'),
@@ -58,6 +62,18 @@ export function App() {
   }, [lang])
 
   useEffect(() => {
+    // On hash-route change, reset scroll and move keyboard/screen-reader focus to the main content
+    // so navigation is announced and doesn't leave focus on the old page.
+    if (typeof window === 'undefined') return
+    window.scrollTo(0, 0)
+    const main = document.querySelector('main') as HTMLElement | null
+    if (main) {
+      if (!main.hasAttribute('tabindex')) main.setAttribute('tabindex', '-1')
+      main.focus({ preventScroll: true })
+    }
+  }, [path])
+
+  useEffect(() => {
     const sync = () => setPath(getCurrentPath())
     const syncAuth = () => setAuthVersion((version) => version + 1)
     window.addEventListener('hashchange', sync)
@@ -70,12 +86,29 @@ export function App() {
 
   const division = findDivisionByRoute(path)
   const bookingMatch = path.match(/^\/booking\/([^/]+)$/)
+  // These booking-detail sub-routes (protection/guarantee/payment-status/dispute) and the ID-
+  // verification screen all end up calling a requireAuth() endpoint for a specific guest's data
+  // (fetchPrototypeBooking, disputePrototypeBooking, submitGuestIdDocument) — same reasoning as the
+  // bare /booking/:id route above, just not covered by that single-segment regex. The trust-center
+  // hub and SOS screens stay ungated (informational/support entry points, no guest-specific fetch).
+  const trustBookingSubRouteMatch =
+    /^\/booking\/(protection|guarantee|payment-status|dispute|dispute-closed)\/[^/]+$/.test(path)
   const listingMatch = path.match(/^\/listing\/([^/]+)$/)
   const paymentReceiptMatch = path.match(/^\/payment\/receipt\/([^/]+)$/)
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
+  // SR Ride vs. Uber gap-closure (P0 #3): a trip-share link -- deliberately public/ungated, same
+  // category as the trust-center/SOS routes below (informational, verified by its own signed token
+  // rather than a session; see server/lib/ride-share.mjs). Never added to guestProtectedRoute.
+  const sharedRideMatch = path.match(/^\/ride\/shared\/([^/?]+)(?:\?(.*))?$/)
   const guestAccountMatch = path.match(/^\/account\/open(?:\/([^/]+))?$/)
-  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
-  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' ? 'generic' : 'stays'
+  // Claiming a gift calls a requireAuth() endpoint (server/routes/wallet.mjs), so a real guest
+  // session must exist before the claim screens render — otherwise the only thing standing between
+  // the user and a silently-failing claim call is a fake local "create account" step that never
+  // talks to the server.
+  const giftClaimRoute = path === '/wallet/gift/claim' || /^\/wallet\/gift\/claim\/[^/]+$/.test(path)
+    || path === '/wallet/gift/code' || /^\/wallet\/gift\/code\/[^/]+$/.test(path)
+  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
+  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch ? 'generic' : 'stays'
   const hasGuestSession = typeof window !== 'undefined' && Boolean(sessionStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
@@ -99,7 +132,13 @@ export function App() {
         ) : isTrustProtectionRoute(path) ? (
           <TrustProtectionRoutes lang={lang} path={path} />
         ) : guestAccountMatch ? (
-          <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} flow={guestAccountMatch[1] ? 'stays' : 'generic'} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : '/stays'} />
+          // A real bug caught by an independent re-audit: hardcoding '/stays' here always won
+          // over whatever the calling page actually stored (e.g. RentalsPage.openAccount() sets
+          // '/rentals'/'/buy'/'/immocontact' before navigating here) -- GuestAccountPage's own
+          // returnPath logic already falls through to sessionStorage correctly when no explicit
+          // prop is given (defaulting to '/stays' only if nothing was genuinely stored), so simply
+          // not overriding it here lets that real value win.
+          <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} flow={guestAccountMatch[1] ? 'stays' : 'generic'} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : undefined} />
         ) : path === '/dashboard' || path === '/account' ? (
           <DashboardPage lang={lang} />
         ) : path === '/host' ||
@@ -121,6 +160,12 @@ export function App() {
           <DriverDashboardPage lang={lang} />
         ) : path === '/immocontact' ? (
           <ImmocontactPage lang={lang} />
+        ) : path === '/admin/sr/promo-codes' ? (
+          <AdminPromoCodesPage lang={lang} />
+        ) : path === '/admin/sr/business-accounts' ? (
+          <AdminBusinessAccountsPage lang={lang} />
+        ) : path === '/business/account' ? (
+          <BusinessAccountPage lang={lang} />
         ) : path === '/admin/review' ? (
           <AdminReviewPage lang={lang} />
         ) : path === '/ai-brain' ? (
@@ -143,6 +188,13 @@ export function App() {
           <ListingDetailPage listingId={listingMatch[1]} lang={lang} />
         ) : path === '/ride' || path === '/ride-preview' ? (
           <SrRidePage lang={lang} />
+        ) : sharedRideMatch ? (
+          <SharedRidePage
+            lang={lang}
+            rideId={sharedRideMatch[1]}
+            exp={new URLSearchParams(sharedRideMatch[2] || '').get('exp') || ''}
+            sig={new URLSearchParams(sharedRideMatch[2] || '').get('sig') || ''}
+          />
         ) : isSellerRoute(path) ? (
           <SellerDivisionRoutes lang={lang} path={path} />
         ) : path === '/search-preview' || path === '/stays' ? (
@@ -197,7 +249,8 @@ function getStaffRequiredRole(path: string): 'ADMIN' | 'HOST' | 'DRIVER' | null 
     path.startsWith('/operations') ||
     path.startsWith('/ai-brain') ||
     path.startsWith('/competitors') ||
-    path.startsWith('/status')
+    path.startsWith('/status') ||
+    path === '/wallet/admin/gift-audit'
   ) {
     return 'ADMIN'
   }

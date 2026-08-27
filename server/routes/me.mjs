@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
+import { defaultCurrency } from '../lib/country.mjs'
 
 export async function handleMe(req, res, url, context) {
   if (url.pathname === '/api/me/id-document') {
@@ -67,6 +68,69 @@ export async function handleMe(req, res, url, context) {
     return true
   }
 
+  // SR Ride vs. Uber gap-closure (P2 #13): saved places (e.g. "Home", "Work") for quick reuse
+  // when requesting a ride. Generic under /api/me/ rather than /api/sr/ -- nothing here is
+  // ride-specific, and other divisions could reuse the same list later.
+  if (url.pathname === '/api/me/saved-places') {
+    if (req.method === 'GET') {
+      requireAuth(context)
+      const places = await db().savedPlace.findMany({
+        where: { userId: context.user.id },
+        orderBy: { createdAt: 'asc' },
+      })
+      return json(res, 200, { ok: true, places })
+    }
+    if (req.method === 'POST') {
+      requireAuth(context)
+      const body = await readJson(req)
+      const label = typeof body.label === 'string' ? body.label.trim() : ''
+      const address = typeof body.address === 'string' ? body.address.trim() : ''
+      if (!label || !address) {
+        const error = new Error('A label and address are required.')
+        error.statusCode = 400
+        error.code = 'SAVED_PLACE_INVALID'
+        error.expose = true
+        throw error
+      }
+      const lat = Number.isFinite(Number(body.lat)) ? Number(body.lat) : undefined
+      const lng = Number.isFinite(Number(body.lng)) ? Number(body.lng) : undefined
+      // No real user needs more than a handful of saved places; without a cap a buggy or scripted
+      // client could create an unbounded number against one account (found in a scale-readiness
+      // sweep of unbounded findMany queries -- most were naturally bounded by real-world cardinality
+      // of the parent entity, but nothing stopped creation here).
+      const existingCount = await db().savedPlace.count({ where: { userId: context.user.id } })
+      if (existingCount >= 50) {
+        const error = new Error('You have reached the maximum number of saved places.')
+        error.statusCode = 422
+        error.code = 'SAVED_PLACE_LIMIT_REACHED'
+        error.expose = true
+        throw error
+      }
+      const place = await db().savedPlace.create({
+        data: { userId: context.user.id, label, address, lat, lng },
+      })
+      return json(res, 201, { ok: true, place })
+    }
+    return methodNotAllowed(res, ['GET', 'POST'])
+  }
+
+  const savedPlaceMatch = url.pathname.match(/^\/api\/me\/saved-places\/([^/]+)$/)
+  if (savedPlaceMatch) {
+    if (req.method !== 'DELETE') return methodNotAllowed(res, ['DELETE'])
+    requireAuth(context)
+    // Scoped to the caller's own userId in the WHERE clause -- deleteMany rather than delete so a
+    // mismatched id (not found, or owned by someone else) is a clean no-op, not a thrown 500.
+    const result = await db().savedPlace.deleteMany({ where: { id: savedPlaceMatch[1], userId: context.user.id } })
+    if (result.count === 0) {
+      const error = new Error('Saved place not found for this account.')
+      error.statusCode = 404
+      error.code = 'SAVED_PLACE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    return json(res, 200, { ok: true })
+  }
+
   if (url.pathname !== '/api/me/overview') return false
   if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
 
@@ -97,7 +161,7 @@ export async function handleMe(req, res, url, context) {
       take: 50,
     }),
     db().wallet.findUnique({
-      where: { userId_currency: { userId: context.user.id, currency: 'SYP' } },
+      where: { userId_currency: { userId: context.user.id, currency: defaultCurrency() } },
       include: { entries: { orderBy: { createdAt: 'desc' }, take: 10 } },
     }),
     db().walletGift.findMany({

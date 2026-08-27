@@ -3,11 +3,127 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
+import { resolveListingCityName } from '../lib/listing-location.mjs'
+import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
 // Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
 // paid-plan divisions gated behind an admin-approved SellerProfile.
 const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
+
+// 'sort' options a caller may request. 'newest' (the default/original behavior) orders by
+// createdAt; 'priceLow'/'priceHigh' order by priceMinor. Kept as an explicit allowlist (not just
+// "any column name") so a request can never sort on an arbitrary field.
+const SORT_CONFIGS = {
+  newest: { field: 'createdAt', direction: 'desc' },
+  priceLow: { field: 'priceMinor', direction: 'asc' },
+  priceHigh: { field: 'priceMinor', direction: 'desc' },
+}
+function resolveSort(raw) {
+  return SORT_CONFIGS[raw] ? raw : 'newest'
+}
+
+// Keyset cursor for GET /api/listings pagination: encodes the last row's (sortValue, id) for
+// whichever sort produced it -- the exact pair the query is ordered and compared on -- so a page
+// boundary survives concurrent inserts (unlike an offset, which drifts: a new row landing above
+// page 1 reshuffles what "page 2" means). Self-contained (no DB lookup needed to resume), safe if
+// that row is later deleted, and bound to its own sort: a cursor from one sort is rejected (not
+// silently reinterpreted) if a later call passes a different `sort` -- the field/direction it
+// encodes wouldn't mean the same thing under a different ordering.
+function encodeListingCursor(sort, position) {
+  const value = position.value instanceof Date ? position.value.toISOString() : position.value
+  return Buffer.from(JSON.stringify({ sort, value, id: position.id }), 'utf8').toString('base64url')
+}
+function decodeListingCursor(raw, sort) {
+  if (!raw) return null
+  let parsed
+  try {
+    parsed = JSON.parse(Buffer.from(String(raw), 'base64url').toString('utf8'))
+  } catch {
+    return null
+  }
+  if (parsed.sort !== sort || !parsed.id) return null
+  const field = SORT_CONFIGS[sort].field
+  if (field === 'createdAt') {
+    const value = new Date(parsed.value)
+    if (Number.isNaN(value.getTime())) return null
+    return { value, id: parsed.id }
+  }
+  const value = Number(parsed.value)
+  if (!Number.isFinite(value)) return null
+  return { value, id: parsed.id }
+}
+
+// priceBand -> a real priceMin/priceMax range, computed from this division's OWN current price
+// distribution rather than a fixed guessed number -- STAYS/RENTALS/BUY/CARS/MARKETPLACE/
+// NEW_CONSTRUCTION have wildly different real price scales (a nightly SYP rate vs. a car vs. a
+// building), so no single hardcoded cutoff means the same thing across all of them, and a
+// hand-picked one would need constant manual upkeep as real inventory changes. Cached per-division
+// for a few minutes -- price distribution shifts slowly, and this runs on every search request.
+const PRICE_BAND_CACHE_TTL_MS = 5 * 60 * 1000
+const priceBandCache = new Map()
+async function priceBandBoundaries(division) {
+  const cached = priceBandCache.get(division)
+  if (cached && Date.now() - cached.computedAt < PRICE_BAND_CACHE_TTL_MS) return cached
+  const rows = await db().$queryRaw`
+    SELECT
+      percentile_cont(0.33) WITHIN GROUP (ORDER BY price_minor) AS low,
+      percentile_cont(0.66) WITHIN GROUP (ORDER BY price_minor) AS high
+    FROM listings WHERE division = ${division}::listing_division AND status = 'APPROVED'
+  `
+  const boundaries = {
+    low: Math.round(Number(rows[0]?.low)) || 0,
+    high: Math.round(Number(rows[0]?.high)) || 0,
+    computedAt: Date.now(),
+  }
+  priceBandCache.set(division, boundaries)
+  return boundaries
+}
+function priceBandRange(band, boundaries) {
+  if (band === 'low') return { lte: boundaries.low }
+  if (band === 'mid') return { gte: boundaries.low, lte: boundaries.high }
+  if (band === 'high') return { gte: boundaries.high }
+  return null
+}
+
+// Multi-select attribute filters (amenities/views/access): the seller's selection is stored as a
+// JSON string array at metadata.visualFilters.<key> (SellerListingWizard.tsx). "Match" means the
+// listing's array contains EVERY value the guest selected, not just one -- so one array_contains
+// check per selected value, ANDed together, is the correct predicate for narrowing search
+// (confirmed live against real data before writing this: array_contains does a single-value
+// containment check, composes correctly under AND, and simply doesn't match rows that lack the
+// key at all -- never errors).
+const ARRAY_ATTRIBUTE_KEYS = ['amenities', 'views', 'access']
+
+// Project a listing to the fields safe for public/unauthenticated consumers: strip street-level
+// address (addressLine/street) and internal metadata markers (e.g. inventory_source). Only fields
+// the customer UI actually renders are returned.
+function toPublicListing(l) {
+  if (!l) return l
+  const metadata = { ...(l.metadata || {}) }
+  delete metadata.inventory_source
+  return {
+    id: l.id,
+    ownerId: l.ownerId,
+    division: l.division,
+    titleAr: l.titleAr,
+    titleEn: l.titleEn,
+    description: l.description,
+    status: l.status,
+    priceMinor: l.priceMinor,
+    currency: l.currency,
+    instantBookEnabled: l.instantBookEnabled,
+    expiresAt: l.expiresAt,
+    createdAt: l.createdAt,
+    updatedAt: l.updatedAt,
+    metadata,
+    media: l.media,
+    location: l.location
+      ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area }
+      : null,
+    owner: l.owner ? { id: l.owner.id, displayName: l.owner.displayName } : undefined,
+  }
+}
 
 export async function handleListings(req, res, url, context) {
   const quoteMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/quote$/)
@@ -51,12 +167,21 @@ export async function handleListings(req, res, url, context) {
       // browse uses carBrand/carBody/carFuel/carTransmission/condition — so this is one generic
       // filter, not a per-division search system. 'any'/empty means "no constraint".
       // Single-select attribute filters (Cars: carBrand/…; Buy/Rentals: propertyType).
-      const attributeKeys = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType']
+      const attributeKeys = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType', 'marketCategory']
       const attributeConditions = []
       for (const key of attributeKeys) {
         const value = url.searchParams.get(key)
         if (value && value !== 'any') {
           attributeConditions.push({ metadata: { path: ['visualFilters', key], equals: value } })
+        }
+      }
+      // Multi-select attribute filters (amenities/views/access) — comma-separated ids, e.g.
+      // ?amenities=wifi,parking. A listing must have ALL selected values, not just one.
+      for (const key of ARRAY_ATTRIBUTE_KEYS) {
+        const raw = url.searchParams.get(key)
+        const values = raw ? raw.split(',').map((v) => v.trim()).filter(Boolean) : []
+        for (const value of values) {
+          attributeConditions.push({ metadata: { path: ['visualFilters', key], array_contains: [value] } })
         }
       }
 
@@ -93,19 +218,115 @@ export async function handleListings(req, res, url, context) {
       if (priceMin !== undefined && priceMin > 0) priceFilter.gte = priceMin
       if (priceMax !== undefined && priceMax > 0) priceFilter.lte = priceMax
 
-      const listings = await db().listing.findMany({
-        where: {
-          status: 'APPROVED',
-          division,
-          location: city ? { city } : undefined,
-          priceMinor: Object.keys(priceFilter).length ? priceFilter : undefined,
-          AND: attributeConditions.length ? attributeConditions : undefined,
-        },
-        include: { location: true, media: true },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      })
-      return json(res, 200, { ok: true, listings })
+      // priceBand is a discrete "Budget/Mid range/Premium" choice, translated to a real
+      // priceMin/priceMax range computed from this division's own data (see priceBandBoundaries
+      // above). Intersected with any explicit priceMin/priceMax also present, not overridden by
+      // it — both narrow the result set together, same as any other two independent filters would.
+      const priceBandParam = url.searchParams.get('priceBand')
+      if (division && priceBandParam && priceBandParam !== 'any') {
+        const boundaries = await priceBandBoundaries(division)
+        const range = priceBandRange(priceBandParam, boundaries)
+        if (range) {
+          if (range.gte !== undefined) priceFilter.gte = Math.max(priceFilter.gte ?? 0, range.gte)
+          if (range.lte !== undefined) priceFilter.lte = priceFilter.lte !== undefined ? Math.min(priceFilter.lte, range.lte) : range.lte
+        }
+      }
+
+      const sort = resolveSort(url.searchParams.get('sort'))
+      const sortConfig = SORT_CONFIGS[sort]
+
+      const rawCursorParam = url.searchParams.get('cursor')
+      const cursor = decodeListingCursor(rawCursorParam, sort)
+      if (rawCursorParam && !cursor) {
+        const error = new Error('Invalid or sort-mismatched cursor.')
+        error.statusCode = 400
+        error.code = 'INVALID_CURSOR'
+        error.expose = true
+        throw error
+      }
+
+      // A real bug caught by an independent re-audit: the advertising submission flow
+      // (SellerListingWizard.tsx) writes an ad purchase as a real listing row tagged
+      // metadata.advertising=true (currently always division='MARKETPLACE') so it can reuse the
+      // existing listing-review/admin-approval pipeline -- but that meant an approved ad was
+      // indistinguishable from a genuine product in real buyer-facing search results (confirmed
+      // live: 62 approved ad rows appearing as real marketplace items). Ads are never meant to be
+      // browsable inventory, so they're excluded below regardless of division. This can't be
+      // expressed as a Prisma `where` JSON-path condition: `NOT: { metadata: { path: [...],
+      // equals: true } }` hits SQL's NULL-trap (`NOT (NULL = true)` is NULL, not TRUE) and would
+      // wrongly exclude every listing that has never touched the advertising flow at all --
+      // confirmed live (a first attempt silently zeroed out all 424 real MARKETPLACE listings).
+      // Filtering in JS is still the correct, simple fix -- but it now runs inside a keyset-paged
+      // scan loop (below) instead of a single fixed-take fetch, so ad-heavy stretches of the feed
+      // can no longer cap results early or hide real inventory that never gets touched by a page.
+      const PAGE_SIZE = 50
+      const SCAN_BATCH_SIZE = 250
+      const MAX_SCAN_BATCHES = 4 // safety cap: at most 1,000 rows scanned per request
+
+      // A real scale-readiness audit found this endpoint's *entire* result set was a single fixed
+      // `take: 250` with no pagination anywhere -- confirmed the server never read a cursor/page
+      // param and neither frontend caller ever sent one, so once any division+city passed ~250
+      // approved listings, older inventory became permanently unreachable through search/browse.
+      // This loop replaces that fixed take with real keyset pagination: it walks batches ordered
+      // by the active sort's (field, id), advancing `scanCursor` through every row (ad or not) so
+      // a page boundary is always the true position in the dataset, then returns once PAGE_SIZE
+      // real (non-ad) listings are collected or the dataset is exhausted.
+      const cmp = sortConfig.direction === 'desc' ? 'lt' : 'gt'
+      let scanCursor = cursor
+      const listings = []
+      let hasMore = false
+      for (let batchNum = 0; batchNum < MAX_SCAN_BATCHES; batchNum++) {
+        const andConditions = [...attributeConditions]
+        if (scanCursor) {
+          andConditions.push({
+            OR: [
+              { [sortConfig.field]: { [cmp]: scanCursor.value } },
+              { [sortConfig.field]: scanCursor.value, id: { [cmp]: scanCursor.id } },
+            ],
+          })
+        }
+        const batch = await db().listing.findMany({
+          where: {
+            status: 'APPROVED',
+            division,
+            location: city ? { city } : undefined,
+            priceMinor: Object.keys(priceFilter).length ? priceFilter : undefined,
+            AND: andConditions.length ? andConditions : undefined,
+          },
+          include: { location: true, media: true },
+          orderBy: [{ [sortConfig.field]: sortConfig.direction }, { id: sortConfig.direction }],
+          take: SCAN_BATCH_SIZE,
+        })
+        if (batch.length === 0) {
+          hasMore = false
+          break
+        }
+
+        let hitPageSize = false
+        for (const listing of batch) {
+          if (listing.metadata?.advertising !== true) listings.push(listing)
+          scanCursor = { value: listing[sortConfig.field], id: listing.id }
+          if (listings.length >= PAGE_SIZE) {
+            hitPageSize = true
+            break
+          }
+        }
+        if (hitPageSize) {
+          hasMore = true
+          break
+        }
+        if (batch.length < SCAN_BATCH_SIZE) {
+          // Fewer rows than requested came back: the dataset is exhausted, not just this batch.
+          hasMore = false
+          break
+        }
+        // Batch was full and PAGE_SIZE isn't reached yet -- keep scanning from scanCursor. If this
+        // was the last allowed batch, the loop exits here with hasMore left true (set below).
+        hasMore = true
+      }
+
+      const nextCursor = hasMore && scanCursor ? encodeListingCursor(sort, scanCursor) : null
+      return json(res, 200, { ok: true, listings: listings.map(toPublicListing), nextCursor })
     }
 
     if (req.method === 'POST') {
@@ -141,15 +362,45 @@ export async function handleListings(req, res, url, context) {
         error.expose = true
         throw error
       }
+      // Persist a Location relation so the listing is discoverable by the city browse filter and
+      // renders with a real location. The wizard sends a governorate slug (damascus/aleppo/…); map
+      // it to the English city name that browse filters match (location.city). Without this, host-
+      // created listings are location-less and un-findable by city.
+      let locationId
+      const govSource = body.governorate || body.metadata?.governorate || ''
+      const areaSource = body.area || body.metadata?.area
+      const cityName = resolveListingCityName(govSource)
+      if (cityName) {
+        const location = await db().location.create({
+          data: {
+            country: 'SY',
+            governorate: cityName,
+            city: cityName,
+            area: areaSource ? String(areaSource) : undefined,
+          },
+        })
+        locationId = location.id
+      }
+
+      const currency = body.currency ? String(body.currency).toUpperCase() : defaultCurrency()
+      if (!isCurrencyAllowed(currency)) {
+        const error = new Error(`Currency '${currency}' is not supported for this country.`)
+        error.statusCode = 400
+        error.code = 'LISTING_CURRENCY_NOT_ALLOWED'
+        error.expose = true
+        throw error
+      }
+
       const listing = await db().listing.create({
         data: {
           ownerId: context.user.id,
+          locationId,
           division,
           titleAr: String(body.titleAr).trim(),
           titleEn: body.titleEn || undefined,
           description: body.description || undefined,
           priceMinor,
-          currency: body.currency || 'SYP',
+          currency,
           instantBookEnabled: Boolean(body.instantBookEnabled),
           expiresAt,
           metadata: body.metadata || {},
@@ -185,7 +436,7 @@ export async function handleListings(req, res, url, context) {
       error.expose = true
       throw error
     }
-    return json(res, 200, { ok: true, listing })
+    return json(res, 200, { ok: true, listing: toPublicListing(listing) })
   }
 
   const availabilityMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/availability$/)
@@ -329,6 +580,29 @@ export async function handleListings(req, res, url, context) {
       const error = new Error('Only draft or rejected listings can be submitted for review.')
       error.statusCode = 400
       error.code = 'LISTING_NOT_SUBMITTABLE'
+      error.expose = true
+      throw error
+    }
+    // Publish gate for EVERY division: the lister must (1) have a verified (admin-approved) ID and
+    // (2) have signed the platform listing agreement before a listing can go to review.
+    const publisher = await db().user.findUnique({
+      where: { id: context.user.id },
+      select: { idDocumentStatus: true },
+    })
+    if (publisher?.idDocumentStatus !== 'APPROVED') {
+      const error = new Error('Verify your identity (upload your ID and get it approved) before publishing a listing.')
+      error.statusCode = 403
+      error.code = 'ID_VERIFICATION_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const listingAgreement = await db().legalConsent.findFirst({
+      where: { userId: context.user.id, documentKey: 'listing-agreement' },
+    })
+    if (!listingAgreement) {
+      const error = new Error('Accept the platform listing agreement before publishing a listing.')
+      error.statusCode = 403
+      error.code = 'LISTING_AGREEMENT_REQUIRED'
       error.expose = true
       throw error
     }

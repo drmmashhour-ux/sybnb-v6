@@ -125,6 +125,8 @@ enum MessageSenderRole {
   HOST
   ADMIN
   SUPPORT
+  DRIVER
+  RIDER
 
   @@map("message_sender_role")
 }
@@ -158,9 +160,17 @@ model User {
   driverRideMatches RideRequest[]     @relation("RideDriver")
   auditLogs         AdminAuditLog[]   @relation("AuditActor")
   listingReviews    ListingReview[]   @relation("ReviewGuest")
+  rideReviews       RideReview[]      @relation("RideReviewRider")
   sentMessages      Message[]         @relation("MessageSender")
   paymentProofs     PaymentProof[]    @relation("PaymentPayer")
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
+  savedPlaces       SavedPlace[]
+  promoRedemptions  PromoRedemption[]
+  pushSubscriptions PushSubscription[]
+  businessAccountMemberships BusinessAccountMember[]
+  adminOfBusinessAccounts    BusinessAccount[]        @relation("BusinessAccountAdmin")
+  refundsRequested             Refund[]        @relation("RefundRequestedBy")
+  refundAttemptsLegacyAccepted RefundAttempt[] @relation("RefundAttemptLegacyAcceptedBy")
 
   @@map("users")
 }
@@ -200,8 +210,12 @@ model DriverProfile {
   vehicleMake     String?  @map("vehicle_make")
   vehicleModel    String?  @map("vehicle_model")
   vehiclePlate    String?  @map("vehicle_plate")
+  photoRef        String?  @map("photo_ref")
+  photoMimeType   String?  @map("photo_mime_type")
   active          Boolean  @default(false)
+  accessibilityCapable Boolean @default(false) @map("accessibility_capable")
   lastLocationGeo Unsupported("geometry(Point,4326)")? @map("last_location_geo")
+  lastLocationUpdatedAt DateTime? @map("last_location_updated_at")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
@@ -256,6 +270,13 @@ model Listing {
 
   @@index([division, status])
   @@index([ownerId])
+  // Backs GET /api/listings's keyset-paginated browse/search scan (server/routes/listings.mjs):
+  // filters on (division, status), then walks pages ordered by (createdAt, id) DESC. Without the
+  // trailing two columns each page's cursor comparison falls back to a full-bucket sort.
+  @@index([division, status, createdAt, id])
+  // Same reasoning, for sort=priceLow/priceHigh's price-ordered scan instead of the default
+  // createdAt-ordered one.
+  @@index([division, status, priceMinor, id])
   @@map("listings")
 }
 
@@ -308,6 +329,8 @@ model Booking {
   listing  Listing       @relation(fields: [listingId], references: [id])
   guest    User          @relation("BookingGuest", fields: [guestId], references: [id])
   payments PaymentProof[]
+  paymentIntents PaymentIntent[]
+  paymentEvents PaymentEvent[]
   review   ListingReview?
   messageThread MessageThread?
 
@@ -319,12 +342,18 @@ model Booking {
 model PaymentProof {
   id              String        @id @default(uuid())
   bookingId       String?       @map("booking_id")
+  rideId          String?       @map("ride_id")
   userId          String        @map("user_id")
   provider        String
   status          PaymentStatus @default(PENDING_PROOF)
   amountMinor     Int           @map("amount_minor")
   currency        String        @default("SYP")
   proofAssetUrl   String?       @map("proof_asset_url")
+  // Full set of uploaded evidence files (seller-plan/advertising submissions can carry several —
+  // ownership proof, license, photos). proofAssetUrl stays populated with the first one for
+  // backward compatibility with every existing single-file consumer (Stripe, local-wallet, etc.,
+  // which only ever have one); this is the complete list admin should actually review.
+  proofAssetUrls  String[]      @default([]) @map("proof_asset_urls")
   providerRef     String?       @map("provider_ref")
   adminNote       String?       @map("admin_note")
   reviewedById    String?       @map("reviewed_by_id")
@@ -332,8 +361,25 @@ model PaymentProof {
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
 
-  booking Booking? @relation(fields: [bookingId], references: [id])
-  payer   User     @relation("PaymentPayer", fields: [userId], references: [id])
+  // Three separate refund counters -- reserved (held pending an in-flight refund), succeeded
+  // (genuinely provider/ledger-confirmed), accepted (an owner's explicit acceptance of incomplete
+  // legacy evidence, NEVER conflated with succeeded). The hard, unconditional cap
+  // (reserved+succeeded+accepted <= amountMinor) is enforced by the refund_minor_within_amount
+  // CHECK constraint at the database level, independent of any application-level eligibility policy.
+  reservedRefundMinor  Int     @default(0) @map("reserved_refund_minor")
+  succeededRefundMinor Int     @default(0) @map("succeeded_refund_minor")
+  acceptedRefundMinor  Int     @default(0) @map("accepted_refund_minor")
+
+  // Captured at original payment confirmation time -- 'charge' | 'payment_intent'. NULL for every
+  // proof predating this column; refund creation on the stripe_checkout rail refuses to proceed
+  // without these populated (an application-level check, not a DB constraint).
+  providerPaymentObjectType String? @map("provider_payment_object_type")
+  providerPaymentObjectId   String? @map("provider_payment_object_id")
+
+  booking Booking?     @relation(fields: [bookingId], references: [id])
+  ride    RideRequest? @relation(fields: [rideId], references: [id])
+  payer   User         @relation("PaymentPayer", fields: [userId], references: [id])
+  refunds Refund[]
 
   // A given provider reference may be submitted only once. Postgres treats NULLs as distinct, so
   // internally-generated proofs without a providerRef are unaffected; this closes the TOCTOU race
@@ -341,6 +387,11 @@ model PaymentProof {
   @@unique([provider, providerRef], map: "payment_proofs_provider_provider_ref_key")
   @@index([status, createdAt])
   @@index([userId])
+  // Scale-readiness audit: hit on ~10 route call sites (every booking screen loads its payment
+  // proofs; the ride-payment duplicate-proof check filters by rideId directly) with no index
+  // backing either FK -- confirmed a full sequential scan of this table before these were added.
+  @@index([bookingId])
+  @@index([rideId, status])
   @@map("payment_proofs")
 }
 
@@ -369,15 +420,21 @@ model MessageThread {
   bookingId String?  @unique @map("booking_id")
   listingId String?  @map("listing_id")
   guestId   String?  @map("guest_id")
+  rideId    String?  @unique @map("ride_id")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  booking  Booking?  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  listing  Listing?  @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  guest    User?     @relation("ListingInquiryGuest", fields: [guestId], references: [id], onDelete: Cascade)
+  booking  Booking?     @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  listing  Listing?     @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  guest    User?        @relation("ListingInquiryGuest", fields: [guestId], references: [id], onDelete: Cascade)
+  ride     RideRequest? @relation(fields: [rideId], references: [id], onDelete: Cascade)
   messages Message[]
 
   @@unique([listingId, guestId])
+  // Scale-readiness audit: the guest inquiry inbox (GET /api/me/inquiries) filters by guestId with
+  // no leading index -- the unique constraint above can't serve a guestId-only lookup since
+  // listingId is its leading column.
+  @@index([guestId, updatedAt])
   @@map("message_threads")
 }
 
@@ -424,6 +481,7 @@ model WalletEntry {
   createdAt       DateTime        @default(now()) @map("created_at")
 
   wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  refundAttemptsLegacy RefundAttempt[]
 
   @@index([walletId, createdAt])
   @@index([referenceType, referenceId])
@@ -470,27 +528,372 @@ model PaymentIntent {
   createdAt    DateTime       @default(now()) @map("created_at")
   updatedAt    DateTime       @updatedAt @map("updated_at")
 
-  events PaymentEvent[]
+  booking Booking?       @relation(fields: [bookingId], references: [id])
+  events  PaymentEvent[]
 
   @@index([userId])
+  @@index([bookingId])
   @@map("payment_intents")
 }
 
 // Auditable, idempotent provider event history. providerEventId is unique, so a duplicate/replayed
-// webhook delivery is a no-op.
+// webhook delivery is a no-op at the intake layer. processingStatus/attempts/lastError track our
+// own handling of a delivery SEPARATELY from PaymentIntent.status (the business state) — a webhook
+// can be durably "received" even when applying its booking/wallet side effects fails and rolls back,
+// which is exactly the case this split exists to make visible instead of silently vanishing.
 model PaymentEvent {
-  id              String   @id @default(uuid())
-  intentId        String   @map("intent_id")
-  providerEventId String   @unique @map("provider_event_id")
-  type            String
-  amountMinor     Int?     @map("amount_minor")
-  currency        String?
-  receivedAt      DateTime @default(now()) @map("received_at")
+  id               String                       @id @default(uuid())
+  // Which webhook rail produced this event -- 'payment_intent' (the events below reference intent)
+  // or 'stripe_checkout' (the events below reference booking instead). Traceability is guaranteed by
+  // providerReference (below) being required, not by a rail-conditional CHECK -- migration 017's
+  // CHECK on original_intent_id/original_booking_id was dropped in migration 018, since it was too
+  // strict once durable intake had to succeed even for an unresolvable local reference.
+  rail             String
+  // Structural authentication identity, NOT the money-movement-approval question (that stays
+  // APPROVED_PROVIDER_CONFIGS in payment-policy.mjs) -- e.g. 'stripe' or 'sandbox'. Permanent: never
+  // cleared by any deletion, unlike intentId/bookingId below.
+  provider         String
+  // A static, per-rail configuration label (e.g. 'sandbox-test-account', 'stripe-checkout') -- part
+  // of the canonical event identity (migration 018) that replaces the old provider-blind global
+  // uniqueness on providerEventId alone. Named honestly (migration 019, renamed from
+  // providerAccount): this is NOT an identity derived from any verified provider/account context --
+  // this codebase has no multi-account or Stripe Connect support, so there is only ever one possible
+  // value per rail. If real multi-account support is ever added, this field must be derived from the
+  // verified account context at that time (e.g. Stripe Connect's event.account), never a literal.
+  providerEndpointKey String                     @map("provider_endpoint_key")
+  // policyEnvironment() at receipt time (e.g. 'development', 'production'). 'unknown' for rows
+  // received before this column existed (migration 017's backfill) -- an honest gap, not a guess.
+  // PLAIN INFORMATIONAL METADATA ONLY (migration 020) -- deliberately NOT part of the canonical event
+  // identity. It was, until independent review correctly found that using a mutable, ambient runtime
+  // label (process.env.NODE_ENV) as part of an identity key let the exact same event delivered to the
+  // exact same endpoint under two different environment labels (a deploy config change, or two
+  // processes with different NODE_ENV, e.g. a test script vs the live server it drives) create two
+  // independent rows and be applied twice -- confirmed as a real, already-manifested defect in this
+  // codebase's own data, not just a theoretical one (see migration 020's comment). providerEndpointKey
+  // already uniquely identifies the endpoint/mode in this codebase (there is exactly one static
+  // endpoint key per rail today), so environment added no genuine distinguishing identity information
+  // on top of it and is never used to fork identity again.
+  environment      String
+  // What kind of internal record this event was originally about -- 'PAYMENT_INTENT' or 'BOOKING'.
+  // Permanent, set once at receipt, independent of whether intentId/bookingId later become null.
+  subjectType      String                       @map("subject_type")
+  // The RAW, unvalidated local reference from the payload (an intent's own `reference` string for
+  // the payment_intent rail; `metadata.bookingId` for stripe_checkout) -- populated UNCONDITIONALLY
+  // at intake, before any local lookup is attempted. This is what lets an authenticated event with
+  // an unresolvable, malformed, or since-deleted local reference still be durably stored (migration
+  // 018, closing a real "authenticated events silently dropped before persistence" defect an
+  // independent review found). Immutable once set -- part of the conflict-detection comparison.
+  providerReference String                      @map("provider_reference")
+  // LIVE foreign keys -- nullable, ON DELETE SET NULL (migration 017; previously CASCADE on intent
+  // and undeclared/NO ACTION on booking -- both wrong for a durable audit table, fixed after
+  // independent review found this exact defect). Deleting the parent clears these, NOT the event row.
+  // Populated once local resolution (via providerReference) succeeds -- may be null at intake time
+  // and filled in by a later processing step, not necessarily set atomically with the row's creation.
+  intentId         String?                      @map("intent_id")
+  bookingId        String?                      @map("booking_id")
+  // PERMANENT snapshots of the same two ids, populated once resolution succeeds and NEVER cleared by
+  // any deletion -- what makes an orphaned event (its live FK now null) still fully self-describing
+  // and reconcilable. "Where available" per rail: payment_intent rows populate originalIntentId
+  // once resolved, and originalBookingId when the resolved intent had one; stripe_checkout rows
+  // populate originalBookingId only (this rail has no PaymentIntent to reference at all).
+  originalIntentId  String?                     @map("original_intent_id")
+  originalBookingId String?                     @map("original_booking_id")
+  // No longer independently unique -- see the partial unique index migration 021 creates (not
+  // representable as a Prisma @@unique, since it is scoped to canonical rows only -- see
+  // supersededByEventId below). A bare provider-event-id string is only unique WITHIN one
+  // provider/endpoint among CANONICAL rows; the same string from a different provider must never
+  // collide with it, and a superseded historical duplicate legitimately shares it with its survivor.
+  // NEVER rewritten once set, for any reason, including duplicate resolution (migration 021 -- an
+  // earlier version of migration 020 rewrote a losing duplicate's value here, which independent
+  // review correctly found destroyed the provider's own evidence; that rewrite was undone).
+  providerEventId  String                       @map("provider_event_id")
+  type             String
+  amountMinor      Int?                         @map("amount_minor")
+  currency         String?
+  // The provider's own object id (e.g. a charge/payment-intent id from event.data.object.id).
+  // Non-sensitive metadata, stored alongside amountMinor/currency for the same reason: it lets an
+  // admin replay reconstruct the event snapshot without needing (or storing) the raw webhook payload.
+  providerObjectId String?                      @map("provider_object_id")
+  // The RAW event.data.object.payment_status string (e.g. Stripe's own 'paid'/'unpaid'/'no_payment_
+  // required'), populated UNCONDITIONALLY at intake for the stripe_checkout rail (migration 022) --
+  // null for payment_intent rail, where this concept doesn't apply. Closes a real gap independent
+  // review found: without this, reconstructing a stripe_checkout session for admin replay of an event
+  // stuck at APPLYING past its claim expiry had no durable source of truth for paid-ness and would
+  // have had to assume 'paid' -- a real risk of confirming a booking that was never actually paid for
+  // a row that crashed before that was ever established. Never used to gate the LIVE webhook path
+  // (which always reconstructs `session` from the actual incoming payload, already accurate) -- only
+  // by admin replay's reconstruction, once resolution has happened (see the replay route).
+  paymentStatus    String?                      @map("payment_status")
+  // SHA-256 of the raw, already-signature-verified webhook body. Never the raw payload itself.
+  payloadDigest    String?                      @map("payload_digest")
+  processingStatus PaymentEventProcessingStatus @default(RECEIVED) @map("processing_status")
+  attempts         Int                          @default(0)
+  lastAttemptAt    DateTime?                    @map("last_attempt_at")
+  lastError        String?                      @map("last_error")
+  appliedAt        DateTime?                     @map("applied_at")
+  receivedAt       DateTime                      @default(now()) @map("received_at")
+  // Claim ownership for the apply phase (migration 021). NULL means no active claim. A claim is a
+  // random per-attempt identity (applyPaymentEvent() mints a fresh one every time it wins the CAS
+  // race) plus a bounded expiry -- what makes a crashed/killed/disconnected worker's stuck APPLYING
+  // row safely reclaimable by a LATER call instead of lost forever (independent review found the
+  // prior CAS-only claim, with no token or expiry, had no recovery path at all: APPLYING is excluded
+  // from CLAIMABLE_STATUSES by design, so nothing could ever reclaim a row stuck there). Every write
+  // this event's own apply() closure or applyPaymentEvent()'s own success/failure handling makes is
+  // bound to the exact token it was issued -- a stale worker that wakes up after its claim expired and
+  // a newer claimant has already taken over matches zero rows on its own write, never corrupting the
+  // newer claimant's state. Cleared to null on every terminal outcome (APPLIED/IGNORED/FAILED/
+  // DEAD_LETTERED).
+  claimToken       String?                      @map("claim_token")
+  claimExpiresAt   DateTime?                    @map("claim_expires_at")
+  // Duplicate-resolution (migration 021), NOT the conflict-audit relation below -- a fundamentally
+  // different concept. A PaymentEventConflict record documents a REDELIVERY whose CONTENT didn't
+  // match an existing row (no second full row is ever created for that). supersededByEventId instead
+  // records that THIS entire, independently-durable row and another row are the SAME real event,
+  // discovered identical only after the fact (e.g. migration 020's environment-forking bug durably
+  // stored the one real event as two full historical rows before that bug was fixed) -- both rows keep
+  // their own complete lifecycle (attempts/status/timestamps) and their real, unaltered
+  // providerEventId; this column just records which one is canonical going forward and NEVER rewrites
+  // either row's provider-originated data to do so. RESTRICT (not SET NULL/CASCADE like intent/
+  // booking): a canonical row must never be deletable while a superseded duplicate still points to it.
+  supersededByEventId String?  @map("superseded_by_event_id")
+  supersededAt         DateTime? @map("superseded_at")
+  supersededReason     String?   @map("superseded_reason")
 
-  intent PaymentIntent @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  // Refund-linkage pair, mirroring intentId/originalIntentId exactly (migration 023, Item 2 Phase
+  // 2a). refundId is LIVE, nullable, SET NULL on delete; originalRefundId is a PERMANENT snapshot,
+  // never cleared. A refund can have several attempts over its lifetime, so a SEPARATE
+  // attempt-level pair is also needed -- a late webhook must resolve to the SPECIFIC attempt it
+  // concerns, not whichever attempt happens to be currently active when the webhook arrives.
+  refundId                String?   @map("refund_id")
+  originalRefundId        String?   @map("original_refund_id")
+  refundAttemptId         String?   @map("refund_attempt_id")
+  originalRefundAttemptId String?   @map("original_refund_attempt_id")
 
+  intent        PaymentIntent?  @relation(fields: [intentId], references: [id], onDelete: SetNull)
+  booking       Booking?        @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  refund        Refund?         @relation(fields: [refundId], references: [id], onDelete: SetNull)
+  // Named to disambiguate from RefundAttempt.legacyPaymentEvent below -- two distinct FK relations
+  // exist between PaymentEvent and RefundAttempt (this live one, and the legacy-evidence one).
+  refundAttempt RefundAttempt?  @relation("PaymentEventRefundAttempt", fields: [refundAttemptId], references: [id], onDelete: SetNull)
+  // Reverse side of RefundAttempt.legacyPaymentEvent (the legacy-evidence FK) -- kept distinct from
+  // the `refundAttempt`/events pair above, which is the live, current-attempt-targeting FK.
+  legacyForRefundAttempts RefundAttempt[] @relation("RefundAttemptLegacyPaymentEvent")
+  // Append-only record of every conflicting delivery under this event's canonical identity (same
+  // (provider, providerEndpointKey, providerEventId), different immutable content). This event row's
+  // own fields (processingStatus/lastError/attempts/etc.) are NEVER written on a conflict -- see
+  // intakeEvent() in payment-event-pipeline.mjs and this relation's own model comment.
+  conflicts PaymentEventConflict[]
+  supersededByEvent    PaymentEvent?  @relation("PaymentEventSupersession", fields: [supersededByEventId], references: [id], onDelete: Restrict)
+  supersededDuplicates PaymentEvent[] @relation("PaymentEventSupersession")
+
+  // Uniqueness among CANONICAL (non-superseded) rows only is enforced by a raw PARTIAL unique index
+  // (migration 021, name payment_events_identity_key kept for isPaymentEventIdentityConflict()'s
+  // P2002 target check) -- NOT representable here as a Prisma @@unique, since @@unique has no WHERE
+  // clause support and a superseded historical duplicate legitimately shares its identity triple with
+  // its survivor. Lookups use findFirst scoped to supersededByEventId: null (see intakeEvent()), not
+  // findUnique against a compound key Prisma itself cannot actually guarantee is unique table-wide.
+  @@index([provider, providerEndpointKey, providerEventId])
+  @@index([providerEventId])
+  @@index([supersededByEventId])
   @@index([intentId])
+  @@index([rail])
+  @@index([bookingId])
+  @@index([processingStatus])
+  @@index([refundId])
+  @@index([refundAttemptId])
   @@map("payment_events")
+}
+
+// Append-only audit trail of conflicting deliveries — a delivery whose canonical identity
+// (provider, providerEndpointKey, providerEventId) matches an existing PaymentEvent but whose
+// immutable content (payload digest, type, reference, subject, amounts) does not. Recording
+// this here, in a separate child table, is what makes it structurally impossible for a conflicting
+// delivery to ever overwrite the original event's own authoritative outcome (independent review
+// found intakeEvent() doing exactly that in the prior round — this table is the fix). Stores only
+// non-sensitive, already-authenticated metadata: a digest and the immutable-field snapshot, never
+// the raw payload, never secrets.
+model PaymentEventConflict {
+  id                String   @id @default(uuid())
+  paymentEventId    String   @map("payment_event_id")
+  receivedAt        DateTime @default(now()) @map("received_at")
+  payloadDigest     String   @map("payload_digest")
+  type              String
+  providerReference String   @map("provider_reference")
+  subjectType       String   @map("subject_type")
+  providerObjectId  String?  @map("provider_object_id")
+  amountMinor       Int?     @map("amount_minor")
+  currency          String?
+
+  event PaymentEvent @relation(fields: [paymentEventId], references: [id], onDelete: Cascade)
+
+  @@index([paymentEventId])
+  @@map("payment_event_conflicts")
+}
+
+// Item 2 Phase 2a (migration 023): refund state machine, attempt-lifecycle, and legacy-migration
+// data model. Independently reviewed across 10 design revisions before implementation began --
+// see the delivered design/evidence package for the full derivation of every choice below.
+
+enum RefundBusinessStatus {
+  REQUESTED
+  IN_PROGRESS
+  // Not terminal -- reservationHeld (on Refund) says whether capacity/funds are still held, since
+  // that cannot be inferred from this status value alone.
+  ACTION_REQUIRED
+  // Genuinely terminal: provider/ledger-confirmed.
+  SUCCEEDED
+  // Genuinely terminal: an owner explicitly accepted incomplete historical evidence. NEVER
+  // conflated with SUCCEEDED -- a materially different epistemic claim, tracked separately end to
+  // end (see PaymentProof.acceptedRefundMinor).
+  ACCOUNTING_ACCEPTED
+  CANCELLED
+
+  @@map("refund_business_status")
+}
+
+enum RefundAttemptStatus {
+  // Non-terminal (5)
+  CLAIMED
+  OUTBOUND_STARTED
+  AWAITING_PROVIDER_CONFIRMATION
+  RESULT_UNKNOWN
+  RECONCILING
+  // Ordinary terminal (4)
+  SUCCEEDED
+  PROVIDER_DECLINED
+  SUPERSEDED
+  ABANDONED
+  // Legacy terminal (3) -- migratedFromLegacy=true only, see the refund_attempt_status_shape CHECK
+  LEGACY_UNVERIFIED
+  LEGACY_PENDING_CONFIRMATION
+  LEGACY_ACCOUNTING_ACCEPTED
+
+  @@map("refund_attempt_status")
+}
+
+model Refund {
+  id        String @id @default(uuid())
+  paymentProofId String @map("payment_proof_id")
+  // Permanent snapshot, deliberately no FK -- mirrors PaymentEvent.originalBookingId. Must survive
+  // regardless of what later happens to the live booking row.
+  bookingId String? @map("booking_id")
+  requestedByUserId String? @map("requested_by_user_id")
+  amountMinor Int    @map("amount_minor")
+  currency    String
+  reason      String
+  reasonCode  String @map("reason_code")
+  rail        String
+  status      RefundBusinessStatus @default(REQUESTED)
+  // Explicit, persisted answer to "is this refund's own reservation currently held" -- never
+  // inferred from status alone (see RefundBusinessStatus.ACTION_REQUIRED above).
+  reservationHeld     Boolean  @default(true) @map("reservation_held")
+  migratedFromLegacy  Boolean  @default(false) @map("migrated_from_legacy")
+  requestedAt         DateTime @default(now()) @map("requested_at")
+  succeededAt          DateTime? @map("succeeded_at")
+
+  paymentProof PaymentProof     @relation(fields: [paymentProofId], references: [id], onDelete: Restrict)
+  requestedBy  User?            @relation("RefundRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  attempts     RefundAttempt[]
+  events       PaymentEvent[]
+
+  // At most one non-terminal-or-ACTION_REQUIRED refund per payment proof -- see migration 023's
+  // partial unique index (not representable as a bare Prisma @@unique).
+  @@index([paymentProofId, status])
+  @@index([status])
+  @@map("refunds")
+}
+
+model RefundAttempt {
+  id       String @id @default(uuid())
+  refundId String @map("refund_id")
+  status   RefundAttemptStatus @default(CLAIMED)
+  claimToken      String?   @map("claim_token")
+  claimExpiresAt  DateTime? @map("claim_expires_at")
+  // AWAITING_PROVIDER_CONFIRMATION's own reconciliation-eligibility deadline, separate from
+  // claimExpiresAt (which stays populated through RESULT_UNKNOWN unchanged from OUTBOUND_STARTED).
+  reconcileNotBefore DateTime? @map("reconcile_not_before")
+
+  // Canonical-request fields -- all nullable at the schema level; required for an ordinary attempt
+  // and forbidden for a migrated one, enforced by the refund_attempt_status_shape CHECK, not by
+  // NOT NULL (a migrated attempt never made a real provider request and must not fabricate one).
+  canonicalRequestVersion    Int?    @map("canonical_request_version")
+  provider                   String?
+  providerPaymentObjectType  String? @map("provider_payment_object_type")
+  providerPaymentObjectId    String? @map("provider_payment_object_id")
+  providerEndpointKey        String? @map("provider_endpoint_key")
+  amountMinor                Int?    @map("amount_minor")
+  currency                   String?
+  idempotencyKey             String? @unique @map("idempotency_key")
+  requestFingerprint         String? @map("request_fingerprint")
+
+  startedAt          DateTime  @default(now()) @map("started_at")
+  outboundStartedAt  DateTime? @map("outbound_started_at")
+  completedAt        DateTime? @map("completed_at")
+  providerStatus     String?   @map("provider_status")
+  providerRefundRef  String?   @map("provider_refund_ref")
+  errorClassification String? @map("error_classification")
+  ambiguous          Boolean   @default(false)
+
+  // Self-referential, RESTRICT (a canonical attempt must never be deletable while a superseded one
+  // still points to it). Its "set at most once" invariant is enforced by the
+  // refund_attempt_supersession_once trigger (migration 023) -- statement-independent, unlike a
+  // guarded UPDATE alone, which only protects callers using that exact statement.
+  supersededByAttemptId String? @map("superseded_by_attempt_id")
+
+  migratedFromLegacy  Boolean @default(false) @map("migrated_from_legacy")
+  legacyWalletEntryId String? @map("legacy_wallet_entry_id")
+  legacyPaymentEventId String? @map("legacy_payment_event_id")
+  legacyAcceptedByUserId String? @map("legacy_accepted_by_user_id")
+  legacyAcceptedAt       DateTime? @map("legacy_accepted_at")
+  legacyAcceptanceReason String?   @map("legacy_acceptance_reason")
+  legacyAcceptanceEvidenceDigest String? @map("legacy_acceptance_evidence_digest")
+
+  refund               Refund          @relation(fields: [refundId], references: [id], onDelete: Restrict)
+  supersededByAttempt  RefundAttempt?  @relation("RefundAttemptSupersession", fields: [supersededByAttemptId], references: [id], onDelete: Restrict)
+  supersededAttempts   RefundAttempt[] @relation("RefundAttemptSupersession")
+  legacyWalletEntry    WalletEntry?    @relation(fields: [legacyWalletEntryId], references: [id], onDelete: Restrict)
+  legacyPaymentEvent   PaymentEvent?   @relation("RefundAttemptLegacyPaymentEvent", fields: [legacyPaymentEventId], references: [id], onDelete: Restrict)
+  legacyAcceptedBy     User?           @relation("RefundAttemptLegacyAcceptedBy", fields: [legacyAcceptedByUserId], references: [id], onDelete: Restrict)
+  observations         RefundProviderObservation[]
+  events                PaymentEvent[] @relation("PaymentEventRefundAttempt")
+
+  // Exactly one non-terminal attempt per refund -- see migration 023's partial unique index.
+  @@index([refundId, status])
+  @@map("refund_attempts")
+}
+
+// Genuinely append-only: every observed provider response for an attempt, deduplicated by
+// (refundAttemptId, responseDigest). Never UPDATEd once inserted.
+model RefundProviderObservation {
+  id                     String   @id @default(uuid())
+  refundAttemptId        String   @map("refund_attempt_id")
+  observedByClaimToken   String?  @map("observed_by_claim_token")
+  providerPaymentObjectId String  @map("provider_payment_object_id")
+  providerRefundRef      String?  @map("provider_refund_ref")
+  providerStatus         String?  @map("provider_status")
+  responseDigest         String   @map("response_digest")
+  observedAt             DateTime @default(now()) @map("observed_at")
+
+  attempt      RefundAttempt                 @relation(fields: [refundAttemptId], references: [id], onDelete: Restrict)
+  consumption  RefundObservationConsumption?
+
+  @@unique([refundAttemptId, responseDigest], map: "refund_provider_observations_dedup")
+  @@map("refund_provider_observations")
+}
+
+// A SEPARATE insert-only table, not columns on the observation above -- this is what makes BOTH
+// tables genuinely insert-only. "Consuming" an observation is recorded by INSERTING a row here,
+// never by updating the observation itself. The unique constraint on observationId is also the
+// mechanism that resolves a race between two would-be consumers: exactly one INSERT succeeds.
+model RefundObservationConsumption {
+  id                       String   @id @default(uuid())
+  observationId            String   @unique @map("observation_id")
+  consumedAt               DateTime @default(now()) @map("consumed_at")
+  consumedByTransactionRef String   @map("consumed_by_transaction_ref")
+
+  observation RefundProviderObservation @relation(fields: [observationId], references: [id], onDelete: Restrict)
+
+  @@map("refund_observation_consumptions")
 }
 
 enum PaymentIntentStatus {
@@ -502,6 +905,32 @@ enum PaymentIntentStatus {
   REFUNDED
 
   @@map("payment_intent_status")
+}
+
+// Our own handling of one webhook delivery (or an admin replay of it) — distinct from
+// PaymentIntentStatus, which is the business state the provider reports. RECEIVED: durably
+// persisted, not yet attempted. APPLYING: an attempt is in flight (observability only, not a lock —
+// real safety is the unique constraints applyPaymentEvent relies on). APPLIED: side effects
+// committed (or none were needed). IGNORED: a legal-but-no-op or an out-of-order/illegal transition
+// — retrying would not change the outcome. FAILED: an attempt threw; eligible for retry via
+// redelivery or admin replay. DEAD_LETTERED: failed attempts reached the threshold; needs a human.
+enum PaymentEventProcessingStatus {
+  RECEIVED
+  APPLYING
+  APPLIED
+  IGNORED
+  FAILED
+  DEAD_LETTERED
+  // Authenticated but locally unresolvable: an unknown/malformed local reference, an amount/currency
+  // conflict against the resolved local record, or a genuine identity conflict on redelivery
+  // (same canonical identity, different immutable fields). Migration 018.
+  QUARANTINED
+  // The webhook_apply policy denied application. A real, queryable status -- previously this case
+  // silently left the row at RECEIVED, which conflated "not yet attempted" with "explicitly
+  // deferred by policy". Migration 018.
+  POLICY_DEFERRED
+
+  @@map("payment_event_processing_status")
 }
 
 // Records a user's acceptance of a specific legal-document VERSION. The document text itself is
@@ -568,6 +997,27 @@ model OtpAttemptLock {
   @@map("otp_attempt_locks")
 }
 
+model RateLimitBucket {
+  id          String   @id @default(uuid())
+  bucketKey   String   @unique @map("bucket_key")
+  windowStart DateTime @default(now()) @map("window_start")
+  count       Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("rate_limit_buckets")
+}
+
+model SuppressedEmail {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  reason    String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("suppressed_emails")
+}
+
 model RideRequest {
   id              String     @id @default(uuid())
   riderId          String     @map("rider_id")
@@ -577,6 +1027,19 @@ model RideRequest {
   status          RideStatus @default(REQUESTED)
   requestedAt     DateTime   @default(now()) @map("requested_at")
   fareMinor       Int?       @map("fare_minor")
+  cancellationFeeMinor Int?  @map("cancellation_fee_minor")
+  scheduledFor    DateTime?  @map("scheduled_for")
+  accessibilityRequired Boolean @default(false) @map("accessibility_required")
+  promoCodeId     String?    @map("promo_code_id")
+  discountMinor   Int?       @map("discount_minor")
+  businessAccountId String?  @map("business_account_id")
+  shareable       Boolean    @default(false)
+  // Set only once a shareable ride is genuinely pooled with another (both claimed by the same
+  // driver, pickups within POOL_MAX_DISTANCE_KM -- see server/lib/ride-pooling.mjs). No formal
+  // relation on purpose (a plain self-referential id is enough; nothing needs to traverse it via
+  // Prisma include). The pooling discount is applied to fareMinor only when this gets set, not at
+  // ride-request time -- see the claim route's own comment for why.
+  pairedRideId    String?    @map("paired_ride_id")
   currency        String     @default("SYP")
   pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
   dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")
@@ -587,10 +1050,167 @@ model RideRequest {
   driver         User?     @relation("RideDriver", fields: [driverId], references: [id])
   pickupLocation Location? @relation("RidePickup", fields: [pickupLocationId], references: [id])
   dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
+  review         RideReview?
+  paymentProofs  PaymentProof[]
+  messageThread  MessageThread?
+  stops          RideStop[]
+  promoCode      PromoCode?      @relation(fields: [promoCodeId], references: [id])
+  promoRedemption PromoRedemption?
+  businessAccount BusinessAccount? @relation(fields: [businessAccountId], references: [id])
 
   @@index([status, requestedAt])
   @@index([driverId, status])
+  // Scale-readiness audit: the primary rider-facing "my trips" query (GET /api/me/overview) filters
+  // by riderId with no index -- only the driverId side of that OR was covered.
+  @@index([riderId])
   @@map("ride_requests")
+}
+
+// Trust remediation capsule (client-satisfaction audit P2 #10): direct structural mirror of
+// ListingReview -- one review per completed unit of service, no separate "reviewed party" column
+// since the driver is derivable via ride_requests.driver_id the same way ListingReview derives the
+// host via listings.owner_id.
+model RideReview {
+  id              String    @id @default(uuid())
+  rideId          String    @unique @map("ride_id")
+  riderId         String    @map("rider_id")
+  rating          Int
+  comment         String?
+  hiddenAt        DateTime? @map("hidden_at")
+  hiddenByAdminId String?   @map("hidden_by_admin_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  ride  RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  rider User        @relation("RideReviewRider", fields: [riderId], references: [id])
+
+  @@map("ride_reviews")
+}
+
+// SR Ride vs. Uber gap-closure (P2 #13): saved places (e.g. "Home", "Work"). Plain lat/lng, not
+// PostGIS -- never spatially queried, only stored and played back into the ride request form.
+model SavedPlace {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  label     String
+  address   String
+  lat       Float?
+  lng       Float?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("saved_places")
+}
+
+// SR Ride vs. Uber gap-closure (P2 #14): multi-stop rides. Plain lat/lng, not PostGIS -- resolved
+// once at ride-creation time, only ever played back for display, never spatially queried again.
+model RideStop {
+  id       String @id @default(uuid())
+  rideId   String @map("ride_id")
+  sequence Int
+  address  String
+  lat      Float?
+  lng      Float?
+
+  ride RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@index([rideId, sequence])
+  @@map("ride_stops")
+}
+
+enum PromoDiscountType {
+  PERCENT
+  FLAT
+
+  @@map("promo_discount_type")
+}
+
+// SR Ride vs. Uber gap-closure (P2 #12): promo codes. Owner-approved scope (2026-08-26): simple
+// percent-or-flat discount, admin-created, single redemption per rider -- no referral system, no
+// auto-generated codes.
+model PromoCode {
+  id               String            @id @default(uuid())
+  code             String            @unique
+  discountType     PromoDiscountType @map("discount_type")
+  discountValue    Int               @map("discount_value")
+  maxDiscountMinor Int?              @map("max_discount_minor")
+  active           Boolean           @default(true)
+  expiresAt        DateTime?         @map("expires_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  createdByAdminId String?           @map("created_by_admin_id")
+
+  redemptions PromoRedemption[]
+  rides       RideRequest[]
+
+  @@map("promo_codes")
+}
+
+// The unique constraint on (promoCodeId, userId) IS the single-redemption-per-rider enforcement --
+// a second concurrent redemption attempt fails atomically at the database level.
+model PromoRedemption {
+  id                   String   @id @default(uuid())
+  promoCodeId          String   @map("promo_code_id")
+  userId               String   @map("user_id")
+  rideId               String   @unique @map("ride_id")
+  discountAppliedMinor Int      @map("discount_applied_minor")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  promoCode PromoCode   @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ride      RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@unique([promoCodeId, userId])
+  @@map("promo_redemptions")
+}
+
+// SR Ride vs. Uber gap-closure (P1 #7): push notifications, standard Web Push (VAPID) -- a
+// self-generated ECDSA keypair, no third-party push-provider account required.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique
+  p256dhKey String   @map("p256dh_key")
+  authKey   String   @map("auth_key")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+// SR Ride vs. Uber gap-closure: business/corporate accounts. MVP scope -- a company entity with a
+// designated admin (an existing real user; authorized purely by adminUserId === the caller, no new
+// auth role needed), members who are existing riders, and ride attribution. Billing still goes
+// through the existing per-ride manual-proof rail; this does not invent new money-movement logic.
+model BusinessAccount {
+  id                  String   @id @default(uuid())
+  name                String
+  billingContactEmail String   @map("billing_contact_email")
+  adminUserId         String   @map("admin_user_id")
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  admin   User                     @relation("BusinessAccountAdmin", fields: [adminUserId], references: [id])
+  members BusinessAccountMember[]
+  rides   RideRequest[]
+
+  @@map("business_accounts")
+}
+
+model BusinessAccountMember {
+  id                String   @id @default(uuid())
+  businessAccountId String   @map("business_account_id")
+  userId            String   @map("user_id")
+  addedAt           DateTime @default(now()) @map("added_at")
+
+  businessAccount BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessAccountId, userId])
+  @@map("business_account_members")
 }
 
 model AdminAuditLog {
@@ -609,4 +1229,39 @@ model AdminAuditLog {
   @@index([entityType, entityId, createdAt])
   @@index([actorUserId, createdAt])
   @@map("admin_audit_logs")
+}
+
+enum SanctionsScreeningStatus {
+  CLEARED
+  POTENTIAL_MATCH
+  HARD_MATCH
+  SYSTEM_ERROR
+
+  @@map("sanctions_screening_status")
+}
+
+// Architecture audit follow-up (Module 2.1): a real, provider-agnostic screening-invocation log.
+// Says nothing about what "compliant" means for any market -- that's a legal/counsel
+// determination (see countries/<country>/profile.mjs's externalGates), not something this table
+// or server/lib/sanctions.mjs decides. Not wired into any live money-moving route yet; see
+// server/lib/sanctions.mjs for the fail-closed engine this feeds.
+model SanctionsScreeningResult {
+  id              String                   @id @default(uuid())
+  requestId       String                   @unique @map("request_id")
+  // Loose subject reference (entityType/entityId style, matching AdminAuditLog) rather than a
+  // hard FK to User -- a screening subject may be a listing owner, a payout recipient, or a
+  // future non-user party.
+  subjectType     String                   @map("subject_type")
+  subjectId       String                   @map("subject_id")
+  fullNameChecked String                   @map("full_name_checked")
+  countryCode     String                   @map("country_code")
+  status          SanctionsScreeningStatus @default(SYSTEM_ERROR)
+  matchScore      Float                    @default(0) @map("match_score")
+  providerUsed    String                   @map("provider_used")
+  rawPayload      Json                     @map("raw_payload")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+
+  @@index([subjectType, subjectId])
+  @@index([status])
+  @@map("sanctions_screening_results")
 }

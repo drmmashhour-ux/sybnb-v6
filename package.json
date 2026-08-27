@@ -23,6 +23,8 @@
     "test:e2e:new-construction": "node tests/e2e/new-construction.e2e.mjs",
     "test:e2e:sell": "node tests/e2e/sell.e2e.mjs",
     "test:e2e:sr-ride": "node tests/e2e/sr-ride.e2e.mjs",
+    "test:e2e:sr-ride-pooling": "node tests/e2e/sr-ride-pooling-discount.e2e.mjs",
+    "test:e2e:search-filters": "node tests/e2e/listing-search-filters.e2e.mjs",
     "bootstrap:admin": "node scripts/bootstrap-admin.mjs",
     "db:validate": "prisma validate",
     "db:migrate:dev": "prisma migrate dev",
@@ -35,22 +37,46 @@
     "test:e2e:payment": "node tests/e2e/payment-sandbox.e2e.mjs",
     "test:e2e:storage-s3": "node tests/e2e/storage-s3-integration.e2e.mjs",
     "test:e2e:sms": "node tests/e2e/sms-integration.e2e.mjs",
-    "test:e2e:payment-race": "node tests/e2e/payment-proof-race.e2e.mjs"
+    "test:e2e:payment-race": "node tests/e2e/payment-proof-race.e2e.mjs",
+    "test:e2e:payment-intents-booking": "node tests/e2e/payment-intents-booking.e2e.mjs",
+    "test:e2e:payment-policy": "node tests/e2e/payment-policy.e2e.mjs",
+    "test:e2e:payment-policy-enforcement": "node tests/e2e/payment-policy-enforcement.e2e.mjs",
+    "test:e2e:payment-webhook-durability": "node tests/e2e/payment-webhook-durability.e2e.mjs",
+    "test:e2e:payment-event-durability": "node tests/e2e/payment-event-durability.e2e.mjs",
+    "test:e2e:payment-event-identity": "node tests/e2e/payment-event-identity.e2e.mjs",
+    "test:e2e:payment-event-claim-recovery": "node tests/e2e/payment-event-claim-recovery.e2e.mjs",
+    "test:e2e:payment-event-supersession": "node tests/e2e/payment-event-supersession.e2e.mjs",
+    "test:e2e:legacy-refund-accept": "node tests/e2e/legacy-refund-accept.e2e.mjs",
+    "test:e2e:seller-plan-fee-ledger": "node tests/e2e/seller-plan-fee-ledger.e2e.mjs",
+    "test:e2e:refund-request-creation": "node tests/e2e/refund-request-creation.e2e.mjs",
+    "test:e2e:refund-actor-policy-split": "node tests/e2e/refund-actor-policy-split.e2e.mjs",
+    "test:e2e:refund-execution-wallet-credit": "node tests/e2e/refund-execution-wallet-credit.e2e.mjs",
+    "test:e2e:payment-webhook-default-deny": "node tests/e2e/payment-webhook-default-deny.e2e.mjs",
+    "test:e2e:payment-stripe-policy-deferred-recovery": "node tests/e2e/payment-event-stripe-policy-deferred-recovery.e2e.mjs",
+    "test:e2e:payment-policy-stripe-approval-guard": "node tests/e2e/payment-policy-stripe-approval-guard.e2e.mjs",
+    "test:e2e:public-access-gate": "node tests/e2e/public-access-gate.e2e.mjs",
+    "test:e2e:admin-rate-limit": "node tests/e2e/admin-action-rate-limit.e2e.mjs",
+    "test:e2e:all": "bash scripts/run-all-e2e.sh",
+    "test:e2e:payment-regression": "PAYMENT_ONLY=1 bash scripts/run-all-e2e.sh"
   },
   "dependencies": {
+    "@types/leaflet": "^1.9.22",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "leaflet": "^1.9.4",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "stripe": "^22.3.0",
     "typescript": "^5.6.3",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@prisma/client": "^6.19.3",
+    "acorn": "^8.18.0",
     "prisma": "^6.19.3"
   }
 }

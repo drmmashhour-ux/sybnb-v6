@@ -4,6 +4,7 @@ import { sendSms } from '../lib/sms.mjs'
 import { sendEmail } from '../lib/email.mjs'
 import { channelEnabled } from '../lib/country.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { isRateLimited, clientIp } from '../lib/rateLimit.mjs'
 
 const CODE_TTL_MS = 10 * 60 * 1000
 const MAX_ATTEMPTS = 5
@@ -21,19 +22,12 @@ const ALLOWED_PURPOSES = new Set([
 // env is unset, so the code is never returned — it must arrive via SMS.
 const EXPOSE_CODE = process.env.OTP_EXPOSE_FOR_TEST === 'true'
 
-const ipBuckets = new Map()
-function ipLimited(req) {
-  // The per-IP limiter is process-global. Bypass it only in explicit test mode
-  // (OTP_EXPOSE_FOR_TEST, never set in production) so the governed E2E is deterministic; the
-  // per-identifier resend throttle + attempt lock remain active and tested in all modes.
+async function ipLimited(req) {
+  // Bypass only in explicit test mode (OTP_EXPOSE_FOR_TEST, never set in production) so the
+  // governed E2E is deterministic; the per-identifier resend throttle + attempt lock remain
+  // active and tested in all modes.
   if (EXPOSE_CODE) return false
-  const ipRaw = req.headers['x-forwarded-for']
-  const ip = (Array.isArray(ipRaw) ? ipRaw[0] : ipRaw || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown'
-  const now = Date.now()
-  const e = ipBuckets.get(ip)
-  if (!e || now - e.start >= IP_WINDOW_MS) { ipBuckets.set(ip, { start: now, count: 1 }); return false }
-  e.count += 1
-  return e.count > IP_MAX
+  return isRateLimited(`otp:${clientIp(req)}`, IP_WINDOW_MS, IP_MAX)
 }
 
 function fail(statusCode, code, message) {
@@ -90,7 +84,7 @@ async function currentLock(purpose, subjectHash) {
 export async function handleOtp(req, res, url) {
   if (url.pathname === '/api/otp/send') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
-    if (ipLimited(req)) throw fail(429, 'RATE_LIMITED', 'Too many verification requests. Please wait a minute.')
+    if (await ipLimited(req)) throw fail(429, 'RATE_LIMITED', 'Too many verification requests. Please wait a minute.')
     const body = await readJson(req)
     const purpose = String(body.purpose || '')
     const id = resolveIdentifier(body)
@@ -152,7 +146,7 @@ export async function handleOtp(req, res, url) {
 
   if (url.pathname === '/api/otp/verify') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
-    if (ipLimited(req)) throw fail(429, 'RATE_LIMITED', 'Too many verification requests. Please wait a minute.')
+    if (await ipLimited(req)) throw fail(429, 'RATE_LIMITED', 'Too many verification requests. Please wait a minute.')
     const body = await readJson(req)
     const purpose = String(body.purpose || '')
     const code = String(body.code || '').trim()

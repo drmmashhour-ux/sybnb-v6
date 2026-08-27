@@ -4,11 +4,15 @@ import type { CSSProperties, ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   decidePrototypeHostRequest,
+  deletePrototypeHostListing,
+  fetchPrototypeHostEarnings,
   fetchPrototypeHostOverview,
   markHostGuestCheckpoint,
+  submitHostIdDocument,
   updatePrototypeHostInstantBook,
   updatePrototypeHostListingStatus,
   type HostDashboardMode,
+  type PlatformHostEarnings,
   type PlatformHostOverview,
   type PlatformListing,
 } from '../../shared/api/platformApi'
@@ -88,9 +92,6 @@ const copy = {
     pendingVerification: 'التوثيق قيد المراجعة',
     notVerifiedYet: 'غير موثق بعد',
     healthDegree: 'درجة الصحة',
-    excellentMonth: 'أداء ممتاز هذا الشهر',
-    lessThanTwoHours: 'أقل من ساعتين',
-    lastPayment: 'الدفعة القادمة ١٥ مايو',
     viewEarningsReport: 'عرض تقرير الأرباح',
     views: 'ظهور إعلانك',
     bookingsImpact: 'زيادة الحجوزات',
@@ -198,9 +199,6 @@ const copy = {
     pendingVerification: 'Verification in review',
     notVerifiedYet: 'Not verified yet',
     healthDegree: 'Health score',
-    excellentMonth: 'Excellent performance this month',
-    lessThanTwoHours: 'Less than 2 hours',
-    lastPayment: 'Next payment May 15',
     viewEarningsReport: 'View earnings report',
     views: 'Listing visibility',
     bookingsImpact: 'More bookings',
@@ -255,6 +253,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const isStaysHost = focus === 'stays'
   const providerCopy = getProviderCopy(t, isAr, focus, mode)
   const [overview, setOverview] = useState<PlatformHostOverview | null>(null)
+  const [earnings, setEarnings] = useState<PlatformHostEarnings | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'saving'>('loading')
   const [message, setMessage] = useState('')
   const [activeRequestId, setActiveRequestId] = useState('')
@@ -262,7 +261,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const [calendarListingId, setCalendarListingId] = useState('')
   const [acceptedRequestTerms, setAcceptedRequestTerms] = useState<Record<string, boolean>>({})
   const [hostDocumentFiles, setHostDocumentFiles] = useState<string[]>([])
-  const [hostDocumentsSent, setHostDocumentsSent] = useState(false)
+  const [hostDocumentPendingFile, setHostDocumentPendingFile] = useState<File | null>(null)
+  const [hostDocumentUploadStatus, setHostDocumentUploadStatus] = useState<'idle' | 'uploading' | 'error'>('idle')
+  const [hostDocumentUploadError, setHostDocumentUploadError] = useState('')
   const [inventoryFilters, setInventoryFilters] = useState<VisualFilterSelection>({
     propertyType: 'any',
     roomType: 'any',
@@ -293,16 +294,17 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const listingApprovalScore = visibleListings.length ? Math.round((approvedListingCount / visibleListings.length) * 100) : 0
   const requestConfirmationScore = visibleRequests.length ? Math.round((confirmedRequestCount / visibleRequests.length) * 100) : 100
   const responseScore = visibleRequests.length ? clamp(100 - requestedRequestCount * 12 + confirmedRequestCount * 4, 45, 100) : 100
+  const isDocumentVerified = overview?.host.idDocumentStatus === 'APPROVED'
+  const isDocumentPendingReview = overview?.host.idDocumentStatus === 'PENDING_REVIEW'
   const trustScore = clamp(
-    Math.round(listingApprovalScore * 0.45 + requestConfirmationScore * 0.35 + (hostDocumentsSent ? 20 : hostDocumentFiles.length ? 10 : 0)),
+    Math.round(listingApprovalScore * 0.45 + requestConfirmationScore * 0.35 + (isDocumentVerified ? 20 : isDocumentPendingReview ? 10 : 0)),
     0,
     100,
   )
   const healthScore = clamp(Math.round((trustScore + averageQualityScore + responseScore) / 3), 0, 100)
-  const isDocumentVerified = overview?.host.idDocumentStatus === 'APPROVED'
   const verificationStatusText = isDocumentVerified
     ? providerCopy.verifiedLabel
-    : overview?.host.idDocumentStatus === 'PENDING_REVIEW'
+    : isDocumentPendingReview
       ? t.pendingVerification
       : t.notVerifiedYet
   const dashboardCurrency = visibleListings[0]?.currency || overview?.requests[0]?.currency || 'SYP'
@@ -330,10 +332,32 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
       })
 
   function addHostDocumentFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
-    if (!names.length) return
-    setHostDocumentFiles((current) => Array.from(new Set([...current, ...names])))
-    setHostDocumentsSent(false)
+    const files = Array.from(fileList || [])
+    if (!files.length) return
+    // The backend stores exactly one ID document per user (server/routes/me.mjs), so only the most
+    // recently selected file is ever actually uploaded — replace, not accumulate, so the displayed
+    // file list never shows files as "added" that will silently never be sent.
+    const file = files[files.length - 1]
+    setHostDocumentFiles([file.name])
+    setHostDocumentPendingFile(file)
+    setHostDocumentUploadStatus('idle')
+    setHostDocumentUploadError('')
+  }
+
+  async function sendHostDocuments() {
+    if (!hostDocumentPendingFile) return
+    setHostDocumentUploadStatus('uploading')
+    setHostDocumentUploadError('')
+    try {
+      await submitHostIdDocument(hostDocumentPendingFile, mode)
+      setHostDocumentFiles([])
+      setHostDocumentPendingFile(null)
+      setHostDocumentUploadStatus('idle')
+      await loadOverview()
+    } catch (error) {
+      setHostDocumentUploadStatus('error')
+      setHostDocumentUploadError(error instanceof Error ? error.message : t.error)
+    }
   }
 
   async function loadOverview() {
@@ -341,7 +365,12 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     setMessage('')
 
     try {
-      setOverview(await fetchPrototypeHostOverview(mode))
+      const [nextOverview, nextEarnings] = await Promise.all([
+        fetchPrototypeHostOverview(mode),
+        fetchPrototypeHostEarnings(mode),
+      ])
+      setOverview(nextOverview)
+      setEarnings(nextEarnings)
       setStatus('ready')
     } catch (error) {
       setStatus('error')
@@ -416,6 +445,24 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     }
   }
 
+  async function deleteListing(listingId: string) {
+    if (!window.confirm(isAr ? 'حذف هذا الإعلان نهائياً؟ لا يمكن التراجع.' : 'Permanently delete this listing? This cannot be undone.')) return
+    setStatus('saving')
+    setActiveListingId(listingId)
+    setMessage('')
+
+    try {
+      await deletePrototypeHostListing(listingId, mode)
+      setOverview(await fetchPrototypeHostOverview(mode))
+      setStatus('ready')
+    } catch (error) {
+      setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setActiveListingId('')
+    }
+  }
+
   async function toggleInstantBook(listingId: string, enabled: boolean) {
     setStatus('saving')
     setActiveListingId(listingId)
@@ -451,11 +498,11 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         <article style={styles.healthHero}>
           <span>SYBNB · {verificationStatusText}</span>
           <strong>{trustScore}%</strong>
-          <small>{t.lessThanTwoHours}</small>
+          <small>{responseScore}% {isAr ? 'معدل الاستجابة' : 'response score'}</small>
         </article>
         <div style={styles.hostMetric}>
           <span>{t.payoutReady}</span>
-          <strong>{moneyText(overview?.totals.revenueMinor || 0, dashboardCurrency, lang)}</strong>
+          <strong>{moneyText(earnings?.totals.pendingMinor || 0, earnings?.totals.currency || dashboardCurrency, lang)}</strong>
           <button style={styles.earningsLink} onClick={() => (window.location.hash = '/host/earnings')}>
             {t.viewEarningsReport}
           </button>
@@ -469,7 +516,13 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <span>{t.healthDegree}</span>
           <strong>{healthScore}</strong>
           <small>/100</small>
-          <em>{t.excellentMonth}</em>
+          <em>
+            {healthScore >= 80
+              ? (isAr ? 'أداء ممتاز' : 'Excellent performance')
+              : healthScore >= 50
+                ? (isAr ? 'أداء جيد' : 'Good performance')
+                : (isAr ? 'يحتاج تحسين' : 'Needs improvement')}
+          </em>
         </div>
       </section>
 
@@ -480,9 +533,12 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <strong>AI Brain / {isAr ? 'يقترح' : 'Suggests'}</strong>
           <span>✣</span>
         </div>
+        <small style={{ color: '#9aa6ba' }}>
+          {isAr ? 'نصائح عامة، وليست تحليلاً مخصصاً لبيانات إعلانك.' : 'Generic tips, not a personalized analysis of your listing data.'}
+        </small>
         {[
-          [t.addPhotos, '+24% views'],
-          [t.updatePolicy, '+12% bookings'],
+          [t.addPhotos, isAr ? 'مثال' : 'EXAMPLE'],
+          [t.updatePolicy, isAr ? 'مثال' : 'EXAMPLE'],
           [t.replyFaster, t.slaMaintenance],
         ].map(([title, impact]) => (
           <article key={title} style={styles.aiSuggestion}>
@@ -514,6 +570,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
             <span>{t.listingViews}</span>
             <span>{t.inquiries}</span>
             <span>{t.action}</span>
+            <span />
           </div>
           {visibleListings.slice(0, 3).map((listing) => {
             const quality = listingQualityScore(listing)
@@ -528,9 +585,16 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                 <strong>{listingTitle(listing, lang)}</strong>
                 <span style={styles.tableQuality}><b style={{ ...styles.trackFill, width: `${quality}%` }} /></span>
                 <span style={{ ...styles.statusPill, ...statusTone }}>{statusLabel}</span>
-                <span>{listingViewCount(listing, visibleRequests)}</span>
+                <span>{listingViewCount(listing) ?? '—'}</span>
                 <span>{listingInquiryCount(listing, visibleRequests)}</span>
                 <button style={styles.editButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>✎</button>
+                <button
+                  style={styles.editButton}
+                  disabled={status === 'saving' && activeListingId === listing.id}
+                  onClick={() => void deleteListing(listing.id)}
+                >
+                  🗑
+                </button>
               </article>
             )
           })}
@@ -547,12 +611,19 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           onAddFiles={addHostDocumentFiles}
           title={hostDocumentsCopy.title}
         />
+        {hostDocumentUploadError && <p style={styles.errorText}>{hostDocumentUploadError}</p>}
         <button
-          disabled={!hostDocumentFiles.length}
-          style={hostDocumentsSent ? styles.primaryButton : styles.secondaryButton}
-          onClick={() => setHostDocumentsSent(true)}
+          disabled={!hostDocumentPendingFile || hostDocumentUploadStatus === 'uploading' || isDocumentVerified || isDocumentPendingReview}
+          style={isDocumentVerified || isDocumentPendingReview ? styles.primaryButton : styles.secondaryButton}
+          onClick={() => void sendHostDocuments()}
         >
-          {hostDocumentsSent ? hostDocumentsCopy.sent : hostDocumentsCopy.send}
+          {isDocumentVerified
+            ? providerCopy.verifiedLabel
+            : isDocumentPendingReview
+              ? t.pendingVerification
+              : hostDocumentUploadStatus === 'uploading'
+                ? (isAr ? 'جارٍ الإرسال...' : 'Sending...')
+                : hostDocumentsCopy.send}
         </button>
       </section>
 
@@ -918,13 +989,11 @@ function listingQualityScore(listing: PlatformListing) {
   return clamp(score, 20, 98)
 }
 
-function listingViewCount(listing: PlatformListing, requests: PlatformHostOverview['requests']) {
+// No page-view tracking exists anywhere in the backend — nothing ever writes metadata.views. Return
+// null rather than a formula-derived number that would look like real traffic analytics.
+function listingViewCount(listing: PlatformListing): number | null {
   const stored = metadataNumber(listing.metadata, ['views', 'viewCount', 'listingViews'])
-  if (stored) return stored
-  const mediaCount = Array.isArray(listing.media) ? listing.media.length : 0
-  const requestCount = requests.filter((request) => request.listingId === listing.id).length
-  const approvalBoost = listing.status.toUpperCase() === 'APPROVED' ? 1 : 0
-  return requestCount * 35 + mediaCount * 12 + approvalBoost * 25
+  return stored || null
 }
 
 function listingInquiryCount(listing: PlatformListing, requests: PlatformHostOverview['requests']) {
@@ -967,6 +1036,7 @@ const styles: Record<string, CSSProperties> = {
   stat: { border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#9aa6ba', display: 'grid', gap: 4, padding: 12 },
   primaryButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 14px' },
   secondaryButton: { minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#171b29', color: '#fff', fontWeight: 900, padding: '0 14px' },
+  errorText: { color: '#ff5f7d', margin: 0, fontSize: 13 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
   filtersPanel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', display: 'grid', gap: 12, padding: 14 },
   filtersHead: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start', color: '#d5a915' },
@@ -985,8 +1055,8 @@ const styles: Record<string, CSSProperties> = {
   activeListings: { display: 'grid', gap: 16 },
   sectionHead: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'end' },
   hostTable: { border: '1px solid #242735', borderRadius: 8, background: '#101016', overflowX: 'auto', overflowY: 'hidden' },
-  hostTableHead: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px', gap: 12, padding: '14px 18px', borderBottom: '1px solid #242735', color: '#8d92a2', fontSize: 13, minWidth: 710 },
-  hostTableRow: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px', gap: 12, alignItems: 'center', padding: '18px', borderBottom: '1px solid #242735', minWidth: 710 },
+  hostTableHead: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px 70px', gap: 12, padding: '14px 18px', borderBottom: '1px solid #242735', color: '#8d92a2', fontSize: 13, minWidth: 780 },
+  hostTableRow: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px 70px', gap: 12, alignItems: 'center', padding: '18px', borderBottom: '1px solid #242735', minWidth: 780 },
   tableQuality: { height: 7, borderRadius: 999, background: '#23222b', overflow: 'hidden', display: 'block' },
   statusPill: { borderRadius: 8, padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 12 },
   statusGreen: { background: 'rgba(32,210,155,.14)', color: '#20d29b', border: '1px solid rgba(32,210,155,.42)' },

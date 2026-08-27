@@ -1,16 +1,15 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
+import { resolveListingCityName } from '../lib/listing-location.mjs'
+import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 import {
-  CANCELLATION_ADMIN_FEE_CURRENCY,
-  CANCELLATION_ADMIN_FEE_MINOR,
-  bookingFinanceSplit,
   buildPayoutRow,
-  originalAdminShareRecipient,
-  recordWalletEntry,
+  createRefundRequest,
 } from '../lib/finance-ledger.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 
 export async function handleHost(req, res, url, context) {
   if (url.pathname === '/api/host/earnings') {
@@ -19,13 +18,19 @@ export async function handleHost(req, res, url, context) {
 
     await completeExpiredBookings({ listing: { ownerId: context.user.id } })
 
+    // Scale-readiness audit: this was `checkOut: 'asc'` + `take: 200` -- always the OLDEST 200
+    // qualifying bookings, with no pagination. Once any single host accumulates more than 200
+    // CONFIRMED/COMPLETED/DISPUTED bookings, their newest earnings silently stopped appearing on
+    // their own earnings page -- exactly backwards, and it hits the platform's most successful
+    // hosts first. Flipped to newest-first; the frontend (HostEarningsPage.tsx) just renders
+    // whatever order the API returns with no re-sort, so this is a pure backend fix.
     const bookings = await db().booking.findMany({
       where: {
         listing: { ownerId: context.user.id },
         status: { in: ['CONFIRMED', 'COMPLETED', 'DISPUTED'] },
       },
       include: { listing: true, payments: true },
-      orderBy: { checkOut: 'asc' },
+      orderBy: { checkOut: 'desc' },
       take: 200,
     })
 
@@ -62,7 +67,7 @@ export async function handleHost(req, res, url, context) {
       ok: true,
       earnings: {
         rows,
-        totals: { ...totals, currency: rows[0]?.currency || 'SYP' },
+        totals: { ...totals, currency: rows[0]?.currency || defaultCurrency() },
       },
     })
   }
@@ -189,16 +194,30 @@ export async function handleHost(req, res, url, context) {
       throw error
     }
 
+    // Item 2 Phase 2b round 3: creating the refund REQUEST (createRefundRequest, below) moves zero
+    // money -- verified exhaustively since round 2 -- so it is genuinely safe for the booking's own
+    // host to trigger directly. It no longer shares a gate with the commission-reversal and
+    // cancellation-fee wallet entries (real money movement), which now happen only via a separate,
+    // ADMIN-only finalize action (see PATCH /api/admin/bookings/:id/finalize-cancellation in
+    // admin.mjs) -- see finalizeCancellationLedgerEffects() in finance-ledger.mjs. This is what
+    // resolves the previously-disclosed gap where a real host could never actually cancel a paid
+    // booking at all (the old bundled 'refund' operation was ADMIN-only end to end).
+    if (status === 'CANCELLED' && existing.payments.some((payment) => payment.status === 'APPROVED')) {
+      authorizePaymentOperation({
+        operation: 'refund_request',
+        rail: 'manual_proof',
+        provider: 'manual',
+        division: existing.listing.division,
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+        actor: { roles: context.roles },
+      })
+    }
+
     const booking = await db().$transaction(async (tx) => {
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
-      const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor)
 
       if (status === 'CANCELLED') {
-        // Same fix as the guest-cancel path in bookings.mjs: reverse against whoever actually
-        // received the original commission-share wallet credit, not the possibly stale/null
-        // PaymentProof.reviewedById field.
-        const adminRecipientId = await originalAdminShareRecipient(tx, existing.id)
-
         await tx.paymentProof.updateMany({
           where: {
             bookingId: existing.id,
@@ -212,49 +231,37 @@ export async function handleHost(req, res, url, context) {
           },
         })
 
-        await recordWalletEntry(tx, {
-          userId: existing.guestId,
-          type: 'REFUND',
-          amountMinor: approvedPayment?.amountMinor || existing.amountMinor,
-          currency: existing.currency,
-          referenceType: 'booking_refund',
-          referenceId: existing.id,
-          keyParts: ['booking-refund', existing.id, approvedPayment?.id],
-          note: 'Guest refund after host cancelled a protected booking.',
-        })
+        // Item 2 Phase 2b round 2: creates a Refund + initial RefundAttempt instead of an immediate
+        // wallet credit -- owner-confirmed replacement; fulfillment deferred to a later phase.
+        // Guarded on a REAL approvedPayment existing: Refund.paymentProofId is a real, non-null FK,
+        // so there is structurally no proof to attach a refund to when no payment was ever
+        // approved. This also closes a real, pre-existing defect the old fallback
+        // (`approvedPayment?.amountMinor || existing.amountMinor`) had: a host cancelling a booking
+        // with NO approved payment would still wallet-credit the guest for the booking's full
+        // LISTED price -- crediting money that was never actually paid.
+        if (approvedPayment) {
+          await createRefundRequest(tx, {
+            paymentProofId: approvedPayment.id,
+            bookingId: existing.id,
+            requestedByUserId: context.user.id,
+            amountMinor: approvedPayment.amountMinor,
+            currency: existing.currency,
+            reason: 'Guest refund after host cancelled a protected booking.',
+            reasonCode: 'HOST_CANCELLED',
+          })
+        }
 
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'DEBIT',
-          amountMinor: split.adminShareMinor,
-          currency: existing.currency,
-          referenceType: 'booking_admin_share_reversal',
-          referenceId: existing.id,
-          keyParts: ['booking-admin-share-reversal', existing.id, approvedPayment?.id],
-          note: 'Admin/SYBNB share reversed because the protected booking was refunded.',
-        })
-
-        await recordWalletEntry(tx, {
-          userId: existing.listing.ownerId,
-          type: 'DEBIT',
-          amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-          currency: CANCELLATION_ADMIN_FEE_CURRENCY,
-          referenceType: 'booking_host_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-host-cancel-fee-host', existing.id, approvedPayment?.id],
-          note: 'Host cancellation admin fee after cancelling a protected paid booking.',
-        })
-
-        await recordWalletEntry(tx, {
-          userId: adminRecipientId,
-          type: 'CREDIT',
-          amountMinor: CANCELLATION_ADMIN_FEE_MINOR,
-          currency: CANCELLATION_ADMIN_FEE_CURRENCY,
-          referenceType: 'booking_host_cancel_fee',
-          referenceId: existing.id,
-          keyParts: ['booking-host-cancel-fee-admin', existing.id, approvedPayment?.id],
-          note: 'Admin received host cancellation fee for protected paid booking.',
-        })
+        // Item 2 Phase 2b round 3: the admin-share-reversal DEBIT and cancellation-fee DEBIT/CREDIT
+        // that used to post right here, inline, atomically with the host's own action -- previously
+        // UNGUARDED on approvedPayment existing at all, a real pre-existing money-creation defect
+        // for a never-paid booking, flagged but explicitly left unfixed in round 2 -- now happen
+        // ONLY via the separate ADMIN-only finalize-cancellation action (see
+        // finalizeCancellationLedgerEffects() in finance-ledger.mjs), which structurally requires a
+        // real REFUNDED payment proof to exist. That requirement closes the old unguarded-fallback
+        // defect as a side effect of this round's restructuring, the same way round 2's own
+        // `if (approvedPayment)` guard did for the refund-request call above it. Zero wallet
+        // entries are created by this transaction; that is the whole point of the actor-policy
+        // split above.
       }
 
       // Payout is intentionally NOT released here. Confirming only means the host accepted the
@@ -429,6 +436,113 @@ export async function handleHost(req, res, url, context) {
     return methodNotAllowed(res, ['GET', 'PATCH'])
   }
 
+  // Edit (PATCH) or remove (DELETE) a host's own listing. Editing content re-enters review so an
+  // approved listing can't be silently changed post-approval; delete is blocked when bookings exist.
+  const listingEditMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)$/)
+  if (listingEditMatch) {
+    requireAuth(context, ['HOST', 'SELLER'])
+    const existing = await db().listing.findFirst({ where: { id: listingEditMatch[1], ownerId: context.user.id } })
+    if (!existing) {
+      const error = new Error('Listing not found for this host account.')
+      error.statusCode = 404
+      error.code = 'HOST_LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    if (req.method === 'PATCH') {
+      const body = await readJson(req)
+      const data = {}
+      if (body.titleAr !== undefined) {
+        if (String(body.titleAr).trim().length < 3) {
+          const error = new Error('Listing title is required.')
+          error.statusCode = 400
+          error.code = 'LISTING_TITLE_REQUIRED'
+          error.expose = true
+          throw error
+        }
+        data.titleAr = String(body.titleAr).trim()
+      }
+      if (body.titleEn !== undefined) data.titleEn = body.titleEn || null
+      if (body.description !== undefined) data.description = body.description || null
+      if (body.currency !== undefined) {
+        const currency = String(body.currency).toUpperCase()
+        if (!isCurrencyAllowed(currency)) {
+          const error = new Error(`Currency '${currency}' is not supported for this country.`)
+          error.statusCode = 400
+          error.code = 'LISTING_CURRENCY_NOT_ALLOWED'
+          error.expose = true
+          throw error
+        }
+        data.currency = currency
+      }
+      if (body.metadata !== undefined) {
+        // Merge, not replace — a partial patch (e.g. just one field) must not silently wipe unrelated
+        // keys already on the listing (visualFilters, bedrooms/bathrooms, uploaded document/ad file
+        // references, etc.) that this specific edit never intended to touch.
+        data.metadata = { ...(existing.metadata || {}), ...(body.metadata || {}) }
+        // Keep the Location relation in sync if the edit changes governorate/area — otherwise city
+        // browse silently goes stale after an edit (M2).
+        const govSource = data.metadata?.governorate
+        if (govSource) {
+          const cityName = resolveListingCityName(govSource)
+          if (cityName) {
+            const location = await db().location.create({
+              data: { country: 'SY', governorate: cityName, city: cityName, area: data.metadata?.area ? String(data.metadata.area) : undefined },
+            })
+            data.locationId = location.id
+          }
+        }
+      }
+      if (body.priceMinor !== undefined) {
+        const priceMinor = Number(body.priceMinor)
+        if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
+          const error = new Error('Listing price must be greater than zero.')
+          error.statusCode = 400
+          error.code = 'LISTING_PRICE_INVALID'
+          error.expose = true
+          throw error
+        }
+        data.priceMinor = priceMinor
+      }
+      // A content edit to a live/approved listing sends it back through admin review.
+      if (Object.keys(data).length && ['APPROVED', 'REJECTED', 'EXPIRED'].includes(existing.status)) {
+        data.status = 'PENDING_REVIEW'
+      }
+      const listing = await db().listing.update({ where: { id: existing.id }, data })
+      await db().adminAuditLog.create({
+        data: { actorUserId: context.user.id, action: 'HOST_LISTING_EDIT', entityType: 'listings', entityId: listing.id, before: existing, after: listing },
+      })
+      return json(res, 200, { ok: true, listing })
+    }
+
+    if (req.method === 'DELETE') {
+      // Booking has no onDelete cascade/restrict override on its listing relation (Prisma defaults to
+      // DB-level RESTRICT), so ANY booking history — not just active statuses — would make the delete
+      // below fail with an opaque 500 from the FK constraint. Check for any booking at all and give a
+      // clean, actionable error; this also preserves booking/financial history, which should never be
+      // silently destroyed by deleting the listing it references.
+      const anyBooking = await db().booking.findFirst({
+        where: { listingId: existing.id },
+        select: { id: true },
+      })
+      if (anyBooking) {
+        const error = new Error('This listing has booking history and cannot be deleted; pause it instead.')
+        error.statusCode = 409
+        error.code = 'HOST_LISTING_HAS_BOOKINGS'
+        error.expose = true
+        throw error
+      }
+      await db().listing.delete({ where: { id: existing.id } })
+      await db().adminAuditLog.create({
+        data: { actorUserId: context.user.id, action: 'HOST_LISTING_DELETE', entityType: 'listings', entityId: existing.id, before: existing, after: null },
+      })
+      return json(res, 200, { ok: true, deleted: existing.id })
+    }
+
+    return methodNotAllowed(res, ['PATCH', 'DELETE'])
+  }
+
   const listingMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/status$/)
   if (listingMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
@@ -446,6 +560,20 @@ export async function handleHost(req, res, url, context) {
       const error = new Error('Listing not found for this host account.')
       error.statusCode = 404
       error.code = 'HOST_LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    // A host may only toggle a LIVE listing between APPROVED (visible) and PAUSED. They must NOT be
+    // able to self-approve a DRAFT/PENDING_REVIEW/REJECTED/EXPIRED listing into APPROVED — publishing
+    // goes through admin review only. This closes a moderation-bypass hole.
+    const transitionAllowed =
+      (status === 'PAUSED' && existing.status === 'APPROVED') ||
+      (status === 'APPROVED' && existing.status === 'PAUSED')
+    if (!transitionAllowed) {
+      const error = new Error('Hosts can only pause a live listing or resume a paused one; publishing requires admin review.')
+      error.statusCode = 409
+      error.code = 'HOST_STATUS_TRANSITION_NOT_ALLOWED'
       error.expose = true
       throw error
     }

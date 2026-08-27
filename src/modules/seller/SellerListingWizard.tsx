@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
-import { createAndSubmitPrototypeListing } from '../../shared/api/platformApi'
+import { acceptListingAgreement, createAndSubmitPrototypeListing, getStoredSellerSession, uploadPaymentProofFile } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
-import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
+import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGroups, sellerRealEstateFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
@@ -26,15 +26,6 @@ const DIVISION_OPTIONS: Array<{ value: ListingDivision; ar: string; en: string }
   { value: 'MARKETPLACE', ar: 'منتج أو خدمة', en: 'Product or service' },
   { value: 'NEW_CONSTRUCTION', ar: 'مشروع جديد', en: 'New project' },
 ]
-
-const DIVISION_MEDIA: Record<ListingDivision, string> = {
-  STAYS: '/assets/divisions/daily-rental.webp',
-  RENTALS: '/assets/divisions/monthly-rental.webp',
-  BUY: '/assets/divisions/buy-property.webp',
-  CARS: '/assets/divisions/cars.webp',
-  MARKETPLACE: '/assets/divisions/marketplace.webp',
-  NEW_CONSTRUCTION: '/assets/divisions/new-construction.webp',
-}
 
 type WizardDraft = {
   division: ListingDivision
@@ -188,6 +179,17 @@ export function SellerListingWizard({ lang }: Props) {
   const [adDuration, setAdDuration] = useState(isAr ? 'أسبوع واحد' : 'One week')
   const [uploadedAdFiles, setUploadedAdFiles] = useState<string[]>([])
   const [uploadedDocumentFiles, setUploadedDocumentFiles] = useState<string[]>([])
+  const [uploadedDocumentUrls, setUploadedDocumentUrls] = useState<string[]>([])
+  const [documentUploadError, setDocumentUploadError] = useState('')
+  // A real bug caught by an independent re-audit: the "Photos and files" step told sellers to
+  // upload property photos, and the uploads genuinely reached real storage -- but they landed in
+  // this same flat uploadedDocumentUrls array as ownership proof/authorization/payment proof, and
+  // the actual public listing.media sent to the server was unconditionally the hardcoded
+  // hardcoded per-division stock image (see `next()` below), so every real photo was silently discarded.
+  // Separate photo state + its own upload widget fixes this at the root.
+  const [uploadedPhotoFiles, setUploadedPhotoFiles] = useState<string[]>([])
+  const [uploadedPhotoUrls, setUploadedPhotoUrls] = useState<string[]>([])
+  const [photoUploadError, setPhotoUploadError] = useState('')
   const [adFilesSent, setAdFilesSent] = useState(false)
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>(
     draft.visualFilters || {
@@ -198,6 +200,9 @@ export function SellerListingWizard({ lang }: Props) {
     },
   )
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle')
+  // Required alongside ID verification before a listing can be published (server-enforced too —
+  // see /api/listings/:id/submit). ID verification itself happens on the seller's account page.
+  const [agreementAccepted, setAgreementAccepted] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
   useEffect(() => {
@@ -247,14 +252,19 @@ export function SellerListingWizard({ lang }: Props) {
 
   const next = async () => {
     if (isLast) {
-      if (isAdvertisingFlow && (!adFilesSent || !uploadedDocumentFiles.length)) {
+      if (isAdvertisingFlow && (!adFilesSent || !uploadedDocumentUrls.length)) {
         setSubmitState('error')
         setSubmitError(isAr ? 'ارفع مستندات الإعلان وأرسل الصور والملفات للإدارة قبل المتابعة.' : 'Upload ad documents and send photos/files to admin before continuing.')
         return
       }
-      if (!isAdvertisingFlow && !uploadedDocumentFiles.length) {
+      if (!isAdvertisingFlow && !uploadedDocumentUrls.length) {
         setSubmitState('error')
         setSubmitError(isAr ? 'ارفع مستندات البائع أو إثبات الملكية قبل إرسال الإعلان للمراجعة.' : 'Upload seller documents or ownership proof before sending the listing for review.')
+        return
+      }
+      if (!agreementAccepted) {
+        setSubmitState('error')
+        setSubmitError(isAr ? 'وافق على اتفاقية النشر قبل الإرسال.' : 'Accept the listing agreement before submitting.')
         return
       }
 
@@ -262,10 +272,14 @@ export function SellerListingWizard({ lang }: Props) {
       setSubmitError('')
 
       try {
-        // Attach a real, viewable gallery image so buyer browse/detail shows the listing with a
-        // photo (matching the division assets sample listings use). Uploaded document filenames
-        // stay in metadata; hosted binary upload is a production-hardening item, out of scope here.
-        const listingMedia = [{ url: DIVISION_MEDIA[division], kind: 'image', sortOrder: 0 }]
+        // Record the agreement acceptance server-side. This — plus an admin-approved ID — is
+        // required by /api/listings/:id/submit before the listing can go to review.
+        await acceptListingAgreement()
+        // Real seller-uploaded photos only -- no hardcoded per-division stock image forced in.
+        // A listing with zero real photos correctly stays empty; listingImage()/hasRealPhoto() on
+        // the browse and detail pages already handle that honestly (generic tile + a real
+        // "No photos yet" badge), the same pattern already proven for STAYS.
+        const listingMedia = uploadedPhotoUrls.map((url, index) => ({ url, kind: 'image', sortOrder: index }))
         await createAndSubmitPrototypeListing({
           division,
           titleAr: title || 'إعلان SYBNB جديد',
@@ -282,6 +296,7 @@ export function SellerListingWizard({ lang }: Props) {
             adDuration,
             uploadedAdFiles,
             uploadedDocumentFiles,
+            uploadedDocumentUrls,
             propertyType: selectedType,
             governorate,
             city,
@@ -308,12 +323,45 @@ export function SellerListingWizard({ lang }: Props) {
     setStepIndex((current) => Math.min(current + 1, steps.length - 1))
   }
 
-  function addListingDocumentFiles(fileList: FileList | null) {
-    const names = Array.from(fileList || []).map((file) => file.name).filter(Boolean)
-    if (!names.length) return
+  async function addListingPhotoFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
 
-    setUploadedDocumentFiles((current) => Array.from(new Set([...current, ...names])))
+    setUploadedPhotoFiles((current) => Array.from(new Set([...current, ...files.map((file) => file.name)])))
+    setPhotoUploadError('')
+
+    const session = getStoredSellerSession()
+    if (!session) {
+      setPhotoUploadError(isAr ? 'سجّل الدخول أولاً لرفع الصور.' : 'Sign in first to upload photos.')
+      return
+    }
+    try {
+      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
+      setUploadedPhotoUrls((current) => [...current, ...urls])
+    } catch (error) {
+      setPhotoUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الصورة.' : 'Could not upload the photo.'))
+    }
+  }
+
+  async function addListingDocumentFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
+
+    setUploadedDocumentFiles((current) => Array.from(new Set([...current, ...files.map((file) => file.name)])))
     setAdFilesSent(false)
+    setDocumentUploadError('')
+
+    const session = getStoredSellerSession()
+    if (!session) {
+      setDocumentUploadError(isAr ? 'سجّل الدخول أولاً لرفع المستندات.' : 'Sign in first to upload documents.')
+      return
+    }
+    try {
+      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
+      setUploadedDocumentUrls((current) => [...current, ...urls])
+    } catch (error) {
+      setDocumentUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
+    }
   }
 
   const back = () => {
@@ -388,10 +436,19 @@ export function SellerListingWizard({ lang }: Props) {
                   onChange={setVisualFilters}
                 />
               )}
-              {!isAdvertisingFlow && division !== 'CARS' && (
+              {!isAdvertisingFlow && division === 'MARKETPLACE' && (
                 <VisualFilterPanel
                   compact
-                  groups={sellerPropertyFilterGroups}
+                  groups={sellerMarketFilterGroups}
+                  lang={lang}
+                  selection={visualFilters}
+                  onChange={setVisualFilters}
+                />
+              )}
+              {!isAdvertisingFlow && division !== 'CARS' && division !== 'MARKETPLACE' && (
+                <VisualFilterPanel
+                  compact
+                  groups={division === 'STAYS' ? sellerPropertyFilterGroups : sellerRealEstateFilterGroups}
                   lang={lang}
                   selection={visualFilters}
                   onChange={(nextFilters) => {
@@ -522,14 +579,14 @@ export function SellerListingWizard({ lang }: Props) {
               {division === 'STAYS' && (
                 <div className="seller-wide-field seller-money-note">
                   {isAr
-                    ? 'تخصم SYBNB عمولة خدمة 10% من قيمة الإيجار (لا تشمل رسوم التنظيف والضريبة) من مستحقاتك عند كل حجز مكتمل.'
-                    : 'SYBNB deducts a 10% service commission from the rent amount (not the cleaning fee or tax) from your payout on every completed booking.'}
+                    ? 'تخصم SYBNB عمولة خدمة 12% من قيمة الإيجار (لا تشمل رسوم التنظيف والضريبة) من مستحقاتك عند كل حجز مكتمل.'
+                    : 'SYBNB deducts a 12% service commission from the rent amount (not the cleaning fee or tax) from your payout on every completed booking.'}
                 </div>
               )}
               <div className="seller-wide-field">
                 <VisualFilterPanel
                   compact
-                  groups={sellerPropertyFilterGroups.slice(1)}
+                  groups={(division === 'STAYS' ? sellerPropertyFilterGroups : sellerRealEstateFilterGroups).slice(1)}
                   lang={lang}
                   selection={visualFilters}
                   onChange={setVisualFilters}
@@ -545,16 +602,18 @@ export function SellerListingWizard({ lang }: Props) {
 
           {activeStep.id === 'media' && (
             <div className="seller-wizard-section">
+              {/* A real bug caught by an independent re-audit: for the regular (non-advertising)
+                  listing flow, this whole grid used to be a checklist of plain buttons ("Plan
+                  payment proof" / "Ownership proof" / "Add authorization" / "Plan or deed") that
+                  toggled local state and uploaded nothing -- clicking one flipped it to a green
+                  "Added" success state with zero network request, right next to the real
+                  PaymentProofUpload widgets below that genuinely upload files. A seller could
+                  believe they'd submitted ownership proof when nothing was ever sent. Only the
+                  advertising flow's real required-file slots (adFileSlots) still need this grid;
+                  the regular flow's real uploads are fully covered by the two widgets below. */}
+              {isAdvertisingFlow && (
               <div className="seller-upload-grid">
-                {(isAdvertisingFlow
-                  ? adFileSlots
-                  : [
-                      { id: 'propertyPhotos', ar: 'صور العقار', en: 'Property photos' },
-                      { id: 'paymentProof', ar: 'إثبات دفع الخطة', en: 'Plan payment proof' },
-                      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
-                      { id: 'authorization', ar: 'أضف التفويض', en: 'Add authorization' },
-                      { id: 'deed', ar: 'مخطط أو سند', en: 'Plan or deed' },
-                    ]).map((item) => (
+                {adFileSlots.map((item) => (
                   <button
                     className={uploadedAdFiles.includes(item.id) ? 'uploaded' : ''}
                     key={item.en}
@@ -576,21 +635,36 @@ export function SellerListingWizard({ lang }: Props) {
                   </button>
                 ))}
               </div>
+              )}
               {isAdvertisingFlow && (
                 <div className={`seller-ad-send-panel ${adFilesSent ? 'sent' : ''}`}>
                   <strong>{adPlan === 'premium' ? (isAr ? 'خطة Premium' : 'Premium plan') : isAr ? 'خطة Plus' : 'Plus plan'}</strong>
                   <span>
                     {isAr
-                      ? `تمت إضافة ${uploadedAdFiles.length} من ${adFileSlots.length} ملفات مطلوبة ورفع ${uploadedDocumentFiles.length} مستند.`
-                      : `${uploadedAdFiles.length} of ${adFileSlots.length} required files added and ${uploadedDocumentFiles.length} document uploaded.`}
+                      ? `تمت إضافة ${uploadedAdFiles.length} من ${adFileSlots.length} ملفات مطلوبة ورفع ${uploadedDocumentUrls.length} مستند.`
+                      : `${uploadedAdFiles.length} of ${adFileSlots.length} required files added and ${uploadedDocumentUrls.length} document uploaded.`}
                   </span>
                   <button
-                    disabled={uploadedAdFiles.length < adFileSlots.length || uploadedDocumentFiles.length < 1}
+                    disabled={uploadedAdFiles.length < adFileSlots.length || uploadedDocumentUrls.length < 1}
                     onClick={() => setAdFilesSent(true)}
                   >
                     {adFilesSent ? (isAr ? 'تم إرسال الملفات للإدارة' : 'Files sent to admin') : isAr ? 'إرسال الملفات للإدارة' : 'Send files to admin'}
                   </button>
                 </div>
+              )}
+              {!isAdvertisingFlow && (
+                <>
+                  <PaymentProofUpload
+                    cta={isAr ? 'رفع صور العقار/المركبة/المنتج' : 'Upload property/car/item photos'}
+                    emptyText={isAr ? 'لم يتم رفع صور بعد. تظهر "لا توجد صور بعد" للزوار حتى ترفع صورة حقيقية.' : 'No photos uploaded yet. Visitors see "No photos yet" until a real photo is uploaded.'}
+                    files={uploadedPhotoFiles}
+                    help={isAr ? 'هذه الصور هي ما سيراه الزوار فعلياً في نتائج البحث وصفحة التفاصيل. PNG أو JPG.' : 'These are the actual photos visitors will see in search results and the detail page. PNG or JPG.'}
+                    lang={lang}
+                    onAddFiles={(files) => void addListingPhotoFiles(files)}
+                    title={isAr ? 'صور الإعلان' : 'Listing photos'}
+                  />
+                  {photoUploadError && <p className="seller-note-line" style={{ color: '#ff5f7d' }}>{photoUploadError}</p>}
+                </>
               )}
               <PaymentProofUpload
                 cta={isAdvertisingFlow ? (isAr ? 'رفع مستندات الإعلان' : 'Upload ad documents') : isAr ? 'رفع مستندات البائع' : 'Upload seller documents'}
@@ -602,13 +676,14 @@ export function SellerListingWizard({ lang }: Props) {
                       ? 'ارفع إثبات الدفع، ملفات الحملة، التفويض، أو صور النشاط حسب الخطة.'
                       : 'Upload payment proof, campaign files, authorization, or business photos based on the plan.'
                     : isAr
-                      ? 'ارفع إثبات الملكية، التفويض، المخططات، صور العقار، أو ملفات السيارة/المشروع.'
-                      : 'Upload ownership proof, authorization, plans, property photos, or car/project files.'
+                      ? 'ارفع إثبات الملكية، التفويض، والمخططات أو ملفات السيارة/المشروع (ليست صور الإعلان — ارفعها أعلاه).'
+                      : 'Upload ownership proof, authorization, and plans or car/project files (not listing photos — upload those above).'
                 }
                 lang={lang}
-                onAddFiles={addListingDocumentFiles}
+                onAddFiles={(files) => void addListingDocumentFiles(files)}
                 title={isAdvertisingFlow ? (isAr ? 'مستندات الإعلان والخطة' : 'Ad and plan documents') : isAr ? 'مستندات البائع' : 'Seller documents'}
               />
+              {documentUploadError && <p className="seller-note-line" style={{ color: '#ff5f7d' }}>{documentUploadError}</p>}
               <p className="seller-note-line">
                 {isAdvertisingFlow
                   ? isAr
@@ -634,7 +709,7 @@ export function SellerListingWizard({ lang }: Props) {
                       ? isAr
                         ? 'تم تجهيز طلب الإعلان من مسار الدفع والإرسال.'
                         : 'The advertising request was prepared through the payment and submission flow.'
-                      : uploadedDocumentFiles.length
+                      : uploadedDocumentUrls.length
                         ? isAr
                           ? 'تم رفع مستندات البائع المطلوبة قبل الإرسال.'
                           : 'Required seller documents were uploaded before submission.'
@@ -651,10 +726,10 @@ export function SellerListingWizard({ lang }: Props) {
                         : isAr
                           ? 'أرسل الصور والمستندات قبل الإرسال النهائي'
                           : 'Send photos and documents before final submission'
-                      : uploadedDocumentFiles.length
+                      : uploadedDocumentUrls.length
                         ? isAr
-                          ? `تم رفع ${uploadedDocumentFiles.length} مستند للبائع`
-                          : `${uploadedDocumentFiles.length} seller document uploaded`
+                          ? `تم رفع ${uploadedDocumentUrls.length} مستند للبائع`
+                          : `${uploadedDocumentUrls.length} seller document uploaded`
                         : isAr
                           ? 'ارفع مستندات البائع قبل الإرسال النهائي'
                           : 'Upload seller documents before final submission'}
@@ -662,6 +737,18 @@ export function SellerListingWizard({ lang }: Props) {
                   {!isAdvertisingFlow && <li>{selectedFilterLabels(sellerPropertyFilterGroups, visualFilters, lang).join(' · ')}</li>}
                 </ul>
               </div>
+              <label className="seller-agreement-check">
+                <input
+                  type="checkbox"
+                  checked={agreementAccepted}
+                  onChange={(event) => setAgreementAccepted(event.target.checked)}
+                />
+                <span>
+                  {isAr
+                    ? 'أقر بأنني قرأت اتفاقية النشر الخاصة بمنصة SYBNB ووافقت عليها، وأن هويتي مقدمة للتحقق.'
+                    : 'I have read and accept the SYBNB platform listing agreement, and my identity has been submitted for verification.'}
+                </span>
+              </label>
               {submitState === 'error' && (
                 <div className="seller-inline-alert">
                   <strong>{isAr ? 'تعذر الإرسال' : 'Submission failed'}</strong>

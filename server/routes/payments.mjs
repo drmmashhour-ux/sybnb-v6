@@ -6,7 +6,7 @@ import { expectedTotalMinor, isProviderRefUniqueViolation } from '../lib/finance
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
-import { defaultCurrency } from '../lib/country.mjs'
+import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 import { log } from '../lib/logger.mjs'
 import { finalizeStripeSession, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
 import { applyPaymentEvent, intakeEvent, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
@@ -47,6 +47,27 @@ function paymentReferenceDuplicate() {
 // expectedTotalMinor and firstAdminId now live in finance-ledger.mjs (shared with the PaymentIntent
 // webhook path) so both payment rails derive the guest total and the auto-approval actor from one
 // place instead of two copies that can drift.
+
+// An independent revenue audit found both no-booking/no-ride payment-proof paths below accepted a
+// raw client-supplied `currency` string with no validation at all -- proven live: a seller-plan
+// proof submitted with currency:"ZZZFAKECOIN" was admin-approvable without incident, creating a
+// real Wallet row denominated in a currency nothing else in the platform recognizes (invisible to
+// any real SYP/USD reporting), directly contradicting finance-ledger.mjs's own documented
+// invariant that every wallet here is SYP-denominated. Fails closed like every other client-input
+// validation in this file: an explicit currency must be one the active country actually allows;
+// omitting it falls back to the country's real default, same as before.
+function resolveClientCurrency(rawCurrency, fallback) {
+  if (!rawCurrency) return fallback
+  const currency = String(rawCurrency).trim().toUpperCase()
+  if (!isCurrencyAllowed(currency)) {
+    const error = new Error(`Unsupported currency: ${currency}.`)
+    error.statusCode = 400
+    error.code = 'PAYMENT_CURRENCY_NOT_ALLOWED'
+    error.expose = true
+    throw error
+  }
+  return currency
+}
 
 // Some upload flows (seller-plan documents, advertising payment files) genuinely upload several
 // real files. Only trust entries that are real object-storage references this server issued
@@ -479,7 +500,7 @@ export async function handlePayments(req, res, url, context) {
             provider: 'seller_plan',
             status: 'PENDING_ADMIN_REVIEW',
             amountMinor,
-            currency: body.currency || 'USD',
+            currency: resolveClientCurrency(body.currency, 'USD'),
             proofAssetUrl: proofAssetUrls[0] || undefined,
             proofAssetUrls,
             providerRef,
@@ -632,7 +653,7 @@ export async function handlePayments(req, res, url, context) {
           provider: 'syrian_local_wallet',
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
-          currency: booking?.currency || ride?.currency || body.currency || defaultCurrency(),
+          currency: booking?.currency || ride?.currency || resolveClientCurrency(body.currency, defaultCurrency()),
           proofAssetUrl: walletProofAssetUrls[0] || undefined,
           proofAssetUrls: walletProofAssetUrls,
           providerRef,

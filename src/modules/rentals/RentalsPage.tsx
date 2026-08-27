@@ -360,13 +360,16 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setMessage('')
     try {
       // Forward the renter's visual-filter selection so the search actually narrows results.
-      // fetchApprovedListings only forwards server-backed scalar keys (propertyType); 'any' and
-      // unsupported keys (roomType/bedType/amenities) are ignored, so nothing over-filters.
-      // Location narrows only on an explicit capsule search, so the first broad load stays rich.
+      // fetchApprovedListings forwards server-backed scalar keys (propertyType) and the
+      // multi-select amenities/views/access arrays; 'any', empty, and other unsupported keys
+      // (roomType/bedType) are ignored, so nothing over-filters. Location narrows only on an
+      // explicit capsule search, so the first broad load stays rich.
       const division = isBuyMode ? 'BUY' : 'RENTALS'
       const filters = {
         attributes: visualFilters,
         city: explicit ? GOV_TO_CITY[selectedGovernorate] : undefined,
+        sort: typeof visualFilters.sort === 'string' ? visualFilters.sort : undefined,
+        priceBand: typeof visualFilters.priceBand === 'string' ? visualFilters.priceBand : undefined,
       }
       const results = await fetchApprovedListings(division, filters)
       setListings(results.listings)

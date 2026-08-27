@@ -274,6 +274,9 @@ model Listing {
   // filters on (division, status), then walks pages ordered by (createdAt, id) DESC. Without the
   // trailing two columns each page's cursor comparison falls back to a full-bucket sort.
   @@index([division, status, createdAt, id])
+  // Same reasoning, for sort=priceLow/priceHigh's price-ordered scan instead of the default
+  // createdAt-ordered one.
+  @@index([division, status, priceMinor, id])
   @@map("listings")
 }
 

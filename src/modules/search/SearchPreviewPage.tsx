@@ -187,9 +187,14 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               condition: value.condition,
               propertyType: value.propertyType,
               marketCategory: value.marketCategory,
+              amenities: value.amenities,
+              views: value.views,
+              access: value.access,
             },
             priceMin: Number(value.minPrice) || undefined,
             priceMax: Number(value.maxPrice) || undefined,
+            sort: value.sort,
+            priceBand: value.priceBand,
             // A real bug caught by an independent re-audit: bedroomsCount/bathrooms default to 1
             // and their only editable UI (the counter steppers in UnifiedSearchBar) is gated to
             // isStay -- so for every other division these were silently sent as bedroomsMin=1/

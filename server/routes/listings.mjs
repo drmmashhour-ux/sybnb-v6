@@ -11,28 +11,89 @@ import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 // paid-plan divisions gated behind an admin-approved SellerProfile.
 const PAID_PLAN_DIVISIONS = new Set(['CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
 
-// Keyset cursor for GET /api/listings pagination: encodes the last row's (createdAt, id) --
-// the exact pair the query is ordered and compared on -- so a page boundary survives concurrent
-// inserts (unlike an offset, which drifts: a new row landing above page 1 reshuffles what "page 2"
-// means). Self-contained (no DB lookup needed to resume), and safe if that row is later deleted.
-function encodeListingCursor(listing) {
-  return Buffer.from(`${listing.createdAt.toISOString()}_${listing.id}`, 'utf8').toString('base64url')
+// 'sort' options a caller may request. 'newest' (the default/original behavior) orders by
+// createdAt; 'priceLow'/'priceHigh' order by priceMinor. Kept as an explicit allowlist (not just
+// "any column name") so a request can never sort on an arbitrary field.
+const SORT_CONFIGS = {
+  newest: { field: 'createdAt', direction: 'desc' },
+  priceLow: { field: 'priceMinor', direction: 'asc' },
+  priceHigh: { field: 'priceMinor', direction: 'desc' },
 }
-function decodeListingCursor(raw) {
+function resolveSort(raw) {
+  return SORT_CONFIGS[raw] ? raw : 'newest'
+}
+
+// Keyset cursor for GET /api/listings pagination: encodes the last row's (sortValue, id) for
+// whichever sort produced it -- the exact pair the query is ordered and compared on -- so a page
+// boundary survives concurrent inserts (unlike an offset, which drifts: a new row landing above
+// page 1 reshuffles what "page 2" means). Self-contained (no DB lookup needed to resume), safe if
+// that row is later deleted, and bound to its own sort: a cursor from one sort is rejected (not
+// silently reinterpreted) if a later call passes a different `sort` -- the field/direction it
+// encodes wouldn't mean the same thing under a different ordering.
+function encodeListingCursor(sort, position) {
+  const value = position.value instanceof Date ? position.value.toISOString() : position.value
+  return Buffer.from(JSON.stringify({ sort, value, id: position.id }), 'utf8').toString('base64url')
+}
+function decodeListingCursor(raw, sort) {
   if (!raw) return null
-  let decoded
+  let parsed
   try {
-    decoded = Buffer.from(String(raw), 'base64url').toString('utf8')
+    parsed = JSON.parse(Buffer.from(String(raw), 'base64url').toString('utf8'))
   } catch {
     return null
   }
-  const sep = decoded.indexOf('_')
-  if (sep < 0) return null
-  const createdAt = new Date(decoded.slice(0, sep))
-  const id = decoded.slice(sep + 1)
-  if (Number.isNaN(createdAt.getTime()) || !id) return null
-  return { createdAt, id }
+  if (parsed.sort !== sort || !parsed.id) return null
+  const field = SORT_CONFIGS[sort].field
+  if (field === 'createdAt') {
+    const value = new Date(parsed.value)
+    if (Number.isNaN(value.getTime())) return null
+    return { value, id: parsed.id }
+  }
+  const value = Number(parsed.value)
+  if (!Number.isFinite(value)) return null
+  return { value, id: parsed.id }
 }
+
+// priceBand -> a real priceMin/priceMax range, computed from this division's OWN current price
+// distribution rather than a fixed guessed number -- STAYS/RENTALS/BUY/CARS/MARKETPLACE/
+// NEW_CONSTRUCTION have wildly different real price scales (a nightly SYP rate vs. a car vs. a
+// building), so no single hardcoded cutoff means the same thing across all of them, and a
+// hand-picked one would need constant manual upkeep as real inventory changes. Cached per-division
+// for a few minutes -- price distribution shifts slowly, and this runs on every search request.
+const PRICE_BAND_CACHE_TTL_MS = 5 * 60 * 1000
+const priceBandCache = new Map()
+async function priceBandBoundaries(division) {
+  const cached = priceBandCache.get(division)
+  if (cached && Date.now() - cached.computedAt < PRICE_BAND_CACHE_TTL_MS) return cached
+  const rows = await db().$queryRaw`
+    SELECT
+      percentile_cont(0.33) WITHIN GROUP (ORDER BY price_minor) AS low,
+      percentile_cont(0.66) WITHIN GROUP (ORDER BY price_minor) AS high
+    FROM listings WHERE division = ${division}::listing_division AND status = 'APPROVED'
+  `
+  const boundaries = {
+    low: Math.round(Number(rows[0]?.low)) || 0,
+    high: Math.round(Number(rows[0]?.high)) || 0,
+    computedAt: Date.now(),
+  }
+  priceBandCache.set(division, boundaries)
+  return boundaries
+}
+function priceBandRange(band, boundaries) {
+  if (band === 'low') return { lte: boundaries.low }
+  if (band === 'mid') return { gte: boundaries.low, lte: boundaries.high }
+  if (band === 'high') return { gte: boundaries.high }
+  return null
+}
+
+// Multi-select attribute filters (amenities/views/access): the seller's selection is stored as a
+// JSON string array at metadata.visualFilters.<key> (SellerListingWizard.tsx). "Match" means the
+// listing's array contains EVERY value the guest selected, not just one -- so one array_contains
+// check per selected value, ANDed together, is the correct predicate for narrowing search
+// (confirmed live against real data before writing this: array_contains does a single-value
+// containment check, composes correctly under AND, and simply doesn't match rows that lack the
+// key at all -- never errors).
+const ARRAY_ATTRIBUTE_KEYS = ['amenities', 'views', 'access']
 
 // Project a listing to the fields safe for public/unauthenticated consumers: strip street-level
 // address (addressLine/street) and internal metadata markers (e.g. inventory_source). Only fields
@@ -114,6 +175,15 @@ export async function handleListings(req, res, url, context) {
           attributeConditions.push({ metadata: { path: ['visualFilters', key], equals: value } })
         }
       }
+      // Multi-select attribute filters (amenities/views/access) — comma-separated ids, e.g.
+      // ?amenities=wifi,parking. A listing must have ALL selected values, not just one.
+      for (const key of ARRAY_ATTRIBUTE_KEYS) {
+        const raw = url.searchParams.get(key)
+        const values = raw ? raw.split(',').map((v) => v.trim()).filter(Boolean) : []
+        for (const value of values) {
+          attributeConditions.push({ metadata: { path: ['visualFilters', key], array_contains: [value] } })
+        }
+      }
 
       // Numeric "at least N" property filters — the seller stores these as plain numbers under
       // metadata.bedrooms / metadata.bathrooms (not visualFilters), so filter that path directly.
@@ -148,10 +218,27 @@ export async function handleListings(req, res, url, context) {
       if (priceMin !== undefined && priceMin > 0) priceFilter.gte = priceMin
       if (priceMax !== undefined && priceMax > 0) priceFilter.lte = priceMax
 
+      // priceBand is a discrete "Budget/Mid range/Premium" choice, translated to a real
+      // priceMin/priceMax range computed from this division's own data (see priceBandBoundaries
+      // above). Intersected with any explicit priceMin/priceMax also present, not overridden by
+      // it — both narrow the result set together, same as any other two independent filters would.
+      const priceBandParam = url.searchParams.get('priceBand')
+      if (division && priceBandParam && priceBandParam !== 'any') {
+        const boundaries = await priceBandBoundaries(division)
+        const range = priceBandRange(priceBandParam, boundaries)
+        if (range) {
+          if (range.gte !== undefined) priceFilter.gte = Math.max(priceFilter.gte ?? 0, range.gte)
+          if (range.lte !== undefined) priceFilter.lte = priceFilter.lte !== undefined ? Math.min(priceFilter.lte, range.lte) : range.lte
+        }
+      }
+
+      const sort = resolveSort(url.searchParams.get('sort'))
+      const sortConfig = SORT_CONFIGS[sort]
+
       const rawCursorParam = url.searchParams.get('cursor')
-      const cursor = decodeListingCursor(rawCursorParam)
+      const cursor = decodeListingCursor(rawCursorParam, sort)
       if (rawCursorParam && !cursor) {
-        const error = new Error('Invalid cursor.')
+        const error = new Error('Invalid or sort-mismatched cursor.')
         error.statusCode = 400
         error.code = 'INVALID_CURSOR'
         error.expose = true
@@ -181,9 +268,10 @@ export async function handleListings(req, res, url, context) {
       // param and neither frontend caller ever sent one, so once any division+city passed ~250
       // approved listings, older inventory became permanently unreachable through search/browse.
       // This loop replaces that fixed take with real keyset pagination: it walks batches ordered
-      // by (createdAt, id) DESC, advancing `scanCursor` through every row (ad or not) so a page
-      // boundary is always the true position in the dataset, then returns once PAGE_SIZE real
-      // (non-ad) listings are collected or the dataset is exhausted.
+      // by the active sort's (field, id), advancing `scanCursor` through every row (ad or not) so
+      // a page boundary is always the true position in the dataset, then returns once PAGE_SIZE
+      // real (non-ad) listings are collected or the dataset is exhausted.
+      const cmp = sortConfig.direction === 'desc' ? 'lt' : 'gt'
       let scanCursor = cursor
       const listings = []
       let hasMore = false
@@ -192,8 +280,8 @@ export async function handleListings(req, res, url, context) {
         if (scanCursor) {
           andConditions.push({
             OR: [
-              { createdAt: { lt: scanCursor.createdAt } },
-              { createdAt: scanCursor.createdAt, id: { lt: scanCursor.id } },
+              { [sortConfig.field]: { [cmp]: scanCursor.value } },
+              { [sortConfig.field]: scanCursor.value, id: { [cmp]: scanCursor.id } },
             ],
           })
         }
@@ -206,7 +294,7 @@ export async function handleListings(req, res, url, context) {
             AND: andConditions.length ? andConditions : undefined,
           },
           include: { location: true, media: true },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          orderBy: [{ [sortConfig.field]: sortConfig.direction }, { id: sortConfig.direction }],
           take: SCAN_BATCH_SIZE,
         })
         if (batch.length === 0) {
@@ -217,7 +305,7 @@ export async function handleListings(req, res, url, context) {
         let hitPageSize = false
         for (const listing of batch) {
           if (listing.metadata?.advertising !== true) listings.push(listing)
-          scanCursor = { createdAt: listing.createdAt, id: listing.id }
+          scanCursor = { value: listing[sortConfig.field], id: listing.id }
           if (listings.length >= PAGE_SIZE) {
             hitPageSize = true
             break
@@ -237,7 +325,7 @@ export async function handleListings(req, res, url, context) {
         hasMore = true
       }
 
-      const nextCursor = hasMore && scanCursor ? encodeListingCursor(scanCursor) : null
+      const nextCursor = hasMore && scanCursor ? encodeListingCursor(sort, scanCursor) : null
       return json(res, 200, { ok: true, listings: listings.map(toPublicListing), nextCursor })
     }
 

@@ -621,6 +621,8 @@ export async function fetchApprovedListings(
     bedroomsMin?: number
     bathroomsMin?: number
     city?: string
+    sort?: string
+    priceBand?: string
   },
   cursor?: string | null,
 ): Promise<FetchApprovedListingsResult> {
@@ -633,12 +635,21 @@ export async function fetchApprovedListings(
       const value = filters.attributes[key]
       if (typeof value === 'string' && value && value !== 'any') params.set(key, value)
     }
+    // Multi-select attribute filters (amenities/views/access): a listing must have ALL selected
+    // values (server-side AND), sent as one comma-separated param per key.
+    const ARRAY_ATTRIBUTE_KEYS = ['amenities', 'views', 'access']
+    for (const key of ARRAY_ATTRIBUTE_KEYS) {
+      const value = filters.attributes[key]
+      if (Array.isArray(value) && value.length) params.set(key, value.join(','))
+    }
   }
   if (filters?.priceMin && filters.priceMin > 0) params.set('priceMin', String(filters.priceMin))
   if (filters?.priceMax && filters.priceMax > 0) params.set('priceMax', String(filters.priceMax))
   if (filters?.bedroomsMin && filters.bedroomsMin > 0) params.set('bedroomsMin', String(filters.bedroomsMin))
   if (filters?.bathroomsMin && filters.bathroomsMin > 0) params.set('bathroomsMin', String(filters.bathroomsMin))
   if (filters?.city) params.set('city', filters.city)
+  if (filters?.sort && filters.sort !== 'newest') params.set('sort', filters.sort)
+  if (filters?.priceBand && filters.priceBand !== 'any') params.set('priceBand', filters.priceBand)
   if (cursor) params.set('cursor', cursor)
   // Real customer journeys must show real inventory only. A legitimate zero-result search returns an
   // empty list (callers render a genuine localized no-results state) — never substitute mock/demo

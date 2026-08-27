@@ -304,12 +304,6 @@ const conditionOptions: FilterOption[] = [
   { key: 'new', labelKey: 'new', icon: 'N' },
   { key: 'used', labelKey: 'used', icon: 'U' },
 ]
-const sortOptions: FilterOption[] = [
-  { key: 'newest', labelKey: 'newest', icon: '↓' },
-  { key: 'priceLow', labelKey: 'priceLow', icon: '$-' },
-  { key: 'priceHigh', labelKey: 'priceHigh', icon: '$+' },
-]
-
 export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivision = false, onSearch }: UnifiedSearchBarProps) {
   const t = T[lang]
   const isAr = lang === 'ar'

@@ -159,6 +159,7 @@ run_full "rentals"          rentals.e2e.mjs          reset
 run_full "new-construction" new-construction.e2e.mjs reset
 run_full "sell"             sell.e2e.mjs             reset
 run_full "advertising"      advertising-payment-tunnel.e2e.mjs reset
+run_full "search-filters"   listing-search-filters.e2e.mjs
 run_full "sr-ride"          sr-ride.e2e.mjs
 
 kill "$API_PID" 2>/dev/null

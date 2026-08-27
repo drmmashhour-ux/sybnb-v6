@@ -94,6 +94,18 @@ export async function handleMe(req, res, url, context) {
       }
       const lat = Number.isFinite(Number(body.lat)) ? Number(body.lat) : undefined
       const lng = Number.isFinite(Number(body.lng)) ? Number(body.lng) : undefined
+      // No real user needs more than a handful of saved places; without a cap a buggy or scripted
+      // client could create an unbounded number against one account (found in a scale-readiness
+      // sweep of unbounded findMany queries -- most were naturally bounded by real-world cardinality
+      // of the parent entity, but nothing stopped creation here).
+      const existingCount = await db().savedPlace.count({ where: { userId: context.user.id } })
+      if (existingCount >= 50) {
+        const error = new Error('You have reached the maximum number of saved places.')
+        error.statusCode = 422
+        error.code = 'SAVED_PLACE_LIMIT_REACHED'
+        error.expose = true
+        throw error
+      }
       const place = await db().savedPlace.create({
         data: { userId: context.user.id, label, address, lat, lng },
       })

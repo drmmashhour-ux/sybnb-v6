@@ -54,6 +54,7 @@ const copy = {
     pendingVerification: 'التوثيق قيد المراجعة',
     verifyNow: 'وثّق هويتك',
     inTrip: 'في الرحلة',
+    upcomingTrip: 'رحلة قادمة',
     noActiveTrip: 'لا توجد رحلة نشطة حالياً',
     noActiveTripCopy: 'ابحث عن إقامة واحجزها لتظهر تفاصيل رحلتك هنا.',
     invoice: 'الفاتورة',
@@ -116,6 +117,7 @@ const copy = {
     pendingVerification: 'Verification in review',
     verifyNow: 'Verify your identity',
     inTrip: 'In trip',
+    upcomingTrip: 'Upcoming trip',
     noActiveTrip: 'No active trip right now',
     noActiveTripCopy: 'Search and book a stay to see your trip details here.',
     invoice: 'Invoice',
@@ -244,7 +246,13 @@ export function DashboardPage({ lang }: Props) {
             <>
               <div style={styles.tripMeta}>
                 {activeTripDates && <span style={styles.datePill}>{activeTripDates}</span>}
-                <span style={isDisputed ? styles.disputePill : styles.activePill}>{isDisputed ? t.disputeOpen : t.inTrip}</span>
+                {/* A real bug caught by an independent re-audit: this always said "In trip" for
+                    any active, non-disputed booking, even days before check-in -- directly
+                    contradicting the stepper below it on the same screen, which already has the
+                    real signal (activeStep/hasArrived, from activeTripStep()). Now the two agree. */}
+                <span style={isDisputed ? styles.disputePill : styles.activePill}>
+                  {isDisputed ? t.disputeOpen : activeStep === 2 ? t.inTrip : t.upcomingTrip}
+                </span>
               </div>
               <h1 style={styles.tripTitle}>{activeTitle}</h1>
               <p style={styles.tripRef}>{activeReference}</p>

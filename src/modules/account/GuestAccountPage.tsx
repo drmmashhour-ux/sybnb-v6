@@ -203,6 +203,14 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
       if (listingId) sessionStorage.setItem(`${CUSTOMER_GATE_KEY}:${listingId}`, '1')
       if (!listingId) sessionStorage.removeItem(GUEST_RETURN_PATH_KEY)
       setStatus(readyMessage, 'success')
+      // A real bug caught by an independent re-audit: `window.location.hash = returnPath` is a
+      // no-op (fires no `hashchange` event) whenever returnPath already equals the current hash --
+      // exactly the case for a gated route like /ride, whose own gate redirect set returnPath to
+      // itself. Without this, App's route-gate state never re-evaluates and a first-time signup
+      // strands the user on this screen after a successful account creation. Fixed the same way
+      // StaffAccessPage.tsx already does for staff login: dispatch the session-changed event App
+      // already listens for, so the re-render happens regardless of whether the hash itself changes.
+      window.dispatchEvent(new Event('sybnb-session-changed'))
       window.location.hash = returnPath
     } catch (error) {
       setStatus(errText(error), 'error')

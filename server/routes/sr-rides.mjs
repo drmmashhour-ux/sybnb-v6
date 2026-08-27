@@ -186,7 +186,19 @@ export async function handleSrRides(req, res, url, context) {
       })
     }
 
-    return json(res, 201, { ok: true, ride })
+    // A real bug caught by an independent re-audit, not by this session's own testing: the raw
+    // Prisma create() result has no relations at all -- stops/pickupCoords/dropoffCoords were
+    // silently `undefined` here even though PlatformRideRequest's TS type promises they're always
+    // present, and GET /api/sr/rides/:id below always includes them. The frontend's very first
+    // setRide() call (right after a successful request) used this response, so `ride.stops` being
+    // undefined crashed the tracking screen's `ride?.stops.map(...)` on the very next render --
+    // the `?.` only guarded `ride`, not `ride.stops`. Fixed at the root here (a consistent
+    // response shape) rather than only defensively in the frontend.
+    const [createdStops, createdCoords] = await Promise.all([
+      db().rideStop.findMany({ where: { rideId: ride.id }, select: { address: true, lat: true, lng: true }, orderBy: { sequence: 'asc' } }),
+      getRideCoords(ride.id),
+    ])
+    return json(res, 201, { ok: true, ride: { ...ride, stops: createdStops, pickupCoords: createdCoords.pickup, dropoffCoords: createdCoords.dropoff } })
   }
 
   const rideMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)$/)

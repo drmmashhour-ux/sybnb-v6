@@ -356,7 +356,7 @@ export function DriverDashboardPage({ lang }: Props) {
                   </i>
                   {pendingRide.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {t.accessibilityRequired}</span>}
                   {pendingRide.shareable && <span style={styles.accessibilityBadge}>🤝 {t.shareable}</span>}
-                  {pendingRide.stops.length > 0 && (
+                  {(pendingRide.stops || []).length > 0 && (
                     <span style={styles.accessibilityBadge}>
                       {pendingRide.stops.length} {t.stopsCount}
                     </span>
@@ -486,7 +486,7 @@ function RideCard({
       <Info label={labels.fare} value={moneyText(ride.fareMinor || 0, ride.currency, lang)} dir={lang === 'ar' ? 'rtl' : 'ltr'} />
       {ride.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {labels.accessibilityRequired}</span>}
       {ride.shareable && <span style={styles.accessibilityBadge}>🤝 {labels.shareable}</span>}
-      {ride.stops.map((stop, index) => (
+      {(ride.stops || []).map((stop, index) => (
         <Info key={index} label={`${labels.stopLabel} ${index + 1}`} value={stop.address} />
       ))}
       {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (

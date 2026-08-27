@@ -5,16 +5,33 @@ import { db } from './prisma.mjs'
 // VAPID keypair is self-generated local crypto (`npx web-push generate-vapid-keys`), never an
 // external account signup. Optional infrastructure: if the keys aren't configured, sends are
 // silently skipped rather than throwing -- a missing push config should never break a ride.
-let configured = false
+//
+// A real bug caught by an independent re-audit: `webpush.setVapidDetails()` throws SYNCHRONOUSLY
+// on a malformed (present but invalid) key -- a very plausible ops mistake (truncated copy-paste,
+// swapped env vars), distinct from the already-handled "unset" case. Because this used to run
+// inside an async function called fire-and-forget (`void sendPushNotification(...)`, never
+// awaited/caught), that throw became an unhandled promise rejection and Node terminates the
+// entire process on those by default -- one bad env var took down the whole API, not just push.
+// Fixed by catching it here and treating "malformed" the same as "unset": disabled, logged once,
+// never retried (a bad key doesn't self-heal mid-process), never thrown.
+let configured = null // null = not yet attempted, false = attempted and failed, true = succeeded
 function ensureConfigured() {
-  if (configured) return true
+  if (configured !== null) return configured
   const publicKey = process.env.VAPID_PUBLIC_KEY
   const privateKey = process.env.VAPID_PRIVATE_KEY
   const contact = process.env.VAPID_CONTACT_EMAIL || 'mailto:support@sybnb.app'
-  if (!publicKey || !privateKey) return false
-  webpush.setVapidDetails(contact, publicKey, privateKey)
-  configured = true
-  return true
+  if (!publicKey || !privateKey) {
+    configured = false
+    return false
+  }
+  try {
+    webpush.setVapidDetails(contact, publicKey, privateKey)
+    configured = true
+  } catch (err) {
+    console.error('[push-notifications] invalid VAPID key configuration, push disabled:', err?.message)
+    configured = false
+  }
+  return configured
 }
 
 export function pushEnabled() {

@@ -799,7 +799,7 @@ export function SrRidePage({ lang }: Props) {
             <RideMap
               pickup={ride.pickupCoords}
               dropoff={ride.dropoffCoords}
-              stops={ride.stops.filter((stop) => stop.lat != null && stop.lng != null).map((stop) => ({ lat: stop.lat as number, lng: stop.lng as number }))}
+              stops={(ride.stops || []).filter((stop) => stop.lat != null && stop.lng != null).map((stop) => ({ lat: stop.lat as number, lng: stop.lng as number }))}
               driverLocation={ride.driver?.location}
             />
           )}
@@ -807,7 +807,7 @@ export function SrRidePage({ lang }: Props) {
           {ride?.driver?.isVerified && <span style={styles.verifiedBadge}>✓ {t.verifiedDriver}</span>}
           <Info label={t.driver} value={driverIdentityLabel(ride, t)} />
           <Info label={t.pickup} value={String(ride?.metadata.pickup || pickup)} />
-          {ride?.stops.map((stop, index) => (
+          {ride?.stops?.map((stop, index) => (
             <Info key={index} label={`${t.stop} ${index + 1}`} value={stop.address} />
           ))}
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />

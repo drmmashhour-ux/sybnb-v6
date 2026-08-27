@@ -1184,3 +1184,38 @@ model AdminAuditLog {
   @@index([actorUserId, createdAt])
   @@map("admin_audit_logs")
 }
+
+enum SanctionsScreeningStatus {
+  CLEARED
+  POTENTIAL_MATCH
+  HARD_MATCH
+  SYSTEM_ERROR
+
+  @@map("sanctions_screening_status")
+}
+
+// Architecture audit follow-up (Module 2.1): a real, provider-agnostic screening-invocation log.
+// Says nothing about what "compliant" means for any market -- that's a legal/counsel
+// determination (see countries/<country>/profile.mjs's externalGates), not something this table
+// or server/lib/sanctions.mjs decides. Not wired into any live money-moving route yet; see
+// server/lib/sanctions.mjs for the fail-closed engine this feeds.
+model SanctionsScreeningResult {
+  id              String                   @id @default(uuid())
+  requestId       String                   @unique @map("request_id")
+  // Loose subject reference (entityType/entityId style, matching AdminAuditLog) rather than a
+  // hard FK to User -- a screening subject may be a listing owner, a payout recipient, or a
+  // future non-user party.
+  subjectType     String                   @map("subject_type")
+  subjectId       String                   @map("subject_id")
+  fullNameChecked String                   @map("full_name_checked")
+  countryCode     String                   @map("country_code")
+  status          SanctionsScreeningStatus @default(SYSTEM_ERROR)
+  matchScore      Float                    @default(0) @map("match_score")
+  providerUsed    String                   @map("provider_used")
+  rawPayload      Json                     @map("raw_payload")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+
+  @@index([subjectType, subjectId])
+  @@index([status])
+  @@map("sanctions_screening_results")
+}

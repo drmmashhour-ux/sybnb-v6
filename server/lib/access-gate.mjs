@@ -11,11 +11,14 @@ import { policyEnvironment } from './payment-policy.mjs'
 //
 // Production always reads the real profile value. Every non-production environment defaults to
 // open (dev and every e2e suite in this repo need an unauthenticated server to hit directly); a
-// narrow, explicitly-named override lets a non-production run exercise the closed path on purpose.
+// narrow, explicitly-named override forces the closed path in EITHER mode, so the mechanism itself
+// stays regression-tested (public-access-gate.e2e.mjs's own production-mode server uses it)
+// independent of whatever the real profile's current gates.publicAccess value happens to be --
+// coupling that test to today's specific launch-gate setting would make it fail the moment the
+// gate is legitimately opened, which tests "did the owner flip a switch," not "does the code work."
 export function isPublicAccessOpen(env = process.env) {
-  if (policyEnvironment() !== 'production') {
-    return env.ACCESS_GATE_TEST_OVERRIDE_CLOSED !== 'true'
-  }
+  if (env.ACCESS_GATE_TEST_OVERRIDE_CLOSED === 'true') return false
+  if (policyEnvironment() !== 'production') return true
   const { profile } = loadCountryProfile(env)
   return profile?.gates?.publicAccess === 'open'
 }

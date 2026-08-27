@@ -34,7 +34,7 @@ export const profile = {
   gates: {
     legal: 'DRAFT',            // countries/syria legal versions (counsel-approved) required
     payments: 'disabled',      // live payments off until owner authorization
-    publicAccess: 'closed',    // no DNS/public cutover
+    publicAccess: 'open',      // owner-authorized 2026-08-27; legal/NAITS/vendor-clearance still open, see docs/launch
     deployment: 'blocked',     // no authenticated production deploy
   },
 

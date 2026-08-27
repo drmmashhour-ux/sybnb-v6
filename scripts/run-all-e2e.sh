@@ -205,6 +205,7 @@ if [ -z "$PAYMENT_ONLY" ]; then
     EMAIL_PROVIDER=resend RESEND_API_KEY=test_key EMAIL_FROM=test@example.com \
     STORAGE_PROVIDER=s3 STORAGE_S3_BUCKET=test-bucket STORAGE_S3_REGION=us-east-1 \
     RESEND_WEBHOOK_SECRET="${RESEND_WEBHOOK_SECRET:-whsec_dGVzdC13ZWJob29rLXNlY3JldA==}" \
+    ACCESS_GATE_TEST_OVERRIDE_CLOSED=true \
     node server/index.mjs > /tmp/sybnb-e2e-api-production-closed.log 2>&1 &
   PRODUCTION_CLOSED_PID=$!
   API_HOST=127.0.0.1 API_PORT=3054 SYBNB_COUNTRY=syria \

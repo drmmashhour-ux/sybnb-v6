@@ -22,8 +22,11 @@ check('service country is SY', profile.country === 'SY', profile.country)
 check('operating entity is Québec (corporate identity, not market)', profile.operatingEntity.country === 'CA-QC', profile.operatingEntity.country)
 check('allowed currencies SYP/USD (no CAD)', JSON.stringify(profile.currencies.allowed) === JSON.stringify(['SYP', 'USD']), JSON.stringify(profile.currencies.allowed))
 check('advertising default USD', profile.currencies.advertisingDefault === 'USD', profile.currencies.advertisingDefault)
-check('per-country gates closed (legal DRAFT, payments off, public closed, deploy blocked)',
-  profile.gates.legal === 'DRAFT' && profile.gates.payments === 'disabled' && profile.gates.publicAccess === 'closed' && profile.gates.deployment === 'blocked',
+// publicAccess flipped 'closed' -> 'open' 2026-08-27 (explicit owner authorization, see
+// countries/syria/profile.mjs's own inline comment). legal/payments/deployment stay closed --
+// those are separate, later authorizations, not implied by opening public access.
+check('per-country gates (legal DRAFT, payments off, public OPEN, deploy blocked)',
+  profile.gates.legal === 'DRAFT' && profile.gates.payments === 'disabled' && profile.gates.publicAccess === 'open' && profile.gates.deployment === 'blocked',
   JSON.stringify(profile.gates))
 
 console.log('\n=== NO CROSS-COUNTRY INHERITANCE ===')

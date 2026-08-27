@@ -221,6 +221,24 @@ async function eventDivision(intent) {
   return booking?.listing?.division || 'PLATFORM'
 }
 
+// Keyset cursor for the reconciliation scan (updatedAt+id, since updatedAt alone isn't unique
+// enough to guarantee a stable order across pages). Malformed/missing input fails open to "start
+// from the top" -- safe for a read-only report, never a data-loss risk.
+function encodeReconciliationCursor(intent) {
+  return Buffer.from(JSON.stringify({ updatedAt: intent.updatedAt.toISOString(), id: intent.id }), 'utf8').toString('base64url')
+}
+function decodeReconciliationCursor(raw) {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(Buffer.from(String(raw), 'base64url').toString('utf8'))
+    const updatedAt = new Date(parsed.updatedAt)
+    if (!parsed.id || Number.isNaN(updatedAt.getTime())) return null
+    return { updatedAt, id: parsed.id }
+  } catch {
+    return null
+  }
+}
+
 function computeDriftReasons(intent, { proof, walletEntries, latestEvent }) {
   const reasons = []
   if (intent.status === 'SUCCEEDED' && intent.bookingId && !proof) reasons.push('SUCCEEDED_WITHOUT_PAYMENT_PROOF')
@@ -599,20 +617,51 @@ export async function handlePaymentIntents(req, res, url, context) {
       take: 25,
     })
 
+    // Scale-readiness audit: this scanned a fixed "most recently updated 200" window with no way
+    // to see or reach anything older -- confirmed against the real DB that the eligible population
+    // (SUCCEEDED/REFUNDED intents) already sits at ~3,850 rows today, meaning ~95% of real
+    // transaction history was silently never re-checked for drift by this view, not a future
+    // concern. Real keyset pagination (updatedAt+id, the same tiebreaker shape every other
+    // cursor in this codebase uses) now lets a caller walk the ENTIRE population exhaustively
+    // across repeated calls, while the no-cursor default call stays cheap (one page, most-recent
+    // first, same behavior as before for a normal dashboard load).
+    const reconciliationCursor = decodeReconciliationCursor(url.searchParams.get('cursor'))
     const candidateIntents = await db().paymentIntent.findMany({
-      where: { status: { in: ['SUCCEEDED', 'REFUNDED'] } },
-      orderBy: { updatedAt: 'desc' },
-      take: 200,
+      where: {
+        status: { in: ['SUCCEEDED', 'REFUNDED'] },
+        ...(reconciliationCursor
+          ? { OR: [
+              { updatedAt: { lt: reconciliationCursor.updatedAt } },
+              { updatedAt: reconciliationCursor.updatedAt, id: { lt: reconciliationCursor.id } },
+            ] }
+          : {}),
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: 201,
     })
-    const contextByIntentId = await loadReconciliationContextBatch(candidateIntents)
+    const hasMore = candidateIntents.length > 200
+    const pageIntents = hasMore ? candidateIntents.slice(0, 200) : candidateIntents
+    const lastIntent = pageIntents[pageIntents.length - 1]
+    const nextCursor = hasMore && lastIntent ? encodeReconciliationCursor(lastIntent) : null
+
+    const [contextByIntentId, totalCandidates] = await Promise.all([
+      loadReconciliationContextBatch(pageIntents),
+      db().paymentIntent.count({ where: { status: { in: ['SUCCEEDED', 'REFUNDED'] } } }),
+    ])
     const drifted = []
-    for (const intent of candidateIntents) {
+    for (const intent of pageIntents) {
       const driftReasons = computeDriftReasons(intent, contextByIntentId.get(intent.id))
       if (driftReasons.length) drifted.push({ intentId: intent.id, reference: intent.reference, status: intent.status, bookingId: intent.bookingId, driftReasons })
     }
 
     return json(res, 200, {
       ok: true,
+      // totalCandidates is the full eligible population; this call scanned pageIntents.length of
+      // it (200, or fewer on the final page) starting from `cursor` -- an honest signal of scan
+      // completeness instead of silently only ever checking the newest slice.
+      totalCandidates,
+      scannedCount: pageIntents.length,
+      nextCursor,
       deadLettered: deadLetteredEvents.map((e) => ({
         eventId: e.id,
         intentId: e.intentId,

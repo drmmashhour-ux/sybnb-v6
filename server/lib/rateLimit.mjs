@@ -29,7 +29,23 @@ export async function isRateLimited(bucketKey, windowMs, max) {
         updated_at = now()
     RETURNING count
   `
+  maybeCleanupStaleBuckets()
   return rows[0].count > max
+}
+
+// No scheduler in this deployment (same constraint gift-lifecycle.mjs's expireStaleWalletGifts()
+// documents), so old buckets are swept opportunistically from this same hot path instead -- but
+// unlike that read-path sweep, isRateLimited() runs on every auth/otp/webhook request, so a DELETE
+// on every call would add real overhead to a security-critical path for no benefit (every window in
+// this codebase is 60s; nothing needs pruning that recently). Sampled at ~1%, and fire-and-forget:
+// a cleanup failure must never affect the rate-limit decision that already returned above it.
+const CLEANUP_SAMPLE_RATE = 0.01
+const STALE_AFTER_MS = 60 * 60 * 1000 // every window in use today is 60s; 1h is a generous, safe margin
+function maybeCleanupStaleBuckets() {
+  if (Math.random() >= CLEANUP_SAMPLE_RATE) return
+  db()
+    .rateLimitBucket.deleteMany({ where: { updatedAt: { lt: new Date(Date.now() - STALE_AFTER_MS) } } })
+    .catch(() => {})
 }
 
 export function clientIp(req) {

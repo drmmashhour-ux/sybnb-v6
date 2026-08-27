@@ -994,6 +994,27 @@ model OtpAttemptLock {
   @@map("otp_attempt_locks")
 }
 
+model RateLimitBucket {
+  id          String   @id @default(uuid())
+  bucketKey   String   @unique @map("bucket_key")
+  windowStart DateTime @default(now()) @map("window_start")
+  count       Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("rate_limit_buckets")
+}
+
+model SuppressedEmail {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  reason    String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("suppressed_emails")
+}
+
 model RideRequest {
   id              String     @id @default(uuid())
   riderId          String     @map("rider_id")

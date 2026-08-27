@@ -12,9 +12,14 @@
 // verified before launch (see docs/launch/RESEND_CERTIFICATION.md).
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { db } from './prisma.mjs'
 
 function providerName() {
   return (process.env.EMAIL_PROVIDER || 'sandbox').toLowerCase()
+}
+
+function normalizeAddress(address) {
+  return String(address || '').trim().toLowerCase()
 }
 
 export function emailProviderStatus() {
@@ -30,6 +35,17 @@ export function emailProviderStatus() {
 // sendEmail({ to, subject, text, html?, purpose, idempotencyKey? }) -> { provider, messageId, delivered }
 export async function sendEmail({ to, subject, text, html, purpose, idempotencyKey }) {
   const provider = providerName()
+
+  const recipients = Array.isArray(to) ? to : [to]
+  for (const recipient of recipients) {
+    if (await isEmailSuppressed(recipient)) {
+      const error = new Error('This address is suppressed after a prior bounce or complaint and will not be emailed.')
+      error.statusCode = 422
+      error.code = 'EMAIL_SUPPRESSED'
+      error.expose = true
+      throw error
+    }
+  }
 
   if (provider === 'sandbox') {
     // No real delivery. Do NOT log `text`/`html` — they may contain the plaintext OTP.
@@ -112,14 +128,23 @@ export function createWebhookReplayGuard({ store = new Set(), max = 10000 } = {}
 }
 
 // Bounce/complaint suppression: once an address hard-bounces or complains, further delivery attempts
-// to it are unsafe (hurts sender reputation) and must be blocked. `shouldDeliver(addr)` is false for
-// suppressed addresses; `suppress(addr, reason)` records it. Store is injectable (Map here; persist
-// in production so suppression survives restarts). Addresses are normalized (lowercased).
-export function createSuppressionList({ store = new Map() } = {}) {
-  const norm = (a) => String(a || '').trim().toLowerCase()
-  return {
-    suppress(address, reason) { const a = norm(address); if (a) store.set(a, { reason: reason || 'bounce', at: Date.now() }) },
-    isSuppressed(address) { return store.has(norm(address)) },
-    shouldDeliver(address) { return !store.has(norm(address)) },
-  }
+// to it are unsafe (hurts sender reputation) and must be blocked. Persisted in Postgres (not an
+// in-process Map) so suppression survives restarts and is shared across every server instance --
+// a bounce recorded by the instance that received the Resend webhook must also block sends from
+// every other instance. Addresses are normalized (trimmed, lowercased) before storage/lookup.
+export async function suppressEmail(address, reason) {
+  const email = normalizeAddress(address)
+  if (!email) return
+  await db().suppressedEmail.upsert({
+    where: { email },
+    create: { email, reason: reason || 'bounce' },
+    update: { reason: reason || 'bounce' },
+  })
+}
+
+export async function isEmailSuppressed(address) {
+  const email = normalizeAddress(address)
+  if (!email) return false
+  const row = await db().suppressedEmail.findUnique({ where: { email } })
+  return Boolean(row)
 }

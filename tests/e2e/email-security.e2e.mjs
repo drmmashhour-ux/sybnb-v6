@@ -1,8 +1,11 @@
 // SYBNB — Email OTP hardening E2E (governed, self-contained). Proves the Part-10 hardening: fail-
 // closed Resend config, webhook signature + timestamp/replay + duplicate-event protection, and
-// bounce/complaint suppression. No network, no secrets. Run: node tests/e2e/email-security.e2e.mjs
+// bounce/complaint suppression. No secrets. Suppression is Postgres-backed (see lib/email.mjs), so
+// this file needs DATABASE_URL, same as the other e2e suites that assert DB state directly.
+// Run: node tests/e2e/email-security.e2e.mjs
 import { createHmac } from 'node:crypto'
-import { emailProviderStatus, sendEmail, verifyResendWebhook, createWebhookReplayGuard, createSuppressionList } from '../../server/lib/email.mjs'
+import { emailProviderStatus, sendEmail, verifyResendWebhook, createWebhookReplayGuard, suppressEmail, isEmailSuppressed } from '../../server/lib/email.mjs'
+import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
 let pass = 0, fail = 0
 const ok = (label, cond, detail) => { if (cond) { pass++; console.log(`   PASS  ${label}`) } else { fail++; console.log(`  FAIL  ${label}  -> ${detail}`) } }
@@ -36,12 +39,26 @@ const guard = createWebhookReplayGuard()
 ok('first delivery of event id is processed', guard.seen('evt_dup') === true, 'not processed')
 ok('repeat delivery of same event id is skipped', guard.seen('evt_dup') === false, 'processed twice')
 
-console.log('\n=== BOUNCE / COMPLAINT SUPPRESSION ===')
-const supp = createSuppressionList()
-ok('address deliverable before suppression', supp.shouldDeliver('User@sybnb.local') === true, 'blocked early')
-supp.suppress('user@sybnb.local', 'hard_bounce')
-ok('after bounce, delivery blocked (case-insensitive)', supp.shouldDeliver('USER@sybnb.local') === false, 'still delivering')
-ok('isSuppressed reflects complaint', (() => { supp.suppress('c@sybnb.local', 'complaint'); return supp.isSuppressed('c@sybnb.local') })(), 'not suppressed')
+console.log('\n=== BOUNCE / COMPLAINT SUPPRESSION (Postgres-backed) ===')
+const testAddr = `suppress-test-${process.pid}-${Date.now()}@sybnb.local`
+const complaintAddr = `complaint-test-${process.pid}-${Date.now()}@sybnb.local`
+await db().suppressedEmail.deleteMany({ where: { email: { in: [testAddr, complaintAddr] } } })
+ok('address deliverable before suppression', (await isEmailSuppressed('User@sybnb.local')) === false, 'blocked early')
+await suppressEmail(testAddr, 'hard_bounce')
+ok('after bounce, delivery blocked (case-insensitive)', (await isEmailSuppressed(testAddr.toUpperCase())) === true, 'still delivering')
+await suppressEmail(complaintAddr, 'complaint')
+ok('isSuppressed reflects complaint', await isEmailSuppressed(complaintAddr), 'not suppressed')
+
+console.log('\n=== sendEmail() REFUSES A SUPPRESSED ADDRESS ===')
+let sendThrew = ''
+try { await sendEmail({ to: testAddr, subject: 's', text: 't', purpose: 'account-verify' }) } catch (e) { sendThrew = e.code }
+ok('sendEmail throws EMAIL_SUPPRESSED for a suppressed address', sendThrew === 'EMAIL_SUPPRESSED', sendThrew)
+let sendOk = false
+try { const r = await sendEmail({ to: `not-suppressed-${process.pid}@sybnb.local`, subject: 's', text: 't', purpose: 'account-verify' }); sendOk = r.delivered === true } catch (e) { sendOk = false }
+ok('sendEmail still delivers to a non-suppressed address', sendOk, 'unexpectedly blocked')
+
+await db().suppressedEmail.deleteMany({ where: { email: { in: [testAddr, complaintAddr] } } })
 
 console.log(`\n==== EMAIL SECURITY E2E: ${pass} passed, ${fail} failed ====`)
+await disconnectDb()
 process.exit(fail ? 1 : 0)

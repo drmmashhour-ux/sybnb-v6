@@ -1,35 +1,28 @@
 import { json, methodNotAllowed } from '../lib/responses.mjs'
 import { log } from '../lib/logger.mjs'
-import { verifyResendWebhook, createWebhookReplayGuard, createSuppressionList } from '../lib/email.mjs'
+import { verifyResendWebhook, createWebhookReplayGuard, suppressEmail } from '../lib/email.mjs'
+import { isRateLimited, clientIp } from '../lib/rateLimit.mjs'
 
 // Resend (Svix) webhook receiver: POST /api/webhooks/resend.
 // Trust nothing until the signature verifies. Order: size cap -> rate cap -> raw body -> signature +
 // timestamp/replay -> duplicate-event guard -> parse -> act (bounce/complaint suppression). The
 // signing secret and payload are never logged. Fails closed if RESEND_WEBHOOK_SECRET is unset.
+// The rate cap is Postgres-backed (rateLimit.mjs) so it holds across multiple server instances.
 //
-// NOTE: the replay guard + suppression store are in-memory (per process). That is correct and tested
-// for a single instance; a multi-instance / restart-durable deployment should back these with a shared
-// store (documented follow-up). The verifier/suppression COMPONENTS are the already-tested ones.
+// NOTE: the replay guard is in-memory (per process) -- correct and tested for a single instance; a
+// multi-instance / restart-durable deployment should back it with a shared store (documented
+// follow-up). The suppression list itself is Postgres-backed (see suppressEmail in lib/email.mjs) so
+// it survives restarts and is shared across instances -- it is consulted by sendEmail() on every send.
 
 const MAX_BODY_BYTES = 64 * 1024 // webhook events are small; reject anything larger
 const RATE_WINDOW_MS = 60_000
 const RATE_MAX = 240
-const rateBuckets = new Map()
 
-// Process-lifetime singletons (tested components).
+// Process-lifetime singleton (tested component).
 const replayGuard = createWebhookReplayGuard()
-const suppression = createSuppressionList()
-
-export function isEmailSuppressed(address) { return suppression.isSuppressed(address) }
 
 function rateLimited(req) {
-  const ipRaw = req.headers['x-forwarded-for']
-  const ip = (Array.isArray(ipRaw) ? ipRaw[0] : ipRaw || '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown'
-  const now = Date.now()
-  const e = rateBuckets.get(ip)
-  if (!e || now - e.start >= RATE_WINDOW_MS) { rateBuckets.set(ip, { start: now, count: 1 }); return false }
-  e.count += 1
-  return e.count > RATE_MAX
+  return isRateLimited(`webhook:resend:${clientIp(req)}`, RATE_WINDOW_MS, RATE_MAX)
 }
 
 export async function handleWebhooks(req, res, url) {
@@ -42,7 +35,7 @@ export async function handleWebhooks(req, res, url) {
     return json(res, 503, { ok: false, error: { code: 'WEBHOOK_NOT_CONFIGURED', message: 'Resend webhook is not configured.' } })
   }
 
-  if (rateLimited(req)) {
+  if (await rateLimited(req)) {
     return json(res, 429, { ok: false, error: { code: 'RATE_LIMITED', message: 'Too many webhook requests.' } })
   }
 
@@ -83,7 +76,7 @@ export async function handleWebhooks(req, res, url) {
   const to = event?.data?.to
   const address = Array.isArray(to) ? to[0] : to
   if ((type === 'email.bounced' || type === 'email.complained') && address) {
-    suppression.suppress(address, type === 'email.complained' ? 'complaint' : 'bounce')
+    await suppressEmail(address, type === 'email.complained' ? 'complaint' : 'bounce')
   }
   // Log event TYPE + id only — never the secret or full payload.
   log.info('resend_webhook', { type, id: svixId })

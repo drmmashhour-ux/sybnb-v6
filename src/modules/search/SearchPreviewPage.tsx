@@ -182,8 +182,15 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             },
             priceMin: Number(value.minPrice) || undefined,
             priceMax: Number(value.maxPrice) || undefined,
-            bedroomsMin: value.bedroomsCount || undefined,
-            bathroomsMin: value.bathrooms || undefined,
+            // A real bug caught by an independent re-audit: bedroomsCount/bathrooms default to 1
+            // and their only editable UI (the counter steppers in UnifiedSearchBar) is gated to
+            // isStay -- so for every other division these were silently sent as bedroomsMin=1/
+            // bathroomsMin=1 on every explicit search. CARS/MARKETPLACE listings have no
+            // bedrooms/bathrooms metadata at all, so that JSON-path filter matched nothing and
+            // every filtered search returned zero results while blaming the user's filters. Only
+            // send these for the divisions that actually carry that metadata.
+            bedroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) ? value.bedroomsCount || undefined : undefined,
+            bathroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) ? value.bathrooms || undefined : undefined,
             // Wire the chosen location to the server so results actually narrow to the selected
             // governorate (maps the capsule key to the stored English city name). Empty when unmatched.
             city: GOV_TO_CITY[value.governorate] || undefined,
@@ -346,6 +353,11 @@ function searchSummary(value: UnifiedSearchValue, lang: Lang) {
 
 // Map the search capsule's governorate key to the English city name listings store in location.city,
 // so the server-side city filter actually matches (Syria's 5 covered governorates).
+// Only real-estate divisions carry bedrooms/bathrooms metadata server-side (see
+// server/routes/listings.mjs's bedroomsMin/bathroomsMin JSON-path filter) -- CARS and
+// MARKETPLACE listings never do, so sending these for them matches nothing.
+const HAS_BEDROOM_BATHROOM_FILTERS = new Set<UnifiedSearchValue['division']>(['stays', 'rentals', 'buy', 'newConstruction'])
+
 const GOV_TO_CITY: Record<string, string> = {
   damascus: 'Damascus',
   aleppo: 'Aleppo',

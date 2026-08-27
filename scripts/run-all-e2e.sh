@@ -193,6 +193,10 @@ kill "$STRIPE_UNAPPROVED_PID" "$STRIPE_APPROVED_PID" 2>/dev/null
 
 if [ -z "$PAYMENT_ONLY" ]; then
   echo "== production-mode server (gates.publicAccess enforcement only activates in production) =="
+  # Two servers: the production-mode one exercises the closed gate (sections 1-3 of the suite); a
+  # second, ordinary dev-mode one proves the gate is a no-op outside production (section 4) -- by
+  # this point in the script every earlier phase's own server has already been killed, so this
+  # can't reuse one of those the way the suite's own header assumes when run standalone.
   NODE_ENV=production API_HOST=127.0.0.1 API_PORT=3053 SYBNB_COUNTRY=syria \
     CORS_ORIGIN=https://example.com \
     EMAIL_PROVIDER=resend RESEND_API_KEY=test_key EMAIL_FROM=test@example.com \
@@ -200,9 +204,13 @@ if [ -z "$PAYMENT_ONLY" ]; then
     RESEND_WEBHOOK_SECRET="${RESEND_WEBHOOK_SECRET:-whsec_dGVzdC13ZWJob29rLXNlY3JldA==}" \
     node server/index.mjs > /tmp/sybnb-e2e-api-production-closed.log 2>&1 &
   PRODUCTION_CLOSED_PID=$!
+  API_HOST=127.0.0.1 API_PORT=3054 SYBNB_COUNTRY=syria \
+    node server/index.mjs > /tmp/sybnb-e2e-api-gate-open.log 2>&1 &
+  GATE_OPEN_PID=$!
   sleep 3
-  API_BASE_CLOSED=http://127.0.0.1:3053 run "public-access-gate" public-access-gate.e2e.mjs
-  kill "$PRODUCTION_CLOSED_PID" 2>/dev/null
+  API_BASE_CLOSED=http://127.0.0.1:3053 API_BASE=http://127.0.0.1:3054 \
+    run "public-access-gate" public-access-gate.e2e.mjs
+  kill "$PRODUCTION_CLOSED_PID" "$GATE_OPEN_PID" 2>/dev/null
 fi
 
 echo "== suites with failures: $fails =="

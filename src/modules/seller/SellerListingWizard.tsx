@@ -4,7 +4,7 @@ import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
 import { acceptListingAgreement, createAndSubmitPrototypeListing, getStoredSellerSession, uploadPaymentProofFile } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
-import { sellerCarFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
+import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
@@ -436,7 +436,16 @@ export function SellerListingWizard({ lang }: Props) {
                   onChange={setVisualFilters}
                 />
               )}
-              {!isAdvertisingFlow && division !== 'CARS' && (
+              {!isAdvertisingFlow && division === 'MARKETPLACE' && (
+                <VisualFilterPanel
+                  compact
+                  groups={sellerMarketFilterGroups}
+                  lang={lang}
+                  selection={visualFilters}
+                  onChange={setVisualFilters}
+                />
+              )}
+              {!isAdvertisingFlow && division !== 'CARS' && division !== 'MARKETPLACE' && (
                 <VisualFilterPanel
                   compact
                   groups={sellerPropertyFilterGroups}
@@ -593,19 +602,18 @@ export function SellerListingWizard({ lang }: Props) {
 
           {activeStep.id === 'media' && (
             <div className="seller-wizard-section">
+              {/* A real bug caught by an independent re-audit: for the regular (non-advertising)
+                  listing flow, this whole grid used to be a checklist of plain buttons ("Plan
+                  payment proof" / "Ownership proof" / "Add authorization" / "Plan or deed") that
+                  toggled local state and uploaded nothing -- clicking one flipped it to a green
+                  "Added" success state with zero network request, right next to the real
+                  PaymentProofUpload widgets below that genuinely upload files. A seller could
+                  believe they'd submitted ownership proof when nothing was ever sent. Only the
+                  advertising flow's real required-file slots (adFileSlots) still need this grid;
+                  the regular flow's real uploads are fully covered by the two widgets below. */}
+              {isAdvertisingFlow && (
               <div className="seller-upload-grid">
-                {(isAdvertisingFlow
-                  ? adFileSlots
-                  : [
-                      // 'Property photos' used to be a decorative checklist button here (toggled
-                      // local state, uploaded nothing) -- real photo upload now has its own
-                      // PaymentProofUpload widget below, so it's removed from this list rather
-                      // than left as a second, non-functional way to "add" the same thing.
-                      { id: 'paymentProof', ar: 'إثبات دفع الخطة', en: 'Plan payment proof' },
-                      { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
-                      { id: 'authorization', ar: 'أضف التفويض', en: 'Add authorization' },
-                      { id: 'deed', ar: 'مخطط أو سند', en: 'Plan or deed' },
-                    ]).map((item) => (
+                {adFileSlots.map((item) => (
                   <button
                     className={uploadedAdFiles.includes(item.id) ? 'uploaded' : ''}
                     key={item.en}
@@ -627,6 +635,7 @@ export function SellerListingWizard({ lang }: Props) {
                   </button>
                 ))}
               </div>
+              )}
               {isAdvertisingFlow && (
                 <div className={`seller-ad-send-panel ${adFilesSent ? 'sent' : ''}`}>
                   <strong>{adPlan === 'premium' ? (isAr ? 'خطة Premium' : 'Premium plan') : isAr ? 'خطة Plus' : 'Plus plan'}</strong>

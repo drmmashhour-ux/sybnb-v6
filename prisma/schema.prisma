@@ -166,6 +166,7 @@ model User {
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
   savedPlaces       SavedPlace[]
   promoRedemptions  PromoRedemption[]
+  pushSubscriptions PushSubscription[]
   refundsRequested             Refund[]        @relation("RefundRequestedBy")
   refundAttemptsLegacyAccepted RefundAttempt[] @relation("RefundAttemptLegacyAcceptedBy")
 
@@ -1111,6 +1112,22 @@ model PromoRedemption {
 
   @@unique([promoCodeId, userId])
   @@map("promo_redemptions")
+}
+
+// SR Ride vs. Uber gap-closure (P1 #7): push notifications, standard Web Push (VAPID) -- a
+// self-generated ECDSA keypair, no third-party push-provider account required.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique
+  p256dhKey String   @map("p256dh_key")
+  authKey   String   @map("auth_key")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 model AdminAuditLog {

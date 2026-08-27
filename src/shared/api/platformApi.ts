@@ -1295,6 +1295,54 @@ export async function setPromoCodeActive(promoCodeId: string, active: boolean) {
   return response.promoCode
 }
 
+// SR Ride vs. Uber gap-closure (P1 #7): standard Web Push -- no third-party push-provider account.
+export async function fetchPushConfig() {
+  const response = await apiRequest<{ ok: true; enabled: boolean; publicKey: string | null }>('/api/push/vapid-public-key')
+  return response
+}
+
+async function registerPushSubscription(subscription: PushSubscriptionJSON, asDriver: boolean) {
+  const session = asDriver ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true; subscriptionId: string }>('/api/push/subscribe', {
+    method: 'POST',
+    token: session.token,
+    body: subscription,
+  })
+}
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
+}
+
+// Browser-side flow: register the service worker, request permission, subscribe, then hand the
+// subscription to the server. Throws a clear message at whichever step isn't available/granted
+// rather than silently no-op'ing, so the UI can show the rider/driver why it didn't work.
+export async function enablePushNotifications(asDriver = false) {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    throw new Error('Push notifications are not supported on this device.')
+  }
+  const config = await fetchPushConfig()
+  if (!config.enabled || !config.publicKey) {
+    throw new Error('Push notifications are not configured on the server yet.')
+  }
+  const permission = await Notification.requestPermission()
+  if (permission !== 'granted') {
+    throw new Error('Notification permission was not granted.')
+  }
+  const registration = await navigator.serviceWorker.register('/sw.js')
+  const existing = await registration.pushManager.getSubscription()
+  const subscription =
+    existing ||
+    (await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(config.publicKey),
+    }))
+  await registerPushSubscription(subscription.toJSON(), asDriver)
+}
+
 export async function fetchPrototypeDriverOverview() {
   const session = await ensurePrototypeDriverSession()
   const response = await apiRequest<{ ok: true; overview: PlatformDriverOverview }>('/api/driver/rides', {

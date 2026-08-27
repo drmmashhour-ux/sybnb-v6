@@ -7,6 +7,7 @@ import {
   createPrototypeSrRide,
   createSavedPlace,
   deleteSavedPlace,
+  enablePushNotifications,
   fetchPrototypeSrRide,
   fetchPrototypeSrRideThread,
   fetchSavedPlaces,
@@ -102,6 +103,9 @@ const copy = {
     removeStop: 'إزالة',
     promoCodePlaceholder: 'كود الخصم (اختياري)',
     promoDiscountApplied: 'خصم الكود',
+    enableNotifications: 'تفعيل الإشعارات',
+    enablingNotifications: 'جار التفعيل...',
+    notificationsEnabled: 'الإشعارات مفعّلة',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -179,6 +183,9 @@ const copy = {
     removeStop: 'Remove',
     promoCodePlaceholder: 'Promo code (optional)',
     promoDiscountApplied: 'Promo discount',
+    enableNotifications: 'Enable notifications',
+    enablingNotifications: 'Enabling...',
+    notificationsEnabled: 'Notifications enabled',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -235,6 +242,7 @@ export function SrRidePage({ lang }: Props) {
   const [accessibilityRequired, setAccessibilityRequired] = useState(false)
   const [stops, setStops] = useState<string[]>([])
   const [promoCode, setPromoCode] = useState('')
+  const [pushStatus, setPushStatus] = useState<'idle' | 'enabling' | 'enabled' | 'error'>('idle')
   const [savedPlaces, setSavedPlaces] = useState<PlatformSavedPlace[]>([])
   const [newPlaceLabel, setNewPlaceLabel] = useState('')
   const [savingPlace, setSavingPlace] = useState(false)
@@ -356,6 +364,17 @@ export function SrRidePage({ lang }: Props) {
         return
       }
       setShareStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function enableNotifications() {
+    setPushStatus('enabling')
+    try {
+      await enablePushNotifications(false)
+      setPushStatus('enabled')
+    } catch (error) {
+      setPushStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
     }
   }
@@ -543,6 +562,16 @@ export function SrRidePage({ lang }: Props) {
         <p style={styles.eyebrow}>SR / SYBNB</p>
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
+        {pushStatus !== 'enabled' && (
+          <button
+            style={styles.secondaryButton}
+            disabled={pushStatus === 'enabling'}
+            onClick={() => void enableNotifications()}
+          >
+            {pushStatus === 'enabling' ? t.enablingNotifications : t.enableNotifications}
+          </button>
+        )}
+        {pushStatus === 'enabled' && <span style={styles.verifiedBadge}>✓ {t.notificationsEnabled}</span>}
       </section>
 
       <section style={styles.grid}>

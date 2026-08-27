@@ -15,6 +15,7 @@ import {
   promoAlreadyUsedError,
   validateActivePromoCode,
 } from '../lib/promo-code.mjs'
+import { sendPushNotification } from '../lib/push-notifications.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -428,6 +429,14 @@ export async function handleSrRides(req, res, url, context) {
         before: existing,
         after: ride,
       },
+    })
+
+    // SR Ride vs. Uber gap-closure (P1 #7): fire-and-forget, never fails the claim itself.
+    // context.user is the claiming driver -- real name, not a relation this query never included.
+    void sendPushNotification(ride.riderId, {
+      title: 'Driver assigned',
+      body: `${context.user.displayName} is on the way to your pickup.`,
+      url: '/#/ride',
     })
 
     return json(res, 200, { ok: true, ride })

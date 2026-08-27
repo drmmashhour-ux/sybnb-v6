@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
   claimPrototypeSrRide,
+  enablePushNotifications,
   fetchDriverIdentityStatus,
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
@@ -67,6 +68,8 @@ const copy = {
     accessibilityRequired: 'يحتاج مركبة لذوي الاحتياجات الخاصة',
     stopsCount: 'محطات',
     stopLabel: 'محطة',
+    enableNotifications: 'تفعيل الإشعارات',
+    enablingNotifications: 'جار التفعيل...',
     empty: 'لا توجد رحلات مسندة بعد.',
     dispatch: 'مركز التوجيه',
     safety: 'أمان الرحلة',
@@ -132,6 +135,8 @@ const copy = {
     accessibilityRequired: 'Needs accessible vehicle',
     stopsCount: 'stops',
     stopLabel: 'Stop',
+    enableNotifications: 'Enable notifications',
+    enablingNotifications: 'Enabling...',
     empty: 'No assigned rides yet.',
     dispatch: 'Dispatch center',
     safety: 'Ride safety',
@@ -178,6 +183,7 @@ export function DriverDashboardPage({ lang }: Props) {
   const [idDocumentStatus, setIdDocumentStatus] = useState<'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null>(null)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoStatus, setPhotoStatus] = useState<'idle' | 'uploading' | 'submitted' | 'error'>('idle')
+  const [pushStatus, setPushStatus] = useState<'idle' | 'enabling' | 'enabled' | 'error'>('idle')
 
   useEffect(() => {
     void loadOverview()
@@ -203,6 +209,16 @@ export function DriverDashboardPage({ lang }: Props) {
       setPhotoStatus('submitted')
     } catch {
       setPhotoStatus('error')
+    }
+  }
+
+  async function enableNotifications() {
+    setPushStatus('enabling')
+    try {
+      await enablePushNotifications(true)
+      setPushStatus('enabled')
+    } catch {
+      setPushStatus('error')
     }
   }
 
@@ -296,6 +312,15 @@ export function DriverDashboardPage({ lang }: Props) {
         <p style={styles.eyebrow}>SR / SYBNB</p>
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
+        {pushStatus !== 'enabled' && (
+          <button
+            style={styles.secondaryButton}
+            disabled={pushStatus === 'enabling'}
+            onClick={() => void enableNotifications()}
+          >
+            {pushStatus === 'enabling' ? t.enablingNotifications : t.enableNotifications}
+          </button>
+        )}
         <div style={styles.stats}>
           {stats.map((item) => (
             <div key={item.label} style={styles.statBox}>

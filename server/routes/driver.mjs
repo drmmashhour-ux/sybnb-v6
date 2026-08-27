@@ -5,6 +5,13 @@ import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { updateDriverLocation } from '../lib/live-map.mjs'
 import { activateScheduledRides } from '../lib/ride-schedule.mjs'
+import { sendPushNotification } from '../lib/push-notifications.mjs'
+
+const RIDER_STATUS_PUSH_COPY = {
+  DRIVER_ARRIVING: { title: 'Your driver is arriving', body: 'Your SR driver is on the way to your pickup point.' },
+  IN_PROGRESS: { title: 'Trip started', body: 'Your SR ride is now in progress.' },
+  COMPLETED: { title: 'Trip completed', body: 'Thanks for riding with SR. Your receipt is ready.' },
+}
 
 export async function handleDriver(req, res, url, context) {
   // SR Ride vs. Uber gap-closure (P0 #1): the driver client reports its own GPS position here
@@ -212,6 +219,14 @@ export async function handleDriver(req, res, url, context) {
         after: ride,
       },
     })
+
+    // SR Ride vs. Uber gap-closure (P1 #7): fire-and-forget -- sendPushNotification() never throws
+    // (see server/lib/push-notifications.mjs), so a missing/expired subscription or unconfigured
+    // VAPID keys can never fail the status update itself.
+    const pushCopy = RIDER_STATUS_PUSH_COPY[nextStatus]
+    if (pushCopy) {
+      void sendPushNotification(ride.riderId, { ...pushCopy, url: '/#/ride' })
+    }
 
     return json(res, 200, { ok: true, ride })
   }

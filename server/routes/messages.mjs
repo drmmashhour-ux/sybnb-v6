@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isBookingViewable } from './bookings.mjs'
+import { sendPushNotification } from '../lib/push-notifications.mjs'
 
 const MESSAGING_ELIGIBLE_BOOKING_STATUSES = ['CONFIRMED', 'COMPLETED', 'DISPUTED']
 
@@ -399,6 +400,17 @@ export async function handleMessages(req, res, url, context) {
       },
       include: { sender: { select: { id: true, displayName: true } } },
     })
+
+    // SR Ride vs. Uber gap-closure (P1 #7): notify whichever side didn't just send this --
+    // fire-and-forget, never fails the send itself.
+    const recipientId = ride.driverId === context.user.id ? ride.riderId : ride.driverId
+    if (recipientId) {
+      void sendPushNotification(recipientId, {
+        title: `${message.sender.displayName} sent a message`,
+        body: text.length > 120 ? `${text.slice(0, 117)}...` : text,
+        url: '/#/ride',
+      })
+    }
 
     return json(res, 201, { ok: true, message })
   }

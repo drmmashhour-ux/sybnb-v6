@@ -380,6 +380,11 @@ model PaymentProof {
   @@unique([provider, providerRef], map: "payment_proofs_provider_provider_ref_key")
   @@index([status, createdAt])
   @@index([userId])
+  // Scale-readiness audit: hit on ~10 route call sites (every booking screen loads its payment
+  // proofs; the ride-payment duplicate-proof check filters by rideId directly) with no index
+  // backing either FK -- confirmed a full sequential scan of this table before these were added.
+  @@index([bookingId])
+  @@index([rideId, status])
   @@map("payment_proofs")
 }
 
@@ -419,6 +424,10 @@ model MessageThread {
   messages Message[]
 
   @@unique([listingId, guestId])
+  // Scale-readiness audit: the guest inquiry inbox (GET /api/me/inquiries) filters by guestId with
+  // no leading index -- the unique constraint above can't serve a guestId-only lookup since
+  // listingId is its leading column.
+  @@index([guestId, updatedAt])
   @@map("message_threads")
 }
 
@@ -1017,6 +1026,9 @@ model RideRequest {
 
   @@index([status, requestedAt])
   @@index([driverId, status])
+  // Scale-readiness audit: the primary rider-facing "my trips" query (GET /api/me/overview) filters
+  // by riderId with no index -- only the driverId side of that OR was covered.
+  @@index([riderId])
   @@map("ride_requests")
 }
 

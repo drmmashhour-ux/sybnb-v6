@@ -260,12 +260,36 @@ export async function handleAdmin(req, res, url, context) {
     // recordWalletEntry call finds its existing entry via the normal findUnique path, not a race),
     // so the loser still gets a correct, non-error 200 rather than a raw 500 -- exactly like any
     // other idempotent re-call of this endpoint.
+    //
+    // An independent revenue audit found a real ordering hazard: for a GUEST cancellation without
+    // purchased protection, this reverses commission AND debits the guest's own SYBNB wallet for
+    // the cancellation fee -- but a manual-proof guest's wallet is never funded until their refund
+    // is actually executed (PATCH /api/admin/refunds/:id/execute credits it). Calling this before
+    // that happens fails safe today (recordWalletEntry's balance guard refuses to overdraw, the
+    // transaction rolls back cleanly, nothing corrupts) but with a generic, confusing
+    // WALLET_INSUFFICIENT_FUNDS -- neither route is wired to any frontend yet, so this has never
+    // actually been hit by a real workflow, but it's a real footgun for whoever eventually builds
+    // one. Translated into a clear, actionable error naming the exact required order instead of
+    // silently re-architecting the money movement (Uber's own model nets the fee into one refund
+    // settlement instead of two separately-ordered operations -- a deeper fix worth doing when this
+    // is actually wired up and exercised for real, not guessed at now).
     let result
     try {
       result = await db().$transaction((tx) =>
         finalizeCancellationLedgerEffects(tx, { booking: existing, approvedPayment, cancelledBy }),
       )
     } catch (err) {
+      if (err.code === 'WALLET_INSUFFICIENT_FUNDS') {
+        const error = new Error(
+          "This guest's cancellation fee can't be charged yet because their refund hasn't been executed " +
+            '(their SYBNB wallet has no funds until PATCH /api/admin/refunds/:id/execute runs). Execute the ' +
+            'refund first, then finalize this cancellation.',
+        )
+        error.statusCode = 409
+        error.code = 'REFUND_MUST_EXECUTE_FIRST'
+        error.expose = true
+        throw error
+      }
       if (err.code !== 'WALLET_ENTRY_RACE_LOST') throw err
       result = await db().$transaction((tx) =>
         finalizeCancellationLedgerEffects(tx, { booking: existing, approvedPayment, cancelledBy }),

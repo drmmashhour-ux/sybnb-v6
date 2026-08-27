@@ -708,8 +708,9 @@ export async function handleSrRides(req, res, url, context) {
         throw error
       }
 
+      let promoCode
       try {
-        const promoCode = await db().promoCode.create({
+        promoCode = await db().promoCode.create({
           data: {
             code,
             discountType,
@@ -719,7 +720,6 @@ export async function handleSrRides(req, res, url, context) {
             createdByAdminId: context.user.id,
           },
         })
-        return json(res, 201, { ok: true, promoCode })
       } catch (err) {
         if (err?.code === 'P2002') {
           const error = new Error('A promo code with this code already exists.')
@@ -730,6 +730,13 @@ export async function handleSrRides(req, res, url, context) {
         }
         throw err
       }
+      // An admin-experience audit found promo-code/business-account admin actions were the only
+      // admin-mutating routes in this file with no audit trail at all -- every other admin
+      // decision here (ride cancel/assign/claim) already logs. Closing that gap.
+      await db().adminAuditLog.create({
+        data: { actorUserId: context.user.id, action: 'SR_PROMO_CODE_CREATED', entityType: 'promo_codes', entityId: promoCode.id, before: null, after: promoCode },
+      })
+      return json(res, 201, { ok: true, promoCode })
     }
     return methodNotAllowed(res, ['GET', 'POST'])
   }
@@ -739,9 +746,23 @@ export async function handleSrRides(req, res, url, context) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context, ['ADMIN'])
     const body = await readJson(req)
+    // An admin-experience audit found this had no existence check at all -- update() on a
+    // nonexistent id throws Prisma's raw P2025, leaking as an opaque 500 instead of a clean 404
+    // (the exact bug class already fixed elsewhere in this codebase for local storage reads).
+    const existingPromoCode = await db().promoCode.findUnique({ where: { id: promoCodeMatch[1] } })
+    if (!existingPromoCode) {
+      const error = new Error('Promo code not found.')
+      error.statusCode = 404
+      error.code = 'PROMO_CODE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
     const promoCode = await db().promoCode.update({
       where: { id: promoCodeMatch[1] },
       data: { active: Boolean(body.active) },
+    })
+    await db().adminAuditLog.create({
+      data: { actorUserId: context.user.id, action: 'SR_PROMO_CODE_TOGGLED', entityType: 'promo_codes', entityId: promoCode.id, before: existingPromoCode, after: promoCode },
     })
     return json(res, 200, { ok: true, promoCode })
   }
@@ -787,6 +808,9 @@ export async function handleSrRides(req, res, url, context) {
       const businessAccount = await db().businessAccount.create({
         data: { name, billingContactEmail, adminUserId: adminUser.id },
         include: { admin: { select: { id: true, displayName: true, email: true } } },
+      })
+      await db().adminAuditLog.create({
+        data: { actorUserId: context.user.id, action: 'SR_BUSINESS_ACCOUNT_CREATED', entityType: 'business_accounts', entityId: businessAccount.id, before: null, after: businessAccount },
       })
       return json(res, 201, { ok: true, businessAccount })
     }

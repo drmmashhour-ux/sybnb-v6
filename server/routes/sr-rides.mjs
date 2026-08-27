@@ -649,7 +649,9 @@ export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/admin/sr/promo-codes') {
     if (req.method === 'GET') {
       requireAuth(context, ['ADMIN'])
-      const promoCodes = await db().promoCode.findMany({ orderBy: { createdAt: 'desc' } })
+      // Scale-readiness audit: unbounded findMany. Admin-curated and slow-growing today, but with
+      // no cap at all a real backlog would eventually load every row ever created on one screen.
+      const promoCodes = await db().promoCode.findMany({ orderBy: { createdAt: 'desc' }, take: 200 })
       return json(res, 200, { ok: true, promoCodes })
     }
     if (req.method === 'POST') {
@@ -718,9 +720,11 @@ export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/admin/sr/business-accounts') {
     if (req.method === 'GET') {
       requireAuth(context, ['ADMIN'])
+      // Scale-readiness audit: same unbounded-findMany gap as promo codes above.
       const businessAccounts = await db().businessAccount.findMany({
         include: { admin: { select: { id: true, displayName: true, email: true } } },
         orderBy: { createdAt: 'desc' },
+        take: 200,
       })
       return json(res, 200, { ok: true, businessAccounts })
     }

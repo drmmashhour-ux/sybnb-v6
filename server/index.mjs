@@ -53,6 +53,15 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
   .filter(Boolean)
 // Routes that must stay reachable even while gates.publicAccess is closed -- see the check below.
 const PUBLIC_ACCESS_EXEMPT_PREFIXES = ['/api/auth', '/api/otp', '/api/webhooks', '/api/legal']
+// A security audit found the payment webhook intake routes live under /api/payments/, not
+// /api/webhooks/ -- so they were NOT actually covered by the prefix list above, despite this
+// file's own comment claiming durable webhook intake stays reachable "the same way payment
+// webhooks" do. If gates.publicAccess is ever closed in production, a real Stripe delivery
+// (payment success/failure/refund) would have hit a 503 instead of being processed, silently
+// desyncing local state from what the provider believes happened. Exact paths, not a prefix --
+// unlike the webhook routes, sibling paths under /api/payments/ (e.g. seller-plan-proof,
+// local-wallet-proof) are real money-adjacent actions that must stay gated.
+const PUBLIC_ACCESS_EXEMPT_PATHS = new Set(['/api/payments/webhook', '/api/payments/stripe/webhook'])
 
 const server = createServer(async (req, res) => {
   const url = publicUrl(req)
@@ -98,7 +107,12 @@ const server = createServer(async (req, res) => {
     // are never dropped (the same durable-intake reasoning already applied to payment webhooks);
     // legal text is informational, not product access. Everything else refuses while closed,
     // unless the caller is already authenticated as ADMIN.
-    if (!isPublicAccessOpen() && !isAccessGateBypassed(context) && !PUBLIC_ACCESS_EXEMPT_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+    if (
+      !isPublicAccessOpen() &&
+      !isAccessGateBypassed(context) &&
+      !PUBLIC_ACCESS_EXEMPT_PREFIXES.some((prefix) => url.pathname.startsWith(prefix)) &&
+      !PUBLIC_ACCESS_EXEMPT_PATHS.has(url.pathname)
+    ) {
       return json(res, 503, {
         ok: false,
         code: 'PUBLIC_ACCESS_CLOSED',

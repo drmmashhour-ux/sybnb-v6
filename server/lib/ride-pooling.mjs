@@ -35,12 +35,20 @@ export function applyShareDiscount(fareMinor) {
 // unbounded -- a driver could previously claim any number of unrelated active rides at once with
 // nothing stopping them; a genuine, if narrow, correctness gap surfaced while building this
 // capsule and closed here rather than left as-is.
-export async function assertPoolClaimEligible(driverId, candidateRide) {
+//
+// Returns { pairedWithRideId } -- null when this claim doesn't pool with anything (the driver had
+// no other active ride), or the other ride's id when it genuinely does. An independent revenue
+// audit found the discount was previously applied unconditionally at ride-REQUEST time from the
+// rider's own client-supplied `shareable` flag, with nothing ever verifying a ride was actually
+// pooled -- a rider could always opt in for a guaranteed 15% off regardless of whether pooling
+// ever happened. The caller (the claim route) now applies applyShareDiscount() only when this
+// returns a real pairedWithRideId, never at request time.
+export async function poolClaimEligibility(driverId, candidateRide) {
   const driverActiveRides = await db().rideRequest.findMany({
     where: { driverId, status: { in: ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'] } },
   })
 
-  if (driverActiveRides.length === 0) return
+  if (driverActiveRides.length === 0) return { pairedWithRideId: null }
 
   if (!candidateRide.shareable || driverActiveRides.some((ride) => !ride.shareable)) {
     const error = new Error('You already have an active ride and cannot claim another right now.')
@@ -76,4 +84,6 @@ export async function assertPoolClaimEligible(driverId, candidateRide) {
     error.expose = true
     throw error
   }
+
+  return { pairedWithRideId: otherRide.id }
 }

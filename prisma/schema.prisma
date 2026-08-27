@@ -1034,6 +1034,12 @@ model RideRequest {
   discountMinor   Int?       @map("discount_minor")
   businessAccountId String?  @map("business_account_id")
   shareable       Boolean    @default(false)
+  // Set only once a shareable ride is genuinely pooled with another (both claimed by the same
+  // driver, pickups within POOL_MAX_DISTANCE_KM -- see server/lib/ride-pooling.mjs). No formal
+  // relation on purpose (a plain self-referential id is enough; nothing needs to traverse it via
+  // Prisma include). The pooling discount is applied to fareMinor only when this gets set, not at
+  // ride-request time -- see the claim route's own comment for why.
+  pairedRideId    String?    @map("paired_ride_id")
   currency        String     @default("SYP")
   pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
   dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")

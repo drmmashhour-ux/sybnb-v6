@@ -45,6 +45,7 @@ export HOST="${HOST:-480b860e-f32f-4089-a34b-5bbeec33952f}"
 export GUEST="${GUEST:-e14887c6-6fff-4cab-bcea-62e1b976ea61}"
 export SENDER="$SELLER1" RECIPIENT="$BUYER" OTHER="$SELLER2"
 export DRIVER_ID="${DRIVER_ID:-$(psql -d sybnb_v6 -tAc "SELECT u.id FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role='DRIVER' AND u.status='ACTIVE' LIMIT 1;" 2>/dev/null | tr -d '[:space:]')}"
+export GUEST2="${GUEST2:-ec554c79-c1e4-451a-b65c-206486a5a491}"
 
 # Payment-policy env: every gate the milestone-2 authorizePaymentOperation() chain needs (see
 # server/lib/payment-policy.mjs), plus the two rail-level flags that predate it. None of this existed
@@ -161,6 +162,7 @@ run_full "sell"             sell.e2e.mjs             reset
 run_full "advertising"      advertising-payment-tunnel.e2e.mjs reset
 run_full "search-filters"   listing-search-filters.e2e.mjs
 run_full "sr-ride"          sr-ride.e2e.mjs
+run_full "sr-ride-pooling"  sr-ride-pooling-discount.e2e.mjs
 
 kill "$API_PID" 2>/dev/null
 sleep 1

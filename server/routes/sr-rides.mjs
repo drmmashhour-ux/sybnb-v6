@@ -17,7 +17,7 @@ import {
   validateActivePromoCode,
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
-import { applyShareDiscount, assertPoolClaimEligible } from '../lib/ride-pooling.mjs'
+import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -118,11 +118,16 @@ export async function handleSrRides(req, res, url, context) {
       discountMinor = computeDiscountMinor(promo, quote.fareMinor)
     }
 
-    // Ride-pooling: a flat opt-in discount, applied after any promo code (sequential, not stacked
-    // business logic invented here -- promo first, then the pooling discount on what's left).
+    // Ride-pooling: an independent revenue audit found the flat discount was previously applied
+    // right here, unconditionally, from the rider's own client-supplied `shareable` flag -- meaning
+    // any rider could always opt in for a guaranteed 15% off regardless of whether a driver ever
+    // actually pooled the ride with anyone (confirmed live: a shareable ride claimed as a driver's
+    // only active ride, never paired, still billed at the discounted fare). `shareable` still
+    // records the rider's opt-in (it's what makes THEIR ride eligible to be pooled, and what a
+    // driver's claim checks against), but the fare itself starts undiscounted; the claim route
+    // below applies applyShareDiscount() only once poolClaimEligibility() confirms a genuine pool.
     const shareable = Boolean(body.shareable)
-    const fareAfterPromo = quote.fareMinor - discountMinor
-    const finalFareMinor = shareable ? applyShareDiscount(fareAfterPromo) : fareAfterPromo
+    const finalFareMinor = quote.fareMinor - discountMinor
 
     const rideData = {
       riderId: context.user.id,
@@ -427,8 +432,10 @@ export async function handleSrRides(req, res, url, context) {
     // pre-existing gap -- nothing previously stopped a driver from claiming any number of
     // unrelated active rides at once; a normal (non-shareable) ride now correctly enforces one
     // active ride per driver, and a shareable ride allows a second only if it's also shareable and
-    // its pickup is genuinely close to the driver's other active ride.
-    await assertPoolClaimEligible(context.user.id, existing)
+    // its pickup is genuinely close to the driver's other active ride. pairedWithRideId is set only
+    // when this claim genuinely pools with the driver's other active ride -- that's the ONLY
+    // trigger for the discount now (see the ride-creation comment above for why).
+    const { pairedWithRideId } = await poolClaimEligibility(context.user.id, existing)
 
     // SR Ride vs. Uber gap-closure (P2 #16): enforced, not decorative -- a rider who marked
     // accessibilityRequired genuinely needs a driver who self-declared their vehicle as capable.
@@ -448,10 +455,35 @@ export async function handleSrRides(req, res, url, context) {
     }
 
     // Optimistic-concurrency guard: the WHERE clause re-checks driverId is still null so two
-    // drivers tapping "accept" on the same pending ride at the same moment can't both win.
-    const claimResult = await db().rideRequest.updateMany({
-      where: { id: claimMatch[1], driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
-      data: { driverId: context.user.id, status: 'DRIVER_ASSIGNED' },
+    // drivers tapping "accept" on the same pending ride at the same moment can't both win. When
+    // this claim genuinely pools (pairedWithRideId set), the discount is applied to BOTH rides'
+    // fareMinor and the pairing recorded on both, in the SAME transaction as the claim itself --
+    // the two rides never end up "half paired" (one linked, fare unchanged on the other) even if
+    // something fails partway. The other ride's update is guarded on pairedRideId: null too: by
+    // construction (poolClaimEligibility caps a driver at 2 active rides) it can never already be
+    // paired with a third ride, but the guard costs nothing and means a violated assumption fails
+    // safe (0 rows updated) instead of silently re-discounting an already-paired ride.
+    const claimResult = await db().$transaction(async (tx) => {
+      const claimed = await tx.rideRequest.updateMany({
+        where: { id: claimMatch[1], driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
+        data: {
+          driverId: context.user.id,
+          status: 'DRIVER_ASSIGNED',
+          ...(pairedWithRideId
+            ? { fareMinor: applyShareDiscount(existing.fareMinor ?? 0), pairedRideId: pairedWithRideId }
+            : {}),
+        },
+      })
+      if (claimed.count === 0) return { count: 0 }
+
+      if (pairedWithRideId) {
+        const otherRide = await tx.rideRequest.findUnique({ where: { id: pairedWithRideId }, select: { fareMinor: true } })
+        await tx.rideRequest.updateMany({
+          where: { id: pairedWithRideId, pairedRideId: null },
+          data: { fareMinor: applyShareDiscount(otherRide?.fareMinor ?? 0), pairedRideId: claimMatch[1] },
+        })
+      }
+      return { count: claimed.count }
     })
 
     if (claimResult.count === 0) {

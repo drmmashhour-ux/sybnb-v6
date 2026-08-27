@@ -272,7 +272,23 @@ export async function handleBookings(req, res, url, context) {
       throw error
     }
 
-    return json(res, 200, { ok: true, booking })
+    // A security audit found this leaked the guest's raw idDocumentRef (an internal storage key)
+    // to the booking's HOST too (isBookingViewable allows both), not just the guest/admin -- the
+    // host has no legitimate need to see the actual key, only whether one exists (BookingDetailPage
+    // .tsx's hasIdDocument = Boolean(booking?.guest?.idDocumentRef) only ever needs a truthy
+    // signal). Not independently exploitable today (no route accepts an arbitrary storage key; the
+    // real document-retrieval routes are scoped to the document owner or require a signature the
+    // host doesn't have), but worth minimizing as real defense in depth -- redact the value, not
+    // the field, so the existing has-a-document UI keeps working. idDocumentSubmittedAt (a plain
+    // date, not a storage key) is left as-is. Only ADMIN/SUPPORT get the real ref, and they read it
+    // via the admin review-queue for that anyway, not this route.
+    const isStaff = context.roles.includes('ADMIN') || context.roles.includes('SUPPORT')
+    const sanitized =
+      isStaff || !booking.guest?.idDocumentRef
+        ? booking
+        : { ...booking, guest: { ...booking.guest, idDocumentRef: 'submitted' } }
+
+    return json(res, 200, { ok: true, booking: sanitized })
   }
 
   if (url.pathname !== '/api/bookings') return false

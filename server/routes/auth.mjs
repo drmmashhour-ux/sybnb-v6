@@ -1,7 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { createSessionToken, hashPassword, hashPhone, hashEmail, verifyPassword } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-import { channelEnabled } from '../lib/country.mjs'
+import { channelEnabled, defaultCurrency } from '../lib/country.mjs'
 
 // DRIVER is intentionally NOT self-registerable: an unvetted self-registered driver could claim
 // live rides and harvest rider pickup/dropoff + identity. Drivers (like ADMIN/SUPPORT) are
@@ -119,7 +119,7 @@ export async function handleAuth(req, res, url) {
             passwordHash,
             displayName: body.displayName || body.email || 'SYBNB User',
             roles: { create: { role } },
-            wallets: { create: { currency: 'SYP' } },
+            wallets: { create: { currency: defaultCurrency() } },
           },
           include: { roles: true },
         })

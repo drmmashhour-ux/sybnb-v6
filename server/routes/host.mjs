@@ -1,7 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { resolveListingCityName } from '../lib/listing-location.mjs'
-import { isCurrencyAllowed } from '../lib/country.mjs'
+import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 import {
   buildPayoutRow,
   createRefundRequest,
@@ -61,7 +61,7 @@ export async function handleHost(req, res, url, context) {
       ok: true,
       earnings: {
         rows,
-        totals: { ...totals, currency: rows[0]?.currency || 'SYP' },
+        totals: { ...totals, currency: rows[0]?.currency || defaultCurrency() },
       },
     })
   }

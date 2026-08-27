@@ -4,14 +4,14 @@ import { giftClaimCode, hashPhone, idempotencyKey, verifyGiftClaimCode } from '.
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { giftReviewThresholdMinor, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
-import { isCurrencyAllowed } from '../lib/country.mjs'
+import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 
 export async function handleWallet(req, res, url, context) {
   if (url.pathname === '/api/wallet') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
     const wallet = await db().wallet.findUnique({
-      where: { userId_currency: { userId: context.user.id, currency: 'SYP' } },
+      where: { userId_currency: { userId: context.user.id, currency: defaultCurrency() } },
       include: { entries: { orderBy: { createdAt: 'desc' }, take: 25 } },
     })
     return json(res, 200, { ok: true, wallet })
@@ -30,7 +30,7 @@ export async function handleWallet(req, res, url, context) {
       throw error
     }
 
-    const currency = body.currency ? String(body.currency).toUpperCase() : 'SYP'
+    const currency = body.currency ? String(body.currency).toUpperCase() : defaultCurrency()
     if (!isCurrencyAllowed(currency)) {
       const error = new Error(`Currency '${currency}' is not supported for this country.`)
       error.statusCode = 400

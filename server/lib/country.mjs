@@ -23,6 +23,14 @@ function validateProfile(p) {
   if (p.currencies && (!Array.isArray(p.currencies.allowed) || p.currencies.allowed.length === 0)) {
     problems.push(`country profile '${p.key}' has no allowed currencies`)
   }
+  if (p.currencies?.allowed?.length) {
+    const allowedUpper = p.currencies.allowed.map((c) => String(c).toUpperCase())
+    if (!p.currencies.default) {
+      problems.push(`country profile '${p.key}' has no default currency`)
+    } else if (!allowedUpper.includes(String(p.currencies.default).toUpperCase())) {
+      problems.push(`country profile '${p.key}' default currency '${p.currencies.default}' is not in its own allowed list`)
+    }
+  }
   return problems
 }
 
@@ -71,6 +79,18 @@ export function isCurrencyAllowed(currency, env = process.env) {
   if (!profile) return false
   const allowed = profile.currencies.allowed.map((c) => String(c).toUpperCase())
   return allowed.includes(String(currency || '').toUpperCase())
+}
+
+// The active country's settlement currency, for routes that need to create or look up a
+// currency-scoped record (a wallet, a fallback price) with no explicit currency supplied. Found by
+// an architecture audit: 9 call sites across server/routes previously hardcoded the literal 'SYP'
+// for exactly this, which would silently break (e.g. a wallet lookup keyed on the wrong currency
+// returning nothing) the moment a second country profile with a different default currency exists.
+// Returns undefined (never a guessed fallback) when no country is loaded — callers should already
+// be unreachable in that case, since the whole server refuses to start without one.
+export function defaultCurrency(env = process.env) {
+  const { profile } = loadCountryProfile(env)
+  return profile?.currencies?.default
 }
 
 // Whether the ACTIVE country enables a communication channel. Defaults to false (fail-closed): a

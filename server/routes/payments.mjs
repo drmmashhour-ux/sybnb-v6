@@ -6,6 +6,7 @@ import { expectedTotalMinor, isProviderRefUniqueViolation } from '../lib/finance
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
+import { defaultCurrency } from '../lib/country.mjs'
 import { log } from '../lib/logger.mjs'
 import { finalizeStripeSession, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
 import { applyPaymentEvent, intakeEvent, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
@@ -631,7 +632,7 @@ export async function handlePayments(req, res, url, context) {
           provider: 'syrian_local_wallet',
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
-          currency: booking?.currency || ride?.currency || body.currency || 'SYP',
+          currency: booking?.currency || ride?.currency || body.currency || defaultCurrency(),
           proofAssetUrl: walletProofAssetUrls[0] || undefined,
           proofAssetUrls: walletProofAssetUrls,
           providerRef,

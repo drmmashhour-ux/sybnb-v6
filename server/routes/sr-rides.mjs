@@ -8,6 +8,7 @@ import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { getDriverLocation, getRideCoords } from '../lib/live-map.mjs'
 import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
+import { defaultCurrency } from '../lib/country.mjs'
 import { activateScheduledRides, MIN_SCHEDULE_LEAD_MS } from '../lib/ride-schedule.mjs'
 import {
   computeDiscountMinor,
@@ -135,7 +136,7 @@ export async function handleSrRides(req, res, url, context) {
       promoCodeId: promo?.id,
       discountMinor: promo ? discountMinor : undefined,
       businessAccountId,
-      currency: body.currency || 'SYP',
+      currency: body.currency || defaultCurrency(),
       metadata: {
         ...(body.metadata || {}),
         pickup,

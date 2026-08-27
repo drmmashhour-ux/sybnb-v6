@@ -3,6 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
+import { defaultCurrency } from '../lib/country.mjs'
 
 export async function handleMe(req, res, url, context) {
   if (url.pathname === '/api/me/id-document') {
@@ -148,7 +149,7 @@ export async function handleMe(req, res, url, context) {
       take: 50,
     }),
     db().wallet.findUnique({
-      where: { userId_currency: { userId: context.user.id, currency: 'SYP' } },
+      where: { userId_currency: { userId: context.user.id, currency: defaultCurrency() } },
       include: { entries: { orderBy: { createdAt: 'desc' }, take: 10 } },
     }),
     db().walletGift.findMany({

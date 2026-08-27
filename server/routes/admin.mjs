@@ -537,8 +537,16 @@ export async function handleAdmin(req, res, url, context) {
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     await completeExpiredBookings()
     await expireStaleWalletGifts()
+    // Scale-readiness audit: 4 of these 5 queues had a `take` cap with no `orderBy` at all --
+    // Postgres gives no guarantee which rows come back once a queue's real backlog exceeds 25, so
+    // admins could see an arbitrary, shuffling subset on every refresh, with some pending items
+    // never surfacing at all while others repeat. Oldest-first (FIFO) is the correct ordering for
+    // a moderation/review queue -- it's what keeps a real backlog from leaving any one item
+    // waiting indefinitely. idDocuments orders by the real submission timestamp
+    // (idDocumentSubmittedAt), not createdAt (account-creation date, unrelated to when the ID was
+    // actually submitted for review).
     const [listings, payments, gifts, bookings, idDocuments] = await Promise.all([
-      db().listing.findMany({ where: { status: 'PENDING_REVIEW' }, take: 25 }),
+      db().listing.findMany({ where: { status: 'PENDING_REVIEW' }, orderBy: { createdAt: 'asc' }, take: 25 }),
       db().paymentProof.findMany({
         where: { status: 'PENDING_ADMIN_REVIEW' },
         include: {
@@ -556,9 +564,10 @@ export async function handleAdmin(req, res, url, context) {
           },
           payer: { select: { id: true, displayName: true, email: true } },
         },
+        orderBy: { createdAt: 'asc' },
         take: 25,
       }),
-      db().walletGift.findMany({ where: { status: { in: ['CLAIM_PENDING', 'LOCKED'] } }, take: 25 }),
+      db().walletGift.findMany({ where: { status: { in: ['CLAIM_PENDING', 'LOCKED'] } }, orderBy: { createdAt: 'asc' }, take: 25 }),
       db().booking.findMany({
         where: { status: { in: ['REQUESTED', 'DISPUTED'] } },
         include: { listing: true },
@@ -568,6 +577,7 @@ export async function handleAdmin(req, res, url, context) {
       db().user.findMany({
         where: { idDocumentStatus: 'PENDING_REVIEW' },
         select: { id: true, displayName: true, email: true, idDocumentMimeType: true, idDocumentSubmittedAt: true },
+        orderBy: { idDocumentSubmittedAt: 'asc' },
         take: 25,
       }),
     ])

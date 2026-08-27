@@ -83,7 +83,7 @@ export async function handleListings(req, res, url, context) {
       // browse uses carBrand/carBody/carFuel/carTransmission/condition — so this is one generic
       // filter, not a per-division search system. 'any'/empty means "no constraint".
       // Single-select attribute filters (Cars: carBrand/…; Buy/Rentals: propertyType).
-      const attributeKeys = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType']
+      const attributeKeys = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType', 'marketCategory']
       const attributeConditions = []
       for (const key of attributeKeys) {
         const value = url.searchParams.get(key)
@@ -125,7 +125,20 @@ export async function handleListings(req, res, url, context) {
       if (priceMin !== undefined && priceMin > 0) priceFilter.gte = priceMin
       if (priceMax !== undefined && priceMax > 0) priceFilter.lte = priceMax
 
-      const listings = await db().listing.findMany({
+      // A real bug caught by an independent re-audit: the advertising submission flow
+      // (SellerListingWizard.tsx) writes an ad purchase as a real listing row tagged
+      // metadata.advertising=true (currently always division='MARKETPLACE') so it can reuse the
+      // existing listing-review/admin-approval pipeline -- but that meant an approved ad was
+      // indistinguishable from a genuine product in real buyer-facing search results (confirmed
+      // live: 62 approved ad rows appearing as real marketplace items). Ads are never meant to be
+      // browsable inventory, so they're excluded below regardless of division. This can't be
+      // expressed as a Prisma `where` JSON-path condition: `NOT: { metadata: { path: [...],
+      // equals: true } }` hits SQL's NULL-trap (`NOT (NULL = true)` is NULL, not TRUE) and would
+      // wrongly exclude every listing that has never touched the advertising flow at all --
+      // confirmed live (a first attempt silently zeroed out all 424 real MARKETPLACE listings).
+      // Filtering in JS after a generously buffered fetch is the correct, simple fix.
+      const RESULT_LIMIT = 50
+      const candidates = await db().listing.findMany({
         where: {
           status: 'APPROVED',
           division,
@@ -135,8 +148,9 @@ export async function handleListings(req, res, url, context) {
         },
         include: { location: true, media: true },
         orderBy: { createdAt: 'desc' },
-        take: 50,
+        take: RESULT_LIMIT + 200,
       })
+      const listings = candidates.filter((l) => l.metadata?.advertising !== true).slice(0, RESULT_LIMIT)
       return json(res, 200, { ok: true, listings: listings.map(toPublicListing) })
     }
 

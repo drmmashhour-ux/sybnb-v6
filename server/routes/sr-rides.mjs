@@ -84,6 +84,25 @@ export async function handleSrRides(req, res, url, context) {
       scheduledFor = parsed
     }
 
+    // SR Ride vs. Uber gap-closure: an optional "bill to my company" flag. Real membership check,
+    // never a client-supplied businessAccountId -- a rider can only attribute a ride to a company
+    // they're an actual, currently-active member of.
+    let businessAccountId
+    if (body.billToBusinessAccount) {
+      const membership = await db().businessAccountMember.findFirst({
+        where: { userId: context.user.id, businessAccount: { active: true } },
+        select: { businessAccountId: true },
+      })
+      if (!membership) {
+        const error = new Error('You are not a member of an active business account.')
+        error.statusCode = 403
+        error.code = 'BUSINESS_ACCOUNT_NOT_MEMBER'
+        error.expose = true
+        throw error
+      }
+      businessAccountId = membership.businessAccountId
+    }
+
     // SR Ride vs. Uber gap-closure (P2 #12): an optional promo code, applied against the ride's
     // own already-computed fareMinor -- never a client-supplied discount. Validated read-only
     // first (codes aren't concurrently created/modified by the requesting rider, so no race there);
@@ -108,6 +127,7 @@ export async function handleSrRides(req, res, url, context) {
       fareMinor: finalFareMinor,
       promoCodeId: promo?.id,
       discountMinor: promo ? discountMinor : undefined,
+      businessAccountId,
       currency: body.currency || 'SYP',
       metadata: {
         ...(body.metadata || {}),
@@ -663,6 +683,51 @@ export async function handleSrRides(req, res, url, context) {
       data: { active: Boolean(body.active) },
     })
     return json(res, 200, { ok: true, promoCode })
+  }
+
+  // SR Ride vs. Uber gap-closure: platform-admin onboarding of a business/corporate account. The
+  // designated admin must already be a real, existing user (found by email) -- SYBNB onboards the
+  // company, the company's own admin then manages their own members via /api/business/*.
+  if (url.pathname === '/api/admin/sr/business-accounts') {
+    if (req.method === 'GET') {
+      requireAuth(context, ['ADMIN'])
+      const businessAccounts = await db().businessAccount.findMany({
+        include: { admin: { select: { id: true, displayName: true, email: true } } },
+        orderBy: { createdAt: 'desc' },
+      })
+      return json(res, 200, { ok: true, businessAccounts })
+    }
+    if (req.method === 'POST') {
+      requireAuth(context, ['ADMIN'])
+      const body = await readJson(req)
+      const name = String(body.name || '').trim()
+      const billingContactEmail = String(body.billingContactEmail || '').trim().toLowerCase()
+      const adminEmail = String(body.adminEmail || '').trim().toLowerCase()
+
+      if (!name || !billingContactEmail || !adminEmail) {
+        const error = new Error('A company name, billing contact email, and admin email are required.')
+        error.statusCode = 400
+        error.code = 'BUSINESS_ACCOUNT_CREATE_INVALID'
+        error.expose = true
+        throw error
+      }
+
+      const adminUser = await db().user.findUnique({ where: { email: adminEmail } })
+      if (!adminUser) {
+        const error = new Error('No account exists with the admin email. That person must sign up first.')
+        error.statusCode = 404
+        error.code = 'BUSINESS_ACCOUNT_ADMIN_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+
+      const businessAccount = await db().businessAccount.create({
+        data: { name, billingContactEmail, adminUserId: adminUser.id },
+        include: { admin: { select: { id: true, displayName: true, email: true } } },
+      })
+      return json(res, 201, { ok: true, businessAccount })
+    }
+    return methodNotAllowed(res, ['GET', 'POST'])
   }
 
   return false

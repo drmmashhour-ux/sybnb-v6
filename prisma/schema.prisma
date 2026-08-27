@@ -167,6 +167,8 @@ model User {
   savedPlaces       SavedPlace[]
   promoRedemptions  PromoRedemption[]
   pushSubscriptions PushSubscription[]
+  businessAccountMemberships BusinessAccountMember[]
+  adminOfBusinessAccounts    BusinessAccount[]        @relation("BusinessAccountAdmin")
   refundsRequested             Refund[]        @relation("RefundRequestedBy")
   refundAttemptsLegacyAccepted RefundAttempt[] @relation("RefundAttemptLegacyAcceptedBy")
 
@@ -993,6 +995,7 @@ model RideRequest {
   accessibilityRequired Boolean @default(false) @map("accessibility_required")
   promoCodeId     String?    @map("promo_code_id")
   discountMinor   Int?       @map("discount_minor")
+  businessAccountId String?  @map("business_account_id")
   currency        String     @default("SYP")
   pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
   dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")
@@ -1009,6 +1012,7 @@ model RideRequest {
   stops          RideStop[]
   promoCode      PromoCode?      @relation(fields: [promoCodeId], references: [id])
   promoRedemption PromoRedemption?
+  businessAccount BusinessAccount? @relation(fields: [businessAccountId], references: [id])
 
   @@index([status, requestedAt])
   @@index([driverId, status])
@@ -1128,6 +1132,38 @@ model PushSubscription {
 
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+// SR Ride vs. Uber gap-closure: business/corporate accounts. MVP scope -- a company entity with a
+// designated admin (an existing real user; authorized purely by adminUserId === the caller, no new
+// auth role needed), members who are existing riders, and ride attribution. Billing still goes
+// through the existing per-ride manual-proof rail; this does not invent new money-movement logic.
+model BusinessAccount {
+  id                  String   @id @default(uuid())
+  name                String
+  billingContactEmail String   @map("billing_contact_email")
+  adminUserId         String   @map("admin_user_id")
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  admin   User                     @relation("BusinessAccountAdmin", fields: [adminUserId], references: [id])
+  members BusinessAccountMember[]
+  rides   RideRequest[]
+
+  @@map("business_accounts")
+}
+
+model BusinessAccountMember {
+  id                String   @id @default(uuid())
+  businessAccountId String   @map("business_account_id")
+  userId            String   @map("user_id")
+  addedAt           DateTime @default(now()) @map("added_at")
+
+  businessAccount BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessAccountId, userId])
+  @@map("business_account_members")
 }
 
 model AdminAuditLog {

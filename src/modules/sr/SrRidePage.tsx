@@ -8,6 +8,7 @@ import {
   createSavedPlace,
   deleteSavedPlace,
   enablePushNotifications,
+  fetchBusinessMembership,
   fetchPrototypeSrRide,
   fetchPrototypeSrRideThread,
   fetchSavedPlaces,
@@ -106,6 +107,8 @@ const copy = {
     enableNotifications: 'تفعيل الإشعارات',
     enablingNotifications: 'جار التفعيل...',
     notificationsEnabled: 'الإشعارات مفعّلة',
+    billToBusiness: 'احتساب الرحلة على حساب {company}',
+    billedToBusiness: 'محتسبة على حساب الشركة',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
     rateSubmitting: 'جار الإرسال',
@@ -186,6 +189,8 @@ const copy = {
     enableNotifications: 'Enable notifications',
     enablingNotifications: 'Enabling...',
     notificationsEnabled: 'Notifications enabled',
+    billToBusiness: 'Bill this ride to {company}',
+    billedToBusiness: 'Billed to your company account',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
     rateSubmitting: 'Submitting',
@@ -243,6 +248,8 @@ export function SrRidePage({ lang }: Props) {
   const [stops, setStops] = useState<string[]>([])
   const [promoCode, setPromoCode] = useState('')
   const [pushStatus, setPushStatus] = useState<'idle' | 'enabling' | 'enabled' | 'error'>('idle')
+  const [businessAccountName, setBusinessAccountName] = useState<string | null>(null)
+  const [billToBusinessAccount, setBillToBusinessAccount] = useState(false)
   const [savedPlaces, setSavedPlaces] = useState<PlatformSavedPlace[]>([])
   const [newPlaceLabel, setNewPlaceLabel] = useState('')
   const [savingPlace, setSavingPlace] = useState(false)
@@ -270,6 +277,9 @@ export function SrRidePage({ lang }: Props) {
 
   useEffect(() => {
     fetchSavedPlaces().then(setSavedPlaces).catch(() => setSavedPlaces([]))
+    fetchBusinessMembership()
+      .then((result) => setBusinessAccountName(result.isMember ? result.businessAccountName : null))
+      .catch(() => setBusinessAccountName(null))
   }, [])
 
   async function saveCurrentPickupAsPlace() {
@@ -429,6 +439,7 @@ export function SrRidePage({ lang }: Props) {
         accessibilityRequired,
         stops: stops.map((stop) => stop.trim()).filter(Boolean),
         promoCode: promoCode.trim() || undefined,
+        billToBusinessAccount: businessAccountName ? billToBusinessAccount : undefined,
       })
       setRide(nextRide)
       setStatus('idle')
@@ -747,6 +758,17 @@ export function SrRidePage({ lang }: Props) {
             />
           )}
 
+          {!ride && businessAccountName && (
+            <label style={styles.scheduleRow}>
+              <input
+                type="checkbox"
+                checked={billToBusinessAccount}
+                onChange={(event) => setBillToBusinessAccount(event.target.checked)}
+              />
+              {t.billToBusiness.replace('{company}', businessAccountName)}
+            </label>
+          )}
+
           <button
             disabled={status === 'saving' || (scheduleForLater && !scheduledFor)}
             style={styles.primaryButton}
@@ -778,6 +800,7 @@ export function SrRidePage({ lang }: Props) {
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
           <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : isAr ? 'يدوي' : 'manual'} />
           {ride?.accessibilityRequired && <div style={styles.message}>♿ {t.accessibilityRequired}</div>}
+          {ride?.businessAccountId && <div style={styles.message}>🏢 {t.billedToBusiness}</div>}
 
           {ride && MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status) && (
             <div style={styles.card}>

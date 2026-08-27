@@ -91,6 +91,7 @@ export type PlatformRideRequest = {
   accessibilityRequired: boolean
   stops: Array<{ address: string; lat: number | null; lng: number | null }>
   discountMinor: number | null
+  businessAccountId: string | null
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string
@@ -1111,6 +1112,7 @@ export async function createPrototypeSrRide(input: {
   accessibilityRequired?: boolean
   stops?: string[]
   promoCode?: string
+  billToBusinessAccount?: boolean
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -1127,6 +1129,7 @@ export async function createPrototypeSrRide(input: {
       accessibilityRequired: input.accessibilityRequired,
       stops: input.stops,
       promoCode: input.promoCode,
+      billToBusinessAccount: input.billToBusinessAccount,
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',
@@ -1293,6 +1296,87 @@ export async function setPromoCodeActive(promoCodeId: string, active: boolean) {
     body: { active },
   })
   return response.promoCode
+}
+
+// SR Ride vs. Uber gap-closure: business/corporate accounts.
+export type PlatformBusinessAccount = {
+  id: string
+  name: string
+  billingContactEmail: string
+  adminUserId: string
+  active: boolean
+  createdAt: string
+  admin?: { id: string; displayName: string; email: string | null }
+}
+
+export type PlatformBusinessAccountMember = {
+  id: string
+  businessAccountId: string
+  userId: string
+  addedAt: string
+  user: { id: string; displayName: string; email: string | null }
+}
+
+export async function fetchBusinessAccounts() {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; businessAccounts: PlatformBusinessAccount[] }>('/api/admin/sr/business-accounts', {
+    token: session.token,
+  })
+  return response.businessAccounts
+}
+
+export async function createBusinessAccount(input: { name: string; billingContactEmail: string; adminEmail: string }) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await apiRequest<{ ok: true; businessAccount: PlatformBusinessAccount }>('/api/admin/sr/business-accounts', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return response.businessAccount
+}
+
+export async function fetchBusinessMembership() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; isMember: boolean; businessAccountName: string | null }>(
+    '/api/business/membership',
+    { token: session.token },
+  )
+  return response
+}
+
+export async function fetchMyBusinessAccount() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; account: PlatformBusinessAccount; members: PlatformBusinessAccountMember[] }>(
+    '/api/business/account',
+    { token: session.token },
+  )
+  return response
+}
+
+export async function addBusinessMember(email: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; member: PlatformBusinessAccountMember }>('/api/business/members', {
+    method: 'POST',
+    token: session.token,
+    body: { email },
+  })
+  return response.member
+}
+
+export async function removeBusinessMember(userId: string) {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/business/members/${userId}`, {
+    method: 'DELETE',
+    token: session.token,
+  })
+}
+
+export async function fetchBusinessUsage() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; rides: PlatformRideRequest[]; totalMinor: number }>('/api/business/usage', {
+    token: session.token,
+  })
+  return response
 }
 
 // SR Ride vs. Uber gap-closure (P1 #7): standard Web Push -- no third-party push-provider account.

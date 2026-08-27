@@ -15,6 +15,7 @@ import { handleListings } from './routes/listings.mjs'
 import { handleMe } from './routes/me.mjs'
 import { handleMessages } from './routes/messages.mjs'
 import { handlePush } from './routes/push.mjs'
+import { handleBusiness } from './routes/business.mjs'
 import { handleOtp } from './routes/otp.mjs'
 import { handleStorage } from './routes/storage.mjs'
 import { handleLegal } from './routes/legal.mjs'
@@ -115,6 +116,7 @@ async function dispatch(req, res, url, context) {
     handleReviews,
     handleMessages,
     handlePush,
+    handleBusiness,
   ]) {
     const handled = await handler(req, res, url, context)
     if (handled !== false) return handled

@@ -35,6 +35,8 @@ const SellerDivisionRoutes = lazyNamed(() => import('../modules/seller'), 'Selle
 const SrRidePage = lazyNamed(() => import('../modules/sr/SrRidePage'), 'SrRidePage')
 const SharedRidePage = lazyNamed(() => import('../modules/sr/SharedRidePage'), 'SharedRidePage')
 const AdminPromoCodesPage = lazyNamed(() => import('../modules/sr/AdminPromoCodesPage'), 'AdminPromoCodesPage')
+const AdminBusinessAccountsPage = lazyNamed(() => import('../modules/sr/AdminBusinessAccountsPage'), 'AdminBusinessAccountsPage')
+const BusinessAccountPage = lazyNamed(() => import('../modules/sr/BusinessAccountPage'), 'BusinessAccountPage')
 const StaffAccessPage = lazyNamed(() => import('../modules/account/StaffAccessPage'), 'StaffAccessPage')
 const SyrianLocalWalletPaymentPage = lazyNamed(
   () => import('../modules/payments/SyrianLocalWalletPaymentPage'),
@@ -105,8 +107,8 @@ export function App() {
   // talks to the server.
   const giftClaimRoute = path === '/wallet/gift/claim' || /^\/wallet\/gift\/claim\/[^/]+$/.test(path)
     || path === '/wallet/gift/code' || /^\/wallet\/gift\/code\/[^/]+$/.test(path)
-  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
-  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch ? 'generic' : 'stays'
+  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
+  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch ? 'generic' : 'stays'
   const hasGuestSession = typeof window !== 'undefined' && Boolean(sessionStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
@@ -154,6 +156,10 @@ export function App() {
           <ImmocontactPage lang={lang} />
         ) : path === '/admin/sr/promo-codes' ? (
           <AdminPromoCodesPage lang={lang} />
+        ) : path === '/admin/sr/business-accounts' ? (
+          <AdminBusinessAccountsPage lang={lang} />
+        ) : path === '/business/account' ? (
+          <BusinessAccountPage lang={lang} />
         ) : path === '/admin/review' ? (
           <AdminReviewPage lang={lang} />
         ) : path === '/ai-brain' ? (

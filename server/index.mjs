@@ -5,6 +5,7 @@ import { getAuthContext } from './lib/auth-context.mjs'
 import { isRateLimited } from './lib/rateLimit.mjs'
 import { loadEnv, validateEnv } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
+import { pruneExpiredOtps } from './lib/otp-retention.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
 import { log, logRequest, newRequestId } from './lib/logger.mjs'
 import { handleAdmin } from './routes/admin.mjs'
@@ -34,6 +35,20 @@ const envProblems = validateEnv()
 if (envProblems.length) {
   log.error('env_validation_failed', { problems: envProblems })
   process.exit(1)
+}
+
+// Scale-readiness follow-up (docs/launch/SCALE_READINESS_1M.md #1 blocker): a bare DATABASE_URL
+// leaves Prisma's pool uncapped (CPUs*2+1) with no upper bound and no pooler in front of Postgres --
+// fine on one small replica today, a hard ceiling the moment there's more than one. A WARNING, not
+// a boot-blocking validateEnv() failure: production is deployed right now without this set, and
+// failing closed here would take down the currently-working service on its next deploy rather than
+// degrade gracefully like the rest of this file's design. Fix is an env change on the connection
+// string itself (?connection_limit=N&pool_timeout=20), not a code change -- Prisma reads it
+// natively -- so this only logs, it never blocks startup.
+if (process.env.NODE_ENV === 'production' && !/[?&]connection_limit=/.test(process.env.DATABASE_URL || '')) {
+  log.error('scale_warning_no_connection_limit', {
+    message: 'DATABASE_URL has no connection_limit set — Prisma pool is uncapped. Add ?connection_limit=N&pool_timeout=20 to DATABASE_URL before running more than one replica.',
+  })
 }
 
 // Port: honor an explicit API_PORT, else the host-injected PORT (Render/Cloud Run/etc.), else dev default.
@@ -265,6 +280,26 @@ server.maxHeadersCount = 100
 server.listen(PORT, HOST, () => {
   log.info('server_listening', { host: HOST, port: PORT, env: process.env.NODE_ENV || 'development' })
 })
+
+// Scale-readiness follow-up: this job existed as a standalone script (scripts/prune-expired-otps.mjs)
+// but was never actually scheduled anywhere -- verification_codes grew unbounded. This codebase has
+// no separate worker/cron infrastructure, so an in-process interval is the pragmatic fix for the
+// current single-replica deployment (not correct once there are multiple replicas -- each would
+// prune independently, which is harmless here since the delete is idempotent by date, just
+// redundant work; a real cron/queue is the fix if that ever matters). Runs once on boot, then on
+// the configured interval.
+const OTP_PRUNE_INTERVAL_MS = Number(process.env.OTP_PRUNE_INTERVAL_HOURS || 24) * 3600 * 1000
+async function runOtpPrune() {
+  try {
+    const result = await pruneExpiredOtps()
+    log.info('otp_prune_ran', result)
+  } catch (error) {
+    log.error('otp_prune_failed', { error: error instanceof Error ? error.message : String(error) })
+  }
+}
+void runOtpPrune()
+const otpPruneTimer = setInterval(runOtpPrune, OTP_PRUNE_INTERVAL_MS)
+otpPruneTimer.unref() // never keep the process alive on its own (tests/scripts that import this file)
 
 let shuttingDown = false
 for (const signal of ['SIGINT', 'SIGTERM']) {

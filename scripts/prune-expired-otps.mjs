@@ -4,20 +4,20 @@
 // inside the retention window. Requires DATABASE_URL. Prints a JSON summary (no PII).
 //
 //   DATABASE_URL=... node scripts/prune-expired-otps.mjs
-import { PrismaClient } from '@prisma/client'
+//
+// Also runs automatically inside the API process every OTP_PRUNE_INTERVAL_HOURS (default 24) --
+// see server/index.mjs -- so this script is a manual/cron-triggered escape hatch, not the only
+// way this job runs. Shares its deletion logic with that in-process scheduler via
+// server/lib/otp-retention.mjs so both paths do exactly the same thing.
+import { pruneExpiredOtps } from '../server/lib/otp-retention.mjs'
+import { disconnectDb } from '../server/lib/prisma.mjs'
 
-const RETAIN_HOURS = Number(process.env.OTP_RETAIN_HOURS || 24)
-const cutoff = new Date(Date.now() - RETAIN_HOURS * 3600 * 1000)
-
-const prisma = new PrismaClient()
 try {
-  const { count } = await prisma.verificationCode.deleteMany({
-    where: { expiresAt: { lt: cutoff } },
-  })
-  console.log(JSON.stringify({ ok: true, job: 'prune-expired-otps', retainHours: RETAIN_HOURS, deleted: count }))
+  const result = await pruneExpiredOtps()
+  console.log(JSON.stringify({ ok: true, job: 'prune-expired-otps', ...result }))
 } catch (error) {
   console.error(JSON.stringify({ ok: false, job: 'prune-expired-otps', error: error instanceof Error ? error.message : String(error) }))
   process.exitCode = 1
 } finally {
-  await prisma.$disconnect()
+  await disconnectDb()
 }

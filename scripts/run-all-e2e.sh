@@ -191,5 +191,19 @@ API_BASE_UNAPPROVED=http://127.0.0.1:3051 API_BASE_APPROVED=http://127.0.0.1:305
   run "payment-stripe-recovery" payment-event-stripe-policy-deferred-recovery.e2e.mjs
 kill "$STRIPE_UNAPPROVED_PID" "$STRIPE_APPROVED_PID" 2>/dev/null
 
+if [ -z "$PAYMENT_ONLY" ]; then
+  echo "== production-mode server (gates.publicAccess enforcement only activates in production) =="
+  NODE_ENV=production API_HOST=127.0.0.1 API_PORT=3053 SYBNB_COUNTRY=syria \
+    CORS_ORIGIN=https://example.com \
+    EMAIL_PROVIDER=resend RESEND_API_KEY=test_key EMAIL_FROM=test@example.com \
+    STORAGE_PROVIDER=s3 STORAGE_S3_BUCKET=test-bucket STORAGE_S3_REGION=us-east-1 \
+    RESEND_WEBHOOK_SECRET="${RESEND_WEBHOOK_SECRET:-whsec_dGVzdC13ZWJob29rLXNlY3JldA==}" \
+    node server/index.mjs > /tmp/sybnb-e2e-api-production-closed.log 2>&1 &
+  PRODUCTION_CLOSED_PID=$!
+  sleep 3
+  API_BASE_CLOSED=http://127.0.0.1:3053 run "public-access-gate" public-access-gate.e2e.mjs
+  kill "$PRODUCTION_CLOSED_PID" 2>/dev/null
+fi
+
 echo "== suites with failures: $fails =="
 exit "$fails"

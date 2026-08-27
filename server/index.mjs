@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { API_ENDPOINTS, PLATFORM_SECURITY_RULES } from './contracts.mjs'
+import { isAccessGateBypassed, isPublicAccessOpen } from './lib/access-gate.mjs'
 import { getAuthContext } from './lib/auth-context.mjs'
 import { loadEnv, validateEnv } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
@@ -50,6 +51,8 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean)
+// Routes that must stay reachable even while gates.publicAccess is closed -- see the check below.
+const PUBLIC_ACCESS_EXEMPT_PREFIXES = ['/api/auth', '/api/otp', '/api/webhooks', '/api/legal']
 
 const server = createServer(async (req, res) => {
   const url = publicUrl(req)
@@ -89,6 +92,20 @@ const server = createServer(async (req, res) => {
     }
 
     const context = await getAuthContext(req)
+
+    // gates.publicAccess backstop. Auth/OTP must stay reachable so an admin (or anyone finishing
+    // pre-launch setup) can actually sign in; webhooks must stay reachable so provider deliveries
+    // are never dropped (the same durable-intake reasoning already applied to payment webhooks);
+    // legal text is informational, not product access. Everything else refuses while closed,
+    // unless the caller is already authenticated as ADMIN.
+    if (!isPublicAccessOpen() && !isAccessGateBypassed(context) && !PUBLIC_ACCESS_EXEMPT_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+      return json(res, 503, {
+        ok: false,
+        code: 'PUBLIC_ACCESS_CLOSED',
+        message: 'SYBNB is not yet open to the public.',
+      })
+    }
+
     const handled = await dispatch(req, res, url, context)
     if (handled === false) return notFound(res)
   } catch (error) {

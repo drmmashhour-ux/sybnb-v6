@@ -52,6 +52,7 @@
     "test:e2e:payment-webhook-default-deny": "node tests/e2e/payment-webhook-default-deny.e2e.mjs",
     "test:e2e:payment-stripe-policy-deferred-recovery": "node tests/e2e/payment-event-stripe-policy-deferred-recovery.e2e.mjs",
     "test:e2e:payment-policy-stripe-approval-guard": "node tests/e2e/payment-policy-stripe-approval-guard.e2e.mjs",
+    "test:e2e:public-access-gate": "node tests/e2e/public-access-gate.e2e.mjs",
     "test:e2e:all": "bash scripts/run-all-e2e.sh",
     "test:e2e:payment-regression": "PAYMENT_ONLY=1 bash scripts/run-all-e2e.sh"
   },

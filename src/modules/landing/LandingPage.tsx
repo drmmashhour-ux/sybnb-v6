@@ -73,14 +73,6 @@ const ABOUT_COPY = {
   },
 }
 
-const AD_SPONSORS = [
-  { image: DIVISION_PHOTOS.stays, ar: 'إقامة مميزة في دمشق', en: 'Featured stay in Damascus' },
-  { image: DIVISION_PHOTOS.cars, ar: 'عروض سيارات موثوقة', en: 'Trusted car offers' },
-  { image: DIVISION_PHOTOS.marketplace, ar: 'متاجر وخدمات محلية', en: 'Local shops and services' },
-  { image: DIVISION_PHOTOS['new-construction'], ar: 'مشاريع عقارية جديدة', en: 'New property projects' },
-  { image: DIVISION_PHOTOS.ride, ar: 'سير SR جاهز للتنقل', en: 'SR rides ready to move' },
-]
-
 export function LandingPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const about = ABOUT_COPY[lang]
@@ -91,28 +83,12 @@ export function LandingPage({ lang }: Props) {
 
   return (
     <main className="landing-page">
-      <section className="landing-ad-marquee" aria-label={isAr ? 'إعلانات متحركة' : 'Moving advertising banner'}>
-        <div className="ad-marquee-heading">
-          <span>{isAr ? 'إعلانات مميزة' : 'Featured ads'}</span>
-          <button
-            type="button"
-            onClick={() => {
-              window.localStorage.setItem('sybnb_v6_sell_flow', 'advertising')
-              navigate('/sell/account')
-            }}
-          >
-            {isAr ? 'احجز إعلانك' : 'Book your ad'}
-          </button>
-        </div>
-        <div className="ad-marquee-track" aria-hidden="true">
-          {[...AD_SPONSORS, ...AD_SPONSORS].map((item, index) => (
-            <article className="ad-marquee-card" key={`${item.en}-${index}`}>
-              <img src={item.image} alt="" />
-              <strong>{isAr ? item.ar : item.en}</strong>
-            </article>
-          ))}
-        </div>
-      </section>
+      {/* A real bug caught by an independent re-audit: this used to be a "Featured ads" marquee
+          of hardcoded division-generic cards with no real advertiser/listing behind any of them,
+          right next to a live "Book your ad" CTA that implied visitors could buy into one of
+          these exact slots. Removed rather than left as fabricated sponsor content --
+          `landing-ad-banner` below is the real, honest equivalent: same "book advertising" CTA,
+          no fake sponsor cards. CAPSULE_RULES.noFakeTrustSignal. */}
 
       <section className="landing-hero">
         <div className="landing-hero-copy">

@@ -58,7 +58,11 @@ check('GET with no signature -> 403', noSig.status === 403, String(noSig.status)
 
 console.log('\n=== 6. DELETION ===')
 await deleteObject('kyc', put.key)
-await expectThrow('deleted object no longer retrievable', () => getObjectBytes('kyc', put.key), 'ENOENT') // fs read throws ENOENT-coded
+// getObjectBytes now catches the raw ENOENT and re-throws a clean, expose:true 404
+// (STORAGE_OBJECT_NOT_FOUND) instead of letting the filesystem error code leak through --
+// an independent admin-experience audit found this surfaced as an opaque 500 to every real
+// caller (e.g. the admin ID-document viewer) before this fix.
+await expectThrow('deleted object no longer retrievable', () => getObjectBytes('kyc', put.key), 'STORAGE_OBJECT_NOT_FOUND')
 
 console.log('\n=== 7. PRODUCTION PROVIDER FAILS CLOSED WHEN UNCONFIGURED ===')
 const prior = process.env.STORAGE_PROVIDER

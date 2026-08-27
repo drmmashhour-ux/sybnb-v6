@@ -156,8 +156,15 @@ export function listingDescriptionText(
     // `description` column is Arabic-primary, so without this EN readers would see Arabic body text.
     const enDesc = (listing.metadata as { descriptionEn?: unknown } | null | undefined)?.descriptionEn
     if (typeof enDesc === 'string' && enDesc.trim()) return enDesc
-    // Otherwise use the stored description only if it isn't Arabic; else the localized division default.
-    if (listing.description && !hasArabic(listing.description)) return listing.description
+    // A real bug caught by an independent re-audit: this used to collapse straight to the generic
+    // per-division boilerplate whenever the seller's real description was Arabic (true for
+    // essentially every listing), so every English-side listing in a division showed the exact
+    // same sentence with zero listing-specific information. No translation pipeline exists here
+    // to invent a real English sentence, and fabricating one would be worse than showing nothing
+    // -- so, mirroring listingTitleText()'s own precedent, show the seller's real description
+    // as-is rather than a generic placeholder; only fall back to the division default when there's
+    // truly no description text at all.
+    if (listing.description?.trim()) return listing.description
     return divisionDescriptions[listing.division]?.[lang] || ''
   }
   if (listing.description && hasArabic(listing.description)) return listing.description

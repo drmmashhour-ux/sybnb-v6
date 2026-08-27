@@ -449,7 +449,11 @@ export function visualFilterGroupsForDivision(division: SearchDivision): VisualF
 }
 
 function carVisualFilterGroups() {
-  return visualFilterGroupsById(['sort', 'priceBand', 'carBody', 'carBrand', 'carFuel', 'carTransmission', 'condition', 'trust']).map((group) => {
+  // No 'trust' group: none of its options (Verified host / Rating 8+ / Fast response / Family
+  // friendly / Instant booking / Featured host) have any real backing data for a car listing --
+  // they were copy-pasted STAYS trust filters (see CARS_MARKETPLACE audit) and none of them reach
+  // the backend filter (server/routes/listings.mjs's attributeKeys). CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['sort', 'priceBand', 'carBody', 'carBrand', 'carFuel', 'carTransmission', 'condition']).map((group) => {
     if (group.id === 'priceBand') {
       return {
         ...group,
@@ -472,7 +476,12 @@ function carVisualFilterGroups() {
 }
 
 function newConstructionVisualFilterGroups() {
-  return visualFilterGroupsById(['sort', 'priceBand', 'propertyType', 'amenities', 'views', 'access', 'trust', 'payments']).map((group) => {
+  // No 'trust'/'payments': NEW_CONSTRUCTION, like CARS/MARKETPLACE/RENTALS/BUY, has no in-app
+  // transactional payment mechanism at all (routes through the lightweight inquiry API, never a
+  // paid booking -- see server/routes/listings.mjs), and 'trust' has no real per-project backing
+  // data either. Same reasoning as SR Ride's/RENTALS-BUY's payments-group removal.
+  // CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['sort', 'priceBand', 'propertyType', 'amenities', 'views', 'access']).map((group) => {
     if (group.id === 'priceBand') {
       return {
         ...group,
@@ -514,7 +523,13 @@ function newConstructionVisualFilterGroups() {
 }
 
 function marketplaceVisualFilterGroups() {
-  return visualFilterGroupsById(['sort', 'priceBand', 'marketCategory', 'condition', 'payments']).map((group) => {
+  // No 'payments' group: MARKETPLACE has no in-app transactional payment mechanism (same
+  // reasoning as CARS/NEW_CONSTRUCTION/RENTALS/BUY above). 'marketCategory' is intentionally kept
+  // even though it doesn't reach the backend yet either -- unlike 'payments'/'trust', it's a real,
+  // buildable feature (the primary way to browse a marketplace) with an existing group definition,
+  // just missing seller-side data capture + a backend filter; flagged separately rather than
+  // removed, since removing it would delete a real expected capability, not decorative filler.
+  return visualFilterGroupsById(['sort', 'priceBand', 'marketCategory', 'condition']).map((group) => {
     if (group.id === 'priceBand') {
       return {
         ...group,

@@ -166,12 +166,28 @@ export type PlatformIdDocumentReview = {
   idDocumentStatus?: string | null
 }
 
+// The real backlog size per category, independent of the (currently 100-item) cap on the arrays
+// below. Added server-side (e59ab6f) specifically so a genuine backlog surge would be visible
+// instead of silently capped -- an admin-satisfaction audit found this never reached the UI, so
+// the review page had no way to show "showing 100 of 319" and just looked like the backlog was
+// however many rows happened to fit under the cap. Optional (not every fetchPrototypeReviewQueue
+// caller populates it -- see that function's own comment) rather than a separate parallel type,
+// so every existing PlatformReviewQueue consumer keeps working unchanged.
+export type PlatformReviewQueueTotals = {
+  listings: number
+  payments: number
+  gifts: number
+  bookings: number
+  idDocuments: number
+}
+
 export type PlatformReviewQueue = {
   listings: PlatformListing[]
   payments: PlatformPaymentProof[]
   gifts: PlatformWalletGift[]
   bookings: PlatformReviewBooking[]
   idDocuments: PlatformIdDocumentReview[]
+  queueTotals?: PlatformReviewQueueTotals
 }
 
 export type PlatformAdminAuditLog = {
@@ -984,10 +1000,13 @@ export async function reviewPrototypePaymentProof(
 }
 
 export async function fetchPrototypeReviewQueue() {
-  const response = await runAdminRequest((token) => apiRequest<{ ok: true; queue: PlatformReviewQueue }>('/api/admin/review-queue', {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true; queue: PlatformReviewQueue; queueTotals: PlatformReviewQueueTotals }>('/api/admin/review-queue', {
     token,
   }))
-  return response.queue
+  // queueTotals is attached alongside the existing per-category arrays (not a breaking change to
+  // this function's return shape) -- every existing caller (OperationsCalendarPage, GiftAdminAudit,
+  // FinanceReconciliationPage) keeps working unchanged; only AdminReviewPage reads the new field.
+  return { ...response.queue, queueTotals: response.queueTotals }
 }
 
 export async function fetchPrototypeAdminAuditLog(

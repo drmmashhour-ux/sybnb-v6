@@ -933,6 +933,13 @@ function ShortRentAdminCommandDashboard({
         )}
         {activeCommandView === 'hosts' && (
           <div style={commandStyles.managementList}>
+            {queue?.queueTotals && queue.queueTotals.listings > listings.length && (
+              <div style={commandStyles.backlogNotice}>
+                {isAr
+                  ? `عرض ${listings.length} من أصل ${queue.queueTotals.listings} عقارًا في الانتظار. ضيّق بحثك لإيجاد الباقي.`
+                  : `Showing ${listings.length} of ${queue.queueTotals.listings} pending listings. Narrow your search to find the rest.`}
+              </div>
+            )}
             {(listings.length ? listings : []).length === 0 ? (
               <AdminEmptyLine text={isAr ? 'ÙØ§ ØªÙØ¬Ø¯ Ø¹ÙØ§Ø±Ø§Øª ÙÙ ÙØ§Ø¦ÙØ© Ø§ÙØ¥Ø¯Ø§Ø±Ø© Ø§ÙØ­Ø§ÙÙØ©.' : 'No stays are in the current admin inventory.'} />
             ) : listings.map((listing) => (
@@ -966,6 +973,13 @@ function ShortRentAdminCommandDashboard({
             <strong style={{ display: 'block', margin: '18px 0 8px' }}>
               {isAr ? 'ÙØ±Ø§Ø¬Ø¹Ø© Ø¥Ø«Ø¨Ø§Øª Ø§ÙÙÙÙØ©' : 'ID document review'}
             </strong>
+            {queue?.queueTotals && queue.queueTotals.idDocuments > (queue.idDocuments?.length || 0) && (
+              <div style={commandStyles.backlogNotice}>
+                {isAr
+                  ? `عرض ${queue.idDocuments?.length || 0} من أصل ${queue.queueTotals.idDocuments} مستند هوية في الانتظار.`
+                  : `Showing ${queue.idDocuments?.length || 0} of ${queue.queueTotals.idDocuments} pending ID documents.`}
+              </div>
+            )}
             {!queue?.idDocuments?.length ? (
               <AdminEmptyLine text={isAr ? 'ÙØ§ ØªÙØ¬Ø¯ ÙØ³ØªÙØ¯Ø§Øª ÙÙÙØ© Ø¨Ø§ÙØªØ¸Ø§Ø± Ø§ÙÙØ±Ø§Ø¬Ø¹Ø©.' : 'No ID documents are waiting for review.'} />
             ) : queue.idDocuments.map((doc) => (
@@ -1771,6 +1785,7 @@ const commandStyles: Record<string, CSSProperties> = {
   commandNotice: { background: 'rgba(32,210,155,.12)', border: '1px solid rgba(32,210,155,.35)', borderRadius: 999, color: '#20d29b', fontSize: 12, fontWeight: 900, padding: '6px 10px' },
   outboxPanel: { background: 'rgba(82,104,255,.08)', border: '1px solid rgba(82,104,255,.35)', borderRadius: 8, color: '#d9deea', display: 'grid', gap: 8, padding: 12 },
   payoutState: { border: '1px solid rgba(230,184,13,.45)', borderRadius: 999, color: '#e6b80d', fontSize: 12, fontWeight: 950, justifySelf: 'start', padding: '6px 10px' },
+  backlogNotice: { background: 'rgba(230,184,13,.1)', border: '1px solid rgba(230,184,13,.35)', borderRadius: 8, color: '#e6b80d', fontSize: 13, fontWeight: 800, padding: '8px 12px' },
   managementList: { display: 'grid', gap: 10 },
   sectionHeadRow: { display: 'grid', gap: 4, color: '#f7f7fb', padding: '4px 2px' },
   managementRow: { alignItems: 'center', background: '#0d0e14', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, color: '#f7f7fb', display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', minHeight: 62, padding: 12, textAlign: 'start' },

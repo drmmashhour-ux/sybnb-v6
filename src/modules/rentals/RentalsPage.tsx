@@ -4,21 +4,27 @@ import type { Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
-import { fetchApprovedListings, sendListingInquiryMessage, type PlatformListing } from '../../shared/api/platformApi'
+import { fetchApprovedListings, getStoredGuestSession, sendListingInquiryMessage, uploadPaymentProofFile, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
-import { PaymentCapsule } from '../payments/PaymentCapsule'
 
 type Props = {
   lang: Lang
   mode?: 'rentals' | 'buy'
 }
 
+// A real bug caught by an independent re-audit: this used to capture only the File object's
+// `name` -- no bytes were ever uploaded, despite the UI presenting a real upload control and the
+// outbound message telling the guest (only after the fact, buried in text they never saw) to send
+// the actual files separately over WhatsApp/email. Now uses the same real
+// uploadPaymentProofFile() path the seller side already had wired up.
+type UploadedDocument = { name: string; url: string }
+
 type RentalRequest = {
   id: string
   listingId: string
   listingTitle: string
-  documents: string[]
+  documents: UploadedDocument[]
   createdAt: string
   status: 'SENT_TO_IMMOCONTACT'
 }
@@ -112,6 +118,13 @@ const copy = {
     docsHint: 'ارفع الهوية، إثبات العمل أو الدخل، وأي ملف يدعم طلب الإيجار الشهري. PDF / PNG / JPG.',
     docsUpload: 'رفع المستندات',
     docsReady: 'مستندات مرفوعة',
+    uploading: 'جارٍ رفع الملفات...',
+    uploadFailed: 'تعذر رفع الملف',
+    requestStatusTitle: 'حالة الطلب',
+    stepAccountOpened: 'فتح الحساب',
+    stepDocumentsUploaded: 'رفع المستندات',
+    stepSentToImmoContact: 'إرسال الطلب إلى IMMOContact',
+    referenceLabel: 'رقم المرجع',
     agreementTitle: 'اتفاقية طلب الإيجار الشهري',
     agreementCopy: 'أوافق أن بياناتي صحيحة، وأن التواصل والعقد والمستندات تتم عبر SYBNB و IMMOContact، وأن أي نزاع أو تغيير في الشروط يراجع عبر المنصة قبل أي اتفاق خارجي.',
     send: 'إرسال طلب التواصل',
@@ -182,6 +195,13 @@ const copy = {
     docsHint: 'Upload ID, work or income proof, and any file supporting the monthly rental request. PDF / PNG / JPG.',
     docsUpload: 'Upload documents',
     docsReady: 'Documents uploaded',
+    uploading: 'Uploading files...',
+    uploadFailed: 'Could not upload file',
+    requestStatusTitle: 'Request status',
+    stepAccountOpened: 'Account opened',
+    stepDocumentsUploaded: 'Documents uploaded',
+    stepSentToImmoContact: 'Sent to IMMOContact',
+    referenceLabel: 'Reference',
     agreementTitle: 'Monthly Rental Request Agreement',
     agreementCopy: 'I agree my details are accurate, and that contact, contract, and documents remain inside SYBNB and IMMOContact. Any dispute or term change must be reviewed through the platform before any outside agreement.',
     send: 'Send contact request',
@@ -272,7 +292,9 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const isAr = lang === 'ar'
   const [listings, setListings] = useState<PlatformListing[]>([])
   const [selectedId, setSelectedId] = useState('')
-  const [documents, setDocuments] = useState<string[]>([])
+  const [documents, setDocuments] = useState<UploadedDocument[]>([])
+  const [uploadingCount, setUploadingCount] = useState(0)
+  const [uploadError, setUploadError] = useState('')
   const [acceptedAgreement, setAcceptedAgreement] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
@@ -286,16 +308,21 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [selectedCity, setSelectedCity] = useState('damascus-city')
   const [selectedStreet, setSelectedStreet] = useState('old-city')
   const [selectedDate, setSelectedDate] = useState('')
+  // A real bug caught by an independent re-audit: amenities/trust used to default to
+  // pre-checked ('wifi','parking','verifiedHost') even though none of these reach the backend
+  // for RENTALS/BUY (only propertyType and numeric price/bedrooms/bathrooms are ever forwarded --
+  // see server/routes/listings.mjs) -- so a first-time visitor saw active-looking filter
+  // checkmarks that silently did nothing. Default to unselected, same as `access`, until the
+  // filtering these groups imply is actually wired up server-side.
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>({
     sort: 'newest',
     priceBand: 'any',
     propertyType: 'any',
     roomType: 'any',
     bedType: 'any',
-    amenities: ['wifi', 'parking'],
+    amenities: [],
     access: [],
-    trust: ['verifiedHost'],
-    payments: ['shamCash'],
+    trust: [],
   })
   const hasGuestAccount = typeof window !== 'undefined' && Boolean(sessionStorage.getItem(GUEST_TOKEN_KEY))
   const activeFilterLabels = useMemo(
@@ -407,10 +434,23 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setVisualFilters((current) => ({ ...current, propertyType: value }))
   }
 
-  function uploadDocuments(files: FileList | null) {
-    const names = Array.from(files || []).map((file) => file.name)
-    if (!names.length) return
-    setDocuments((current) => [...current, ...names])
+  async function uploadDocuments(files: FileList | null) {
+    const fileList = Array.from(files || [])
+    if (!fileList.length) return
+    setUploadError('')
+    setUploadingCount(fileList.length)
+    try {
+      const session = getStoredGuestSession()
+      if (!session) throw new Error(t.required)
+      const uploaded = await Promise.all(
+        fileList.map(async (file) => ({ name: file.name, url: await uploadPaymentProofFile(file, session.token) })),
+      )
+      setDocuments((current) => [...current, ...uploaded])
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : t.required)
+    } finally {
+      setUploadingCount(0)
+    }
   }
 
   async function sendRequest() {
@@ -423,17 +463,20 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setSendState('saving')
     setMessage('')
 
-    // Honest wording: only the file NAMES are captured here (no file storage is wired to this form
-    // yet) — the guest must actually send the files via WhatsApp/email, same as the ID-document flow.
+    // Documents are now real, already-uploaded files (see uploadDocuments above) -- their URLs are
+    // included directly, not a "send it separately" instruction the guest never saw.
+    const docLines = documents.map((doc) => `${doc.name}: ${doc.url}`).join(isAr ? '، ' : ', ')
     const introBody = isAr
-      ? `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nالمستندات المذكورة (أرسل الملفات فعلياً عبر واتساب/إيميل الدعم): ${documents.join('، ')}`
-      : `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nDocuments named (send the actual files via WhatsApp/support email): ${documents.join(', ')}`
+      ? `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nالمستندات المرفوعة: ${docLines}`
+      : `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nUploaded documents: ${docLines}`
 
     try {
-      await sendListingInquiryMessage(selectedListing.id, introBody)
+      // Use the real persisted message id as the reference -- not a client-fabricated
+      // "RENTAL-CAPSULE-<timestamp>" code implying a tracked transaction that doesn't exist.
+      const sentMessage = await sendListingInquiryMessage(selectedListing.id, introBody)
 
       const request: RentalRequest = {
-        id: `${isBuyMode ? 'BUY' : 'MR'}-${Date.now().toString(36).toUpperCase()}`,
+        id: sentMessage.id,
         listingId: selectedListing.id,
         listingTitle: listingTitleText(selectedListing, lang),
         documents,
@@ -656,15 +699,23 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 </ol>
               </section>
 
-              <PaymentCapsule
-                lang={lang}
-                methodLabel="SYBNB / IMMOContact"
-                amountLabel={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)}
-                destinationCode={isBuyMode ? 'BUYER-CAPSULE' : 'RENTAL-CAPSULE'}
-                followCode={sentRequest?.id || 'WAITING'}
-                proofCount={documents.length}
-                status={sentRequest ? 'admin' : documents.length ? 'proof' : hasGuestAccount ? 'ready' : 'locked'}
-              />
+              {/* A real bug caught by an independent re-audit: this used to be a <PaymentCapsule>
+                  reused verbatim from the real-money STAYS wallet-payment flow -- a hardcoded
+                  literal as the "payment code," the renter/buyer's ID documents relabeled
+                  "payment proofs," and a status machine implying progress toward "Payment
+                  confirmed" for a division that structurally has no in-app payment mechanism at
+                  all (RENTALS/BUY are commission/contact-based, see server/routes/listings.mjs).
+                  Replaced with an honest status list reflecting only what's actually true.
+                  CAPSULE_RULES.noFakeTrustSignal. */}
+              <section style={styles.detailPanel}>
+                <strong>{t.requestStatusTitle}</strong>
+                <ol style={styles.detailSteps}>
+                  <li>{hasGuestAccount ? '✓ ' : '○ '}{t.stepAccountOpened}</li>
+                  <li>{documents.length ? '✓ ' : '○ '}{t.stepDocumentsUploaded}{documents.length ? ` (${documents.length})` : ''}</li>
+                  <li>{sentRequest ? '✓ ' : '○ '}{t.stepSentToImmoContact}</li>
+                </ol>
+                {sentRequest ? <small>{t.referenceLabel}: {sentRequest.id}</small> : null}
+              </section>
             </>
           ) : <p style={styles.empty}>{t.noSelection}</p>}
 
@@ -681,19 +732,21 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 <strong>{t.docsTitle}</strong>
                 <p>{t.docsHint}</p>
                 <label style={styles.uploadBox}>
-                  {t.docsUpload}
+                  {uploadingCount ? t.uploading : t.docsUpload}
                   <input
                     type="file"
                     accept=".pdf,.png,.jpg,.jpeg"
                     multiple
+                    disabled={uploadingCount > 0}
                     style={styles.fileInput}
-                    onChange={(event) => uploadDocuments(event.target.files)}
+                    onChange={(event) => void uploadDocuments(event.target.files)}
                   />
                 </label>
+                {uploadError ? <p style={styles.empty} role="alert">{t.uploadFailed}: {uploadError}</p> : null}
                 {documents.length ? (
                   <div style={styles.docList}>
                     <span>{documents.length} {t.docsReady}</span>
-                    {documents.slice(0, 6).map((name) => <small key={name}>{name}</small>)}
+                    {documents.slice(0, 6).map((doc) => <small key={doc.url}>{doc.name}</small>)}
                   </div>
                 ) : null}
               </section>

@@ -545,7 +545,10 @@ export function sellerCarFilterGroupsFromConfig() {
 }
 
 export function renterPropertyFilterGroupsFromConfig() {
-  return visualFilterGroupsById(['popular', 'sort', 'priceBand', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'trust', 'payments'])
+  // No 'payments' group: RENTALS/BUY are commission/contact-based with no in-app payment
+  // collection at all (no booking, no checkout, no quote) -- same reasoning as SR Ride below.
+  // CAPSULE_RULES.noFakeTrustSignal.
+  return visualFilterGroupsById(['popular', 'sort', 'priceBand', 'propertyType', 'roomType', 'bedType', 'hotelStars', 'meals', 'amenities', 'views', 'access', 'trust'])
 }
 
 export function hostInventoryFilterGroupsFromConfig() {

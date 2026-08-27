@@ -6,6 +6,26 @@ import { sendPushNotification } from '../lib/push-notifications.mjs'
 
 const MESSAGING_ELIGIBLE_BOOKING_STATUSES = ['CONFIRMED', 'COMPLETED', 'DISPUTED']
 
+// Scale-readiness audit: thread detail was `orderBy: asc, take: 200` with no pagination, so once a
+// thread (e.g. a long DISPUTED-booking negotiation) passed 200 messages, everything sent after that
+// point became permanently invisible to both sides. Fetch the newest page instead (desc + reverse),
+// and expose `hasMore` + a `before` cursor so the client can page further back on demand.
+const THREAD_MESSAGE_PAGE_SIZE = 200
+
+async function fetchThreadMessagePage(threadId, beforeId) {
+  const rows = await db().message.findMany({
+    where: { threadId },
+    include: { sender: { select: { id: true, displayName: true } } },
+    orderBy: { createdAt: 'desc' },
+    take: THREAD_MESSAGE_PAGE_SIZE + 1,
+    ...(beforeId ? { cursor: { id: beforeId }, skip: 1 } : {}),
+  })
+
+  const hasMore = rows.length > THREAD_MESSAGE_PAGE_SIZE
+  const messages = rows.slice(0, THREAD_MESSAGE_PAGE_SIZE).reverse()
+  return { messages, hasMore }
+}
+
 // SR Ride vs. Uber gap-closure (P0 #4): a rider and driver only have anything to coordinate once
 // a driver actually exists (never REQUESTED/MATCHING) up through a short window after the trip
 // ends (mirrors Uber's own in-app chat window, e.g. reporting a lost item) -- not CANCELLED,
@@ -186,14 +206,10 @@ export async function handleMessages(req, res, url, context) {
       throw error
     }
 
-    const messages = await db().message.findMany({
-      where: { threadId: thread.id },
-      include: { sender: { select: { id: true, displayName: true } } },
-      orderBy: { createdAt: 'asc' },
-      take: 200,
-    })
+    const before = url.searchParams.get('before') || undefined
+    const { messages, hasMore } = await fetchThreadMessagePage(thread.id, before)
 
-    return json(res, 200, { ok: true, thread: { id: thread.id, listingId: listing.id, guestId, messages } })
+    return json(res, 200, { ok: true, thread: { id: thread.id, listingId: listing.id, guestId, messages, hasMore } })
   }
 
   const listingSendMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/thread\/messages$/)
@@ -299,14 +315,10 @@ export async function handleMessages(req, res, url, context) {
 
     const booking = await loadBookingForThread(threadMatch[1], context)
     const thread = await ensureThread(booking.id)
-    const messages = await db().message.findMany({
-      where: { threadId: thread.id },
-      include: { sender: { select: { id: true, displayName: true } } },
-      orderBy: { createdAt: 'asc' },
-      take: 200,
-    })
+    const before = url.searchParams.get('before') || undefined
+    const { messages, hasMore } = await fetchThreadMessagePage(thread.id, before)
 
-    return json(res, 200, { ok: true, thread: { id: thread.id, bookingId: booking.id, messages } })
+    return json(res, 200, { ok: true, thread: { id: thread.id, bookingId: booking.id, messages, hasMore } })
   }
 
   const sendMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/thread\/messages$/)
@@ -355,14 +367,10 @@ export async function handleMessages(req, res, url, context) {
 
     const ride = await loadRideForThread(rideThreadMatch[1], context)
     const thread = await ensureRideThread(ride.id)
-    const messages = await db().message.findMany({
-      where: { threadId: thread.id },
-      include: { sender: { select: { id: true, displayName: true } } },
-      orderBy: { createdAt: 'asc' },
-      take: 200,
-    })
+    const before = url.searchParams.get('before') || undefined
+    const { messages, hasMore } = await fetchThreadMessagePage(thread.id, before)
 
-    return json(res, 200, { ok: true, thread: { id: thread.id, rideId: ride.id, messages } })
+    return json(res, 200, { ok: true, thread: { id: thread.id, rideId: ride.id, messages, hasMore } })
   }
 
   const rideSendMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/thread\/messages$/)

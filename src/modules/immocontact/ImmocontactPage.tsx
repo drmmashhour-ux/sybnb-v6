@@ -91,6 +91,8 @@ const copy = {
     send: 'إرسال',
     sending: 'جار الإرسال...',
     sendError: 'تعذر إرسال الرسالة.',
+    loadEarlier: 'تحميل رسائل أقدم',
+    loadingEarlier: 'جار التحميل...',
   },
   en: {
     back: 'Back to landing',
@@ -139,6 +141,8 @@ const copy = {
     send: 'Send',
     sending: 'Sending...',
     sendError: 'Could not send the message.',
+    loadEarlier: 'Load earlier messages',
+    loadingEarlier: 'Loading...',
   },
 }
 
@@ -154,6 +158,8 @@ export function ImmocontactPage({ lang }: Props) {
   const [activeThreadId, setActiveThreadId] = useState('')
   const [threadMessages, setThreadMessages] = useState<PlatformMessage[]>([])
   const [messagesStatus, setMessagesStatus] = useState<'idle' | 'loading' | 'locked' | 'error'>('idle')
+  const [hasMoreMessages, setHasMoreMessages] = useState(false)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [messageInput, setMessageInput] = useState('')
   const [sendStatus, setSendStatus] = useState<'idle' | 'sending' | 'error'>('idle')
 
@@ -240,11 +246,13 @@ export function ImmocontactPage({ lang }: Props) {
     if (!activeThread || (activeThread.type !== 'booking' && activeThread.type !== 'inquiry')) {
       setThreadMessages([])
       setMessagesStatus('idle')
+      setHasMoreMessages(false)
       return
     }
     if (activeThread.type === 'booking' && activeThread.rawStatus && !MESSAGING_ELIGIBLE_BOOKING_STATUSES.includes(activeThread.rawStatus)) {
       setThreadMessages([])
       setMessagesStatus('locked')
+      setHasMoreMessages(false)
       return
     }
 
@@ -258,6 +266,7 @@ export function ImmocontactPage({ lang }: Props) {
       .then((thread) => {
         if (!cancelled) {
           setThreadMessages(thread.messages)
+          setHasMoreMessages(thread.hasMore)
           setMessagesStatus('idle')
         }
       })
@@ -268,6 +277,22 @@ export function ImmocontactPage({ lang }: Props) {
       cancelled = true
     }
   }, [activeThread?.id, activeThread?.type, activeThread?.rawStatus, activeThread?.listingId, isStaff])
+
+  async function loadEarlierMessages() {
+    if (!activeThread || (activeThread.type !== 'booking' && activeThread.type !== 'inquiry') || !threadMessages.length) return
+    setLoadingEarlier(true)
+    try {
+      const oldestId = threadMessages[0].id
+      const thread =
+        activeThread.type === 'inquiry' && activeThread.listingId
+          ? await fetchListingInquiryThread(activeThread.listingId, oldestId)
+          : await fetchBookingThread(activeThread.id, isStaff, oldestId)
+      setThreadMessages((current) => [...thread.messages, ...current])
+      setHasMoreMessages(thread.hasMore)
+    } finally {
+      setLoadingEarlier(false)
+    }
+  }
 
   async function sendMessage() {
     if (!activeThread || (activeThread.type !== 'booking' && activeThread.type !== 'inquiry') || !messageInput.trim()) return
@@ -396,13 +421,20 @@ export function ImmocontactPage({ lang }: Props) {
                 ) : threadMessages.length === 0 ? (
                   <p className="immo-empty">{t.noMessagesYet}</p>
                 ) : (
-                  threadMessages.map((msg) => (
+                  <>
+                  {hasMoreMessages && (
+                    <button className="immo-load-earlier" disabled={loadingEarlier} onClick={() => void loadEarlierMessages()}>
+                      {loadingEarlier ? t.loadingEarlier : t.loadEarlier}
+                    </button>
+                  )}
+                  {threadMessages.map((msg) => (
                     <MessageBubble
                       key={msg.id}
                       align={msg.senderRole === 'GUEST' ? 'user' : 'admin'}
                       text={`${msg.sender?.displayName || msg.senderRole}: ${msg.body}`}
                     />
-                  ))
+                  ))}
+                  </>
                 )}
               </div>
               {(activeThread.type === 'booking' || activeThread.type === 'inquiry') && messagesStatus === 'idle' && (

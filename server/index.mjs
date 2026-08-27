@@ -143,10 +143,19 @@ const server = createServer(async (req, res) => {
       !PUBLIC_ACCESS_EXEMPT_PREFIXES.some((prefix) => url.pathname.startsWith(prefix)) &&
       !PUBLIC_ACCESS_EXEMPT_PATHS.has(url.pathname)
     ) {
+      // A satisfaction audit found this used a flat {ok,code,message} shape instead of this
+      // codebase's actual established error convention ({ok,error:{code,message}} -- see
+      // responses.mjs's notFound/methodNotAllowed/handleRouteError, which every other error path
+      // in this API follows). The frontend's apiRequest() only ever reads payload.error?.message,
+      // so this real, well-worded message was silently discarded and replaced with a generic
+      // "request failed" fallback -- the bug survived because this file's own e2e suite asserted
+      // the same wrong flat shape it implemented, never the shape the real frontend consumes.
       return json(res, 503, {
         ok: false,
-        code: 'PUBLIC_ACCESS_CLOSED',
-        message: 'SYBNB is not yet open to the public.',
+        error: {
+          code: 'PUBLIC_ACCESS_CLOSED',
+          message: 'SYBNB is not yet open to the public.',
+        },
       })
     }
 
@@ -158,8 +167,10 @@ const server = createServer(async (req, res) => {
       if (await isRateLimited(`admin-action:${context.user.id}`, ADMIN_ACTION_RATE_WINDOW_MS, ADMIN_ACTION_RATE_MAX)) {
         return json(res, 429, {
           ok: false,
-          code: 'ADMIN_ACTION_RATE_LIMITED',
-          message: 'Too many admin actions in a short window. Wait a moment before continuing.',
+          error: {
+            code: 'ADMIN_ACTION_RATE_LIMITED',
+            message: 'Too many admin actions in a short window. Wait a moment before continuing.',
+          },
         })
       }
     }

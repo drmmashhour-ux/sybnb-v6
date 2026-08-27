@@ -57,7 +57,11 @@ async function run() {
     const res = await fetch(`${CLOSED_API}/api/listings?division=STAYS`)
     const body = await res.json().catch(() => ({}))
     check('unauthenticated listings -> 503', res.status === 503, `got ${res.status}`)
-    check('body carries PUBLIC_ACCESS_CLOSED', body.code === 'PUBLIC_ACCESS_CLOSED', JSON.stringify(body))
+    // Nested under error.code, matching this codebase's real error convention (responses.mjs) --
+    // an admin-satisfaction audit found this suite and the route it tests had both been written
+    // against the same wrong flat shape, so this assertion never actually proved what the real
+    // frontend consumer (apiRequest(), which only reads payload.error?.message) needed proven.
+    check('body carries PUBLIC_ACCESS_CLOSED', body.error?.code === 'PUBLIC_ACCESS_CLOSED', JSON.stringify(body))
   }
 
   console.log('== 2. closed server: exempt routes stay reachable (not gate-blocked) ==')
@@ -97,7 +101,7 @@ async function run() {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
     })
     const paymentIntentWebhookBody = await paymentIntentWebhook.json().catch(() => ({}))
-    check('payments/webhook (payment_intent rail) reaches its own handler, not the gate', paymentIntentWebhookBody.error?.code !== 'PUBLIC_ACCESS_CLOSED' && paymentIntentWebhookBody.code !== 'PUBLIC_ACCESS_CLOSED', JSON.stringify(paymentIntentWebhookBody))
+    check('payments/webhook (payment_intent rail) reaches its own handler, not the gate', paymentIntentWebhookBody.error?.code !== 'PUBLIC_ACCESS_CLOSED', JSON.stringify(paymentIntentWebhookBody))
 
     const stripeWebhook = await fetch(`${CLOSED_API}/api/payments/stripe/webhook`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
@@ -109,7 +113,7 @@ async function run() {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
     })
     const sellerPlanProofBody = await sellerPlanProof.json().catch(() => ({}))
-    check('a sibling /api/payments/ route (real payment action) is still gated, not over-exempted', sellerPlanProof.status === 503 && sellerPlanProofBody.code === 'PUBLIC_ACCESS_CLOSED', `got ${sellerPlanProof.status} ${JSON.stringify(sellerPlanProofBody)}`)
+    check('a sibling /api/payments/ route (real payment action) is still gated, not over-exempted', sellerPlanProof.status === 503 && sellerPlanProofBody.error?.code === 'PUBLIC_ACCESS_CLOSED', `got ${sellerPlanProof.status} ${JSON.stringify(sellerPlanProofBody)}`)
   }
 
   console.log('== 3. bypass is ADMIN-only, checked against real DB roles ==')

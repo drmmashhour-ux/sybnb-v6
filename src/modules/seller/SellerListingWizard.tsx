@@ -27,15 +27,6 @@ const DIVISION_OPTIONS: Array<{ value: ListingDivision; ar: string; en: string }
   { value: 'NEW_CONSTRUCTION', ar: 'مشروع جديد', en: 'New project' },
 ]
 
-const DIVISION_MEDIA: Record<ListingDivision, string> = {
-  STAYS: '/assets/divisions/daily-rental.webp',
-  RENTALS: '/assets/divisions/monthly-rental.webp',
-  BUY: '/assets/divisions/buy-property.webp',
-  CARS: '/assets/divisions/cars.webp',
-  MARKETPLACE: '/assets/divisions/marketplace.webp',
-  NEW_CONSTRUCTION: '/assets/divisions/new-construction.webp',
-}
-
 type WizardDraft = {
   division: ListingDivision
   selectedType: string
@@ -190,6 +181,15 @@ export function SellerListingWizard({ lang }: Props) {
   const [uploadedDocumentFiles, setUploadedDocumentFiles] = useState<string[]>([])
   const [uploadedDocumentUrls, setUploadedDocumentUrls] = useState<string[]>([])
   const [documentUploadError, setDocumentUploadError] = useState('')
+  // A real bug caught by an independent re-audit: the "Photos and files" step told sellers to
+  // upload property photos, and the uploads genuinely reached real storage -- but they landed in
+  // this same flat uploadedDocumentUrls array as ownership proof/authorization/payment proof, and
+  // the actual public listing.media sent to the server was unconditionally the hardcoded
+  // hardcoded per-division stock image (see `next()` below), so every real photo was silently discarded.
+  // Separate photo state + its own upload widget fixes this at the root.
+  const [uploadedPhotoFiles, setUploadedPhotoFiles] = useState<string[]>([])
+  const [uploadedPhotoUrls, setUploadedPhotoUrls] = useState<string[]>([])
+  const [photoUploadError, setPhotoUploadError] = useState('')
   const [adFilesSent, setAdFilesSent] = useState(false)
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>(
     draft.visualFilters || {
@@ -275,9 +275,11 @@ export function SellerListingWizard({ lang }: Props) {
         // Record the agreement acceptance server-side. This — plus an admin-approved ID — is
         // required by /api/listings/:id/submit before the listing can go to review.
         await acceptListingAgreement()
-        // Attach a real, viewable gallery image so buyer browse/detail shows the listing with a
-        // photo (matching the division assets sample listings use).
-        const listingMedia = [{ url: DIVISION_MEDIA[division], kind: 'image', sortOrder: 0 }]
+        // Real seller-uploaded photos only -- no hardcoded per-division stock image forced in.
+        // A listing with zero real photos correctly stays empty; listingImage()/hasRealPhoto() on
+        // the browse and detail pages already handle that honestly (generic tile + a real
+        // "No photos yet" badge), the same pattern already proven for STAYS.
+        const listingMedia = uploadedPhotoUrls.map((url, index) => ({ url, kind: 'image', sortOrder: index }))
         await createAndSubmitPrototypeListing({
           division,
           titleAr: title || 'إعلان SYBNB جديد',
@@ -319,6 +321,26 @@ export function SellerListingWizard({ lang }: Props) {
     }
 
     setStepIndex((current) => Math.min(current + 1, steps.length - 1))
+  }
+
+  async function addListingPhotoFiles(fileList: FileList | null) {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
+
+    setUploadedPhotoFiles((current) => Array.from(new Set([...current, ...files.map((file) => file.name)])))
+    setPhotoUploadError('')
+
+    const session = getStoredSellerSession()
+    if (!session) {
+      setPhotoUploadError(isAr ? 'سجّل الدخول أولاً لرفع الصور.' : 'Sign in first to upload photos.')
+      return
+    }
+    try {
+      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
+      setUploadedPhotoUrls((current) => [...current, ...urls])
+    } catch (error) {
+      setPhotoUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الصورة.' : 'Could not upload the photo.'))
+    }
   }
 
   async function addListingDocumentFiles(fileList: FileList | null) {
@@ -575,7 +597,10 @@ export function SellerListingWizard({ lang }: Props) {
                 {(isAdvertisingFlow
                   ? adFileSlots
                   : [
-                      { id: 'propertyPhotos', ar: 'صور العقار', en: 'Property photos' },
+                      // 'Property photos' used to be a decorative checklist button here (toggled
+                      // local state, uploaded nothing) -- real photo upload now has its own
+                      // PaymentProofUpload widget below, so it's removed from this list rather
+                      // than left as a second, non-functional way to "add" the same thing.
                       { id: 'paymentProof', ar: 'إثبات دفع الخطة', en: 'Plan payment proof' },
                       { id: 'ownershipProof', ar: 'إثبات الملكية', en: 'Ownership proof' },
                       { id: 'authorization', ar: 'أضف التفويض', en: 'Add authorization' },
@@ -618,6 +643,20 @@ export function SellerListingWizard({ lang }: Props) {
                   </button>
                 </div>
               )}
+              {!isAdvertisingFlow && (
+                <>
+                  <PaymentProofUpload
+                    cta={isAr ? 'رفع صور العقار/المركبة/المنتج' : 'Upload property/car/item photos'}
+                    emptyText={isAr ? 'لم يتم رفع صور بعد. تظهر "لا توجد صور بعد" للزوار حتى ترفع صورة حقيقية.' : 'No photos uploaded yet. Visitors see "No photos yet" until a real photo is uploaded.'}
+                    files={uploadedPhotoFiles}
+                    help={isAr ? 'هذه الصور هي ما سيراه الزوار فعلياً في نتائج البحث وصفحة التفاصيل. PNG أو JPG.' : 'These are the actual photos visitors will see in search results and the detail page. PNG or JPG.'}
+                    lang={lang}
+                    onAddFiles={(files) => void addListingPhotoFiles(files)}
+                    title={isAr ? 'صور الإعلان' : 'Listing photos'}
+                  />
+                  {photoUploadError && <p className="seller-note-line" style={{ color: '#ff5f7d' }}>{photoUploadError}</p>}
+                </>
+              )}
               <PaymentProofUpload
                 cta={isAdvertisingFlow ? (isAr ? 'رفع مستندات الإعلان' : 'Upload ad documents') : isAr ? 'رفع مستندات البائع' : 'Upload seller documents'}
                 emptyText={isAr ? 'لم يتم رفع مستندات بعد. ارفع PDF أو PNG أو JPG.' : 'No documents uploaded yet. Upload PDF, PNG, or JPG.'}
@@ -628,8 +667,8 @@ export function SellerListingWizard({ lang }: Props) {
                       ? 'ارفع إثبات الدفع، ملفات الحملة، التفويض، أو صور النشاط حسب الخطة.'
                       : 'Upload payment proof, campaign files, authorization, or business photos based on the plan.'
                     : isAr
-                      ? 'ارفع إثبات الملكية، التفويض، المخططات، صور العقار، أو ملفات السيارة/المشروع.'
-                      : 'Upload ownership proof, authorization, plans, property photos, or car/project files.'
+                      ? 'ارفع إثبات الملكية، التفويض، والمخططات أو ملفات السيارة/المشروع (ليست صور الإعلان — ارفعها أعلاه).'
+                      : 'Upload ownership proof, authorization, and plans or car/project files (not listing photos — upload those above).'
                 }
                 lang={lang}
                 onAddFiles={(files) => void addListingDocumentFiles(files)}

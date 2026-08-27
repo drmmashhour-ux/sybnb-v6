@@ -29,22 +29,17 @@ type RentalRequest = {
   status: 'SENT_TO_IMMOCONTACT'
 }
 
-type SearchPanel = 'governorate' | 'city' | 'street' | 'date' | null
+// A real bug caught by an independent re-audit: this used to include a 'date' search panel
+// ('This week'/'This month'/'3 months'/'Open date') that was purely cosmetic -- the chosen value
+// was shown in the search summary but never sent to fetchApprovedListings, and RENTALS/BUY have
+// no backend concept of availability dates at all (they're commission/contact-based, not
+// booking-based). Removed entirely rather than left as a filter that silently does nothing.
+type SearchPanel = 'governorate' | 'city' | 'street' | null
 type SortMode = 'newest' | 'lowest'
 
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 const GUEST_TOKEN_KEY = 'sybnb-v6-guest-token'
 
-const dateOptions = [
-  { key: 'week', ar: 'هذا الأسبوع', en: 'This week' },
-  { key: 'month', ar: 'هذا الشهر', en: 'This month' },
-  { key: 'quarter', ar: '3 أشهر', en: '3 months' },
-  { key: 'open', ar: 'تاريخ مفتوح', en: 'Open date' },
-]
-const dateLabelFor = (key: string, lang: 'ar' | 'en') => {
-  const opt = dateOptions.find((d) => d.key === key)
-  return opt ? (lang === 'ar' ? opt.ar : opt.en) : ''
-}
 // Map governorate key -> the English city name stored in listing.location.city (Syria's 5 governorates).
 const GOV_TO_CITY: Record<string, string> = {
   damascus: 'Damascus',
@@ -72,7 +67,7 @@ const copy = {
     signup: 'إنشاء حساب',
     search: 'بحث',
     searchCapsule: 'كبسولة البحث',
-    searchCapsuleHint: 'اختر الموقع والتاريخ ثم افتح خيارات الباحث.',
+    searchCapsuleHint: 'اختر الموقع ثم افتح خيارات الباحث.',
     rouletteHint: 'اسحب الشريط لاختيار المنطقة بسرعة.',
     applied: 'تم تطبيق كبسولة البحث.',
     beforeSearch: 'ابدأ من كبسولة البحث لاختيار نوع العقار والموقع. بعد الضغط على بحث تظهر النتائج ثم تفاصيل العقار.',
@@ -80,11 +75,9 @@ const copy = {
     chooseGovernorate: 'اختر المحافظة',
     chooseCity: 'اختر المدينة',
     chooseStreet: 'اختر الحي / الشارع',
-    chooseDate: 'اختر التاريخ',
     governorate: 'المحافظة',
     city: 'المدينة',
     street: 'حي / شارع',
-    dateOptional: 'التاريخ اختياري',
     newest: 'الأحدث',
     lowestPrice: 'الأقل سعراً',
     availableResults: 'النتائج المتاحة',
@@ -149,7 +142,7 @@ const copy = {
     signup: 'Create account',
     search: 'Search',
     searchCapsule: 'Search capsule',
-    searchCapsuleHint: 'Choose location and date, then open searcher choices.',
+    searchCapsuleHint: 'Choose location, then open searcher choices.',
     rouletteHint: 'Swipe the strip to choose the area quickly.',
     applied: 'Search capsule applied.',
     beforeSearch: 'Start with the search capsule to choose property type and location. After Search, results and property details appear.',
@@ -157,11 +150,9 @@ const copy = {
     chooseGovernorate: 'Choose governorate',
     chooseCity: 'Choose city',
     chooseStreet: 'Choose district / street',
-    chooseDate: 'Choose date',
     governorate: 'Governorate',
     city: 'City',
     street: 'District / street',
-    dateOptional: 'Date optional',
     newest: 'Newest',
     lowestPrice: 'Lowest price',
     availableResults: 'Available results',
@@ -307,7 +298,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [selectedGovernorate, setSelectedGovernorate] = useState('damascus')
   const [selectedCity, setSelectedCity] = useState('damascus-city')
   const [selectedStreet, setSelectedStreet] = useState('old-city')
-  const [selectedDate, setSelectedDate] = useState('')
   // A real bug caught by an independent re-audit: amenities/trust used to default to
   // pre-checked ('wifi','parking','verifiedHost') even though none of these reach the backend
   // for RENTALS/BUY (only propertyType and numeric price/bedrooms/bathrooms are ever forwarded --
@@ -340,9 +330,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       ? SYRIA_GOVERNORATES.map((item) => ({ key: item.key, label: labelFor(lang, item) }))
       : activeSearchPanel === 'city'
         ? (selectedGovernorateData?.cities || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
-        : activeSearchPanel === 'street'
-          ? (selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
-          : dateOptions.map((item) => ({ key: item.key, label: lang === 'ar' ? item.ar : item.en }))
+        : (selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
   )
   const visibleListings = useMemo(() => {
     if (sortMode === 'lowest') {
@@ -519,7 +507,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           <button style={activeSearchPanel === 'governorate' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'governorate' ? null : 'governorate')}>{selectedGovernorateLabel || t.governorate}</button>
           <button style={activeSearchPanel === 'city' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'city' ? null : 'city')}>{selectedCityLabel || t.city}</button>
           <button style={activeSearchPanel === 'street' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'street' ? null : 'street')}>{selectedStreetLabel || t.street}</button>
-          <button style={activeSearchPanel === 'date' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'date' ? null : 'date')}>{dateLabelFor(selectedDate, lang) || t.dateOptional}</button>
           <button style={styles.searchPillActive} onClick={() => setShowFilters((current) => !current)}>
             {showFilters ? t.hideFilters : t.showFilters}
           </button>
@@ -532,9 +519,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   ? t.chooseGovernorate
                   : activeSearchPanel === 'city'
                     ? t.chooseCity
-                    : activeSearchPanel === 'street'
-                      ? t.chooseStreet
-                      : t.chooseDate}
+                    : t.chooseStreet}
               </strong>
               <span>{t.rouletteHint}</span>
             </div>
@@ -545,9 +530,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                     ? selectedGovernorate
                     : activeSearchPanel === 'city'
                       ? selectedCity
-                      : activeSearchPanel === 'street'
-                        ? selectedStreet
-                        : selectedDate
+                      : selectedStreet
                 )
                 return (
                   <button
@@ -560,10 +543,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                       }
                       if (activeSearchPanel === 'street') {
                         setSelectedStreet(option.key)
-                        setActiveSearchPanel(null)
-                      }
-                      if (activeSearchPanel === 'date') {
-                        setSelectedDate(option.key)
                         setActiveSearchPanel(null)
                       }
                     }}
@@ -579,9 +558,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   ? selectedGovernorate
                   : activeSearchPanel === 'city'
                     ? selectedCity
-                    : activeSearchPanel === 'street'
-                      ? selectedStreet
-                      : selectedDate
+                    : selectedStreet
               )) + 1} / {currentPanelOptions.length}
             </div>
           </section>
@@ -595,7 +572,6 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
       {hasSearched ? <section style={styles.searchSummary}>
         <strong>{selectedGovernorateLabel} · {selectedCityLabel} · {selectedStreetLabel}</strong>
-        <span>{dateLabelFor(selectedDate, lang) || t.dateOptional}</span>
         <span>{mainGroupOptions.find((option) => option.id === visualFilters.propertyType)?.[isAr ? 'ar' : 'en']}</span>
       </section> : null}
 

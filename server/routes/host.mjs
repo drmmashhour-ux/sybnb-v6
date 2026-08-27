@@ -18,13 +18,19 @@ export async function handleHost(req, res, url, context) {
 
     await completeExpiredBookings({ listing: { ownerId: context.user.id } })
 
+    // Scale-readiness audit: this was `checkOut: 'asc'` + `take: 200` -- always the OLDEST 200
+    // qualifying bookings, with no pagination. Once any single host accumulates more than 200
+    // CONFIRMED/COMPLETED/DISPUTED bookings, their newest earnings silently stopped appearing on
+    // their own earnings page -- exactly backwards, and it hits the platform's most successful
+    // hosts first. Flipped to newest-first; the frontend (HostEarningsPage.tsx) just renders
+    // whatever order the API returns with no re-sort, so this is a pure backend fix.
     const bookings = await db().booking.findMany({
       where: {
         listing: { ownerId: context.user.id },
         status: { in: ['CONFIRMED', 'COMPLETED', 'DISPUTED'] },
       },
       include: { listing: true, payments: true },
-      orderBy: { checkOut: 'asc' },
+      orderBy: { checkOut: 'desc' },
       take: 200,
     })
 

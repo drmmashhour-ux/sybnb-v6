@@ -7,12 +7,18 @@ import { recordWalletEntry } from './finance-ledger.mjs'
 // the same pattern completeExpiredBookings() uses for bookings.
 export async function expireStaleWalletGifts() {
   const now = new Date()
+  // Scale-readiness audit: no orderBy meant Postgres didn't guarantee which 100 expired-but-
+  // unprocessed gifts got swept on any given call. Harmless for a healthy sweep rate (processed
+  // rows leave the where filter regardless of order), but without ordering there's no deterministic
+  // catch-up if the backlog ever grows faster than incidental read-path traffic sweeps it -- oldest-
+  // expired-first ensures a real backlog drains in a predictable order instead of an arbitrary one.
   const expired = await db().walletGift.findMany({
     where: {
       status: { in: ['SENT', 'CLAIM_PENDING', 'LOCKED'] },
       expiresAt: { lt: now },
     },
     select: { id: true, senderUserId: true, amountMinor: true, currency: true, status: true },
+    orderBy: { expiresAt: 'asc' },
     take: 100,
   })
 

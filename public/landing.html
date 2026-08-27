@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>سيبنب — قائمة الانتظار المبكرة | SYBNB Early Access</title>
+<meta name="description" content="سيبنب دليل محلي للإيجار اليومي والشهري، شراء العقارات، السيارات، السوق، ومشاريع البناء الجديدة في سوريا. سجّل اهتمامك للحصول على إشعار عند الإطلاق.">
+<meta name="robots" content="index, follow">
+<style>
+  :root {
+    --bg: #0b0d14;
+    --surface: #12151f;
+    --border: rgba(255,255,255,.08);
+    --text: #f2f3f7;
+    --muted: #8e93a3;
+    --accent: #5268ff;
+    --accent-ink: #ffffff;
+    --warn-bg: rgba(230,184,13,.1);
+    --warn-border: rgba(230,184,13,.35);
+    --warn-text: #e6b80d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Tahoma, Arial, sans-serif;
+    line-height: 1.6;
+    padding: 48px 20px;
+    display: flex;
+    justify-content: center;
+  }
+  .shell {
+    max-width: 640px;
+    width: 100%;
+  }
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .brand h1 {
+    font-size: 26px;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .brand span {
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .tagline {
+    color: var(--muted);
+    font-size: 16px;
+    margin: 0 0 28px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+  }
+  .notice {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    color: var(--warn-text);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 13px;
+    margin-bottom: 22px;
+  }
+  .verticals {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+    margin-bottom: 26px;
+  }
+  .vertical {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+  }
+  form { display: grid; gap: 14px; }
+  label {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  select, input {
+    width: 100%;
+    padding: 12px 14px;
+    background: #0e1119;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    font-size: 15px;
+    font-family: inherit;
+  }
+  select:focus, input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  button {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button:hover { background: #4457e0; }
+  .confirm {
+    display: none;
+    background: rgba(32,210,155,.12);
+    border: 1px solid rgba(32,210,155,.35);
+    color: #20d29b;
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 14px;
+    text-align: center;
+  }
+  .confirm.visible { display: block; }
+  form.hidden { display: none; }
+  footer {
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  footer p { margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="brand">
+    <h1>سيبنب</h1>
+    <span>SYBNB</span>
+  </div>
+  <p class="tagline">دليل الإيجار اليومي والشهري، العقارات، السيارات، والسوق المحلي في سوريا — قريباً</p>
+
+  <div class="card">
+    <div class="notice">
+      هذه المنصة قيد التحضير للإطلاق ولم تُفتح للعامة بعد. سيبنب دليل معلومات وتنسيق مباشر بين المستخدمين فقط — لا توجد أي مدفوعات إلكترونية أو معاملات مالية تتم عبر الموقع حالياً.
+    </div>
+
+    <div class="verticals">
+      <div class="vertical">الإيجار اليومي</div>
+      <div class="vertical">الإيجار الشهري</div>
+      <div class="vertical">شراء عقار</div>
+      <div class="vertical">المركبات</div>
+      <div class="vertical">السوق</div>
+      <div class="vertical">مشاريع جديدة</div>
+      <div class="vertical">سير (SYBNB Ride)</div>
+    </div>
+
+    <form id="waitlist-form">
+      <div>
+        <label for="role">أنت مهتم كـ:</label>
+        <select id="role" name="role" required>
+          <option value="guest">مستخدم / زائر مستقبلي</option>
+          <option value="host">مضيف / صاحب عقار أو مركبة</option>
+        </select>
+      </div>
+      <div>
+        <label for="vertical">القسم الأكثر اهتماماً بالنسبة لك:</label>
+        <select id="vertical" name="vertical" required>
+          <option value="stays">الإيجار اليومي</option>
+          <option value="rentals">الإيجار الشهري</option>
+          <option value="buy">شراء عقار</option>
+          <option value="cars">المركبات</option>
+          <option value="marketplace">السوق</option>
+          <option value="new-construction">مشاريع جديدة</option>
+          <option value="ride">سير (SYBNB Ride)</option>
+        </select>
+      </div>
+      <div>
+        <label for="contact">البريد الإلكتروني أو رقم الهاتف:</label>
+        <input type="text" id="contact" name="contact" placeholder="example@domain.com أو 09xxxxxxxx" autocomplete="off" required>
+      </div>
+      <button type="submit">سجّل اهتمامك</button>
+    </form>
+    <div class="confirm" id="confirm-message">
+      تم تسجيل اهتمامك. سنقوم بإشعارك عند فتح المنصة.
+    </div>
+  </div>
+
+  <footer>
+    <p>هذا الدليل معلوماتي فقط، ولا يقدّم أي خدمات دفع أو تحويل أموال إلكترونية عبر الموقع.</p>
+    <p>© 2026 Mohamed Almashhour — 9375-7649 Québec Inc.</p>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var form = document.getElementById('waitlist-form');
+    var confirmBox = document.getElementById('confirm-message');
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var entry = {
+        role: document.getElementById('role').value,
+        vertical: document.getElementById('vertical').value,
+        contact: document.getElementById('contact').value.trim(),
+        at: new Date().toISOString(),
+      };
+      if (!entry.contact) return;
+      try {
+        var raw = window.localStorage.getItem('sybnb_waitlist_entries');
+        var list = raw ? JSON.parse(raw) : [];
+        list.push(entry);
+        window.localStorage.setItem('sybnb_waitlist_entries', JSON.stringify(list));
+      } catch (e) {
+        // localStorage unavailable (private mode, etc.) -- still show confirmation, nothing to send anywhere.
+      }
+      form.classList.add('hidden');
+      confirmBox.classList.add('visible');
+    });
+  })();
+</script>
+</body>
+</html>

@@ -585,7 +585,19 @@ export async function handleAdmin(req, res, url, context) {
     const bookingsWhere = { status: { in: ['REQUESTED', 'DISPUTED'] } }
     const idDocumentsWhere = { idDocumentStatus: 'PENDING_REVIEW' }
     const [listings, payments, gifts, bookings, idDocuments, listingsTotal, paymentsTotal, giftsTotal, bookingsTotal, idDocumentsTotal] = await Promise.all([
-      db().listing.findMany({ where: listingsWhere, orderBy: { createdAt: 'asc' }, take: REVIEW_QUEUE_LIMIT }),
+      db().listing.findMany({
+        where: listingsWhere,
+        // Admin satisfaction audit finding: the review card showed only a title/division/status --
+        // no price, host, or image, so an admin had to open "Details" for every single item just to
+        // make an approve/reject call. Price is already a scalar on Listing; owner/media are
+        // relations that need an explicit include to come back at all.
+        include: {
+          owner: { select: { id: true, displayName: true } },
+          media: { orderBy: { sortOrder: 'asc' }, take: 1 },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: REVIEW_QUEUE_LIMIT,
+      }),
       db().paymentProof.findMany({
         where: paymentsWhere,
         include: {

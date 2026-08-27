@@ -1488,11 +1488,22 @@ function AdminListingLine({
   onReject: () => void
 }) {
   const reviewable = listing.status === 'PENDING_REVIEW'
+  const thumbnailUrl = (listing.media || [])
+    .map((item) => item.url || item.src || item.assetUrl)
+    .find((value): value is string => typeof value === 'string')
+  const hostName = listing.owner?.displayName || (isAr ? 'مضيف غير معروف' : 'Unknown host')
   return (
     <article style={commandStyles.managementRow}>
+      {thumbnailUrl ? (
+        <img src={thumbnailUrl} alt="" style={commandStyles.listingThumbnail} />
+      ) : (
+        <div style={commandStyles.listingThumbnailPlaceholder}>{isAr ? 'لا صورة' : 'No image'}</div>
+      )}
       <div>
         <strong>{listingTitleText(listing, lang)}</strong>
         <small>{divisionText(listing.division, lang)}</small>
+        <small>{hostName}</small>
+        <small>{moneyText(listing.priceMinor, listing.currency, lang)}</small>
       </div>
       <span>{statusText(listing.status, lang)}</span>
       <div style={commandStyles.managementRowActions}>
@@ -1765,6 +1776,8 @@ const commandStyles: Record<string, CSSProperties> = {
   managementList: { display: 'grid', gap: 10 },
   sectionHeadRow: { display: 'grid', gap: 4, color: '#f7f7fb', padding: '4px 2px' },
   managementRow: { alignItems: 'center', background: '#0d0e14', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, color: '#f7f7fb', display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', minHeight: 62, padding: 12, textAlign: 'start' },
+  listingThumbnail: { borderRadius: 6, height: 48, objectFit: 'cover', width: 48 },
+  listingThumbnailPlaceholder: { alignItems: 'center', background: 'rgba(255,255,255,.06)', borderRadius: 6, color: '#8e93a3', display: 'flex', fontSize: 11, height: 48, justifyContent: 'center', textAlign: 'center', width: 48 },
   selectedCard: { border: '1px solid rgba(82,104,255,.85)', boxShadow: '0 0 0 1px rgba(82,104,255,.2) inset' },
   managementRowActions: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(74px, 1fr))' },
   moneyCommandGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' },

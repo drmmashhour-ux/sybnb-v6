@@ -198,17 +198,17 @@ export function App() {
         ) : isSellerRoute(path) ? (
           <SellerDivisionRoutes lang={lang} path={path} />
         ) : path === '/search-preview' || path === '/stays' ? (
-          <SearchPreviewPage lang={lang} initialDivision="stays" entry={path === '/stays' ? 'stays' : 'general'} />
+          <SearchPreviewPage key="stays" lang={lang} initialDivision="stays" entry={path === '/stays' ? 'stays' : 'general'} />
         ) : path === '/rentals' ? (
           <RentalsPage lang={lang} mode="rentals" />
         ) : path === '/buy' ? (
           <RentalsPage lang={lang} mode="buy" />
         ) : path === '/cars' ? (
-          <SearchPreviewPage lang={lang} initialDivision="cars" entry="general" />
+          <SearchPreviewPage key="cars" lang={lang} initialDivision="cars" entry="general" />
         ) : path === '/marketplace' ? (
-          <SearchPreviewPage lang={lang} initialDivision="marketplace" entry="general" />
+          <SearchPreviewPage key="marketplace" lang={lang} initialDivision="marketplace" entry="general" />
         ) : path === '/new-construction' ? (
-          <SearchPreviewPage lang={lang} initialDivision="newConstruction" entry="general" />
+          <SearchPreviewPage key="newConstruction" lang={lang} initialDivision="newConstruction" entry="general" />
         ) : paymentReceiptMatch ? (
           <PaymentReceiptPage lang={lang} proofId={paymentReceiptMatch[1]} />
         ) : bookingPaymentMatch ? (

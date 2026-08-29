@@ -145,9 +145,6 @@ export function LandingPage({ lang }: Props) {
             onPause={() => setMoviePlaying(false)}
             onEnded={() => setMoviePlaying(false)}
           />
-          <div className="about-movie-caption">
-            <b>{about.movieTitle}</b>
-          </div>
         </div>
       </section>
 

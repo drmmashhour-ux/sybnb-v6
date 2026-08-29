@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { expectedTotalMinor, isProviderRefUniqueViolation } from '../lib/finance-ledger.mjs'
+import { expectedTotalMinor, isProviderRefUniqueViolation, sypPerUsd } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
@@ -99,8 +99,7 @@ function stripeChargeAmount(totalMinor) {
     error.expose = true
     throw error
   }
-  const sypPerUsd = Number(process.env.SYP_PER_USD || 15000)
-  const unitAmount = Math.max(50, Math.round((totalMinor / sypPerUsd) * 100))
+  const unitAmount = Math.max(50, Math.round((totalMinor / sypPerUsd()) * 100))
   return { currency, unitAmount }
 }
 

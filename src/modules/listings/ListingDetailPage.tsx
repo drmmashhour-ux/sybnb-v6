@@ -79,6 +79,8 @@ const copy = {
     stayAmount: 'قيمة الحجز',
     cleaningFee: 'رسوم الإزالة والتنظيف',
     taxes: 'الضرائب والرسوم المحلية',
+    serviceFee: 'رسوم الخدمة',
+    parkingFee: 'رسوم مواقف السيارات',
     feesIncluded: 'شامل رسوم التنظيف والضرائب',
     agreementTitle: 'اتفاقية الإيجار اليومي',
     agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي. أعلم أن SYBNB تخصم عمولة خدمة (12% من قيمة الإيجار) من مستحقات المضيف مقابل إدارة الحجز والدفع والحماية.',
@@ -165,6 +167,8 @@ const copy = {
     stayAmount: 'Booking amount',
     cleaningFee: 'Cleaning fee',
     taxes: 'Taxes and local fees',
+    serviceFee: 'Service fee',
+    parkingFee: 'Parking fee',
     feesIncluded: 'Includes cleaning fee and taxes',
     agreementTitle: 'Short-Term Rental Agreement',
     agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action. I understand SYBNB deducts a service commission (12% of the rent amount) from the host payout for managing the booking, payment, and protection.',
@@ -652,13 +656,19 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                         {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
                       </button>
                     </div>
-                    {!quoteLoading && (feesStandard.cleaningFeeMinor > 0 || feesStandard.taxesMinor > 0) && (
+                    {!quoteLoading && (feesStandard.cleaningFeeMinor > 0 || feesStandard.taxesMinor > 0 || feesStandard.serviceFeeMinor > 0 || feesStandard.parkingFeeMinor > 0) && (
                       <div style={styles.feeBreakdownRow}>
                         <span>{t.stayAmount}: {moneyText(feesStandard.stayAmountMinor, listing.currency, lang)}</span>
                         {feesStandard.cleaningFeeMinor > 0 && (
                           <span>{t.cleaningFee}: {moneyText(feesStandard.cleaningFeeMinor, listing.currency, lang)}</span>
                         )}
                         {feesStandard.taxesMinor > 0 && <span>{t.taxes}: {moneyText(feesStandard.taxesMinor, listing.currency, lang)}</span>}
+                        {feesStandard.serviceFeeMinor > 0 && (
+                          <span>{t.serviceFee}: {moneyText(feesStandard.serviceFeeMinor, listing.currency, lang)}</span>
+                        )}
+                        {feesStandard.parkingFeeMinor > 0 && (
+                          <span>{t.parkingFee}: {moneyText(feesStandard.parkingFeeMinor, listing.currency, lang)}</span>
+                        )}
                       </div>
                     )}
                   </section>

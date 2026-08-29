@@ -436,12 +436,18 @@ export async function handleHost(req, res, url, context) {
     return methodNotAllowed(res, ['GET', 'PATCH'])
   }
 
-  // Edit (PATCH) or remove (DELETE) a host's own listing. Editing content re-enters review so an
-  // approved listing can't be silently changed post-approval; delete is blocked when bookings exist.
+  // Edit (PATCH) or remove (DELETE) a listing. Editing content re-enters review so an approved
+  // listing can't be silently changed post-approval; delete is blocked when bookings exist.
+  // ADMIN may also edit here (e.g. fixing/adjusting a host's price or itemized fees) — deliberately
+  // routed through this exact same validation/merge/audit path rather than a second admin-only
+  // editor, so there is only ever one place that decides what a valid listing edit looks like.
   const listingEditMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)$/)
   if (listingEditMatch) {
-    requireAuth(context, ['HOST', 'SELLER'])
-    const existing = await db().listing.findFirst({ where: { id: listingEditMatch[1], ownerId: context.user.id } })
+    requireAuth(context, ['HOST', 'SELLER', 'ADMIN'])
+    const isAdminActor = context.roles.includes('ADMIN')
+    const existing = await db().listing.findFirst({
+      where: isAdminActor ? { id: listingEditMatch[1] } : { id: listingEditMatch[1], ownerId: context.user.id },
+    })
     if (!existing) {
       const error = new Error('Listing not found for this host account.')
       error.statusCode = 404
@@ -511,12 +517,29 @@ export async function handleHost(req, res, url, context) {
       }
       const listing = await db().listing.update({ where: { id: existing.id }, data })
       await db().adminAuditLog.create({
-        data: { actorUserId: context.user.id, action: 'HOST_LISTING_EDIT', entityType: 'listings', entityId: listing.id, before: existing, after: listing },
+        data: {
+          actorUserId: context.user.id,
+          action: isAdminActor ? 'ADMIN_LISTING_EDIT' : 'HOST_LISTING_EDIT',
+          entityType: 'listings',
+          entityId: listing.id,
+          before: existing,
+          after: listing,
+        },
       })
       return json(res, 200, { ok: true, listing })
     }
 
     if (req.method === 'DELETE') {
+      // Deliberately host-only, even though ADMIN can edit above — deleting is far more destructive
+      // than adjusting a price/fee, and wasn't part of what was asked for. An admin who needs a
+      // listing removed should reject it through the normal review flow instead.
+      if (isAdminActor) {
+        const error = new Error('Admins cannot delete a listing through this route.')
+        error.statusCode = 403
+        error.code = 'ADMIN_LISTING_DELETE_NOT_ALLOWED'
+        error.expose = true
+        throw error
+      }
       // Booking has no onDelete cascade/restrict override on its listing relation (Prisma defaults to
       // DB-level RESTRICT), so ANY booking history — not just active statuses — would make the delete
       // below fail with an opaque 500 from the FK constraint. Check for any booking at all and give a

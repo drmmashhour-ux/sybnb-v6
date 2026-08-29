@@ -9,10 +9,20 @@ import { isPayoutEligible, payoutEligibleAt } from './booking-lifecycle.mjs'
 // via the same placeholder FX rate used for Stripe (SYP_PER_USD) so the real-money value is unchanged
 // once a live rate is configured.
 const CANCELLATION_ADMIN_FEE_USD_MINOR = 1000
+
+// Owner-set starting rate (2026-08-29), deliberately a variable/updatable value, not a fixed fact:
+// read fresh from env everywhere a conversion is needed, never baked into a module-load-time
+// constant, so changing SYP_PER_USD takes effect without a code change. Falls back to this default
+// only when the env var is unset or not a valid positive number.
+export function sypPerUsd(env = process.env) {
+  const value = Number(env.SYP_PER_USD)
+  return Number.isFinite(value) && value > 0 ? value : 130
+}
+
 export const CANCELLATION_ADMIN_FEE_CURRENCY = 'SYP'
-export const CANCELLATION_ADMIN_FEE_MINOR = Math.round(
-  (CANCELLATION_ADMIN_FEE_USD_MINOR / 100) * Number(process.env.SYP_PER_USD || 15000),
-)
+export function cancellationAdminFeeMinor(env = process.env) {
+  return Math.round((CANCELLATION_ADMIN_FEE_USD_MINOR / 100) * sypPerUsd(env))
+}
 
 // A booking's currency is whatever its listing was priced in (SYP or USD, the only two the Syria
 // country profile allows), and every wallet entry for that booking — refund, HOLD/RELEASE, admin
@@ -25,7 +35,7 @@ export function cancellationAdminFee(currency) {
   if (normalized === 'USD') {
     return { amountMinor: CANCELLATION_ADMIN_FEE_USD_MINOR, currency: 'USD' }
   }
-  return { amountMinor: CANCELLATION_ADMIN_FEE_MINOR, currency: CANCELLATION_ADMIN_FEE_CURRENCY }
+  return { amountMinor: cancellationAdminFeeMinor(), currency: CANCELLATION_ADMIN_FEE_CURRENCY }
 }
 // Gifts at/above this real value require admin review before they can be claimed (server/routes/
 // wallet.mjs). The threshold has to be expressed in whatever currency the gift was actually sent
@@ -36,7 +46,7 @@ const GIFT_REVIEW_THRESHOLD_SYP_MINOR = 100000
 export function giftReviewThresholdMinor(currency) {
   const normalized = String(currency || CANCELLATION_ADMIN_FEE_CURRENCY).toUpperCase()
   if (normalized === 'USD') {
-    return Math.round((GIFT_REVIEW_THRESHOLD_SYP_MINOR / Number(process.env.SYP_PER_USD || 15000)) * 100)
+    return Math.round((GIFT_REVIEW_THRESHOLD_SYP_MINOR / sypPerUsd()) * 100)
   }
   return GIFT_REVIEW_THRESHOLD_SYP_MINOR
 }
@@ -50,6 +60,30 @@ export const STR_TAX_RATE = 0.02
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+// STAYS itemized fees a host can set on a listing (server/routes/host.mjs's PATCH already merges
+// listing.metadata safely; this just gives 4 named keys real meaning instead of only cleaning/tax).
+// Each is read independently via metadataNumber, so a bad/missing value drops to 0 rather than
+// corrupting the total -- never a source of the actual charge, only informational line items (see
+// the anti-fraud comment on adminCommissionMinor below for why the real split never reads these).
+export function readListingFees(listingMetadata) {
+  return {
+    cleaningFeeMinor: metadataNumber(listingMetadata, 'cleaningFeeMinor'),
+    taxesMinor: metadataNumber(listingMetadata, 'taxesMinor'),
+    serviceFeeMinor: metadataNumber(listingMetadata, 'serviceFeeMinor'),
+    parkingFeeMinor: metadataNumber(listingMetadata, 'parkingFeeMinor'),
+  }
+}
+
+function hasExplicitListingFees(listingMetadata) {
+  return Boolean(
+    listingMetadata &&
+      ('cleaningFeeMinor' in listingMetadata ||
+        'taxesMinor' in listingMetadata ||
+        'serviceFeeMinor' in listingMetadata ||
+        'parkingFeeMinor' in listingMetadata),
+  )
 }
 
 // Mirrors the split the admin finance panel has always displayed (rentMinor / cleaningFeeMinor /
@@ -84,6 +118,8 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
       stayAmountMinor,
       cleaningFeeMinor: 0,
       taxesMinor: 0,
+      serviceFeeMinor: 0,
+      parkingFeeMinor: 0,
       adminCommissionMinor: 0,
       extraFeesMinor,
       cancellationProtectionFeeMinor,
@@ -94,16 +130,45 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     }
   }
 
-  const divisor = 1 + STR_CLEANING_RATE + STR_TAX_RATE
-  const rentMinor = metadataNumber(listingMetadata, 'rentMinor') || Math.round(staySplitBaseMinor / divisor)
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || Math.round(rentMinor * STR_CLEANING_RATE)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor)
-  // rentMinor/cleaningFeeMinor/taxesMinor come from seller-controlled listing.metadata (unvalidated)
-  // and are informational only (the rent/cleaning/tax breakdown shown to admin/host). The actual
-  // money split is always computed from staySplitBaseMinor — the real, server-trusted paid amount —
-  // never from rentMinor. Deriving the commission from rentMinor let a host inflate it to drive
+  // A snapshot taken at booking-creation time (see buildBookingMetadata in bookings.mjs) always
+  // wins over the listing's CURRENT metadata: without this, a host or admin editing a listing's
+  // fees after a booking already exists would silently change what that older booking's breakdown
+  // displays (payout screens, refund/cancellation views, admin ledger) even though the actual
+  // dollar split stays safe either way (adminCommissionMinor is anchored to staySplitBaseMinor,
+  // never to these labels). Pre-snapshot bookings (created before this existed) have no
+  // bookingMetadata.feeSnapshot and fall through to reading the listing's live metadata, same as
+  // before.
+  const feeSnapshot = bookingMetadata.feeSnapshot
+  const explicitFees = feeSnapshot || (hasExplicitListingFees(listingMetadata) ? readListingFees(listingMetadata) : null)
+
+  let rentMinor, cleaningFeeMinor, taxesMinor, serviceFeeMinor, parkingFeeMinor
+  if (explicitFees) {
+    // Host/admin set at least one explicit fee: rent is whatever's left of the real paid amount
+    // after those fees, matching the additive total expectedTotalMinor charged the guest in the
+    // first place (stay + cleaning + tax + service + parking), never re-derived from a percentage.
+    cleaningFeeMinor = metadataNumber(explicitFees, 'cleaningFeeMinor')
+    taxesMinor = metadataNumber(explicitFees, 'taxesMinor')
+    serviceFeeMinor = metadataNumber(explicitFees, 'serviceFeeMinor')
+    parkingFeeMinor = metadataNumber(explicitFees, 'parkingFeeMinor')
+    const explicitFeesTotalMinor = cleaningFeeMinor + taxesMinor + serviceFeeMinor + parkingFeeMinor
+    rentMinor = Math.max(0, staySplitBaseMinor - explicitFeesTotalMinor)
+  } else {
+    // No explicit fees ever set on this listing -- original fixed-percentage decomposition,
+    // unchanged, so every pre-existing listing behaves exactly as it did before this feature.
+    const divisor = 1 + STR_CLEANING_RATE + STR_TAX_RATE
+    rentMinor = metadataNumber(listingMetadata, 'rentMinor') || Math.round(staySplitBaseMinor / divisor)
+    cleaningFeeMinor = Math.round(rentMinor * STR_CLEANING_RATE)
+    taxesMinor = Math.max(0, staySplitBaseMinor - rentMinor - cleaningFeeMinor)
+    serviceFeeMinor = 0
+    parkingFeeMinor = 0
+  }
+  // rentMinor/cleaningFeeMinor/taxesMinor/serviceFeeMinor/parkingFeeMinor are informational only
+  // (the itemized breakdown shown to admin/host/guest). The actual money split is always computed
+  // from staySplitBaseMinor — the real, server-trusted paid amount — never from these labels.
+  // Deriving the commission from the itemized rent let a host inflate non-rent line items to drive
   // hostGrossMinor toward the paid-amount cap while adminShareMinor (the platform's cut) collapsed
-  // toward zero; anchoring both to staySplitBaseMinor makes the commission unconditional.
+  // toward zero; anchoring both to staySplitBaseMinor makes the commission unconditional, no matter
+  // how a host chooses to itemize fees.
   const adminCommissionMinor = Math.round(staySplitBaseMinor * STR_ADMIN_COMMISSION_RATE)
   const hostGrossMinor = Math.max(0, staySplitBaseMinor - adminCommissionMinor)
   const adminShareMinor = Math.max(0, staySplitBaseMinor - hostGrossMinor)
@@ -112,6 +177,8 @@ export function bookingFinanceSplit(booking, paidAmountMinor = booking?.amountMi
     stayAmountMinor: rentMinor,
     cleaningFeeMinor,
     taxesMinor,
+    serviceFeeMinor,
+    parkingFeeMinor,
     adminCommissionMinor,
     extraFeesMinor: 0,
     cancellationProtectionFeeMinor,
@@ -826,15 +893,30 @@ export function expectedTotalMinor(booking) {
   const bookingMetadata = booking.metadata || {}
   const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
 
-  const cleaningFeeMinor = metadataNumber(listingMetadata, 'cleaningFeeMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
-  const taxesMinor = metadataNumber(listingMetadata, 'taxesMinor') || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
+  // Prefer the fee breakdown snapshotted at booking-creation time over the listing's current
+  // metadata — see the matching comment in bookingFinanceSplit for why (a later fee edit must
+  // never change what an already-created booking charges).
+  const feeSnapshot = bookingMetadata.feeSnapshot
+  const fees = feeSnapshot || readListingFees(listingMetadata)
+  const cleaningFeeMinor = fees.cleaningFeeMinor || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
+  const taxesMinor = fees.taxesMinor || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
+  const serviceFeeMinor = fees.serviceFeeMinor || 0
+  const parkingFeeMinor = fees.parkingFeeMinor || 0
   const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
   const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
   const cancellationProtectionFeeMinor = cancellationProtectionPurchased
     ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') || Math.round(stayAmountMinor * CANCELLATION_PROTECTION_RATE)
     : 0
 
-  return stayAmountMinor + cleaningFeeMinor + taxesMinor + extraFeesMinor + cancellationProtectionFeeMinor
+  return (
+    stayAmountMinor +
+    cleaningFeeMinor +
+    taxesMinor +
+    serviceFeeMinor +
+    parkingFeeMinor +
+    extraFeesMinor +
+    cancellationProtectionFeeMinor
+  )
 }
 
 // Shared by admin's payout queue and the host earnings report so both read the same numbers

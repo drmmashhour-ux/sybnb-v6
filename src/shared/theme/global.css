@@ -4322,10 +4322,6 @@ a {
     gap: 17px;
   }
 
-  .landing-hero-mark {
-    display: inline-flex;
-  }
-
   .landing-hero h1 {
     font-size: 38px;
     line-height: 1.08;

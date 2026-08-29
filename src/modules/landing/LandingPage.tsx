@@ -147,7 +147,6 @@ export function LandingPage({ lang }: Props) {
           />
           <div className="about-movie-caption">
             <b>{about.movieTitle}</b>
-            <p>{about.movieBody}</p>
           </div>
         </div>
       </section>

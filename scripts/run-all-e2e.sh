@@ -134,6 +134,7 @@ run_full "otp"              otp-identity.e2e.mjs
   run_full "seller-signup"    seller-signup-journey.e2e.mjs
   run_full "host-login"       host-login-journey.e2e.mjs
   run_full "staff-role-reg"   staff-access-role-registration.e2e.mjs
+  run_full "admin-self-review" admin-self-review-protection.e2e.mjs
   run_full "resend-webhook"   resend-webhook.e2e.mjs
 run_full "storage"          storage.e2e.mjs
 run_full "legal"            legal-consent.e2e.mjs

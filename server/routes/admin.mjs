@@ -111,6 +111,8 @@ export async function handleAdmin(req, res, url, context) {
       error.expose = true
       throw error
     }
+    // An admin who also holds the HOST role for this listing must not release their own payout.
+    assertNotInterestedParty([booking.listing.ownerId], context.user.id)
 
     // Paying the host out is its own operation (payout_release), distinct from capturing or
     // refunding the guest's payment — no third-party disbursement processor is called anywhere in
@@ -226,6 +228,9 @@ export async function handleAdmin(req, res, url, context) {
       error.expose = true
       throw error
     }
+    // Finalizing moves real fee/commission money involving both the guest and the host of this
+    // booking -- an admin who is either must not be the one finalizing it.
+    assertNotInterestedParty([existing.guestId, existing.listing.ownerId], context.user.id)
 
     // Who initiated the cancellation determines who owes the cancellation fee -- derived from the
     // durable audit trail the cancel handlers already write, never from caller input.
@@ -334,6 +339,11 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
     const division = refund.paymentProof?.booking?.listing?.division || 'PLATFORM'
+    // executeManualRailRefund credits refund.paymentProof.userId's wallet -- the original payer,
+    // not necessarily refund.requestedByUserId (which can be an admin who filed the refund on the
+    // payer's behalf, e.g. after rejecting a booking). The wallet that gets credited is the real
+    // interested party here.
+    assertNotInterestedParty([refund.paymentProof.userId], context.user.id)
 
     authorizePaymentOperation({
       operation: 'refund',
@@ -402,6 +412,9 @@ export async function handleAdmin(req, res, url, context) {
       error.expose = true
       throw error
     }
+    // Same interested party as execute-refund above -- the original payer this refund resolves in
+    // favor of, whether or not this specific path moves a wallet balance directly.
+    assertNotInterestedParty([refund.paymentProof.userId], context.user.id)
 
     const division = refund.paymentProof?.booking?.listing?.division || 'PLATFORM'
 
@@ -985,6 +998,38 @@ async function findReviewEntity(tx, entityType, entityId) {
   return tx[model].findUnique({ where: { id: entityId } })
 }
 
+// Centralized "who has a material interest in this entity" resolver. A real audit found the
+// self-review guard only covered 'listing' and 'paymentProof' -- 'walletGift', 'user' (KYC), and
+// 'booking' had no check at all, and each was independently exploitable live (an admin self-
+// approved their own ID document, self-approved their own wallet gift above the anti-fraud review
+// threshold, and self-confirmed their own booking including its refund/reversal logic). A 6th
+// review type added later would silently reintroduce this exact gap if the check stayed three
+// separate inline `if`s instead of one resolver every branch is required to call. Applies
+// uniformly to BOTH decisions (APPROVED and REJECTED) -- the conflict of interest in ruling on
+// your own submission doesn't depend on which way you rule.
+function interestedPartyIds(model, entity) {
+  if (model === 'listing') return [entity.ownerId] // listing owner
+  if (model === 'paymentProof') return [entity.userId] // payment submitter
+  if (model === 'walletGift') return [entity.senderUserId, entity.recipientUserId].filter(Boolean) // sender (refunded if blocked) + recipient (financial beneficiary if approved)
+  if (model === 'user') return [entity.id] // the KYC subject IS the reviewed entity
+  if (model === 'booking') return [entity.guestId, entity.listing?.ownerId].filter(Boolean) // booking guest (requester) + listing owner (host, financially affected by confirm/cancel)
+  throw new Error(`interestedPartyIds: unhandled review model '${model}'`)
+}
+
+// Lower-level primitive the review-queue models above build on -- also used directly by the 4
+// ADMIN-only money-moving endpoints below (payout release, finalize-cancellation, refund execute,
+// legacy-refund-accept) that sit OUTSIDE the review-queue dispatcher entirely and had NO
+// self-dealing check of any kind before this fix. Same underlying risk (an admin who also holds
+// a HOST/SELLER/GUEST role directing money to themselves), different code shape, one shared
+// assertion so it can't drift into 4 separately-written (and separately-forgettable) checks.
+function assertNotInterestedParty(interestedIds, actorUserId) {
+  if (interestedIds.includes(actorUserId)) throw selfReviewError()
+}
+
+function assertNoSelfReview(model, entity, actorUserId) {
+  assertNotInterestedParty(interestedPartyIds(model, entity), actorUserId)
+}
+
 async function updateReviewEntity(tx, entityType, entityId, decision, actorUserId, body) {
   const model = reviewModel(entityType)
   const note = body.adminNote || body.note || undefined
@@ -992,10 +1037,7 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (model === 'listing') {
     const existing = await tx.listing.findUnique({ where: { id: entityId } })
     if (!existing || existing.status !== 'PENDING_REVIEW') throw reviewStateError('LISTING_NOT_REVIEWABLE')
-    // A real audit found no check here beyond role -- an admin account that also holds a
-    // SELLER/HOST role could approve/reject their own submitted listing. Ownership is immutable
-    // DB data (existing.ownerId), not a UI assumption that "admins don't also list things."
-    if (existing.ownerId === actorUserId) throw selfReviewError()
+    assertNoSelfReview('listing', existing, actorUserId)
     // Re-check status in the WHERE clause so two concurrent decisions on the same listing can't
     // both apply (same TOCTOU class as the payment-proof and SR-ride races fixed earlier).
     const updated = await tx.listing.updateMany({
@@ -1028,9 +1070,7 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
       },
     })
     if (!existing || existing.status !== 'PENDING_ADMIN_REVIEW') throw reviewStateError('PAYMENT_NOT_REVIEWABLE')
-    // Same self-dealing check as the listing branch above -- live-proven: an admin submitted then
-    // approved their own payment proof (reviewedById === the payer's own id).
-    if (existing.userId === actorUserId) throw selfReviewError()
+    assertNoSelfReview('paymentProof', existing, actorUserId)
     const shamCashReconciliation = decision === 'APPROVED' && isShamCashProvider(existing.provider)
       ? requireShamCashReconciliation(existing, body)
       : null
@@ -1070,6 +1110,7 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (model === 'walletGift') {
     const existing = await tx.walletGift.findUnique({ where: { id: entityId } })
     if (!existing || !['CLAIM_PENDING', 'LOCKED'].includes(existing.status)) throw reviewStateError('GIFT_NOT_REVIEWABLE')
+    assertNoSelfReview('walletGift', existing, actorUserId)
     const updated = await tx.walletGift.updateMany({
       where: { id: entityId, status: existing.status },
       data: { status: decision === 'APPROVED' ? 'SENT' : 'ADMIN_BLOCKED' },
@@ -1094,8 +1135,9 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   }
 
   if (model === 'user') {
-    const existing = await tx.user.findUnique({ where: { id: entityId }, select: { idDocumentStatus: true } })
+    const existing = await tx.user.findUnique({ where: { id: entityId }, select: { id: true, idDocumentStatus: true } })
     if (!existing || existing.idDocumentStatus !== 'PENDING_REVIEW') throw reviewStateError('ID_DOCUMENT_NOT_REVIEWABLE')
+    assertNoSelfReview('user', existing, actorUserId)
     const updated = await tx.user.updateMany({
       where: { id: entityId, idDocumentStatus: 'PENDING_REVIEW' },
       data: {
@@ -1113,6 +1155,7 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
     include: { payments: true, listing: true },
   })
   if (!existing || !['REQUESTED', 'DISPUTED'].includes(existing.status)) throw reviewStateError('BOOKING_NOT_REVIEWABLE')
+  assertNoSelfReview('booking', existing, actorUserId)
   const updatedBooking = await tx.booking.updateMany({
     where: { id: entityId, status: existing.status },
     data: { status: decision === 'APPROVED' ? 'CONFIRMED' : 'CANCELLED' },

@@ -61,7 +61,7 @@ function check(label, cond, detail) { if (cond) { pass++; console.log(`   PASS  
 const code = r => r.j?.error?.code || r.j?.code
 const has = (r, id) => (r.j?.listings || []).some(l => l.id === id)
 // advertising campaign = a listing carrying metadata.advertising, created in a paid division
-function adBody(extra = {}) { return { division:'MARKETPLACE', titleAr:'Featured campaign banner', priceMinor:15000, currency:'SYP', metadata:{ advertising:true, adPlan:'plus', adPlacement:'homepage', adDuration:30, visualFilters:{} }, ...extra } }
+function adBody(extra = {}) { return { division:'MARKETPLACE', titleAr:'Featured campaign banner', priceMinor:15000, currency:'SYP', metadata:{ advertising:true, adPlan:'plus', adPlacement:'homepage', adDuration:30, adDurationDays:7, visualFilters:{} }, ...extra } }
 async function submitProof(token, ref, amount=1900) {
   return call('POST','/api/payments/seller-plan-proof', token, {planCode:'advertising-plus', amountMinor:amount, currency:'USD', providerRef:ref, legalName:'Advertiser Co', sellerType:'advertiser'})
 }
@@ -110,6 +110,11 @@ check('after approval advertiser creates ad campaign (201)', create.status === 2
 const adId = create.j?.listing?.id
 check('ad campaign carries advertising metadata', create.j?.listing?.metadata?.advertising === true, JSON.stringify(create.j?.listing?.metadata?.advertising))
 check('ad campaign starts DRAFT (not active)', create.j?.listing?.status === 'DRAFT', create.j?.listing?.status)
+// Real duration enforcement: adBody() requested 7 days (adDurationDays:7) -- the flat per-tier
+// default (plus=30, premium=60) would put expiresAt ~30 days out; a real 7-day expiry proves the
+// advertiser's own chosen duration is honored, not silently ignored.
+const expiresInDays = (new Date(create.j?.listing?.expiresAt) - Date.now()) / 86400000
+check('ad expiry honors the advertiser\'s chosen duration (~7 days, not the flat 30-day default)', expiresInDays > 6 && expiresInDays < 8, `${expiresInDays} days`)
 check('ad media attach (201)', (await call('POST', `/api/listings/${adId}/media`, AA, {media:[{url:'/assets/divisions/marketplace.webp', kind:'mainBanner'}]})).status === 201)
 check('draft ad NOT publicly visible', !has(await call('GET','/api/listings?division=MARKETPLACE',null), adId), 'leaked')
 check('ad submit -> PENDING_REVIEW', (await call('PATCH', `/api/listings/${adId}/submit`, AA)).j?.listing?.status === 'PENDING_REVIEW', 'no submit')

@@ -120,17 +120,20 @@ const PROPERTY_TYPES = [
   { ar: 'مشروع جديد', en: 'New project' },
 ]
 
-const AD_PLACEMENTS = [
-  { ar: 'الرئيسية', en: 'Landing page' },
-  { ar: 'صفحة البحث', en: 'Search page' },
-  { ar: 'صفحات الأقسام', en: 'Division pages' },
-  { ar: 'كل المنصة', en: 'Whole platform' },
-]
+// Only 'Landing page' is a real, built display surface (the landing page's "Sponsored" section --
+// see /api/advertising/active). Offering Search page/Division pages/Whole platform here would be a
+// choice with no effect: an advertiser picking one of those would get nothing shown anywhere,
+// silently. Reduced to the one option that's actually true, matching this codebase's own
+// no-fake-choice standard (see the removed "Featured ads" marquee note on the landing page).
+const AD_PLACEMENTS = [{ ar: 'الرئيسية', en: 'Landing page' }]
 
+// `days` is the real, server-enforced expiry (server/routes/listings.mjs reads
+// metadata.adDurationDays at creation time) -- not just display text. Keep this in sync with
+// whatever labels are offered here; the label alone is never sent to the server.
 const AD_DURATIONS = [
-  { ar: 'أسبوع واحد', en: 'One week' },
-  { ar: 'شهر واحد', en: 'One month' },
-  { ar: 'ثلاثة أشهر', en: 'Three months' },
+  { ar: 'أسبوع واحد', en: 'One week', days: 7 },
+  { ar: 'شهر واحد', en: 'One month', days: 30 },
+  { ar: 'ثلاثة أشهر', en: 'Three months', days: 90 },
 ]
 
 export function SellerListingWizard({ lang }: Props) {
@@ -310,6 +313,7 @@ export function SellerListingWizard({ lang }: Props) {
             adPlan,
             adPlacement,
             adDuration,
+            adDurationDays: AD_DURATIONS.find((item) => item[lang] === adDuration)?.days,
             uploadedDocumentFiles,
             uploadedDocumentUrls,
             propertyType: selectedType,

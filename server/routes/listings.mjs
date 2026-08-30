@@ -374,7 +374,15 @@ export async function handleListings(req, res, url, context) {
           error.expose = true
           throw error
         }
-        expiresAt = listingExpiryDate(sellerProfile.planCode)
+        // Advertising campaigns pick their own real duration (SellerListingWizard.tsx's AD_DURATIONS,
+        // 7/30/90 days) -- honor it instead of the generic per-tier default, which used to apply
+        // regardless of what the advertiser actually chose. Capped at the wizard's own max option so
+        // a direct API call can't request an arbitrarily long-lived ad.
+        const requestedAdDays = Number(body.metadata?.adDurationDays)
+        expiresAt =
+          body.metadata?.advertising === true && Number.isInteger(requestedAdDays) && requestedAdDays > 0 && requestedAdDays <= 90
+            ? new Date(Date.now() + requestedAdDays * 24 * 60 * 60 * 1000)
+            : listingExpiryDate(sellerProfile.planCode)
       }
 
       const priceMinor = Number(body.priceMinor || 0)

@@ -365,7 +365,41 @@ export async function handleListings(req, res, url, context) {
       const division = normalizeListingDivision(body.division || 'STAYS')
 
       let expiresAt
-      if (PAID_PLAN_DIVISIONS.has(division)) {
+      let boundAdvertisingProofId
+      const isAdvertisingCampaign = PAID_PLAN_DIVISIONS.has(division) && body.metadata?.advertising === true
+      if (isAdvertisingCampaign) {
+        // Owner-approved business rule: one approved, unused advertising payment = exactly one
+        // campaign -- NOT the "pay once, list unlimited inventory" model CARS/MARKETPLACE/
+        // NEW_CONSTRUCTION dealers get in the branch below (intentionally left untouched; that
+        // model is correct there). Checks for a specific unconsumed payment rather than the
+        // seller profile's overall (and, once one payment is spent, stale) approval flag.
+        const availableProof = await db().paymentProof.findFirst({
+          where: {
+            userId: context.user.id,
+            provider: 'seller_plan',
+            status: 'APPROVED',
+            campaignListingId: null,
+            planCode: { in: ['advertising-plus', 'advertising-premium'] },
+          },
+          orderBy: { createdAt: 'asc' },
+        })
+        if (!availableProof) {
+          const error = new Error('An approved, unused advertising payment is required before creating a campaign. A second campaign or a renewal after expiry needs a new payment.')
+          error.statusCode = 403
+          error.code = 'ADVERTISING_PAYMENT_REQUIRED'
+          error.expose = true
+          throw error
+        }
+        boundAdvertisingProofId = availableProof.id
+        // The advertiser's own chosen duration (SellerListingWizard.tsx's AD_DURATIONS, 7/30/90
+        // days) -- honor it instead of the generic per-tier default. Capped at the wizard's own
+        // max option so a direct API call can't request an arbitrarily long-lived ad.
+        const requestedAdDays = Number(body.metadata?.adDurationDays)
+        expiresAt =
+          Number.isInteger(requestedAdDays) && requestedAdDays > 0 && requestedAdDays <= 90
+            ? new Date(Date.now() + requestedAdDays * 24 * 60 * 60 * 1000)
+            : listingExpiryDate(availableProof.planCode)
+      } else if (PAID_PLAN_DIVISIONS.has(division)) {
         const sellerProfile = await db().sellerProfile.findUnique({ where: { userId: context.user.id } })
         if (!sellerProfile || sellerProfile.documentStatus !== 'APPROVED') {
           const error = new Error('A paid, admin-approved seller plan is required before publishing this listing.')
@@ -374,15 +408,7 @@ export async function handleListings(req, res, url, context) {
           error.expose = true
           throw error
         }
-        // Advertising campaigns pick their own real duration (SellerListingWizard.tsx's AD_DURATIONS,
-        // 7/30/90 days) -- honor it instead of the generic per-tier default, which used to apply
-        // regardless of what the advertiser actually chose. Capped at the wizard's own max option so
-        // a direct API call can't request an arbitrarily long-lived ad.
-        const requestedAdDays = Number(body.metadata?.adDurationDays)
-        expiresAt =
-          body.metadata?.advertising === true && Number.isInteger(requestedAdDays) && requestedAdDays > 0 && requestedAdDays <= 90
-            ? new Date(Date.now() + requestedAdDays * 24 * 60 * 60 * 1000)
-            : listingExpiryDate(sellerProfile.planCode)
+        expiresAt = listingExpiryDate(sellerProfile.planCode)
       }
 
       const priceMinor = Number(body.priceMinor || 0)
@@ -444,6 +470,25 @@ export async function handleListings(req, res, url, context) {
           metadata: body.metadata || {},
         },
       })
+
+      if (boundAdvertisingProofId) {
+        // Atomic claim -- only succeeds if nothing else bound this same payment in between the
+        // availability check above and here. Deterministic campaign association (the payment
+        // record carries campaignListingId directly, not inferred from amount/uploader).
+        const claim = await db().paymentProof.updateMany({
+          where: { id: boundAdvertisingProofId, campaignListingId: null },
+          data: { campaignListingId: listing.id },
+        })
+        if (claim.count === 0) {
+          await db().listing.delete({ where: { id: listing.id } })
+          const error = new Error('This advertising payment was just used for another campaign. Submit a new payment.')
+          error.statusCode = 409
+          error.code = 'ADVERTISING_PAYMENT_ALREADY_CONSUMED'
+          error.expose = true
+          throw error
+        }
+      }
+
       return json(res, 201, { ok: true, listing })
     }
 

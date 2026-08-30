@@ -355,6 +355,15 @@ model PaymentProof {
   // which only ever have one); this is the complete list admin should actually review.
   proofAssetUrls  String[]      @default([]) @map("proof_asset_urls")
   providerRef     String?       @map("provider_ref")
+  // Which plan THIS payment was submitted for -- durable per-payment record, unlike
+  // SellerProfile.planCode which gets overwritten by every new submission. Used to identify
+  // advertising-tier payments specifically for the one-payment-per-campaign binding below.
+  planCode        String?       @map("plan_code")
+  // Set the moment an advertising payment is bound to a new campaign listing at creation
+  // (deterministic campaign association, not inferred from amount/uploader). Stays set forever
+  // once that campaign is admin-approved -- the payment is genuinely consumed. Released back to
+  // NULL if the bound campaign is REJECTED instead, so the same payment can back a retry.
+  campaignListingId String?     @map("campaign_listing_id")
   adminNote       String?       @map("admin_note")
   reviewedById    String?       @map("reviewed_by_id")
   reviewedAt      DateTime?     @map("reviewed_at")
@@ -392,6 +401,7 @@ model PaymentProof {
   // backing either FK -- confirmed a full sequential scan of this table before these were added.
   @@index([bookingId])
   @@index([rideId, status])
+  @@index([campaignListingId])
   @@map("payment_proofs")
 }
 

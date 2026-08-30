@@ -531,6 +531,10 @@ export async function handlePayments(req, res, url, context) {
             proofAssetUrl: proofAssetUrls[0] || undefined,
             proofAssetUrls,
             providerRef,
+            // Durable per-payment record of which plan THIS submission was for -- SellerProfile's
+            // own planCode gets overwritten by every new submission, so it can't answer "what was
+            // this specific already-reviewed payment for" after the fact.
+            planCode,
           },
         }),
         db().sellerProfile.upsert({

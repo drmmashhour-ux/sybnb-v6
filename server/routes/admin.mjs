@@ -637,9 +637,27 @@ export async function handleAdmin(req, res, url, context) {
       db().booking.count({ where: bookingsWhere }),
       db().user.count({ where: idDocumentsWhere }),
     ])
+
+    // Resolve each advertising payment's bound campaign for display -- campaignListingId is a
+    // plain string (not a Prisma relation, matching this codebase's other soft cross-references),
+    // so it's enriched here rather than via `include`. Admin previously had no way to tell which
+    // campaign a payment proof was for except guessing from amount/uploader.
+    const campaignListingIds = payments.map((p) => p.campaignListingId).filter(Boolean)
+    const campaignListings = campaignListingIds.length
+      ? await db().listing.findMany({
+          where: { id: { in: campaignListingIds } },
+          select: { id: true, titleAr: true, titleEn: true, status: true, metadata: true },
+        })
+      : []
+    const campaignListingById = new Map(campaignListings.map((l) => [l.id, l]))
+    const paymentsWithCampaign = payments.map((p) => ({
+      ...p,
+      campaignListing: p.campaignListingId ? campaignListingById.get(p.campaignListingId) || null : null,
+    }))
+
     return json(res, 200, {
       ok: true,
-      queue: { listings, payments, gifts, bookings, idDocuments },
+      queue: { listings, payments: paymentsWithCampaign, gifts, bookings, idDocuments },
       // Additive, not yet declared on the frontend's PlatformReviewQueue type -- safe for existing
       // callers (extra JSON fields are simply ignored) and ready for the frontend to surface once
       // that type is free to edit.
@@ -981,6 +999,16 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
       data: { status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED' },
     })
     if (updated.count === 0) throw reviewStateError('LISTING_NOT_REVIEWABLE')
+    // A rejected advertising campaign never ran -- release its bound payment (rather than leaving
+    // it permanently consumed by a dead campaign) so the same, still-valid payment can back a
+    // retry. An APPROVED campaign needs no action here: the binding set at creation time simply
+    // stays, which is what makes it genuinely consumed going forward.
+    if (decision === 'REJECTED' && existing.metadata?.advertising === true) {
+      await tx.paymentProof.updateMany({
+        where: { campaignListingId: entityId },
+        data: { campaignListingId: null },
+      })
+    }
     return tx.listing.findUnique({ where: { id: entityId } })
   }
 

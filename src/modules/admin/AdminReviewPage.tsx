@@ -794,6 +794,9 @@ function ShortRentAdminCommandDashboard({
                 </div>
                 <b>{paymentListingTitle(payment, lang)}</b>
                 <strong>{moneyText(payment.amountMinor, payment.currency, lang)}</strong>
+                {paymentAdvertisingDetails(payment, lang) && (
+                  <small style={{ color: '#d5a915' }}>{paymentAdvertisingDetails(payment, lang)} · {paymentHostName(payment, lang)}</small>
+                )}
                 <small>{isAr ? 'ثقة الذكاء الاصطناعي' : 'AI confidence'} {createAiPaymentReview(payment, isAr).label}</small>
                 <div style={commandStyles.proofActions}>
                   <button disabled={disabled || heldPaymentIds[payment.id] || (isShamCashProvider(payment.provider) && !shamCashReconciliation.canApprove)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'قبول' : 'Approve'}</button>
@@ -1188,11 +1191,13 @@ function AdminPaymentLine({
   onSelect: () => void
 }) {
   const aiReview = createAiPaymentReview(payment, isAr)
+  const advertisingDetails = paymentAdvertisingDetails(payment, lang)
   return (
     <article style={{ ...commandStyles.managementRow, ...(selected ? commandStyles.selectedCard : {}) }} onClick={onSelect}>
       <div>
         <strong>{bookingReference(payment)}</strong>
         <small>{paymentListingTitle(payment, lang)}</small>
+        {advertisingDetails && <small style={{ color: '#d5a915' }}>{advertisingDetails} · {paymentHostName(payment, lang)}</small>}
       </div>
       <span>{providerText(payment.provider, lang)}</span>
       <div style={commandStyles.aiRowDecision}>
@@ -1523,8 +1528,27 @@ function AdminListingLine({
 function paymentListingTitle(payment: PlatformPaymentProof | undefined, lang: Lang) {
   const listing = payment?.booking?.listing
   if (listing) return listingTitleText(listing, lang)
+  const campaign = payment?.campaignListing
+  if (campaign) return lang === 'ar' ? campaign.titleAr : campaign.titleEn || campaign.titleAr
   if (payment?.provider === 'seller_plan') return lang === 'ar' ? 'دفعة خطة بائع' : 'Seller plan payment'
   return lang === 'ar' ? 'بدون حجز مرتبط' : 'No linked booking'
+}
+
+// Deterministic campaign association (payment.campaignListingId), not inferred from amount or
+// uploader -- see the one-payment-per-campaign business rule in server/routes/listings.mjs.
+function paymentAdvertisingDetails(payment: PlatformPaymentProof | undefined, lang: Lang) {
+  const isAr = lang === 'ar'
+  if (payment?.provider !== 'seller_plan' || !String(payment?.planCode || '').startsWith('advertising-')) return null
+  const plan = payment?.planCode === 'advertising-premium' ? (isAr ? 'Premium' : 'Premium') : 'Plus'
+  const campaign = payment?.campaignListing
+  const metadata = campaign?.metadata as { adDuration?: string; adPlacement?: string } | undefined
+  const campaignPart = campaign
+    ? `${isAr ? 'الحملة' : 'Campaign'}: ${(isAr ? campaign.titleAr : campaign.titleEn || campaign.titleAr)} (${campaign.id.slice(0, 8)}) · ${campaign.status}`
+    : isAr
+      ? 'لم تُربط بحملة بعد'
+      : 'Not yet attached to a campaign'
+  const durationPart = metadata?.adDuration ? ` · ${metadata.adDuration}` : ''
+  return `📢 ${isAr ? 'إعلان' : 'Advertising'} · ${plan}${durationPart} — ${campaignPart}`
 }
 
 function paymentHostName(payment: PlatformPaymentProof | undefined, lang: Lang) {

@@ -58,6 +58,15 @@ export type PlatformPaymentProof = {
   adminNote: string | null
   reviewedById: string | null
   reviewedAt: string | null
+  planCode?: string | null
+  campaignListingId?: string | null
+  campaignListing?: {
+    id: string
+    titleAr: string
+    titleEn: string | null
+    status: string
+    metadata?: Record<string, unknown>
+  } | null
   user?: {
     id: string
     displayName: string

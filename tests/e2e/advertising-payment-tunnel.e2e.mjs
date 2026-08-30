@@ -82,8 +82,11 @@ await verifySellerKyc(AA, advA.id)
 await verifySellerKyc(AB, advB.id)
 
 console.log('=== 1. GATE: activation blocked before payment/approval ===')
+// One approved, unused advertising payment = one campaign (owner-approved business rule) --
+// checked directly, not via the coarse sellerProfile.documentStatus flag CARS/MARKETPLACE/
+// NEW_CONSTRUCTION dealers use, so the code is ADVERTISING_PAYMENT_REQUIRED, not SELLER_PLAN_REQUIRED.
 const preCreate = await call('POST','/api/listings', AA, adBody())
-check('advertiser cannot create paid ad before plan (403 SELLER_PLAN_REQUIRED)', preCreate.status === 403 && code(preCreate) === 'SELLER_PLAN_REQUIRED', preCreate.status+' '+code(preCreate))
+check('advertiser cannot create ad before any approved payment (403 ADVERTISING_PAYMENT_REQUIRED)', preCreate.status === 403 && code(preCreate) === 'ADVERTISING_PAYMENT_REQUIRED', preCreate.status+' '+code(preCreate))
 check('anon cannot submit ad payment proof (401)', (await submitProof(null, 'anon-ref')).status === 401)
 check('anon cannot create ad (401)', (await call('POST','/api/listings', null, adBody())).status === 401)
 check('buyer(GUEST) cannot create ad (403)', (await call('POST','/api/listings', B, adBody())).status === 403)
@@ -135,10 +138,54 @@ check('active-ads endpoint is public (200, no auth)', activeAds.status === 200, 
 const activeAd = (activeAds.j?.ads || []).find((a) => a.id === adId)
 check('approved ad appears in the real public display surface', Boolean(activeAd), JSON.stringify(activeAds.j?.ads?.map((a) => a.id)))
 check('display surface carries the real attached banner media (not fake/empty)', activeAd?.media?.some((m) => m.kind === 'mainBanner' && m.url), JSON.stringify(activeAd?.media))
+
+console.log('\n=== 3c. ONE PAYMENT = ONE CAMPAIGN (owner-approved business rule) ===')
+// The proof approved in section 2 was already spent on the campaign created+approved in section 3
+// -- a second campaign must NOT be creatable from that same payment, however long ago it was
+// approved. This is checked directly (not inferred), so a stale sellerProfile.documentStatus=
+// APPROVED left over from that same old payment can't accidentally re-authorize a new campaign.
+const secondWithoutNewPayment = await call('POST','/api/listings', AA, adBody({ titleAr:'Second campaign, no new payment' }))
+check('second campaign blocked without a NEW payment (403 ADVERTISING_PAYMENT_REQUIRED)', secondWithoutNewPayment.status === 403 && code(secondWithoutNewPayment) === 'ADVERTISING_PAYMENT_REQUIRED', secondWithoutNewPayment.status+' '+code(secondWithoutNewPayment))
+
+const ref2 = 'ADV2-' + Math.floor(performance.now()*1000)
+const proof2 = await submitProof(AA, ref2)
+const approve2 = await call('PATCH', `/api/admin/review-queue/payment/${proof2.j?.proof?.id}`, A, {decision:'APPROVE'})
+check('a fresh payment is approvable independently of the first', approve2.status === 200, approve2.status)
 const draftForVisibility = await call('POST','/api/listings', AA, adBody({ titleAr:'Not-yet-approved campaign' }))
 const draftAdVisId = draftForVisibility.j?.listing?.id
+check('a NEW payment unlocks exactly one new campaign (201)', draftForVisibility.status === 201, draftForVisibility.status+' '+code(draftForVisibility))
+const overviewAfterBind = await call('GET', '/api/me/overview', AA)
+const boundProof2 = (overviewAfterBind.j?.overview?.payments || []).find((p) => p.id === proof2.j?.proof?.id)
+check('the new payment is bound to this exact campaign, deterministically (campaignListingId)', boundProof2?.campaignListingId === draftAdVisId, JSON.stringify(boundProof2?.campaignListingId) + ' vs ' + draftAdVisId)
+const thirdWithoutNewPayment = await call('POST','/api/listings', AA, adBody({ titleAr:'Third campaign, no new payment' }))
+check('a second-in-a-row campaign is blocked again once THIS payment is also bound (403)', thirdWithoutNewPayment.status === 403 && code(thirdWithoutNewPayment) === 'ADVERTISING_PAYMENT_REQUIRED', thirdWithoutNewPayment.status+' '+code(thirdWithoutNewPayment))
+
 const activeAdsAfterDraft = await call('GET', '/api/advertising/active', null)
 check('a DRAFT (not yet approved) ad never appears on the public display surface', !(activeAdsAfterDraft.j?.ads || []).some((a) => a.id === draftAdVisId), 'unapproved ad leaked to display surface')
+
+console.log('\n=== 3d. REJECTION RELEASES THE PAYMENT FOR A RETRY ===')
+const ref3 = 'ADV3-' + Math.floor(performance.now()*1000)
+const proof3 = await submitProof(AA, ref3)
+await call('PATCH', `/api/admin/review-queue/payment/${proof3.j?.proof?.id}`, A, {decision:'APPROVE'})
+const rejectedCampaign = await call('POST','/api/listings', AA, adBody({ titleAr:'Will be rejected' }))
+check('third payment unlocks a new campaign (201)', rejectedCampaign.status === 201, rejectedCampaign.status)
+const rejectedCampaignId = rejectedCampaign.j?.listing?.id
+await call('POST', `/api/listings/${rejectedCampaignId}/media`, AA, {media:[{url:'/assets/divisions/marketplace.webp', kind:'mainBanner'}]})
+await call('PATCH', `/api/listings/${rejectedCampaignId}/submit`, AA)
+const campaignReject = await call('PATCH', `/api/admin/review-queue/listing/${rejectedCampaignId}`, A, {decision:'REJECT'})
+check('admin rejects the campaign (200)', campaignReject.status === 200, campaignReject.status)
+const retryWithSamePayment = await call('POST','/api/listings', AA, adBody({ titleAr:'Retry after rejection' }))
+check('a REJECTED campaign releases its payment -- the SAME payment backs a retry (201, not 403)', retryWithSamePayment.status === 201, retryWithSamePayment.status+' '+code(retryWithSamePayment))
+const retryAgainBlocked = await call('POST','/api/listings', AA, adBody({ titleAr:'Second retry, should be blocked' }))
+check('once the retry campaign exists, that same payment is bound again -- a further campaign is blocked', retryAgainBlocked.status === 403 && code(retryAgainBlocked) === 'ADVERTISING_PAYMENT_REQUIRED', retryAgainBlocked.status+' '+code(retryAgainBlocked))
+
+console.log('\n=== 3e. ADMIN PAYMENT REVIEW SHOWS THE CAMPAIGN ASSOCIATION ===')
+const refPending = 'ADVP-' + Math.floor(performance.now()*1000)
+const proofPending = await submitProof(AB, refPending)
+const queueBeforeApproval = await call('GET', '/api/admin/review-queue', A)
+const pendingInQueue = (queueBeforeApproval.j?.queue?.payments || []).find((p) => p.id === proofPending.j?.proof?.id)
+check('pending advertising payment carries its own planCode (deterministic, not inferred)', pendingInQueue?.planCode === 'advertising-plus', JSON.stringify(pendingInQueue?.planCode))
+check('pending advertising payment has no campaign yet (not created until after approval)', pendingInQueue?.campaignListingId == null, JSON.stringify(pendingInQueue?.campaignListingId))
 
 console.log('\n=== 4. ADVERTISER STATUS SURFACE (/api/me/overview) ===')
 const overview = await call('GET','/api/me/overview', AA)
@@ -151,8 +198,9 @@ console.log('\n=== 5. ISOLATION: private campaign/payment info ===')
 const overviewB = await call('GET','/api/me/overview', AB)
 check('advertiserB overview does NOT contain advertiserA proof', !(overviewB.j?.overview?.payments||[]).some(p => p.id === proofId), 'proof leaked')
 check('advertiserB overview does NOT contain advertiserA campaign', !(overviewB.j?.overview?.listings||[]).some(l => l.id === adId), 'campaign leaked')
-const draftAd = await call('POST','/api/listings', AA, adBody({ titleAr:'Second campaign draft' }))
-const draftAdId = draftAd.j?.listing?.id
+// Reuses draftAdVisId (section 3c) rather than creating yet another campaign here -- under the
+// one-payment-per-campaign rule, AA has no unconsumed payment left to spend on a fresh one.
+const draftAdId = draftAdVisId
 check('advertiserB cannot attach media to advertiserA campaign (404)', (await call('POST', `/api/listings/${draftAdId}/media`, AB, {media:[{url:'/x.webp'}]})).status === 404)
 check('advertiserB cannot submit advertiserA campaign (404)', (await call('PATCH', `/api/listings/${draftAdId}/submit`, AB)).status === 404)
 check('invalid/unknown campaign id fails safely (404)', (await call('GET','/api/listings/11111111-1111-1111-1111-111111111111', null)).status === 404)
@@ -165,7 +213,7 @@ const rReject = await call('PATCH', `/api/admin/review-queue/payment/${rproof.j?
 check('admin rejects proof (200)', rReject.status === 200, rReject.status)
 const ovB2 = await call('GET','/api/me/overview', AB)
 check('rejected proof -> sellerProfile documentStatus REJECTED', ovB2.j?.overview?.sellerProfile?.documentStatus === 'REJECTED', JSON.stringify(ovB2.j?.overview?.sellerProfile?.documentStatus))
-check('advertiserB w/ rejected proof still blocked from paid ad (403)', code(await call('POST','/api/listings', AB, adBody())) === 'SELLER_PLAN_REQUIRED', 'gate bypassed after rejection')
+check('advertiserB w/ rejected proof still blocked from a paid ad (403 ADVERTISING_PAYMENT_REQUIRED)', code(await call('POST','/api/listings', AB, adBody())) === 'ADVERTISING_PAYMENT_REQUIRED', 'gate bypassed after rejection')
 
 console.log(`\n==== ADVERTISING / PAYMENT TUNNEL E2E: ${pass} passed, ${fail} failed ====`)
 process.exit(fail ? 1 : 0)

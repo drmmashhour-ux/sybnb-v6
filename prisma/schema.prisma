@@ -139,6 +139,10 @@ model User {
   displayName  String        @map("display_name")
   locale       String        @default("ar-SY")
   status       AccountStatus @default(ACTIVE)
+  // SEC-002 security epoch. Every session token carries the epoch it was issued under; bumping
+  // this column invalidates every outstanding token for this user in one atomic write (logout-all,
+  // suspension, deletion, role change). See prisma/migrations/046_session_revocation.
+  sessionEpoch Int           @default(0) @map("session_epoch")
   idDocumentRef String?      @map("id_document_ref")
   idDocumentSubmittedAt DateTime? @map("id_document_submitted_at")
   idDocumentMimeType String? @map("id_document_mime_type")
@@ -149,6 +153,7 @@ model User {
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
   roles             UserRole[]
+  sessions          UserSession[]
   sellerProfile     SellerProfile?
   driverProfile     DriverProfile?
   listings          Listing[]         @relation("ListingOwner")
@@ -173,6 +178,27 @@ model User {
   refundAttemptsLegacyAccepted RefundAttempt[] @relation("RefundAttemptLegacyAcceptedBy")
 
   @@map("users")
+}
+
+// SEC-002 server-backed session. One row per issued session token; the token carries this row's id
+// as its `sid` claim and every authenticated request re-reads the row. Revoking one row logs out
+// exactly one session without disturbing that account's other devices.
+model UserSession {
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  issuedAt      DateTime  @default(now()) @map("issued_at")
+  expiresAt     DateTime  @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  revokedReason String?   @map("revoked_reason")
+  lastUsedAt    DateTime? @map("last_used_at")
+  userAgent     String?   @map("user_agent")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("user_sessions")
 }
 
 model UserRole {

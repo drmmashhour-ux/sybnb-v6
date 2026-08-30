@@ -51,7 +51,7 @@
 //      PAYMENT_OPERATION_STRIPE_CHECKOUT_REPLAY_ENABLED=true on port 3052)
 
 import { createHash } from 'node:crypto'
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { signWebhook } from '../../server/lib/payment-webhook.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
@@ -66,9 +66,9 @@ if (!host.id || !guest.id || !admin.id) {
   console.error('Missing HOST/GUEST/ADMIN env')
   process.exit(2)
 }
-const H = createSessionToken({ id: host.id, roles: [{ role: 'HOST' }] })
-const G = createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
-const A = createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
+const H = await createSessionToken({ id: host.id, roles: [{ role: 'HOST' }] })
+const G = await createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
+const A = await createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
 
 let pass = 0
 let fail = 0

@@ -30,7 +30,7 @@
 //      (server must run with the full payment-policy config this repo's run-all-e2e.sh sets)
 
 import { randomUUID } from 'node:crypto'
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 import { createRefundRequest } from '../../server/lib/finance-ledger.mjs'
 
@@ -43,9 +43,9 @@ if (!host.id || !guest.id || !admin.id) {
   console.error('Missing HOST/GUEST/ADMIN env')
   process.exit(2)
 }
-const H = createSessionToken({ id: host.id, roles: [{ role: 'HOST' }] })
-const G = createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
-const A = createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
+const H = await createSessionToken({ id: host.id, roles: [{ role: 'HOST' }] })
+const G = await createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
+const A = await createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
 
 let pass = 0
 let fail = 0

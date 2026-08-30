@@ -41,7 +41,7 @@
 //      (server must run with PAYMENT_INTENTS_ENABLED=true, PAYMENTS_ENABLED=true, and the SAME
 //      PAYMENT_WEBHOOK_SECRET / STRIPE_WEBHOOK_SECRET / STRIPE_SECRET_KEY)
 
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { signWebhook } from '../../server/lib/payment-webhook.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
@@ -56,9 +56,9 @@ if (!host.id || !guest.id || !admin.id) {
   console.error('Missing HOST/GUEST/ADMIN env')
   process.exit(2)
 }
-const H = createSessionToken({ id: host.id, roles: [{ role: 'HOST' }] })
-const G = createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
-const A = createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
+const H = await createSessionToken({ id: host.id, roles: [{ role: 'HOST' }] })
+const G = await createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
+const A = await createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
 
 let pass = 0
 let fail = 0

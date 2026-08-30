@@ -21,7 +21,7 @@
 //      node tests/e2e/seller-plan-fee-ledger.e2e.mjs
 
 import { randomUUID } from 'node:crypto'
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
@@ -31,9 +31,9 @@ const admin = { id: process.env.ADMIN }
 for (const [name, u] of [['SELLER1', seller1], ['SELLER2', seller2], ['ADMIN', admin]]) {
   if (!u.id) { console.error(`Missing required env ${name} (a synthetic user id).`); process.exit(2) }
 }
-const S1 = createSessionToken({ id: seller1.id, roles: [{ role: 'SELLER' }] })
-const S2 = createSessionToken({ id: seller2.id, roles: [{ role: 'SELLER' }] })
-const A = createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
+const S1 = await createSessionToken({ id: seller1.id, roles: [{ role: 'SELLER' }] })
+const S2 = await createSessionToken({ id: seller2.id, roles: [{ role: 'SELLER' }] })
+const A = await createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
 
 let pass = 0
 let fail = 0

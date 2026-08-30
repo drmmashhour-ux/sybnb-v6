@@ -36,6 +36,24 @@ export const API_ENDPOINTS: ApiEndpoint[] = [
     purpose: 'Start a secure session after bcrypt password verification.',
   },
   {
+    method: 'POST',
+    path: '/api/auth/logout',
+    auth: 'user',
+    purpose: 'Revoke the calling session server-side so its token stops working immediately.',
+  },
+  {
+    method: 'POST',
+    path: '/api/auth/logout-all',
+    auth: 'user',
+    purpose: 'Revoke every session for the account by bumping its security epoch.',
+  },
+  {
+    method: 'GET',
+    path: '/api/auth/sessions',
+    auth: 'user',
+    purpose: "List the caller's own active sessions.",
+  },
+  {
     method: 'GET',
     path: '/api/listings',
     auth: 'public',
@@ -219,7 +237,9 @@ export const API_ENDPOINTS: ApiEndpoint[] = [
 export const PLATFORM_SECURITY_RULES = [
   'Passwords are scrypt hashes on the server only.',
   'Session tokens are signed, expiring server-side credentials and never stored in localStorage.',
+  'Every session has a server-side record; logout revokes it so the token stops working immediately.',
   'Suspended or deleted accounts cannot log in or use previously issued sessions.',
+  "Removing a role revokes that account's live sessions, so privilege cannot outlive the role.",
   'Admin and support roles cannot be created through public self-registration.',
   'Public registration requires a unique email or phone and returns safe conflict errors.',
   'Phone numbers used for gifts are stored and matched through server-generated hashes.',

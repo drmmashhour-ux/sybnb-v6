@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, randomInt, scryptSync, timingSafeEqual } from 'node:crypto'
 
 const PASSWORD_PREFIX = 'scrypt:v1'
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
+export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
 
 function requiredSecret(name) {
   const value = process.env[name]
@@ -78,14 +78,36 @@ export function verifyGiftClaimCode(gift, code) {
   return candidate.length === expected.length && timingSafeEqual(candidate, expected)
 }
 
-export function createSessionToken(user) {
+// SEC-002. Tokens used to be a bare {sub, roles, iat, exp} envelope with no server-side counterpart,
+// which is precisely why nothing could revoke one. Two claims were added:
+//
+//   sid   -- the id of this session's row in user_sessions. Every authenticated request re-reads
+//            that row, so revoking it logs out this one session and nothing else.
+//   epoch -- users.session_epoch at issue time. A mismatch rejects the token outright, which is how
+//            logout-all / suspension / deletion / role changes kill every session at once.
+//
+// Both are MANDATORY: minting a token without a session row would recreate the unrevocable
+// credential this finding is about, so this throws rather than silently signing a weaker token.
+// Callers go through issueUserSession() in server/lib/session-store.mjs, which creates the row and
+// reads the epoch in one place. The `roles` claim is retained for debuggability ONLY -- authorization
+// has never trusted it and still does not; getAuthContext reads roles live from the DB per request.
+export function createSessionToken(user, options = {}) {
   const secret = requiredSecret('AUTH_SECRET')
+  const { sessionId, epoch, ttlSeconds = SESSION_TTL_SECONDS } = options
+  if (!sessionId || typeof sessionId !== 'string') {
+    throw new Error('createSessionToken requires a sessionId — use issueUserSession() so a revocable session row exists.')
+  }
+  if (!Number.isInteger(epoch)) {
+    throw new Error('createSessionToken requires an integer security epoch — use issueUserSession().')
+  }
   const issuedAt = Math.floor(Date.now() / 1000)
   const payload = {
     sub: user.id,
+    sid: sessionId,
+    epoch,
     roles: user.roles?.map((role) => role.role) || [],
     iat: issuedAt,
-    exp: issuedAt + SESSION_TTL_SECONDS,
+    exp: issuedAt + ttlSeconds,
   }
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const signature = createHmac('sha256', secret).update(body).digest('base64url')

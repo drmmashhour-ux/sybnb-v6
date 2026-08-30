@@ -547,6 +547,108 @@ export function clearGuestSession() {
   window.dispatchEvent(new Event('sybnb-session-changed'))
 }
 
+// SEC-002 — server-side revocation. Clearing sessionStorage is NOT a logout: the token is a
+// self-contained credential that keeps working for its full seven-day life, so anyone who copied it
+// (shared machine, XSS, exported browser profile) stayed signed in after the user pressed "Sign
+// out". These helpers revoke the session on the server FIRST and only then drop the local copy.
+//
+// Returns whether the server actually revoked it. A 401/403 counts as revoked -- the token is
+// already unusable, which is the outcome logout is trying to produce. Anything else (offline,
+// 5xx) returns false, and the caller must not tell the user they are securely signed out.
+async function revokeSessionOnServer(token: string | undefined | null): Promise<boolean> {
+  if (!token) return true
+  try {
+    await apiRequest<{ ok: true; revoked: boolean }>('/api/auth/logout', { method: 'POST', token, body: {} })
+    return true
+  } catch (error) {
+    return isAuthApiError(error)
+  }
+}
+
+export async function signOutGuest(): Promise<{ serverRevoked: boolean }> {
+  const session = getStoredGuestSession()
+  const serverRevoked = await revokeSessionOnServer(session?.token)
+  // The local copy is dropped either way: leaving a token the user asked to discard sitting in
+  // sessionStorage would be worse than a stale server-side row. The return value is what tells the
+  // UI whether it may claim the session was actually revoked.
+  clearGuestSession()
+  return { serverRevoked }
+}
+
+export async function signOutStaff(): Promise<{ serverRevoked: boolean }> {
+  const session = getStoredStaffSession()
+  const serverRevoked = await revokeSessionOnServer(session?.token)
+  clearStoredStaffSession()
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return { serverRevoked }
+}
+
+// The seller flow's sign-out historically called sessionStorage.clear(), which wipes guest, staff
+// AND seller sessions at once. Revoke every token it is about to discard, so the blast radius of
+// the local clear matches the blast radius of the server-side revocation.
+export async function signOutAllLocalSessions(): Promise<{ serverRevoked: boolean }> {
+  const tokens = [getStoredGuestSession()?.token, getStoredStaffSession()?.token, getStoredSellerSession()?.token]
+  const unique = Array.from(new Set(tokens.filter((token): token is string => Boolean(token))))
+  const results = await Promise.all(unique.map((token) => revokeSessionOnServer(token)))
+  sessionStorage.clear()
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return { serverRevoked: results.every(Boolean) }
+}
+
+// "Sign out everywhere" — revokes every session on the account, not just this browser's.
+export async function signOutEverywhere(token: string): Promise<{ serverRevoked: boolean }> {
+  let serverRevoked = false
+  try {
+    await apiRequest<{ ok: true }>('/api/auth/logout-all', { method: 'POST', token, body: {} })
+    serverRevoked = true
+  } catch (error) {
+    serverRevoked = isAuthApiError(error)
+  }
+  sessionStorage.clear()
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return { serverRevoked }
+}
+
+// SEC-002, Step J. Server-side revocation is now real, which creates a state the frontend never had
+// to handle before: a token sitting in sessionStorage that the server has already killed (logged out
+// on another device, account suspended, ADMIN removed). Browser-verified before this existed --
+// re-injecting a revoked token left the header rendering "Hi, <name>" and a "Sign out" button,
+// because getStoredGuestSession() only ever read local storage and nothing reconciled it with the
+// server. Not a privilege bypass (the credential is dead server-side and every protected route
+// refused), but the UI claimed a session that did not exist.
+//
+// Any 401 on a request that carried a token means that token is no longer valid, so the local copy
+// is dropped and the app re-renders signed-out. Only the key(s) holding the FAILING token are
+// cleared -- a guest 401 must not sign an admin out of a different tab's staff session.
+function purgeLocalSessionsForToken(token: string) {
+  if (typeof window === 'undefined' || !token) return
+  let changed = false
+  const drop = (sessionKey: string, tokenKey?: string) => {
+    try {
+      const raw = sessionStorage.getItem(sessionKey)
+      const stored = raw ? (JSON.parse(raw) as { token?: string })?.token : undefined
+      if (stored !== token) return
+      sessionStorage.removeItem(sessionKey)
+      if (tokenKey) sessionStorage.removeItem(tokenKey)
+      changed = true
+    } catch {
+      // A malformed stored session is not something to crash an API error path over.
+    }
+  }
+  drop(GUEST_SESSION_KEY, GUEST_SESSION_TOKEN_KEY)
+  drop(STAFF_SESSION_KEY, STAFF_SESSION_TOKEN_KEY)
+  drop(SELLER_SESSION_KEY)
+  if (changed) window.dispatchEvent(new Event('sybnb-session-changed'))
+}
+
+export async function fetchActiveSessions(token: string) {
+  const response = await apiRequest<{
+    ok: true
+    sessions: Array<{ id: string; issuedAt: string; expiresAt: string; lastUsedAt: string | null; userAgent: string | null; current: boolean }>
+  }>('/api/auth/sessions', { token })
+  return response.sessions
+}
+
 export function getStoredStaffSession(requiredRole?: 'ADMIN' | 'HOST' | 'SELLER' | 'DRIVER'): PlatformAuthSession | null {
   try {
     const raw = sessionStorage.getItem(STAFF_SESSION_KEY)
@@ -1993,6 +2095,9 @@ async function apiRequest<T>(
 
   const payload = (await response.json()) as unknown
   if (!response.ok || isApiErrorBody(payload)) {
+    // SEC-002: a 401 on a token-bearing request means the server has revoked or expired that
+    // credential. Drop the dead local copy so the UI stops presenting a session that is gone.
+    if (response.status === 401 && options.token) purgeLocalSessionsForToken(options.token)
     const message = isApiErrorBody(payload) ? payload.error?.message : undefined
     const code = isApiErrorBody(payload) ? payload.error?.code : undefined
     const error = new Error(message || `SYBNB API request failed: ${response.status}`) as Error & { status?: number; code?: string }

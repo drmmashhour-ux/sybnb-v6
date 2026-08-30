@@ -9,6 +9,7 @@ import {
   fetchSellerOverview,
   getStoredSellerSession,
   requestOtp,
+  signOutAllLocalSessions,
   submitSellerPlanProof,
   uploadPaymentProofFile,
 } from '../../shared/api/platformApi'
@@ -513,8 +514,9 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => {
-              window.sessionStorage.clear()
+            onClick={async () => {
+              // SEC-002: revoke every session this clear() is about to discard before discarding it.
+              await signOutAllLocalSessions()
               navigate('/')
             }}
           >
@@ -1263,8 +1265,9 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
             {accountReadyForNext && (
               <button
                 className="seller-secondary-button seller-signout-button"
-                onClick={() => {
-                  window.sessionStorage.clear()
+                onClick={async () => {
+                  // SEC-002: server-side revocation before the local clear (see above).
+                  await signOutAllLocalSessions()
                   window.localStorage.removeItem(AD_PLAN_STORAGE_KEY)
                   navigate('/')
                 }}

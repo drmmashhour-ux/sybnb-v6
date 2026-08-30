@@ -22,7 +22,7 @@
 // Run: node tests/e2e/admin-self-review-protection.e2e.mjs (API_BASE default http://127.0.0.1:3051)
 
 import { randomUUID } from 'node:crypto'
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
@@ -72,10 +72,10 @@ for (const uid of [adminGuestId, secondAdminId]) {
   })
 }
 
-const AG = createSessionToken({ id: adminGuestId, roles: [{ role: 'ADMIN' }, { role: 'GUEST' }, { role: 'SELLER' }] })
-const A2 = createSessionToken({ id: secondAdminId, roles: [{ role: 'ADMIN' }] })
-const SUP = createSessionToken({ id: supportId, roles: [{ role: 'SUPPORT' }] })
-const H = createSessionToken({ id: hostId, roles: [{ role: 'HOST' }] }) // listing creation needs SELLER/HOST, not ADMIN
+const AG = await createSessionToken({ id: adminGuestId, roles: [{ role: 'ADMIN' }, { role: 'GUEST' }, { role: 'SELLER' }] })
+const A2 = await createSessionToken({ id: secondAdminId, roles: [{ role: 'ADMIN' }] })
+const SUP = await createSessionToken({ id: supportId, roles: [{ role: 'SUPPORT' }] })
+const H = await createSessionToken({ id: hostId, roles: [{ role: 'HOST' }] }) // listing creation needs SELLER/HOST, not ADMIN
 
 console.log('=== 1. ID DOCUMENT / KYC ===')
 {

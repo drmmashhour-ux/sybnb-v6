@@ -7,6 +7,11 @@ import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-docu
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
+import { applyRoleChange, setAccountStatus, REVOCATION_REASONS } from '../lib/session-store.mjs'
+
+// Mirrors prisma/schema.prisma's RoleName enum. Validated here so an unknown role is a clean 400
+// rather than a Prisma enum error surfacing as a 500.
+const VALID_ROLES = new Set(['GUEST', 'HOST', 'SELLER', 'DRIVER', 'ADMIN', 'SUPPORT'])
 
 export async function handleAdmin(req, res, url, context) {
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)
@@ -756,6 +761,117 @@ export async function handleAdmin(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, user: foundUser })
+  }
+
+  // SEC-002 — account status as a real security control.
+  //
+  // AccountStatus.SUSPENDED / DELETED have existed in the schema since the beginning with no
+  // handler anywhere that could set them, so the platform's own published security rule ("Suspended
+  // or deleted accounts cannot log in or use previously issued sessions") described a state the
+  // product had no way to reach. These two endpoints are the enforcement hooks for that rule and
+  // nothing more -- they are not an admin user-management feature, and deliberately expose only the
+  // status and role transitions the revocation model has to be driven by.
+  const userStatusMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/status$/)
+  if (userStatusMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    // ADMIN only. SUPPORT can read the review queue but must not be able to disable accounts.
+    requireAuth(context, ['ADMIN'])
+
+    const targetUserId = userStatusMatch[1]
+    const body = await readJson(req)
+    const status = String(body.status || '').toUpperCase()
+    if (!['ACTIVE', 'SUSPENDED', 'DELETED'].includes(status)) {
+      const error = new Error('status must be ACTIVE, SUSPENDED, or DELETED.')
+      error.statusCode = 400
+      error.code = 'INVALID_ACCOUNT_STATUS'
+      error.expose = true
+      throw error
+    }
+    // Same self-dealing principle as the 9 review paths closed in 115aa09, plus a plain lockout
+    // guard: an admin suspending or deleting themselves would revoke their own credentials mid-call
+    // and could leave the platform with no reachable administrator.
+    assertNotInterestedParty([targetUserId], context.user.id)
+
+    const reason = status === 'SUSPENDED'
+      ? REVOCATION_REASONS.ACCOUNT_SUSPENDED
+      : status === 'DELETED'
+        ? REVOCATION_REASONS.ACCOUNT_DELETED
+        : REVOCATION_REASONS.ACCOUNT_REINSTATED
+
+    // setAccountStatus writes the status and revokes the account's live credentials in ONE
+    // transaction. Reinstating (-> ACTIVE) revokes too: the documented policy is that a revoked
+    // session never comes back, so lifting a suspension requires a fresh login rather than
+    // resurrecting the token the suspension was meant to kill.
+    const { before, after } = await setAccountStatus(targetUserId, status, reason)
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_ACCOUNT_STATUS_CHANGED',
+        entityType: 'user',
+        entityId: targetUserId,
+        before,
+        after,
+      },
+    })
+
+    return json(res, 200, { ok: true, user: after, sessionsRevoked: true })
+  }
+
+  const userRolesMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/roles$/)
+  if (userRolesMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+
+    const targetUserId = userRolesMatch[1]
+    const body = await readJson(req)
+    const add = Array.isArray(body.add) ? body.add.map((role) => String(role).toUpperCase()) : []
+    const remove = Array.isArray(body.remove) ? body.remove.map((role) => String(role).toUpperCase()) : []
+    const invalid = [...add, ...remove].filter((role) => !VALID_ROLES.has(role))
+    if (invalid.length) {
+      const error = new Error(`Unknown role(s): ${invalid.join(', ')}.`)
+      error.statusCode = 400
+      error.code = 'INVALID_ROLE'
+      error.expose = true
+      throw error
+    }
+    if (!add.length && !remove.length) {
+      const error = new Error('Provide at least one role to add or remove.')
+      error.statusCode = 400
+      error.code = 'ROLE_CHANGE_EMPTY'
+      error.expose = true
+      throw error
+    }
+    // An admin must not be able to grant themselves a role (self-dealing) or strip their own ADMIN
+    // (lockout) -- both go through a second administrator, matching the 115aa09 two-party pattern.
+    assertNotInterestedParty([targetUserId], context.user.id)
+
+    const target = await db().user.findUnique({ where: { id: targetUserId }, select: { id: true } })
+    if (!target) {
+      const error = new Error('Account not found.')
+      error.statusCode = 404
+      error.code = 'USER_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    // Role changes revoke every session for the account. Removal MUST be immediate (that is the
+    // security requirement); grants revoke too so a token's authority can never silently grow
+    // under a session opened before the account was trusted with the role.
+    const { before, after } = await applyRoleChange(targetUserId, { add, remove })
+
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_USER_ROLES_CHANGED',
+        entityType: 'user',
+        entityId: targetUserId,
+        before: { roles: before },
+        after: { roles: after },
+      },
+    })
+
+    return json(res, 200, { ok: true, userId: targetUserId, roles: after, sessionsRevoked: true })
   }
 
   const idDocumentAdminUploadMatch = url.pathname.match(/^\/api\/admin\/id-document\/([^/]+)\/upload$/)

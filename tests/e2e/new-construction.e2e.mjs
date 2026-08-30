@@ -1,12 +1,12 @@
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 
 const API = 'http://127.0.0.1:3051'
 const dev1  = { id: process.env.SELLER1, roles: [{ role: 'SELLER' }] }
 const dev2  = { id: process.env.SELLER2, roles: [{ role: 'SELLER' }] }
 const buyer = { id: process.env.BUYER,   roles: [{ role: 'GUEST' }] }
 const admin = { id: process.env.ADMIN,   roles: [{ role: 'ADMIN' }] }
-const D1 = createSessionToken(dev1), D2 = createSessionToken(dev2)
-const B = createSessionToken(buyer), A = createSessionToken(admin)
+const D1 = await createSessionToken(dev1), D2 = await createSessionToken(dev2)
+const B = await createSessionToken(buyer), A = await createSessionToken(admin)
 
 let pass = 0, fail = 0
 async function call(method, path, token, body) {

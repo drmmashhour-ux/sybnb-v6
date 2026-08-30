@@ -84,6 +84,17 @@ export PAYMENT_OPERATION_MANUAL_PROOF_REFUND_REQUEST_ENABLED=true
 
 psql_reset() { psql -d sybnb_v6 -tAc "DELETE FROM seller_profiles WHERE user_id IN ('$SELLER1','$SELLER2'); DELETE FROM payment_proofs WHERE provider='seller_plan';" >/dev/null 2>&1; }
 
+# Top the shared gift-sender fixture's SYP wallet back up before every run. wallet-gift.e2e.mjs
+# spends real ledger balance on every execution (a 150,000-minor "large gift" in its admin-approval
+# section alone) and never refunds it, so the fixture drains a little each run and the suite
+# eventually fails with a confusing "Cannot read properties of undefined (reading 'id')" -- the gift
+# create call had failed for insufficient funds. Observed for real: after three full-suite runs in
+# one afternoon the balance had fallen to 123,000, below what section 6 needs. Nothing to do with
+# any product code; the suite simply assumes a funded sender and had no step that guaranteed one.
+fund_gift_fixture() {
+  psql -d sybnb_v6 -tAc "UPDATE wallets SET cached_balance_minor = 50000000 WHERE user_id='$SELLER1' AND currency='SYP';" >/dev/null 2>&1
+}
+
 echo "== build + schema =="
 npm run build 2>&1 | grep -oE "built in [0-9.]+s|error TS" || true
 DATABASE_URL="postgresql://x@127.0.0.1:5432/x" npx prisma validate 2>&1 | grep -oE "is valid|error" || true
@@ -135,10 +146,12 @@ run_full "otp"              otp-identity.e2e.mjs
   run_full "host-login"       host-login-journey.e2e.mjs
   run_full "staff-role-reg"   staff-access-role-registration.e2e.mjs
   run_full "admin-self-review" admin-self-review-protection.e2e.mjs
+  run_full "session-revocation" session-revocation.e2e.mjs
   run_full "resend-webhook"   resend-webhook.e2e.mjs
 run_full "storage"          storage.e2e.mjs
 run_full "legal"            legal-consent.e2e.mjs
 run_full "operations"       operations.e2e.mjs
+fund_gift_fixture
 run_full "wallet"           wallet-gift.e2e.mjs
 run "payment"          payment-sandbox.e2e.mjs
 run "payment-race"     payment-proof-race.e2e.mjs

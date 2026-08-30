@@ -19,7 +19,7 @@
 //      of this suite is that this specific condition was never actually tested before)
 
 import { randomUUID } from 'node:crypto'
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { signWebhook } from '../../server/lib/payment-webhook.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
@@ -31,7 +31,7 @@ if (!guest.id) {
   console.error('Missing GUEST env')
   process.exit(2)
 }
-const G = createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
+const G = await createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
 
 let pass = 0
 let fail = 0

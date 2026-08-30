@@ -18,7 +18,8 @@
 //   AUTH_SECRET=<secret> SENDER=<uuid> RECIPIENT=<uuid> OTHER=<uuid> ADMIN=<uuid> \
 //   node tests/e2e/wallet-gift.e2e.mjs      (or: npm run test:e2e:wallet)
 
-import { createSessionToken, giftClaimCode } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
+import { giftClaimCode } from '../../server/lib/security.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
 const sender    = { id: process.env.SENDER,    roles: [{ role: 'SELLER' }] }
@@ -28,7 +29,7 @@ const admin     = { id: process.env.ADMIN,     roles: [{ role: 'ADMIN' }] }
 for (const [n, u] of [['SENDER', sender], ['RECIPIENT', recipient], ['OTHER', other], ['ADMIN', admin]]) {
   if (!u.id) { console.error(`Missing required env ${n}`); process.exit(2) }
 }
-const S = createSessionToken(sender), R = createSessionToken(recipient), O = createSessionToken(other), A = createSessionToken(admin)
+const S = await createSessionToken(sender), R = await createSessionToken(recipient), O = await createSessionToken(other), A = await createSessionToken(admin)
 
 let pass = 0, fail = 0
 async function call(method, path, token, body) {

@@ -15,7 +15,7 @@
 // canonical regression, which deliberately leaves a ride mid-flight on whatever driver it used, so
 // a fixed id can't be assumed clean.
 
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
@@ -68,10 +68,10 @@ async function run() {
     console.log('  SKIP  need 2 real ACTIVE drivers with zero active rides right now to run this suite')
     process.exit(0)
   }
-  const riderAToken = createSessionToken({ id: RIDER_A, roles: [{ role: 'GUEST' }] })
-  const riderBToken = createSessionToken({ id: RIDER_B, roles: [{ role: 'GUEST' }] })
-  const driverToken = createSessionToken({ id: driverId, roles: [{ role: 'DRIVER' }] })
-  const driver2Token = createSessionToken({ id: driver2Id, roles: [{ role: 'DRIVER' }] })
+  const riderAToken = await createSessionToken({ id: RIDER_A, roles: [{ role: 'GUEST' }] })
+  const riderBToken = await createSessionToken({ id: RIDER_B, roles: [{ role: 'GUEST' }] })
+  const driverToken = await createSessionToken({ id: driverId, roles: [{ role: 'DRIVER' }] })
+  const driver2Token = await createSessionToken({ id: driver2Id, roles: [{ role: 'DRIVER' }] })
 
   const UMAYYAD = { label: 'Umayyad Square, Damascus', lat: 33.5131, lng: 36.2919 }
   const NEAR_UMAYYAD = { label: 'Near Umayyad Square, Damascus', lat: 33.514, lng: 36.293 }

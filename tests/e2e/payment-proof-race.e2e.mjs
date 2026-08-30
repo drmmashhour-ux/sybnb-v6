@@ -5,12 +5,12 @@
 // rest rejected as duplicates — no duplicate rows. No real money. Run:
 //   AUTH_SECRET=<secret> SELLER1=<uuid> node tests/e2e/payment-proof-race.e2e.mjs
 
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
 const seller = { id: process.env.SELLER1, roles: [{ role: 'SELLER' }] }
 if (!seller.id) { console.error('Missing SELLER1'); process.exit(2) }
-const S = createSessionToken(seller)
+const S = await createSessionToken(seller)
 
 let pass = 0, fail = 0
 function check(label, cond, detail) { if (cond) { pass++; console.log(`   PASS  ${label}`) } else { fail++; console.log(`  FAIL  ${label}  -> ${detail}`) } }

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
-import { clearGuestSession, getStoredGuestSession } from '../api/platformApi'
+import { getStoredGuestSession, signOutGuest as revokeGuestSession } from '../api/platformApi'
 import { Footer } from './Footer'
 
 type Props = {
@@ -31,8 +31,18 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
     navigate(routeContext.nextPath)
   }
 
-  function signOutGuest() {
-    clearGuestSession()
+  // SEC-002: sign-out is a server round trip now, not a sessionStorage delete. If the server did
+  // not confirm revocation the local session is still dropped, but the user is told the session may
+  // still be live elsewhere rather than being reassured falsely.
+  async function signOutGuest() {
+    const { serverRevoked } = await revokeGuestSession()
+    if (!serverRevoked) {
+      window.alert(
+        isAr
+          ? 'تم تسجيل الخروج من هذا الجهاز، لكن تعذّر الوصول إلى الخادم لإنهاء الجلسة. قد تظل الجلسة نشطة في مكان آخر — أعد المحاولة عند عودة الاتصال.'
+          : 'Signed out on this device, but the server could not be reached to end the session. It may still be active elsewhere — try again once you are back online.',
+      )
+    }
     navigate('/')
   }
 

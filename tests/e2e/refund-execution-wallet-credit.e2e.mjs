@@ -24,7 +24,7 @@
 //      node tests/e2e/refund-execution-wallet-credit.e2e.mjs
 
 import { randomUUID } from 'node:crypto'
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
@@ -36,10 +36,10 @@ const other = { id: process.env.BUYER } // an unrelated, authenticated GUEST -- 
 for (const [name, u] of [['HOST', host], ['GUEST', guest], ['ADMIN', admin], ['BUYER', other]]) {
   if (!u.id) { console.error(`Missing required env ${name} (a synthetic user id).`); process.exit(2) }
 }
-const H = createSessionToken({ id: host.id, roles: [{ role: 'HOST' }] })
-const G = createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
-const A = createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
-const O = createSessionToken({ id: other.id, roles: [{ role: 'GUEST' }] })
+const H = await createSessionToken({ id: host.id, roles: [{ role: 'HOST' }] })
+const G = await createSessionToken({ id: guest.id, roles: [{ role: 'GUEST' }] })
+const A = await createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
+const O = await createSessionToken({ id: other.id, roles: [{ role: 'GUEST' }] })
 
 let pass = 0
 let fail = 0

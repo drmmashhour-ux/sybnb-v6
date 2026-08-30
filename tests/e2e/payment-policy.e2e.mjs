@@ -15,7 +15,7 @@
 // same running server + env as tests/e2e/payment-intents-booking.e2e.mjs)
 
 import { authorizePaymentOperation } from '../../server/lib/payment-policy.mjs'
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
@@ -188,7 +188,7 @@ const admin = { id: process.env.ADMIN }
 if (!admin.id) {
   console.log('   SKIP  (set ADMIN=<uuid> to run the live section)')
 } else {
-  const A = createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
+  const A = await createSessionToken({ id: admin.id, roles: [{ role: 'ADMIN' }] })
   const before = await db().walletEntry.count()
   const beforeIntents = await db().paymentIntent.count()
   const beforeBookings = await db().booking.count()

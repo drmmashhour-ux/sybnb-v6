@@ -381,6 +381,17 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     })
     // Grant the SELLER role here (authoritatively) rather than trusting the client to have set it at
     // registration — approving the plan is what actually entitles paid-plan listing.
+    //
+    // SEC-002 exception, deliberate: this is the ONE role mutation in the codebase that does NOT go
+    // through applyRoleChange() in server/lib/session-store.mjs, so it does not revoke the seller's
+    // sessions. Two reasons. It is grant-only, so the security invariant SEC-002 exists to protect
+    // ("removing a role takes effect immediately") is untouched -- authority is being added to an
+    // account that just paid for it and was approved by an admin, not silently escalated. And
+    // revoking here would sign the seller out at the exact moment their payment is approved, mid
+    // listing flow, which would be a real product regression introduced as a side effect of a
+    // security patch. The new role is picked up by their existing session on its very next request,
+    // because getAuthContext() reads roles live from the DB per request and no longer caches them.
+    // Any future path that REMOVES a role must use applyRoleChange().
     await tx.userRole.upsert({
       where: { userId_role: { userId: proof.userId, role: 'SELLER' } },
       update: {},

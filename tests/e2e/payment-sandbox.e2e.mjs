@@ -10,7 +10,7 @@
 //      AND with PAYMENT_INTENTS_ENABLED=true — this whole subsystem 503s otherwise. See also
 //      tests/e2e/payment-intents-booking.e2e.mjs for the booking/wallet wiring on top of this.)
 
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { signWebhook } from '../../server/lib/payment-webhook.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
@@ -18,7 +18,7 @@ const SECRET = process.env.PAYMENT_WEBHOOK_SECRET || 'whsec_sandbox_test'
 const buyer = { id: process.env.BUYER, roles: [{ role: 'GUEST' }] }
 const other = { id: process.env.OTHER, roles: [{ role: 'SELLER' }] }
 if (!buyer.id || !other.id) { console.error('Missing BUYER/OTHER env'); process.exit(2) }
-const B = createSessionToken(buyer), O = createSessionToken(other)
+const B = await createSessionToken(buyer), O = await createSessionToken(other)
 
 let pass = 0, fail = 0
 async function call(method, path, token, body) {

@@ -1,5 +1,7 @@
 import { db } from '../lib/prisma.mjs'
-import { createSessionToken, hashPassword, hashPhone, hashEmail, verifyPassword } from '../lib/security.mjs'
+import { hashPassword, hashPhone, hashEmail, verifyPassword } from '../lib/security.mjs'
+import { requireAuth } from '../lib/auth-context.mjs'
+import { issueUserSession, listActiveSessions, revokeSession, revokeUserAccess, REVOCATION_REASONS } from '../lib/session-store.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { channelEnabled, defaultCurrency } from '../lib/country.mjs'
 import { isRateLimited, clientIp } from '../lib/rateLimit.mjs'
@@ -24,7 +26,57 @@ function tooManyRequests(res) {
   return json(res, 429, { ok: false, error: { code: 'RATE_LIMITED', message: 'Too many attempts. Please wait a minute and try again.' } })
 }
 
-export async function handleAuth(req, res, url) {
+export async function handleAuth(req, res, url, context) {
+  // SEC-002 — real, server-side logout. Before this existed the only "logout" in the product was the
+  // frontend deleting its own sessionStorage keys, which does not touch the credential: anyone who
+  // had copied the token still held a working session for the remaining seven days. Revoking the
+  // session row here is what actually ends it.
+  if (url.pathname === '/api/auth/logout') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const result = await revokeSession(context.sessionId, REVOCATION_REASONS.LOGOUT)
+    // `revoked` distinguishes "this call ended the session" from "it was already revoked". Both are
+    // successes -- a client retrying a logout it is not sure landed must not be told it failed --
+    // but the flag lets a caller tell the two apart without a second request.
+    return json(res, 200, { ok: true, revoked: result.revoked, scope: 'session' })
+  }
+
+  // Logout everywhere. Bumps the account's security epoch, so every token for this user dies at
+  // once, including sessions on devices the user no longer has access to. This is the control a
+  // person reaches for after "someone else may have my password".
+  if (url.pathname === '/api/auth/logout-all') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const keepCurrent = body.keepCurrentSession === true
+
+    // No exceptSessionId: every session including the caller's own is revoked. "Keep this device"
+    // is honoured by issuing a BRAND NEW session afterwards, never by sparing the old one -- the
+    // epoch bump would have invalidated a spared session's token anyway, and sparing it would leave
+    // a pre-logout-all credential alive, which is the exact thing this endpoint exists to prevent.
+    await revokeUserAccess(context.user.id, REVOCATION_REASONS.LOGOUT_ALL)
+
+    if (keepCurrent) {
+      const user = await db().user.findUnique({ where: { id: context.user.id }, include: { roles: true } })
+      const reissued = await issueUserSession(user, req)
+      return json(res, 200, { ok: true, scope: 'all', reissued: true, token: reissued.token, sessionId: reissued.sessionId, user: publicUser(user) })
+    }
+
+    return json(res, 200, { ok: true, scope: 'all', reissued: false })
+  }
+
+  // A person's own active sessions. Read-only and strictly self-scoped -- it never accepts a user
+  // id, so it cannot be turned into a way to enumerate someone else's devices.
+  if (url.pathname === '/api/auth/sessions') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    const sessions = await listActiveSessions(context.user.id)
+    return json(res, 200, {
+      ok: true,
+      sessions: sessions.map((session) => ({ ...session, current: session.id === context.sessionId })),
+    })
+  }
+
   if (url.pathname === '/api/auth/register') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     if (await rateLimited(req, 'register')) return tooManyRequests(res)
@@ -114,10 +166,13 @@ export async function handleAuth(req, res, url) {
         })
       })
 
+      const session = await issueUserSession(user, req)
       return json(res, 201, {
         ok: true,
         user: publicUser(user),
-        token: createSessionToken(user),
+        token: session.token,
+        sessionId: session.sessionId,
+        expiresAt: session.expiresAt,
       })
     } catch (error) {
       if (error?.code === 'P2002') {
@@ -158,10 +213,15 @@ export async function handleAuth(req, res, url) {
       throw error
     }
 
+    // Each login issues its OWN session row, so two devices signing into the same account get two
+    // independently revocable sessions rather than two copies of one indistinguishable credential.
+    const session = await issueUserSession(user, req)
     return json(res, 200, {
       ok: true,
       user: publicUser(user),
-      token: createSessionToken(user),
+      token: session.token,
+      sessionId: session.sessionId,
+      expiresAt: session.expiresAt,
     })
   }
 

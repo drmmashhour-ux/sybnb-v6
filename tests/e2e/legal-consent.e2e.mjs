@@ -4,12 +4,12 @@
 // invented — Terms & Privacy report status DRAFT and the manifest is launch-blocking until an owner
 // publishes real content. Run: AUTH_SECRET=<secret> BUYER=<uuid> node tests/e2e/legal-consent.e2e.mjs
 
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
 const user = { id: process.env.BUYER, roles: [{ role: 'GUEST' }] }
 if (!user.id) { console.error('Missing BUYER env'); process.exit(2) }
-const T = createSessionToken(user)
+const T = await createSessionToken(user)
 
 let pass = 0, fail = 0
 async function call(method, path, token, body) {

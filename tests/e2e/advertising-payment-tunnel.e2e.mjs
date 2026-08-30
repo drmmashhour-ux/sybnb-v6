@@ -36,7 +36,7 @@
 // closed exactly that leak. This suite was not re-run against that fix at the time (only verified
 // live via curl), so its own assertion went stale until this regression pass caught it.
 
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
 const advA = { id: process.env.SELLER1, roles: [{ role: 'SELLER' }] }
@@ -48,8 +48,8 @@ for (const [name, u] of [['SELLER1', advA], ['SELLER2', advB], ['BUYER', buyer],
   if (!u.id) { console.error(`Missing required env ${name} (a synthetic user id).`); process.exit(2) }
 }
 
-const AA = createSessionToken(advA), AB = createSessionToken(advB)
-const B = createSessionToken(buyer), A = createSessionToken(admin)
+const AA = await createSessionToken(advA), AB = await createSessionToken(advB)
+const B = await createSessionToken(buyer), A = await createSessionToken(admin)
 
 let pass = 0, fail = 0
 async function call(method, path, token, body) {

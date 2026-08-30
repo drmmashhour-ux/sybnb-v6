@@ -1,4 +1,4 @@
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 
 const API = 'http://127.0.0.1:3051'
 
@@ -24,7 +24,7 @@ function line(label, r) {
   return r
 }
 
-const gToken = createSessionToken(guest)
+const gToken = await createSessionToken(guest)
 
 console.log('=== GUEST RIDER LOOP ===')
 const created = line('create ride', await call('POST', '/api/sr/rides', gToken, {
@@ -35,7 +35,7 @@ console.log('   rideId =', rideId)
 
 // pick a driver — grab pending list as driver, or assign via admin. First find a DRIVER user.
 const driver = { id: process.env.DRIVER_ID, roles: [{ role: 'DRIVER' }] }
-const dToken = createSessionToken(driver)
+const dToken = await createSessionToken(driver)
 
 // Driver sees it pending, claims it
 line('driver: pending list', await call('GET', '/api/driver/rides/pending', dToken))

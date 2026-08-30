@@ -14,7 +14,7 @@
 //   ADMIN_ACTION_RATE_MAX=5 API_PORT=<port> node server/index.mjs &
 //   API_BASE=http://127.0.0.1:<port> node tests/e2e/admin-action-rate-limit.e2e.mjs
 
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
@@ -32,7 +32,7 @@ function check(label, cond, detail) {
 async function bearerFor(userId, roles) {
   const user = await db().user.findUnique({ where: { id: userId } })
   if (!user) throw new Error(`fixture user ${userId} not found`)
-  return createSessionToken({ id: user.id, roles: roles.map((role) => ({ role })) })
+  return await createSessionToken({ id: user.id, roles: roles.map((role) => ({ role })) })
 }
 
 async function run() {

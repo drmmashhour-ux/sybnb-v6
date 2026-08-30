@@ -25,7 +25,7 @@
 // Section 3 also asserts the gate is OPEN against the ALREADY-RUNNING shared permissive server (the
 // same one every other suite uses, API_BASE) -- no extra boot needed for that half.
 
-import { createSessionToken } from '../../server/lib/security.mjs'
+import { createSessionToken } from './_session.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
 
 const CLOSED_API = process.env.API_BASE_CLOSED || 'http://127.0.0.1:3053'
@@ -43,7 +43,7 @@ function check(label, cond, detail) {
 async function bearerFor(userId) {
   const user = await db().user.findUnique({ where: { id: userId }, include: { roles: true } })
   if (!user) throw new Error(`fixture user ${userId} not found -- set ADMIN/GUEST to real ACTIVE users`)
-  return createSessionToken(user)
+  return await createSessionToken(user)
 }
 
 async function run() {

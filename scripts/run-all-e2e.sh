@@ -147,6 +147,7 @@ run_full "otp"              otp-identity.e2e.mjs
   run_full "staff-role-reg"   staff-access-role-registration.e2e.mjs
   run_full "admin-self-review" admin-self-review-protection.e2e.mjs
   run_full "session-revocation" session-revocation.e2e.mjs
+  run_full "commit-boundary-reauth" commit-boundary-reauthorization.e2e.mjs
   run_full "resend-webhook"   resend-webhook.e2e.mjs
 run_full "storage"          storage.e2e.mjs
 run_full "legal"            legal-consent.e2e.mjs

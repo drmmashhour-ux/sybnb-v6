@@ -8,6 +8,12 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
 import { applyRoleChange, setAccountStatus, REVOCATION_REASONS } from '../lib/session-store.mjs'
+// SEC-002R (finding N4): getAuthContext() runs ONCE, in server/index.mjs, before the route handler
+// has even read the request body, and its result is trusted for the rest of the request. Every
+// Class A (irreversible money-moving or privilege-changing) handler in this file re-asserts that
+// authority against locked, authoritative DB rows inside the SAME transaction as its own
+// state-changing write -- see server/lib/commit-authorization.mjs for the full reasoning.
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
 // Mirrors prisma/schema.prisma's RoleName enum. Validated here so an unknown role is a clean 400
 // rather than a Prisma enum error surfacing as a 500.
@@ -151,7 +157,13 @@ export async function handleAdmin(req, res, url, context) {
       // before this transaction opened, so a dispute filed in that window (or any other status
       // change) would otherwise still get released. This closes that race with no added cost — the
       // idempotencyKey on recordWalletEntry already prevents an actual double-release.
-      const freshBooking = await tx.booking.findUnique({ where: { id: booking.id } })
+      const freshBooking = await tx.booking.findUnique({
+        where: { id: booking.id },
+        // SEC-002R: the listing is included so the self-dealing re-check below runs against the
+        // ownerId as it stands INSIDE this transaction, not the copy read before the body was
+        // parsed -- a genuine commit-boundary comparison rather than a replay of the admission one.
+        include: { listing: { select: { ownerId: true } } },
+      })
       if (!freshBooking || !isPayoutEligible(freshBooking)) {
         const error = new Error(
           `Payout is not eligible for release yet. It must be COMPLETED and past the ${PAYOUT_HOLD_DAYS}-day hold, with no open dispute.`,
@@ -161,6 +173,16 @@ export async function handleAdmin(req, res, url, context) {
         error.expose = true
         throw error
       }
+
+      // SEC-002R Class A. Last statement before real money moves: proves the acting admin's session
+      // is still live, their account still ACTIVE, their epoch still current and their ADMIN role
+      // still held, holding the locks that make a concurrent revocation impossible until this
+      // transaction commits. A failure throws, and Postgres rolls back the RELEASE below with it.
+      await reauthorizeAtCommit(tx, context, {
+        action: 'ADMIN_PAYOUT_RELEASED',
+        requiredRoles: ['ADMIN'],
+        interestedPartyIds: [freshBooking.listing?.ownerId],
+      })
 
       const released = await recordWalletEntry(tx, {
         userId: booking.listing.ownerId,
@@ -283,11 +305,27 @@ export async function handleAdmin(req, res, url, context) {
     // silently re-architecting the money movement (Uber's own model nets the fee into one refund
     // settlement instead of two separately-ordered operations -- a deeper fix worth doing when this
     // is actually wired up and exercised for real, not guessed at now).
+    //
+    // SEC-002R Class A: this transaction posts the commission reversal and the cancellation-fee
+    // wallet entries -- real, irreversible money movement. The re-authorization runs as the first
+    // statement inside it, before finalizeCancellationLedgerEffects() writes anything, and the two
+    // interested-party ids are re-read here rather than reused from the admission-time `existing`.
+    const finalizeInTransaction = async (tx) => {
+      const fresh = await tx.booking.findUnique({
+        where: { id: bookingId },
+        select: { guestId: true, listing: { select: { ownerId: true } } },
+      })
+      await reauthorizeAtCommit(tx, context, {
+        action: 'BOOKING_CANCELLATION_FINALIZED',
+        requiredRoles: ['ADMIN'],
+        interestedPartyIds: [fresh?.guestId, fresh?.listing?.ownerId],
+      })
+      return finalizeCancellationLedgerEffects(tx, { booking: existing, approvedPayment, cancelledBy })
+    }
+
     let result
     try {
-      result = await db().$transaction((tx) =>
-        finalizeCancellationLedgerEffects(tx, { booking: existing, approvedPayment, cancelledBy }),
-      )
+      result = await db().$transaction(finalizeInTransaction)
     } catch (err) {
       if (err.code === 'WALLET_INSUFFICIENT_FUNDS') {
         const error = new Error(
@@ -301,9 +339,9 @@ export async function handleAdmin(req, res, url, context) {
         throw error
       }
       if (err.code !== 'WALLET_ENTRY_RACE_LOST') throw err
-      result = await db().$transaction((tx) =>
-        finalizeCancellationLedgerEffects(tx, { booking: existing, approvedPayment, cancelledBy }),
-      )
+      // The retry re-enters the SAME wrapper, so the second attempt re-authorizes from scratch in
+      // its own transaction -- authority revoked between the two attempts is caught by the retry.
+      result = await db().$transaction(finalizeInTransaction)
     }
 
     await db().adminAuditLog.create({
@@ -360,7 +398,22 @@ export async function handleAdmin(req, res, url, context) {
       actor: { roles: context.roles },
     })
 
-    const result = await db().$transaction((tx) => executeManualRailRefund(tx, { refundId, actorUserId: context.user.id }))
+    // SEC-002R Class A: executeManualRailRefund() credits the original payer's wallet. Re-authorize
+    // inside the same transaction, before that credit, against a fresh read of who the payer is.
+    const result = await db().$transaction(async (tx) => {
+      const freshPayerId = (
+        await tx.refund.findUnique({
+          where: { id: refundId },
+          select: { paymentProof: { select: { userId: true } } },
+        })
+      )?.paymentProof?.userId
+      await reauthorizeAtCommit(tx, context, {
+        action: 'ADMIN_REFUND_EXECUTED',
+        requiredRoles: ['ADMIN'],
+        interestedPartyIds: [freshPayerId],
+      })
+      return executeManualRailRefund(tx, { refundId, actorUserId: context.user.id })
+    })
 
     await db().adminAuditLog.create({
       data: {
@@ -436,6 +489,21 @@ export async function handleAdmin(req, res, url, context) {
     const acceptedAt = new Date()
 
     const result = await db().$transaction(async (tx) => {
+      // SEC-002R Class A, Step 0: re-authorize before the refund is claimed, so a revoked admin
+      // cannot even take the claim (which would strand the refund in IN_PROGRESS if it were taken
+      // and then rolled back later) let alone commit the ACCOUNTING_ACCEPTED finalization below.
+      const freshPayerId = (
+        await tx.refund.findUnique({
+          where: { id: refundId },
+          select: { paymentProof: { select: { userId: true } } },
+        })
+      )?.paymentProof?.userId
+      await reauthorizeAtCommit(tx, context, {
+        action: 'ADMIN_LEGACY_REFUND_ACCEPTED',
+        requiredRoles: ['ADMIN'],
+        interestedPartyIds: [freshPayerId],
+      })
+
       // Step 1: claim -- the PRIMARY refund-level serializer. Guarded on the exact precondition a
       // legacy ACTION_REQUIRED refund is created with (see scripts/migrate-legacy-refunds-2a.mjs);
       // 0 rows means already claimed, already resolved, or genuinely not eligible.
@@ -802,7 +870,20 @@ export async function handleAdmin(req, res, url, context) {
     // transaction. Reinstating (-> ACTIVE) revokes too: the documented policy is that a revoked
     // session never comes back, so lifting a suspension requires a fresh login rather than
     // resurrecting the token the suspension was meant to kill.
-    const { before, after } = await setAccountStatus(targetUserId, status, reason)
+    //
+    // SEC-002R Class A: suspending, deleting or reinstating an account is a privilege mutation and
+    // is the exact operation finding N4 was demonstrated on -- a slow PATCH here committed a real
+    // suspension after the acting admin's own session had already been revoked mid-request.
+    // setAccountStatus() now accepts the caller's transaction, so the re-authorization and the
+    // status write are one atomic unit with no window between them.
+    const { before, after } = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, {
+        action: 'ADMIN_ACCOUNT_STATUS_CHANGED',
+        requiredRoles: ['ADMIN'],
+        interestedPartyIds: [targetUserId],
+      })
+      return setAccountStatus(targetUserId, status, reason, { tx })
+    })
 
     await db().adminAuditLog.create({
       data: {
@@ -858,7 +939,17 @@ export async function handleAdmin(req, res, url, context) {
     // Role changes revoke every session for the account. Removal MUST be immediate (that is the
     // security requirement); grants revoke too so a token's authority can never silently grow
     // under a session opened before the account was trusted with the role.
-    const { before, after } = await applyRoleChange(targetUserId, { add, remove })
+    // SEC-002R Class A: granting or stripping a role is the other privilege mutation N4 applies to.
+    // Same shape as the status handler above -- one transaction covering both the acting admin's
+    // commit-boundary re-authorization and the role write it authorizes.
+    const { before, after } = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, {
+        action: 'ADMIN_USER_ROLES_CHANGED',
+        requiredRoles: ['ADMIN'],
+        interestedPartyIds: [targetUserId],
+      })
+      return applyRoleChange(targetUserId, { add, remove }, REVOCATION_REASONS.ROLE_CHANGED, { tx })
+    })
 
     await db().adminAuditLog.create({
       data: {
@@ -1039,6 +1130,21 @@ export async function handleAdmin(req, res, url, context) {
 
     const result = await db().$transaction(async (tx) => {
       const before = await findReviewEntity(tx, entityType, entityId)
+      // SEC-002R Class A. This one dispatcher is the commit boundary for six distinct irreversible
+      // decisions: payment approval (wallet HOLD + platform CREDIT + protection fee + the SELLER
+      // role grant + driver fare credit, via approvePaymentProof), payment rejection, wallet-gift
+      // approval/blocking (sender refund), booking confirmation/rejection (refund request +
+      // reverseBookingPlatformShare), KYC/ID-document approval (which is what unlocks publishing),
+      // and listing/advertising-campaign approval. All of them write inside THIS transaction, so
+      // one re-authorization here covers every branch and no future 7th branch can be added past
+      // it. Self-dealing is deliberately NOT passed here: updateReviewEntity() already re-reads the
+      // entity inside this same transaction and calls assertNoSelfReview() on that fresh row, which
+      // is itself a commit-boundary check -- duplicating it against a staler copy would be weaker,
+      // not stronger.
+      await reauthorizeAtCommit(tx, context, {
+        action: `REVIEW_${decision}`,
+        requiredRoles: ['ADMIN'],
+      })
       const after = await updateReviewEntity(tx, entityType, entityId, decision, context.user.id, body)
       const auditLog = await tx.adminAuditLog.create({
         data: {

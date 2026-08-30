@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { verifyWebhook, targetStatusFor, canTransition, paymentWebhookSecret } from '../lib/payment-webhook.mjs'
 import {
@@ -146,10 +147,16 @@ async function applyPaymentIntentRefund(tx, { intent }) {
 // already owns this event, verifyAndLockClaim() throws immediately, before applyPaymentIntentSuccess/
 // Refund or the intent-status claim ever runs, and Postgres rolls back the whole transaction -- there
 // is no window in which a stale worker can execute, let alone commit, a real effect.
-async function applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToken }) {
+// SEC-002R: `beforeEffects`, when supplied, runs inside THIS transaction immediately after
+// verifyAndLockClaim() and before any effect-producing write, exactly like the `verifyOwnership`
+// hook finalizeStripeSession() already offers the other rail. The ONLY caller that supplies it is
+// the admin replay route, which uses it to re-authorize the acting admin at the commit boundary;
+// the webhook path never supplies it, because a provider delivery has no session behind it at all.
+async function applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToken, beforeEffects }) {
   const target = targetStatusFor(type)
   return db().$transaction(async (tx) => {
     await verifyAndLockClaim(tx, { eventId, claimToken })
+    if (beforeEffects) await beforeEffects(tx)
 
     const fresh = await tx.paymentIntent.findUnique({ where: { id: intentId } })
     if (!fresh) throw fail(404, 'PAYMENT_INTENT_NOT_FOUND', 'No matching payment intent.')
@@ -199,11 +206,11 @@ async function applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToke
   })
 }
 
-async function applyPaymentEvent({ eventId, intentId, type, obj }) {
+async function applyPaymentEvent({ eventId, intentId, type, obj, beforeEffects }) {
   return applyPaymentEventPipeline({
     eventId,
     rail: 'payment_intent',
-    apply: (claimToken) => applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToken }),
+    apply: (claimToken) => applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToken, beforeEffects }),
   })
 }
 
@@ -794,6 +801,17 @@ export async function handlePaymentIntents(req, res, url, context) {
     })
 
     const before = { processingStatus: eventRow.processingStatus, attempts: eventRow.attempts }
+    // SEC-002R Class A (finding N4): replay re-runs a real financial application -- PaymentProof
+    // approval, wallet HOLD/CREDIT entries, booking confirmation. Authority for this request was
+    // established once, in server/index.mjs, before the body was read. This hook re-establishes it
+    // inside the rail's OWN apply transaction, immediately after verifyAndLockClaim() and before
+    // any effect-producing write, so a revoked admin's replay rolls back with nothing committed.
+    // No self-dealing ids are passed: the effects are fully determined by the stored,
+    // provider-authenticated event, and the admin supplies no beneficiary of their own choosing.
+    const reauthorizeReplay = (tx) => reauthorizeAtCommit(tx, context, {
+      action: 'ADMIN_PAYMENT_EVENT_REPLAYED',
+      requiredRoles: ['ADMIN'],
+    })
     let result
     let replayError
     try {
@@ -803,6 +821,7 @@ export async function handlePaymentIntents(req, res, url, context) {
           intentId: eventRow.intentId,
           type: eventRow.type,
           obj: { id: eventRow.providerObjectId, amount_minor: eventRow.amountMinor, currency: eventRow.currency },
+          beforeEffects: reauthorizeReplay,
         })
       } else {
         // payment_status comes from the durably-stored, authenticated value (migration 022) --
@@ -825,6 +844,7 @@ export async function handlePaymentIntents(req, res, url, context) {
               metadata: { bookingId: eventRow.bookingId, sypTotalMinor: eventRow.amountMinor },
             },
             claimToken,
+            beforeEffects: reauthorizeReplay,
           }),
         })
       }

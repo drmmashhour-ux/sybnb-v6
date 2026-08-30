@@ -75,6 +75,12 @@ export async function getAuthContext(req) {
     // Live from the DB, never from the token's `roles` claim.
     roles: user.roles.map((item) => item.role),
     sessionId: session.id,
+    // SEC-002R, additive only -- no check above changed. The epoch this request was ADMITTED under,
+    // carried explicitly rather than left to be dug back out of `user.sessionEpoch` by callers, so
+    // reauthorizeAtCommit() (server/lib/commit-authorization.mjs) can re-assert the same equality
+    // this function just asserted, against a fresh, locked read, at a Class A mutation's commit
+    // boundary. Equal to claims.epoch by the check immediately above.
+    epoch: user.sessionEpoch,
   }
 }
 

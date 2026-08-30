@@ -90,12 +90,20 @@ export async function finalizeStripeSession(session, { verifyOwnership, markSett
 // of its own; production code always supplies a real token, and direct idempotency tests now seed and
 // acquire a genuine claim first instead of omitting it (see
 // tests/e2e/payment-event-claim-recovery.e2e.mjs).
-export async function applyStripeCheckoutEvent({ eventId, session, claimToken }) {
+// SEC-002R: `beforeEffects` is forwarded into the existing `verifyOwnership` hook, so it runs inside
+// finalizeStripeSession's own transaction, after claim ownership is proven and before any
+// effect-producing write. Supplied ONLY by the admin replay route (to re-authorize the acting admin
+// at the commit boundary); the live webhook path never supplies it -- a provider delivery is
+// authenticated by its signature, not by a session, and has no actor to re-authorize.
+export async function applyStripeCheckoutEvent({ eventId, session, claimToken, beforeEffects }) {
   let settledInsideTransaction = false
   let appliedOutcome = false
 
   const proof = await finalizeStripeSession(session, {
-    verifyOwnership: (tx) => verifyAndLockClaim(tx, { eventId, claimToken }),
+    verifyOwnership: async (tx) => {
+      await verifyAndLockClaim(tx, { eventId, claimToken })
+      if (beforeEffects) await beforeEffects(tx)
+    },
     markSettled: async (tx, { applied }) => {
       const marked = await tx.paymentEvent.updateMany({
         where: { id: eventId, claimToken },

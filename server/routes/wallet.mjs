@@ -1,5 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { giftClaimCode, hashPhone, idempotencyKey, verifyGiftClaimCode } from '../lib/security.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { giftReviewThresholdMinor, recordWalletEntry } from '../lib/finance-ledger.mjs'
@@ -43,6 +44,11 @@ export async function handleWallet(req, res, url, context) {
     // the gift, so a gift can never mint unbacked ledger money. recordWalletEntry's negative-balance
     // guard rejects this (409 WALLET_INSUFFICIENT_FUNDS) if the sender doesn't have the funds.
     const gift = await db().$transaction(async (tx) => {
+      // SEC-002R Class A (finding N4): this transaction debits real ledger money out of the
+      // sender's own wallet into a gift another person can then claim -- irreversible once claimed.
+      // Authority was established once, at request admission, before this request's body was even
+      // read; re-assert it here, inside the transaction, against locked authoritative rows.
+      await reauthorizeAtCommit(tx, context, { action: 'WALLET_GIFT_SENT' })
       const created = await tx.walletGift.create({
         data: {
           senderUserId: context.user.id,
@@ -191,6 +197,10 @@ export async function handleWallet(req, res, url, context) {
     // as an updateMany makes the row-level lock do the job: the second concurrent transaction's
     // updateMany blocks until the first commits, then matches zero rows.
     const result = await db().$transaction(async (tx) => {
+      // SEC-002R Class A: this transaction credits real ledger money into the claimant's wallet and
+      // permanently consumes the gift. Re-authorized here, before the claim, so a session revoked
+      // while this request was in flight cannot both burn the gift and bank the money.
+      await reauthorizeAtCommit(tx, context, { action: 'WALLET_GIFT_CLAIMED' })
       const claimResult = await tx.walletGift.updateMany({
         where: { id: gift.id, status: 'SENT' },
         data: {

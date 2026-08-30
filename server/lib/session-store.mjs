@@ -114,9 +114,14 @@ export async function revokeUserAccess(userId, reason, options = {}) {
 // take the account's live credentials with it. Moving BACK to ACTIVE also revokes -- the documented
 // policy is that a revoked session stays revoked forever and reinstatement requires a fresh login,
 // so a suspension can never be "undone" into a still-live pre-suspension token.
-export async function setAccountStatus(userId, status, reason) {
-  return db().$transaction(async (tx) => {
-    const before = await tx.user.findUnique({ where: { id: userId }, select: { id: true, status: true } })
+//
+// SEC-002R: accepts an external `tx` so the caller can run this INSIDE the same transaction as
+// reauthorizeAtCommit() (this is a Class A privilege mutation -- see server/routes/admin.mjs's
+// /api/admin/users/:id/status handler). Same pattern revokeUserAccess() above already offers.
+export async function setAccountStatus(userId, status, reason, options = {}) {
+  const { tx = null } = options
+  const run = async (client) => {
+    const before = await client.user.findUnique({ where: { id: userId }, select: { id: true, status: true } })
     if (!before) {
       const error = new Error('Account not found.')
       error.statusCode = 404
@@ -124,10 +129,18 @@ export async function setAccountStatus(userId, status, reason) {
       error.expose = true
       throw error
     }
-    const after = await tx.user.update({ where: { id: userId }, data: { status }, select: { id: true, status: true } })
-    await revokeUserAccess(userId, reason, { tx })
+    // SEC-002R: revoke BEFORE writing the status, not after. Both statements are in one transaction
+    // either way, so no caller and no reader can tell the difference in the committed result -- the
+    // change is purely about the order locks are taken in. revokeUserAccess() touches user_sessions
+    // and then users, which is exactly the order reauthorizeAtCommit() takes its own two locks in;
+    // writing the status first took the users-row lock BEFORE the user_sessions-row lock, giving
+    // the two paths opposite lock orders and therefore a real deadlock window between an admin
+    // suspending an account and that same account's own in-flight Class A mutation.
+    await revokeUserAccess(userId, reason, { tx: client })
+    const after = await client.user.update({ where: { id: userId }, data: { status }, select: { id: true, status: true } })
     return { before, after }
-  })
+  }
+  return tx ? run(tx) : db().$transaction(run)
 }
 
 // Role changes made through this function revoke every session for the account, in BOTH directions.
@@ -139,23 +152,29 @@ export async function setAccountStatus(userId, status, reason) {
 // One documented exception exists repo-wide: the seller-plan approval in server/lib/finance-ledger.mjs
 // grants SELLER without revoking (see the comment there). It is grant-only and therefore cannot
 // affect the removal guarantee. Every role REMOVAL must come through here.
-export async function applyRoleChange(userId, { add = [], remove = [] }, reason = REVOCATION_REASONS.ROLE_CHANGED) {
-  return db().$transaction(async (tx) => {
-    const before = await tx.userRole.findMany({ where: { userId }, select: { role: true } })
+//
+// SEC-002R: accepts an external `tx` for the same reason setAccountStatus() above does -- a role
+// change is a Class A privilege mutation and its caller runs it inside the transaction that also
+// holds the acting admin's own commit-boundary re-authorization.
+export async function applyRoleChange(userId, { add = [], remove = [] }, reason = REVOCATION_REASONS.ROLE_CHANGED, options = {}) {
+  const { tx = null } = options
+  const run = async (client) => {
+    const before = await client.userRole.findMany({ where: { userId }, select: { role: true } })
     if (remove.length) {
-      await tx.userRole.deleteMany({ where: { userId, role: { in: remove } } })
+      await client.userRole.deleteMany({ where: { userId, role: { in: remove } } })
     }
     for (const role of add) {
-      await tx.userRole.upsert({
+      await client.userRole.upsert({
         where: { userId_role: { userId, role } },
         create: { userId, role },
         update: {},
       })
     }
-    const after = await tx.userRole.findMany({ where: { userId }, select: { role: true } })
-    await revokeUserAccess(userId, reason, { tx })
+    const after = await client.userRole.findMany({ where: { userId }, select: { role: true } })
+    await revokeUserAccess(userId, reason, { tx: client })
     return { before: before.map((r) => r.role), after: after.map((r) => r.role) }
-  })
+  }
+  return tx ? run(tx) : db().$transaction(run)
 }
 
 // Hook for the separate password-reset work item (out of scope for SEC-002, which is why there is

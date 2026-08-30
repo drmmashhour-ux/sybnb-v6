@@ -156,10 +156,7 @@ export function LandingPage({ lang }: Props) {
         </div>
         <button
           className="landing-primary"
-          onClick={() => {
-            window.localStorage.setItem('sybnb_v6_sell_flow', 'advertising')
-            navigate('/sell/account')
-          }}
+          onClick={() => navigate('/advertising/account')}
         >
           {about.adCta}
         </button>

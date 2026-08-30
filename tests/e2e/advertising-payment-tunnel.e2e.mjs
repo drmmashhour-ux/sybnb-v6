@@ -215,5 +215,59 @@ const ovB2 = await call('GET','/api/me/overview', AB)
 check('rejected proof -> sellerProfile documentStatus REJECTED', ovB2.j?.overview?.sellerProfile?.documentStatus === 'REJECTED', JSON.stringify(ovB2.j?.overview?.sellerProfile?.documentStatus))
 check('advertiserB w/ rejected proof still blocked from a paid ad (403 ADVERTISING_PAYMENT_REQUIRED)', code(await call('POST','/api/listings', AB, adBody())) === 'ADVERTISING_PAYMENT_REQUIRED', 'gate bypassed after rejection')
 
+// Section 7: negative regression matrix for the security patch that closed 3 real, live-proven
+// gaps found by an independent adversarial audit (not this suite) -- see commit for the audit
+// evidence. This suite previously only proved the *quantity* rule (one payment = one campaign);
+// it never proved division-scoping, dealer-inventory isolation, tier integrity, or self-review.
+console.log('\n=== 7a. DIVISION MUST BE MARKETPLACE -- fails closed on any other division, payment stays unconsumed ===')
+const div7ref = 'ADV7-' + Math.floor(performance.now()*1000)
+const div7proof = await submitProof(AA, div7ref)
+await call('PATCH', `/api/admin/review-queue/payment/${div7proof.j?.proof?.id}`, A, {decision:'APPROVE'})
+const carsAttempt = await call('POST','/api/listings', AA, adBody({ division:'CARS' }))
+check('advertising + division:CARS rejected (400 ADVERTISING_DIVISION_INVALID)', carsAttempt.status === 400 && code(carsAttempt) === 'ADVERTISING_DIVISION_INVALID', carsAttempt.status+' '+code(carsAttempt))
+const staysAttempt = await call('POST','/api/listings', AA, adBody({ division:'STAYS' }))
+check('advertising + division:STAYS rejected, not silently ungated (400 ADVERTISING_DIVISION_INVALID)', staysAttempt.status === 400 && code(staysAttempt) === 'ADVERTISING_DIVISION_INVALID', staysAttempt.status+' '+code(staysAttempt))
+const ov7 = await call('GET','/api/me/overview', AA)
+const stillUnconsumed = (ov7.j?.overview?.payments||[]).find((p) => p.id === div7proof.j?.proof?.id)
+check('payment stays unconsumed after both rejected division attempts (campaignListingId still null)', stillUnconsumed?.campaignListingId == null, JSON.stringify(stillUnconsumed?.campaignListingId))
+const correctDivision = await call('POST','/api/listings', AA, adBody({ division:'MARKETPLACE', titleAr:'Correct division campaign' }))
+check('the SAME payment still works for the correct division (201) -- fix does not break the real path', correctDivision.status === 201, correctDivision.status+' '+code(correctDivision))
+
+console.log('\n=== 7b. AN ADVERTISING PAYMENT MUST NOT UNLOCK DEALER INVENTORY (the critical finding) ===')
+// AA has zero unconsumed advertising-tier proofs at this point (the one from 7a was just spent in
+// the correct-division check above) and has NEVER had a 'plus'/'premium' dealer-tier proof
+// approved -- a real audit found sellerProfile.documentStatus alone used to authorize this.
+const carsReal = await call('POST','/api/listings', AA, { division:'CARS', titleAr:'Real BMW listing', priceMinor:500000000, currency:'SYP', metadata:{ visualFilters:{ carBrand:'bmw' } } })
+check('advertising-only entitlement does NOT unlock a real CARS listing (403 SELLER_PLAN_REQUIRED)', carsReal.status === 403 && code(carsReal) === 'SELLER_PLAN_REQUIRED', carsReal.status+' '+code(carsReal))
+const newConstructionReal = await call('POST','/api/listings', AA, { division:'NEW_CONSTRUCTION', titleAr:'Real tower project', priceMinor:900000000, currency:'SYP', metadata:{} })
+check('advertising-only entitlement does NOT unlock a real NEW_CONSTRUCTION listing (403 SELLER_PLAN_REQUIRED)', newConstructionReal.status === 403 && code(newConstructionReal) === 'SELLER_PLAN_REQUIRED', newConstructionReal.status+' '+code(newConstructionReal))
+// The converse also holds -- a real dealer-tier payment (planCode 'plus') does NOT unlock advertising.
+const dealerRef = 'DEALER7-' + Math.floor(performance.now()*1000)
+const dealerProof = await call('POST','/api/payments/seller-plan-proof', AA, {planCode:'plus', amountMinor:2000, currency:'USD', providerRef:dealerRef, legalName:'AA Dealer', sellerType:'dealer'})
+await call('PATCH', `/api/admin/review-queue/payment/${dealerProof.j?.proof?.id}`, A, {decision:'APPROVE'})
+const carsRealWithDealerPlan = await call('POST','/api/listings', AA, { division:'CARS', titleAr:'Real BMW listing 2', priceMinor:500000000, currency:'SYP', metadata:{ visualFilters:{ carBrand:'bmw' } } })
+check('a genuine dealer-tier payment correctly DOES unlock real CARS inventory (201)', carsRealWithDealerPlan.status === 201, carsRealWithDealerPlan.status+' '+code(carsRealWithDealerPlan))
+const adWithDealerPlan = await call('POST','/api/listings', AA, adBody({ titleAr:'Trying to use dealer plan for an ad' }))
+check('that same dealer-tier payment does NOT unlock an advertising campaign (403 ADVERTISING_PAYMENT_REQUIRED)', adWithDealerPlan.status === 403 && code(adWithDealerPlan) === 'ADVERTISING_PAYMENT_REQUIRED', adWithDealerPlan.status+' '+code(adWithDealerPlan))
+
+console.log('\n=== 7c. TIER INTEGRITY -- server derives the real tier, a plus payment cannot buy premium display ===')
+const tierRef = 'TIER7-' + Math.floor(performance.now()*1000)
+const tierProof = await submitProof(AA, tierRef) // advertising-plus, $19
+await call('PATCH', `/api/admin/review-queue/payment/${tierProof.j?.proof?.id}`, A, {decision:'APPROVE'})
+const spoofAttempt = await call('POST','/api/listings', AA, adBody({ titleAr:'Spoofed premium campaign', metadata:{ advertising:true, adPlan:'premium', adPlacement:'homepage', adDuration:30, adDurationDays:30, visualFilters:{} } }))
+check('campaign created from a plus-tier payment (201)', spoofAttempt.status === 201, spoofAttempt.status)
+check('server overwrites the client-claimed adPlan with the REAL paid tier (plus, not premium)', spoofAttempt.j?.listing?.metadata?.adPlan === 'plus', JSON.stringify(spoofAttempt.j?.listing?.metadata?.adPlan))
+
+console.log('\n=== 7d. ADMIN SELF-REVIEW IS FORBIDDEN ===')
+// Same underlying fix (existing.ownerId/userId === actorUserId) protects both the listing-review
+// and payment-review branches in server/routes/admin.mjs; this proves it on the payment branch,
+// which needs no extra role fixture (submitting a seller-plan-proof only requires any authenticated
+// user, per server/routes/payments.mjs's requireAuth(context)).
+const selfRef = 'SELF7-' + Math.floor(performance.now()*1000)
+const selfProof = await call('POST','/api/payments/seller-plan-proof', A, {planCode:'plus', amountMinor:2000, currency:'USD', providerRef:selfRef, legalName:'Admin Self', sellerType:'dealer'})
+check('admin can submit a payment proof under their own id (201)', selfProof.status === 201, selfProof.status)
+const selfApprove = await call('PATCH', `/api/admin/review-queue/payment/${selfProof.j?.proof?.id}`, A, {decision:'APPROVE'})
+check('admin cannot approve their OWN payment proof (403 SELF_REVIEW_FORBIDDEN)', selfApprove.status === 403 && code(selfApprove) === 'SELF_REVIEW_FORBIDDEN', selfApprove.status+' '+code(selfApprove))
+
 console.log(`\n==== ADVERTISING / PAYMENT TUNNEL E2E: ${pass} passed, ${fail} failed ====`)
 process.exit(fail ? 1 : 0)

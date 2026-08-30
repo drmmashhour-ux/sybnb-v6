@@ -20,7 +20,12 @@ const uniq = () => 'CAR-' + Math.floor(performance.now() * 1000)
 
 async function approvePlan(token, user) {
   const ref = uniq()
-  const proof = await call('POST','/api/payments/seller-plan-proof', token, {planCode:'cars-plus', amountMinor:2000, currency:'USD', providerRef:ref, legalName:'Dealer', sellerType:'dealer'})
+  // Real dealer plan code (SELLER_PLANS in src/modules/seller/sellerData.ts) -- was 'cars-plus', a
+  // string the real frontend never sends and that only "worked" because the server used to check a
+  // single sticky sellerProfile.documentStatus flag with no regard for which plan actually earned
+  // it. A real audit found that let an advertising payment unlock dealer inventory; the fix checks
+  // for a specifically dealer-tier (plus/premium) APPROVED payment, so this fixture must use one.
+  const proof = await call('POST','/api/payments/seller-plan-proof', token, {planCode:'plus', amountMinor:2000, currency:'USD', providerRef:ref, legalName:'Dealer', sellerType:'dealer'})
   await call('PATCH', `/api/admin/review-queue/payment/${proof.j?.proof?.id}`, A, {decision:'APPROVE'})
 }
 async function makeCar(token, attrs, price, title) {

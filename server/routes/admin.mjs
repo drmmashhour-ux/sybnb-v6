@@ -992,6 +992,10 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
   if (model === 'listing') {
     const existing = await tx.listing.findUnique({ where: { id: entityId } })
     if (!existing || existing.status !== 'PENDING_REVIEW') throw reviewStateError('LISTING_NOT_REVIEWABLE')
+    // A real audit found no check here beyond role -- an admin account that also holds a
+    // SELLER/HOST role could approve/reject their own submitted listing. Ownership is immutable
+    // DB data (existing.ownerId), not a UI assumption that "admins don't also list things."
+    if (existing.ownerId === actorUserId) throw selfReviewError()
     // Re-check status in the WHERE clause so two concurrent decisions on the same listing can't
     // both apply (same TOCTOU class as the payment-proof and SR-ride races fixed earlier).
     const updated = await tx.listing.updateMany({
@@ -1024,6 +1028,9 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
       },
     })
     if (!existing || existing.status !== 'PENDING_ADMIN_REVIEW') throw reviewStateError('PAYMENT_NOT_REVIEWABLE')
+    // Same self-dealing check as the listing branch above -- live-proven: an admin submitted then
+    // approved their own payment proof (reviewedById === the payer's own id).
+    if (existing.userId === actorUserId) throw selfReviewError()
     const shamCashReconciliation = decision === 'APPROVED' && isShamCashProvider(existing.provider)
       ? requireShamCashReconciliation(existing, body)
       : null
@@ -1184,6 +1191,14 @@ function reviewStateError(code) {
   const error = new Error('Entity is not in a reviewable state.')
   error.statusCode = 400
   error.code = code
+  error.expose = true
+  return error
+}
+
+function selfReviewError() {
+  const error = new Error('An admin cannot approve or reject their own submission.')
+  error.statusCode = 403
+  error.code = 'SELF_REVIEW_FORBIDDEN'
   error.expose = true
   return error
 }

@@ -42,7 +42,7 @@ console.log('=== 1. PAID-PLAN SELLER JOURNEY through /sell (Cars) ===')
 // seller starts with NO profile (reset in wrapper): plan requirement must be enforced
 const carBlocked = await call('POST','/api/listings', SA, {division:'CARS', titleAr:'BMW 320i 2020', priceMinor:14000000, currency:'SYP', metadata:{visualFilters:{carBrand:'bmw'}}})
 check('paid division blocked before plan (403 SELLER_PLAN_REQUIRED)', carBlocked.status === 403 && code(carBlocked) === 'SELLER_PLAN_REQUIRED', carBlocked.status+' '+code(carBlocked))
-const plan = await approvePlan(SA, 'cars-plus')
+const plan = await approvePlan(SA, 'plus')
 check('mock plan proof submitted (201) + admin approved (200)', plan.proofStatus === 201 && plan.approveStatus === 200, JSON.stringify(plan))
 const carCreate = await call('POST','/api/listings', SA, {division:'CARS', titleAr:'BMW 320i 2020', priceMinor:14000000, currency:'SYP', metadata:{visualFilters:{carBrand:'bmw', carFuel:'gas'}}})
 check('after plan approval, create Cars listing (201)', carCreate.status === 201, carCreate.status+' '+code(carCreate))

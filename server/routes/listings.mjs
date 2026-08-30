@@ -366,13 +366,30 @@ export async function handleListings(req, res, url, context) {
 
       let expiresAt
       let boundAdvertisingProofId
-      const isAdvertisingCampaign = PAID_PLAN_DIVISIONS.has(division) && body.metadata?.advertising === true
-      if (isAdvertisingCampaign) {
+      let listingMetadata = body.metadata || {}
+      // A listing tagged metadata.advertising:true is ALWAYS an advertising campaign, regardless of
+      // which division was submitted. A real audit found the old gate -- checked only when
+      // `PAID_PLAN_DIVISIONS.has(division)` was ALSO true -- let a client skip payment entirely by
+      // submitting division:'STAYS' (or RENTALS/BUY) with metadata.advertising:true: that
+      // combination hit neither this branch nor the dealer branch below, so nothing checked
+      // payment at all. Live-proven: a free, permanent (expiresAt:null), admin-approvable
+      // "advertising"-tagged listing, $0 paid. Advertising must go through the advertising
+      // entitlement path no matter what division is claimed; any other division fails closed.
+      const claimsAdvertising = listingMetadata.advertising === true
+      if (claimsAdvertising) {
+        if (division !== 'MARKETPLACE') {
+          const error = new Error("Advertising campaigns must be division 'MARKETPLACE'.")
+          error.statusCode = 400
+          error.code = 'ADVERTISING_DIVISION_INVALID'
+          error.expose = true
+          throw error
+        }
         // Owner-approved business rule: one approved, unused advertising payment = exactly one
         // campaign -- NOT the "pay once, list unlimited inventory" model CARS/MARKETPLACE/
-        // NEW_CONSTRUCTION dealers get in the branch below (intentionally left untouched; that
-        // model is correct there). Checks for a specific unconsumed payment rather than the
-        // seller profile's overall (and, once one payment is spent, stale) approval flag.
+        // NEW_CONSTRUCTION dealers get in the branch below (intentionally untouched; that model is
+        // correct there). Checks for a specific unconsumed payment, never the coarse
+        // sellerProfile.documentStatus flag -- see the dealer branch's comment for why that flag is
+        // no longer trusted as an authorization source at all.
         const availableProof = await db().paymentProof.findFirst({
           where: {
             userId: context.user.id,
@@ -391,6 +408,12 @@ export async function handleListings(req, res, url, context) {
           throw error
         }
         boundAdvertisingProofId = availableProof.id
+        // The campaign's real tier is DERIVED from the entitlement actually being spent, never
+        // trusted from the client -- a real audit found a genuine $19 advertising-plus payment
+        // could get bound to a listing whose client-submitted metadata.adPlan claimed 'premium',
+        // displaying (and sorting ahead of real premium campaigns) as premium for free. Whatever
+        // the client sent is overwritten here with the tier the approved payment actually paid for.
+        listingMetadata = { ...listingMetadata, adPlan: availableProof.planCode === 'advertising-premium' ? 'premium' : 'plus' }
         // The advertiser's own chosen duration (SellerListingWizard.tsx's AD_DURATIONS, 7/30/90
         // days) -- honor it instead of the generic per-tier default. Capped at the wizard's own
         // max option so a direct API call can't request an arbitrarily long-lived ad.
@@ -400,15 +423,33 @@ export async function handleListings(req, res, url, context) {
             ? new Date(Date.now() + requestedAdDays * 24 * 60 * 60 * 1000)
             : listingExpiryDate(availableProof.planCode)
       } else if (PAID_PLAN_DIVISIONS.has(division)) {
-        const sellerProfile = await db().sellerProfile.findUnique({ where: { userId: context.user.id } })
-        if (!sellerProfile || sellerProfile.documentStatus !== 'APPROVED') {
+        // A real audit found this used to check only sellerProfile.documentStatus === 'APPROVED' --
+        // a single flag shared across every plan a user has ever had reviewed, set true by ANY
+        // approved seller_plan proof (including an advertising one) and never re-checked against
+        // what was actually paid for. Live-proven exploit: one $19 advertising-plus payment
+        // permanently unlocked unlimited free real CARS/NEW_CONSTRUCTION inventory, because this
+        // flag doesn't know or care which plan set it. documentStatus stays as a display-only
+        // signal (still read by the account page's "payment confirmed" UI) but is no longer
+        // trusted for authorization -- this looks for a real, dealer-tier-specific APPROVED
+        // payment instead. An advertising payment (planCode advertising-plus/-premium) can never
+        // satisfy this, by construction.
+        const dealerEntitlement = await db().paymentProof.findFirst({
+          where: {
+            userId: context.user.id,
+            provider: 'seller_plan',
+            status: 'APPROVED',
+            planCode: { in: ['plus', 'premium'] },
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+        if (!dealerEntitlement) {
           const error = new Error('A paid, admin-approved seller plan is required before publishing this listing.')
           error.statusCode = 403
           error.code = 'SELLER_PLAN_REQUIRED'
           error.expose = true
           throw error
         }
-        expiresAt = listingExpiryDate(sellerProfile.planCode)
+        expiresAt = listingExpiryDate(dealerEntitlement.planCode)
       }
 
       const priceMinor = Number(body.priceMinor || 0)
@@ -467,7 +508,7 @@ export async function handleListings(req, res, url, context) {
           currency,
           instantBookEnabled: Boolean(body.instantBookEnabled),
           expiresAt,
-          metadata: body.metadata || {},
+          metadata: listingMetadata,
         },
       })
 

@@ -56,9 +56,9 @@ check('seller w/o approved plan blocked from MARKETPLACE (403 SELLER_PLAN_REQUIR
   preGate.status === 403 && code(preGate) === 'SELLER_PLAN_REQUIRED', preGate.status+' '+code(preGate))
 
 const planRef = uniq()
-const planProof = await call('POST','/api/payments/seller-plan-proof', S1, {planCode:'marketplace-plus', amountMinor:1500, currency:'USD', providerRef:planRef, legalName:'Seller One', sellerType:'merchant'})
+const planProof = await call('POST','/api/payments/seller-plan-proof', S1, {planCode:'plus', amountMinor:1500, currency:'USD', providerRef:planRef, legalName:'Seller One', sellerType:'merchant'})
 check('seller submits plan payment proof (mock, 201)', planProof.status === 201, planProof.status+' '+code(planProof))
-const dupProof = await call('POST','/api/payments/seller-plan-proof', S1, {planCode:'marketplace-plus', amountMinor:1500, currency:'USD', providerRef:planRef})
+const dupProof = await call('POST','/api/payments/seller-plan-proof', S1, {planCode:'plus', amountMinor:1500, currency:'USD', providerRef:planRef})
 check('duplicate plan providerRef rejected (409)', dupProof.status === 409 && code(dupProof) === 'PAYMENT_REFERENCE_DUPLICATE', dupProof.status+' '+code(dupProof))
 const proofId = planProof.j?.proof?.id
 const approvePlan = await call('PATCH', `/api/admin/review-queue/payment/${proofId}`, A, {decision:'APPROVE'})

@@ -20,7 +20,7 @@ const has = (r, id) => (r.j?.listings || []).some(l => l.id === id)
 
 async function approvePlan(token) {
   const ref = 'NC-' + Math.floor(performance.now()*1000)
-  const p = await call('POST','/api/payments/seller-plan-proof', token, {planCode:'developer-plus', amountMinor:5000, currency:'USD', providerRef:ref, legalName:'Developer Co', sellerType:'developer'})
+  const p = await call('POST','/api/payments/seller-plan-proof', token, {planCode:'plus', amountMinor:5000, currency:'USD', providerRef:ref, legalName:'Developer Co', sellerType:'developer'})
   await call('PATCH', `/api/admin/review-queue/payment/${p.j?.proof?.id}`, A, {decision:'APPROVE'})
 }
 async function makeListing(token, division, meta, price, title, needPlan) {

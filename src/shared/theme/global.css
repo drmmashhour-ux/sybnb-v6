@@ -3929,6 +3929,50 @@ a {
   max-width: 680px;
 }
 
+.landing-sponsored {
+  margin: -46px auto 76px;
+  max-width: 1080px;
+  padding: 0 clamp(18px, 3vw, 30px);
+}
+
+.landing-sponsored-track {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+}
+
+.landing-sponsored-card {
+  background: #11121a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  flex: 0 0 auto;
+  margin: 0;
+  overflow: hidden;
+  position: relative;
+  width: 260px;
+}
+
+.landing-sponsored-card img {
+  aspect-ratio: 16 / 9;
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.landing-sponsored-tag {
+  background: rgba(17, 18, 26, 0.82);
+  border-radius: 6px;
+  color: #9aa7bd;
+  font-size: 10px;
+  font-weight: 700;
+  left: 8px;
+  letter-spacing: 0.6px;
+  padding: 3px 7px;
+  position: absolute;
+  text-transform: uppercase;
+  top: 8px;
+}
+
 .division-grid {
   display: grid;
   gap: 38px 30px;

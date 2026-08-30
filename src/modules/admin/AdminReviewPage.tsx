@@ -1500,7 +1500,12 @@ function AdminListingLine({
         <div style={commandStyles.listingThumbnailPlaceholder}>{isAr ? 'لا صورة' : 'No image'}</div>
       )}
       <div>
-        <strong>{listingTitleText(listing, lang)}</strong>
+        <strong>
+          {listing.metadata?.advertising === true && (
+            <span style={{ color: '#d5a915' }}>{isAr ? '📢 إعلان · ' : '📢 Advertising · '}</span>
+          )}
+          {listingTitleText(listing, lang)}
+        </strong>
         <small>{divisionText(listing.division, lang)}</small>
         <small>{hostName}</small>
         <small>{moneyText(listing.priceMinor, listing.currency, lang)}</small>

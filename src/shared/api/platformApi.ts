@@ -362,6 +362,18 @@ export async function fetchPrototypeContracts() {
   return apiRequest<PlatformContracts>('/api/contracts')
 }
 
+export type ActiveAd = {
+  id: string
+  titleAr: string
+  titleEn: string | null
+  plan: 'plus' | 'premium'
+  media: { url: string; kind: string }[]
+}
+
+export async function fetchActiveAdvertising() {
+  return apiRequest<{ ok: true; ads: ActiveAd[] }>('/api/advertising/active')
+}
+
 export async function createAndSubmitPrototypeListing(input: CreateListingInput) {
   const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
   const { media, ...listingBody } = input

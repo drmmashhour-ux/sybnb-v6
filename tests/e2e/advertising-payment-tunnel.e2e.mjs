@@ -22,10 +22,10 @@
 //   ADMIN      admin user id
 //   AUTH_SECRET must match the running API's AUTH_SECRET (used to mint session tokens)
 //
-// PRODUCT GAP (documented, intentionally NOT implemented here): the landing "Featured ads"
-// marquee is static (hardcoded AD_SPONSORS) — approved advertising campaigns do not dynamically
-// appear there. Dynamic ad placement is NOT SUPPORTED and is out of scope for the payment-tunnel
-// gate.
+// A real display surface now exists: GET /api/advertising/active (server/routes/listings.mjs)
+// returns real, admin-approved, non-expired ad campaigns for the landing page's "Sponsored"
+// section (src/modules/landing/LandingPage.tsx) to render — no fake/hardcoded sponsor cards.
+// Section 7 below proves an ad is absent before approval and present with real media after.
 //
 // An approved ad IS a real APPROVED listing row (individually fetchable, administratively real —
 // see "activation" below), but is deliberately excluded from GET /api/listings' ordinary
@@ -90,6 +90,7 @@ check('buyer(GUEST) cannot create ad (403)', (await call('POST','/api/listings',
 
 console.log('\n=== 2. PAYMENT TUNNEL INTEGRITY (mock, seller_plan proof) ===')
 check('invalid amount (0, non-zero-fee) rejected (PAYMENT_AMOUNT_INVALID)', code(await submitProof(AA, 'zero-'+Date.now(), 0)) === 'PAYMENT_AMOUNT_INVALID', 'wrong')
+check('amount not matching the real advertising-plus price rejected (PAYMENT_AMOUNT_MISMATCH)', code(await submitProof(AA, 'mismatch-'+Date.now(), 1)) === 'PAYMENT_AMOUNT_MISMATCH', 'client-trusted amount accepted')
 check('missing provider reference rejected (PAYMENT_REFERENCE_REQUIRED)', code(await call('POST','/api/payments/seller-plan-proof', AA, {planCode:'advertising-plus', amountMinor:1900, currency:'USD'})) === 'PAYMENT_REFERENCE_REQUIRED', 'wrong')
 const ref = 'ADV-' + Math.floor(performance.now()*1000)
 const proof = await submitProof(AA, ref)
@@ -109,7 +110,7 @@ check('after approval advertiser creates ad campaign (201)', create.status === 2
 const adId = create.j?.listing?.id
 check('ad campaign carries advertising metadata', create.j?.listing?.metadata?.advertising === true, JSON.stringify(create.j?.listing?.metadata?.advertising))
 check('ad campaign starts DRAFT (not active)', create.j?.listing?.status === 'DRAFT', create.j?.listing?.status)
-check('ad media attach (201)', (await call('POST', `/api/listings/${adId}/media`, AA, {media:[{url:'/assets/divisions/marketplace.webp'}]})).status === 201)
+check('ad media attach (201)', (await call('POST', `/api/listings/${adId}/media`, AA, {media:[{url:'/assets/divisions/marketplace.webp', kind:'mainBanner'}]})).status === 201)
 check('draft ad NOT publicly visible', !has(await call('GET','/api/listings?division=MARKETPLACE',null), adId), 'leaked')
 check('ad submit -> PENDING_REVIEW', (await call('PATCH', `/api/listings/${adId}/submit`, AA)).j?.listing?.status === 'PENDING_REVIEW', 'no submit')
 check('pending ad NOT publicly visible before review', !has(await call('GET','/api/listings?division=MARKETPLACE',null), adId), 'leaked')
@@ -122,6 +123,17 @@ check('admin approves ad listing (200)', (await call('PATCH', `/api/admin/review
 const activated = await call('GET', `/api/listings/${adId}`, null)
 check('approved ad now individually fetchable (activation)', activated.status === 200 && activated.j?.listing?.id === adId, activated.status+' '+JSON.stringify(activated.j))
 check('approved ad still excluded from ordinary product search (no disguised leak)', !has(await call('GET','/api/listings?division=MARKETPLACE',null), adId), 'leaked')
+
+console.log('\n=== 3b. DISPLAY SURFACE: GET /api/advertising/active ===')
+const activeAds = await call('GET', '/api/advertising/active', null)
+check('active-ads endpoint is public (200, no auth)', activeAds.status === 200, activeAds.status)
+const activeAd = (activeAds.j?.ads || []).find((a) => a.id === adId)
+check('approved ad appears in the real public display surface', Boolean(activeAd), JSON.stringify(activeAds.j?.ads?.map((a) => a.id)))
+check('display surface carries the real attached banner media (not fake/empty)', activeAd?.media?.some((m) => m.kind === 'mainBanner' && m.url), JSON.stringify(activeAd?.media))
+const draftForVisibility = await call('POST','/api/listings', AA, adBody({ titleAr:'Not-yet-approved campaign' }))
+const draftAdVisId = draftForVisibility.j?.listing?.id
+const activeAdsAfterDraft = await call('GET', '/api/advertising/active', null)
+check('a DRAFT (not yet approved) ad never appears on the public display surface', !(activeAdsAfterDraft.j?.ads || []).some((a) => a.id === draftAdVisId), 'unapproved ad leaked to display surface')
 
 console.log('\n=== 4. ADVERTISER STATUS SURFACE (/api/me/overview) ===')
 const overview = await call('GET','/api/me/overview', AA)

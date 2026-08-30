@@ -51,6 +51,10 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
   const storedPlan = window.localStorage.getItem(AD_PLAN_STORAGE_KEY)
   const amountMinor = storedPlan === 'premium' ? 4900 : 1900
   const amountLabel = storedPlan === 'premium' ? '$49' : '$19'
+  // Distinct per-tier plan codes (not a single 'advertising' code for both) so the server's price
+  // catalog (server/routes/payments.mjs) can validate the submitted amount against the real price
+  // for the tier actually chosen, and so admin can tell plans apart in review.
+  const planCode = storedPlan === 'premium' ? 'advertising-premium' : 'advertising-plus'
   const currency = 'USD'
   const [amountConfirmed, setAmountConfirmed] = useState(false)
   const [paymentStarted, setPaymentStarted] = useState(false)
@@ -197,7 +201,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
         providerRef: reference,
         proofAssetUrl: paymentProofUrls[0] || paymentProofReference('advertising-payment-proof', paymentUploadedFiles),
         proofAssetUrls: paymentProofUrls,
-        planCode: 'advertising',
+        planCode,
         sellerType: 'advertising',
       })
       setPaymentReference(reference)

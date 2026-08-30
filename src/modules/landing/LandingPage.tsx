@@ -1,10 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { text } from '../../engines/language/languageEngine'
 import { DIVISIONS } from '../../engines/navigation/divisions'
 import type { DivisionId } from '../../engines/navigation/divisions'
 import { navigate } from '../../app/routes'
 import type { CSSVars } from '../../shared/theme/cssVars'
+import { fetchActiveAdvertising } from '../../shared/api/platformApi'
+import type { ActiveAd } from '../../shared/api/platformApi'
+
+const BANNER_KIND_PRIORITY = ['desktopBanner', 'mainBanner', 'tabletBanner', 'phoneBanner']
+
+function adBannerUrl(ad: ActiveAd) {
+  for (const kind of BANNER_KIND_PRIORITY) {
+    const match = ad.media.find((item) => item.kind === kind)
+    if (match) return match.url
+  }
+  return ad.media[0]?.url
+}
 
 type Props = {
   lang: Lang
@@ -80,6 +92,23 @@ export function LandingPage({ lang }: Props) {
   const [moviePlaying, setMoviePlaying] = useState(false)
   const activeCount = DIVISIONS.filter((division) => division.status === 'active').length
   const showAbout = () => document.getElementById('platform-about')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // Real, admin-approved ad campaigns only -- no fake/hardcoded sponsor cards (see the removed
+  // "Featured ads" marquee note below). Renders nothing when there are zero approved ads instead
+  // of a placeholder, matching CAPSULE_RULES.noFakeTrustSignal.
+  const [activeAds, setActiveAds] = useState<ActiveAd[]>([])
+  useEffect(() => {
+    let cancelled = false
+    fetchActiveAdvertising()
+      .then((result) => {
+        if (!cancelled) setActiveAds(result.ads)
+      })
+      .catch(() => {
+        // No ads to show is a normal, silent outcome -- never block the landing page on this.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
     <main className="landing-page">
@@ -161,6 +190,19 @@ export function LandingPage({ lang }: Props) {
           {about.adCta}
         </button>
       </section>
+
+      {activeAds.length > 0 && (
+        <section className="landing-sponsored" aria-label={isAr ? 'إعلانات ممولة' : 'Sponsored'}>
+          <div className="landing-sponsored-track">
+            {activeAds.map((ad) => (
+              <figure className="landing-sponsored-card" key={ad.id}>
+                <span className="landing-sponsored-tag">{isAr ? 'إعلان ممول' : 'Sponsored'}</span>
+                <img alt={isAr ? ad.titleAr : ad.titleEn || ad.titleAr} loading="lazy" src={adBannerUrl(ad)} />
+              </figure>
+            ))}
+          </div>
+        </section>
+      )}
 
       <h2 className="landing-section-title">{isAr ? 'استكشف الفئات' : 'Explore categories'}</h2>
       <section className="division-grid" aria-label={isAr ? 'أقسام المنصة' : 'Platform divisions'}>

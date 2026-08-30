@@ -158,6 +158,9 @@ export function SellerListingWizard({ lang }: Props) {
           { id: 'brandLogo', ar: 'شعار الشركة', en: 'Brand logo' },
           { id: 'documents', ar: 'ملفات الشركة أو الحملة', en: 'Company or campaign documents' },
         ]
+  // 'documents' has its own real upload widget below (uploadedDocumentUrls) -- these are the
+  // image slots (banners/logo) that need their own real per-slot upload.
+  const bannerSlots = adFileSlots.filter((item) => item.id !== 'documents')
   const draft = useMemo(() => loadDraft(), [])
   const [stepIndex, setStepIndex] = useState(0)
   const [division, setDivision] = useState<ListingDivision>(draft.division || 'STAYS')
@@ -177,7 +180,11 @@ export function SellerListingWizard({ lang }: Props) {
   const [instantBookEnabled, setInstantBookEnabled] = useState(draft.instantBookEnabled ?? false)
   const [adPlacement, setAdPlacement] = useState(isAr ? 'الرئيسية' : 'Landing page')
   const [adDuration, setAdDuration] = useState(isAr ? 'أسبوع واحد' : 'One week')
-  const [uploadedAdFiles, setUploadedAdFiles] = useState<string[]>([])
+  // Real per-slot banner/logo uploads (slot id -> uploaded file). Replaces a prior version of this
+  // grid that was a plain button toggling local state with zero network request -- an advertiser
+  // could believe they'd sent a real banner when nothing was ever uploaded.
+  const [adSlotUploads, setAdSlotUploads] = useState<Record<string, { fileName: string; url: string }>>({})
+  const [adSlotUploadError, setAdSlotUploadError] = useState('')
   const [uploadedDocumentFiles, setUploadedDocumentFiles] = useState<string[]>([])
   const [uploadedDocumentUrls, setUploadedDocumentUrls] = useState<string[]>([])
   const [documentUploadError, setDocumentUploadError] = useState('')
@@ -279,9 +286,18 @@ export function SellerListingWizard({ lang }: Props) {
         // A listing with zero real photos correctly stays empty; listingImage()/hasRealPhoto() on
         // the browse and detail pages already handle that honestly (generic tile + a real
         // "No photos yet" badge), the same pattern already proven for STAYS.
-        const listingMedia = uploadedPhotoUrls.map((url, index) => ({ url, kind: 'image', sortOrder: index }))
+        // Ad banners/logo attach as real ListingMedia too (kind = slot id, e.g. 'desktopBanner')
+        // instead of only living in metadata, so the real display surface can query them the same
+        // way every other listing's images are served.
+        const listingMedia = isAdvertisingFlow
+          ? Object.entries(adSlotUploads).map(([slotId, upload], index) => ({ url: upload.url, kind: slotId, sortOrder: index }))
+          : uploadedPhotoUrls.map((url, index) => ({ url, kind: 'image', sortOrder: index }))
         await createAndSubmitPrototypeListing({
-          division,
+          // Ads must be division='MARKETPLACE' -- that's what gates listing creation behind an
+          // admin-approved paid seller plan (PAID_PLAN_DIVISIONS in server/routes/listings.mjs).
+          // Leaving this as the property-flow's default 'STAYS' meant an ad could reach
+          // PENDING_REVIEW/APPROVED without the required plan payment ever being verified.
+          division: isAdvertisingFlow ? 'MARKETPLACE' : division,
           titleAr: title || 'إعلان SYBNB جديد',
           titleEn: title,
           description,
@@ -294,7 +310,6 @@ export function SellerListingWizard({ lang }: Props) {
             adPlan,
             adPlacement,
             adDuration,
-            uploadedAdFiles,
             uploadedDocumentFiles,
             uploadedDocumentUrls,
             propertyType: selectedType,
@@ -361,6 +376,25 @@ export function SellerListingWizard({ lang }: Props) {
       setUploadedDocumentUrls((current) => [...current, ...urls])
     } catch (error) {
       setDocumentUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
+    }
+  }
+
+  async function addAdSlotFile(slotId: string, fileList: FileList | null) {
+    const file = Array.from(fileList || [])[0]
+    if (!file) return
+
+    setAdSlotUploadError('')
+    const session = getStoredSellerSession()
+    if (!session) {
+      setAdSlotUploadError(isAr ? 'سجّل الدخول أولاً لرفع الملفات.' : 'Sign in first to upload files.')
+      return
+    }
+    try {
+      const url = await uploadPaymentProofFile(file, session.token)
+      setAdSlotUploads((current) => ({ ...current, [slotId]: { fileName: file.name, url } }))
+      setAdFilesSent(false)
+    } catch (error) {
+      setAdSlotUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
     }
   }
 
@@ -602,50 +636,35 @@ export function SellerListingWizard({ lang }: Props) {
 
           {activeStep.id === 'media' && (
             <div className="seller-wizard-section">
-              {/* A real bug caught by an independent re-audit: for the regular (non-advertising)
-                  listing flow, this whole grid used to be a checklist of plain buttons ("Plan
-                  payment proof" / "Ownership proof" / "Add authorization" / "Plan or deed") that
-                  toggled local state and uploaded nothing -- clicking one flipped it to a green
-                  "Added" success state with zero network request, right next to the real
-                  PaymentProofUpload widgets below that genuinely upload files. A seller could
-                  believe they'd submitted ownership proof when nothing was ever sent. Only the
-                  advertising flow's real required-file slots (adFileSlots) still need this grid;
-                  the regular flow's real uploads are fully covered by the two widgets below. */}
               {isAdvertisingFlow && (
               <div className="seller-upload-grid">
-                {adFileSlots.map((item) => (
-                  <button
-                    className={uploadedAdFiles.includes(item.id) ? 'uploaded' : ''}
-                    key={item.en}
-                    onClick={() => {
-                      setUploadedAdFiles((current) => (current.includes(item.id) ? current : [...current, item.id]))
-                      setAdFilesSent(false)
-                    }}
-                  >
-                    <strong>{item[lang]}</strong>
-                    <span>
-                      {uploadedAdFiles.includes(item.id)
-                        ? isAr
-                          ? 'تمت الإضافة'
-                          : 'Added'
-                        : isAr
-                          ? 'إضافة / رفع'
-                          : 'Add / upload'}
-                    </span>
-                  </button>
+                {bannerSlots.map((item) => (
+                  <PaymentProofUpload
+                    cta={isAr ? `رفع ${item.ar}` : `Upload ${item.en}`}
+                    emptyText={isAr ? 'لم يتم رفع الملف بعد.' : 'No file uploaded yet.'}
+                    files={adSlotUploads[item.id] ? [adSlotUploads[item.id].fileName] : []}
+                    help={isAr ? 'PNG أو JPG.' : 'PNG or JPG.'}
+                    key={item.id}
+                    lang={lang}
+                    onAddFiles={(files) => void addAdSlotFile(item.id, files)}
+                    title={item[lang]}
+                  />
                 ))}
               </div>
+              )}
+              {isAdvertisingFlow && adSlotUploadError && (
+                <p className="seller-note-line" style={{ color: '#ff5f7d' }}>{adSlotUploadError}</p>
               )}
               {isAdvertisingFlow && (
                 <div className={`seller-ad-send-panel ${adFilesSent ? 'sent' : ''}`}>
                   <strong>{adPlan === 'premium' ? (isAr ? 'خطة Premium' : 'Premium plan') : isAr ? 'خطة Plus' : 'Plus plan'}</strong>
                   <span>
                     {isAr
-                      ? `تمت إضافة ${uploadedAdFiles.length} من ${adFileSlots.length} ملفات مطلوبة ورفع ${uploadedDocumentUrls.length} مستند.`
-                      : `${uploadedAdFiles.length} of ${adFileSlots.length} required files added and ${uploadedDocumentUrls.length} document uploaded.`}
+                      ? `تم رفع ${Object.keys(adSlotUploads).length} من ${bannerSlots.length} ملفات مطلوبة ورفع ${uploadedDocumentUrls.length} مستند.`
+                      : `${Object.keys(adSlotUploads).length} of ${bannerSlots.length} required files uploaded and ${uploadedDocumentUrls.length} document uploaded.`}
                   </span>
                   <button
-                    disabled={uploadedAdFiles.length < adFileSlots.length || uploadedDocumentUrls.length < 1}
+                    disabled={bannerSlots.some((item) => !adSlotUploads[item.id]) || uploadedDocumentUrls.length < 1}
                     onClick={() => setAdFilesSent(true)}
                   >
                     {adFilesSent ? (isAr ? 'تم إرسال الملفات للإدارة' : 'Files sent to admin') : isAr ? 'إرسال الملفات للإدارة' : 'Send files to admin'}

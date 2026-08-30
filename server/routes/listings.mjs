@@ -126,6 +126,36 @@ function toPublicListing(l) {
 }
 
 export async function handleListings(req, res, url, context) {
+  if (url.pathname === '/api/advertising/active') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    // Public, unauthenticated read of real, admin-approved ad campaigns for display -- the
+    // counterpart to the exclusion above (which keeps ads out of ordinary product search).
+    // Filtered in JS for the same NULL-trap reason documented on that exclusion: a Prisma `where`
+    // JSON-path equality check on metadata.advertising can't be combined with `division` safely.
+    const now = new Date()
+    const batch = await db().listing.findMany({
+      where: { status: 'APPROVED', division: 'MARKETPLACE' },
+      include: { media: true },
+      orderBy: [{ createdAt: 'desc' }],
+      take: 100,
+    })
+    const ads = batch
+      .filter((l) => l.metadata?.advertising === true && (!l.expiresAt || l.expiresAt > now))
+      .sort((a, b) => {
+        const tierRank = (l) => (l.metadata?.adPlan === 'premium' ? 0 : 1)
+        return tierRank(a) - tierRank(b) || b.createdAt - a.createdAt
+      })
+      .slice(0, 6)
+      .map((l) => ({
+        id: l.id,
+        titleAr: l.titleAr,
+        titleEn: l.titleEn,
+        plan: l.metadata?.adPlan === 'premium' ? 'premium' : 'plus',
+        media: l.media.map((m) => ({ url: m.url, kind: m.kind })),
+      }))
+    return json(res, 200, { ok: true, ads })
+  }
+
   const quoteMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/quote$/)
   if (quoteMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])

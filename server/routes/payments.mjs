@@ -48,6 +48,22 @@ function paymentReferenceDuplicate() {
 // webhook path) so both payment rails derive the guest total and the auto-approval actor from one
 // place instead of two copies that can drift.
 
+// A real end-to-end audit found /api/payments/seller-plan-proof (below) had NO server-side price
+// check for the advertising plan -- only `amountMinor > 0`, meaning a client could submit any
+// positive amount (e.g. 1) for a $49 ad plan and it would be accepted, with the only backstop
+// being a human admin manually eyeballing the claimed amount before approving. This catalog is the
+// real fix, scoped to the two real advertising plan codes (SellerAdvertisingPaymentPage.tsx):
+// known codes must match their real price exactly. Deliberately NOT extended to the generic
+// 'plus'/'premium' codes other seller roles also send -- those are used with inconsistent
+// historical test amounts across multiple divisions/fixtures with no single real catalog price
+// behind them yet; unifying that is separate, larger work than this advertising-specific fix.
+// Unknown/uncataloged plan codes fall through unchecked, same fail-open-for-unknown/
+// fail-closed-for-known posture as the rest of this file's validation.
+const PLAN_PRICE_CATALOG = {
+  'advertising-plus': { amountMinor: 1900, currency: 'USD' },
+  'advertising-premium': { amountMinor: 4900, currency: 'USD' },
+}
+
 // An independent revenue audit found both no-booking/no-ride payment-proof paths below accepted a
 // raw client-supplied `currency` string with no validation at all -- proven live: a seller-plan
 // proof submitted with currency:"ZZZFAKECOIN" was admin-approvable without incident, creating a
@@ -443,16 +459,29 @@ export async function handlePayments(req, res, url, context) {
     requireAuth(context)
 
     const body = await readJson(req)
+    const planCode = body.planCode ? String(body.planCode).trim() : undefined
     const amountMinor = Number(body.amountMinor || 0)
     // platform-sale is the only plan with no upfront fee — SYBNB manages the sale and takes a
     // commission on close instead, so a review request can carry a zero amount for that plan only.
-    const isZeroFeePlan = String(body.planCode || '').trim() === 'platform-sale'
+    const isZeroFeePlan = planCode === 'platform-sale'
     if (!Number.isFinite(amountMinor) || amountMinor < 0 || (amountMinor === 0 && !isZeroFeePlan)) {
       const error = new Error('Plan payment amount must be greater than zero.')
       error.statusCode = 400
       error.code = 'PAYMENT_AMOUNT_INVALID'
       error.expose = true
       throw error
+    }
+
+    const catalogEntry = planCode ? PLAN_PRICE_CATALOG[planCode] : undefined
+    if (catalogEntry) {
+      const submittedCurrency = resolveClientCurrency(body.currency, 'USD')
+      if (amountMinor !== catalogEntry.amountMinor || submittedCurrency !== catalogEntry.currency) {
+        const error = new Error(`Plan '${planCode}' costs ${catalogEntry.amountMinor} ${catalogEntry.currency}; submitted amount does not match.`)
+        error.statusCode = 400
+        error.code = 'PAYMENT_AMOUNT_MISMATCH'
+        error.expose = true
+        throw error
+      }
     }
 
     const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
@@ -487,7 +516,6 @@ export async function handlePayments(req, res, url, context) {
 
     const legalName = body.legalName ? String(body.legalName).trim() : context.user.displayName
     const sellerType = body.sellerType ? String(body.sellerType).trim() : 'owner'
-    const planCode = body.planCode ? String(body.planCode).trim() : undefined
 
     const proofAssetUrls = normalizeProofAssetUrls(body)
     let proof

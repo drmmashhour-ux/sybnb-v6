@@ -14,11 +14,15 @@ type Props = {
 const labels = {
   ar: {
     title: 'بوابة الدخول الداخلية',
-    subtitle: 'هذه الصفحة مخصصة للفريق الداخلي فقط. سجّل الدخول أو أنشئ جلسة اختبار قبل متابعة لوحة التحكم.',
+    // Was "سجّل الدخول أو أنشئ جلسة اختبار" -- a real bug audit found self-registration is not
+    // actually supported for ADMIN/DRIVER (the backend rejects it), so "create a session" here was
+    // a promise the page couldn't keep. Sign-in only, for these two roles.
+    subtitle: 'هذه الصفحة مخصصة للفريق الداخلي فقط. سجّل الدخول بحسابك الحالي للمتابعة إلى لوحة التحكم.',
     signIn: 'تسجيل الدخول',
     signUp: 'إنشاء حساب',
     admin: 'دخول الإدارة',
     host: 'دخول المضيف',
+    hostSignUp: 'إنشاء حساب مضيف',
     driver: 'دخول السائق',
     email: 'البريد الإلكتروني',
     password: 'كلمة المرور',
@@ -35,11 +39,12 @@ const labels = {
   },
   en: {
     title: 'Internal Access Gate',
-    subtitle: 'This page is for internal team access only. Sign in or create a test session before continuing to the dashboard.',
+    subtitle: 'This page is for internal team access only. Sign in with your existing account to continue to the dashboard.',
     signIn: 'Sign in',
     signUp: 'Sign up',
     admin: 'Open admin',
     host: 'Open host',
+    hostSignUp: 'Create host account',
     driver: 'Open driver',
     email: 'Email address',
     password: 'Password',
@@ -69,7 +74,15 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState('')
 
-  const actionLabel = role === 'ADMIN' ? t.admin : role === 'DRIVER' ? t.driver : t.host
+  // A real bug audit found "Create account" was a nonfunctional promise for ADMIN/DRIVER: the
+  // backend's PUBLIC_REGISTER_ROLES (server/routes/auth.mjs) only allows self-registration for
+  // GUEST/HOST/SELLER, so createStaffAccountSession's register() call for ADMIN/DRIVER always
+  // 403s (ROLE_REGISTRATION_FORBIDDEN) and silently falls back to login() -- both tabs ended up
+  // doing the exact same thing, with no visible difference at all. HOST genuinely can self-register
+  // here, so only HOST gets the toggle; ADMIN/DRIVER are sign-in only, matching real capability.
+  const canSelfRegister = role === 'HOST'
+  const baseActionLabel = role === 'ADMIN' ? t.admin : role === 'DRIVER' ? t.driver : t.host
+  const actionLabel = canSelfRegister && mode === 'signUp' ? t.hostSignUp : baseActionLabel
   // Every role signs in over email OTP -- an independent admin-experience audit found ADMIN/DRIVER
   // were still hardcoded to the phone/SMS channel here, and Syria's country profile has SMS
   // disabled entirely (communications.sms: false). requestOtp/confirmOtp over phone therefore
@@ -142,14 +155,16 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
         <span style={styles.badge}>{role}</span>
         <h1 style={styles.title}>{gateTitle}</h1>
         <p style={styles.body}>{gateSubtitle}</p>
-        <div style={styles.segmented}>
-          <button style={mode === 'signIn' ? styles.segmentActive : styles.segment} onClick={() => setMode('signIn')}>
-            {t.signIn}
-          </button>
-          <button style={mode === 'signUp' ? styles.segmentActive : styles.segment} onClick={() => setMode('signUp')}>
-            {t.signUp}
-          </button>
-        </div>
+        {canSelfRegister && (
+          <div style={styles.segmented}>
+            <button style={mode === 'signIn' ? styles.segmentActive : styles.segment} onClick={() => setMode('signIn')}>
+              {t.signIn}
+            </button>
+            <button style={mode === 'signUp' ? styles.segmentActive : styles.segment} onClick={() => setMode('signUp')}>
+              {t.signUp}
+            </button>
+          </div>
+        )}
         <div style={styles.formGrid}>
           <label style={styles.label}>
             {t.email}

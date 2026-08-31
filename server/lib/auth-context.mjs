@@ -1,5 +1,7 @@
 import { db } from './prisma.mjs'
 import { verifySessionToken } from './security.mjs'
+import { isLockContentionError } from './revocation-contention.mjs'
+import { log } from './logger.mjs'
 
 // SEC-002. This file used to keep a 30-second per-process cache of {user, roles} keyed by user id,
 // added as a scale optimisation (docs/launch/SCALE_READINESS_1M.md #1 blocker). Its own comment
@@ -31,6 +33,98 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // last_used_at is useful for the "your active sessions" list, but writing it on every request would
 // turn every authenticated read into a write. Refreshed at most this often per session instead.
 const LAST_USED_REFRESH_MS = 5 * 60_000
+
+// SEC-F1 ROUND 2 -- the admission-time last_used_at refresh must not be able to defeat the
+// containment bound.
+//
+// WHAT WENT WRONG
+//
+// SEC-F1 round 1 bounded the three revocation vectors (logout-all, admin suspend, admin role
+// removal) at REVOCATION_TOTAL_BUDGET_MS (6s) inside runBoundedRevocation()
+// (server/lib/revocation-contention.mjs). But that wrapper only covers the ROUTE HANDLER. The
+// refresh below runs earlier, in getAuthContext(), on EVERY authenticated request including those
+// three -- and it is an UPDATE on the ACTING session's own `user_sessions` row, which is exactly
+// the row a stalled Class A transaction holds `SELECT ... FOR UPDATE` on via reauthorizeAtCommit()
+// (server/lib/commit-authorization.mjs). It had no lock_timeout and was not inside any bounded
+// transaction, so it blocked for the holder's FULL lifetime before the route handler ever ran.
+//
+// This is not an edge case: LAST_USED_REFRESH_MS is five minutes, so the refresh fires whenever the
+// acting session has merely been idle that long -- the ordinary state of an operator opening the
+// admin console to respond to an incident. Reproduced against this repo's local sybnb_v6
+// (2026-08-31), logout-all with a cold session: 12,026ms against a 12s holder and 40,014ms against
+// a 40s holder, versus 6,241ms (correct, bounded 503) for the same call on a warm session. Round 5's
+// MERGED_TX_OPTIONS allows a legitimate holder up to 60s, so the containment button could hang for
+// about a minute. The response was still HONEST when it finally arrived -- this never produced a
+// false success or a partial write -- but the BOUND that SEC-F1 exists to establish was not real.
+//
+// WHY IT IS SAFE TO SKIP THIS WRITE
+//
+// last_used_at is telemetry, not authorization state. Every consumer in the codebase was traced:
+// the column is written ONLY here, and read ONLY by listActiveSessions()
+// (server/lib/session-store.mjs), which feeds the read-only "your active sessions" list at
+// GET /api/auth/sessions for display. Nothing gates access on it, no session-expiry or
+// idle-timeout feature consults it (expiry is `expires_at`; revocation is `revoked_at` and
+// `users.session_epoch`, all checked above and none of them touched here), and the Prisma schema
+// declares it nullable with no index, no constraint and no relation. Skipping one refresh leaves
+// the field at its previous value -- the same state it legitimately holds for any session that has
+// simply not made a request in the last five minutes -- and the next request past the interval
+// writes it. No correctness or security consequence follows.
+//
+// WHY BOUNDED-AND-SKIPPED RATHER THAN DROPPED, DEFERRED OR MADE ASYNC
+//
+// Dropping the field would remove a real operator-facing signal for a problem that is only about
+// WAITING for it. Making the write a floating unawaited promise would leave an unbounded statement
+// parked on a pooled connection and an unhandled rejection path, trading a visible hang for an
+// invisible one. Bounding the wait in Postgres and skipping only on contention keeps the field, its
+// meaning, and the connection accounting exactly as they were.
+//
+// WHY THIS DOES NOT SILENTLY SWALLOW A REAL PROBLEM
+//
+// Only lock contention is tolerated, decided by the same isLockContentionError() predicate round 1
+// already uses to distinguish "someone else holds the rows" from a genuine fault. Anything else --
+// a connection failure, a schema error, a constraint violation -- propagates unchanged and still
+// fails the request. Every tolerated skip emits a distinct `session_last_used_refresh_contended`
+// warn line carrying the session id and the observed wait, so a skip is an observable event with
+// its own signature, not an absence.
+//
+// SCOPE. This is one write site. getAuthContext()'s authorization checks above are untouched, and
+// runBoundedRevocation() is deliberately NOT reused here: this is not revocation work, it needs no
+// retry budget and no REVOCATION_CONTENDED translation -- only the contention predicate is shared.
+// Because getAuthContext() is common admission code it cannot be narrowed to the three containment
+// routes; every authenticated route therefore also stops being able to block unboundedly here,
+// which is strictly an improvement and changes no route's success semantics.
+export const LAST_USED_LOCK_WAIT_MS = 500
+// Far above LAST_USED_LOCK_WAIT_MS on purpose, for the same reason as REVOCATION_TX_OPTIONS: the
+// wait must be ended by Postgres' lock_timeout (which cancels the statement and rolls the
+// transaction back cleanly) rather than by Prisma's own transaction bound.
+const LAST_USED_TX_OPTIONS = { maxWait: 2_000, timeout: 10_000 }
+
+/**
+ * Refresh this session's last_used_at, waiting at most LAST_USED_LOCK_WAIT_MS for the row lock.
+ *
+ * Resolves either way. On lock contention the refresh is abandoned and logged; the row is provably
+ * untouched, because a lock_timeout aborts the statement and rolls back the whole transaction.
+ * Any non-contention error is re-thrown and fails the request as it did before.
+ */
+async function refreshLastUsedAt(sessionId) {
+  const startedAt = Date.now()
+  try {
+    await db().$transaction(async (tx) => {
+      // Integer literal built from this module's own constant -- no caller-supplied value reaches
+      // this statement, and `lock_timeout` cannot be parameterized.
+      await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = ${LAST_USED_LOCK_WAIT_MS}`)
+      await tx.userSession.updateMany({ where: { id: sessionId }, data: { lastUsedAt: new Date() } })
+    }, LAST_USED_TX_OPTIONS)
+  } catch (err) {
+    if (!isLockContentionError(err)) throw err
+    log.warn('session_last_used_refresh_contended', {
+      sessionId,
+      waitedMs: Date.now() - startedAt,
+      lockWaitMs: LAST_USED_LOCK_WAIT_MS,
+      skipped: true,
+    })
+  }
+}
 
 export async function getAuthContext(req) {
   const header = req.headers.authorization || ''
@@ -67,7 +161,9 @@ export async function getAuthContext(req) {
   if (user.sessionEpoch !== claims.epoch) return null
 
   if (!session.lastUsedAt || Date.now() - session.lastUsedAt.getTime() > LAST_USED_REFRESH_MS) {
-    await db().userSession.updateMany({ where: { id: session.id }, data: { lastUsedAt: new Date() } })
+    // SEC-F1 round 2: bounded. See refreshLastUsedAt() above -- this write used to be able to block
+    // for the full lifetime of a stalled Class A transaction holding this very row.
+    await refreshLastUsedAt(session.id)
   }
 
   return {

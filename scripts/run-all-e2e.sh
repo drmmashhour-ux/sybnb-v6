@@ -148,6 +148,10 @@ run_full "otp"              otp-identity.e2e.mjs
   run_full "admin-self-review" admin-self-review-protection.e2e.mjs
   run_full "session-revocation" session-revocation.e2e.mjs
   run_full "commit-boundary-reauth" commit-boundary-reauthorization.e2e.mjs
+  # SEC-002R round 2 (post-FAIL remediation). Additive: the round-1 suite above is frozen evidence
+  # and still runs unchanged. The stripe_checkout REPLAY half of round 2 cannot run here (that
+  # operation is policy-refused on this server) -- it runs in the stripe-approved phase below.
+  run_full "commit-boundary-r2" commit-boundary-reauthorization-round2.e2e.mjs
   run_full "resend-webhook"   resend-webhook.e2e.mjs
 run_full "storage"          storage.e2e.mjs
 run_full "legal"            legal-consent.e2e.mjs
@@ -208,6 +212,10 @@ STRIPE_APPROVED_PID=$!
 sleep 3
 API_BASE_UNAPPROVED=http://127.0.0.1:3051 API_BASE_APPROVED=http://127.0.0.1:3052 \
   run "payment-stripe-recovery" payment-event-stripe-policy-deferred-recovery.e2e.mjs
+# SEC-002R round 2, finding A8 on the stripe_checkout rail: needs the same stripe-approved,
+# NODE_ENV=test server this phase already starts (the replay operation is policy-refused elsewhere).
+API_BASE_APPROVED=http://127.0.0.1:3052 \
+  run "commit-boundary-r2-stripe" commit-boundary-reauthorization-stripe-round2.e2e.mjs
 kill "$STRIPE_UNAPPROVED_PID" "$STRIPE_APPROVED_PID" 2>/dev/null
 
 if [ -z "$PAYMENT_ONLY" ]; then

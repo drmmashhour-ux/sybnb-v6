@@ -40,6 +40,79 @@ type SortMode = 'newest' | 'lowest'
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 const GUEST_TOKEN_KEY = 'sybnb-v6-guest-token'
 
+// ---------------------------------------------------------------------------
+// UX-4B finding 2.1 -- SEARCH state only.
+//
+// Opening a property navigates to /listing/<id>, which unmounts this page; coming back re-mounted
+// it with every filter at its useState default, so the customer had to rebuild their search
+// (governorate/city/street, property filters, sort) from scratch after every look at a property.
+// This mirrors the sessionStorage draft UnifiedSearchBar already uses ('sybnb-v6-search-draft') --
+// same repository convention, no new state architecture.
+//
+// THESE SHAPES ARE DELIBERATELY SEARCH-ONLY. Neither may ever gain a transactional/application
+// field (uploaded documents, documentsContext, agreement acceptance, sentRequest, sendState,
+// selected listing/application id) -- that is exactly the state finding 1.3 isolates per mode, and
+// persisting any of it here would resurrect what that fix clears. Two separate containers, on
+// purpose: these drafts, versus resetApplicationState().
+
+// Geography is SHARED between Rentals and Buy: it is cross-division search context and must
+// survive a Rentals <-> Buy switch (finding 1.3, proof 6).
+const PROPERTY_GEO_DRAFT_KEY = 'sybnb-v6-property-search-geo'
+type PropertyGeoDraft = {
+  governorate: string
+  city: string
+  street: string
+  // Whether the customer actually pressed Search -- which is what makes location narrow the fetch --
+  // as opposed to just landing on the broad default list.
+  locationApplied: boolean
+}
+
+// Filters/sort are PER MODE: a Rentals search and a Buy search restore independently.
+type PropertyFiltersDraft = {
+  visualFilters: VisualFilterSelection
+  sortMode: SortMode
+  showFilters: boolean
+}
+function filtersDraftKey(mode: 'rentals' | 'buy') {
+  return `sybnb-v6-${mode}-search-filters`
+}
+
+function loadDraft<T>(key: string): Partial<T> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = sessionStorage.getItem(key)
+    return raw ? JSON.parse(raw) : {}
+  } catch {
+    return {}
+  }
+}
+
+// A real bug caught by an independent re-audit: amenities/trust used to default to pre-checked
+// ('wifi','parking','verifiedHost') even though none of these reach the backend for RENTALS/BUY
+// (only propertyType and numeric price/bedrooms/bathrooms are ever forwarded -- see
+// server/routes/listings.mjs) -- so a first-time visitor saw active-looking filter checkmarks that
+// silently did nothing. Default to unselected, same as `access`, until the filtering these groups
+// imply is actually wired up server-side.
+const DEFAULT_VISUAL_FILTERS: VisualFilterSelection = {
+  sort: 'newest',
+  priceBand: 'any',
+  propertyType: 'any',
+  roomType: 'any',
+  bedType: 'any',
+  amenities: [],
+  access: [],
+  trust: [],
+}
+
+function saveDraft(key: string, draft: unknown) {
+  if (typeof window === 'undefined') return
+  try {
+    sessionStorage.setItem(key, JSON.stringify(draft))
+  } catch {
+    // A full or blocked sessionStorage must never break the search page.
+  }
+}
+
 // Map governorate key -> the English city name stored in listing.location.city (Syria's 5 governorates).
 const GOV_TO_CITY: Record<string, string> = {
   damascus: 'Damascus',
@@ -301,29 +374,26 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   // UX-4B finding 1.3: binds uploaded documents to the exact mode + listing they were collected
   // under, so they can never be submitted against a different property or after a mode switch.
   const [documentsContext, setDocumentsContext] = useState<{ mode: 'rentals' | 'buy'; listingId: string } | null>(null)
-  const [showFilters, setShowFilters] = useState(true)
+  // --- SEARCH state (finding 2.1: restored from the drafts above on re-entry) ---
+  const [geoDraft] = useState(() => loadDraft<PropertyGeoDraft>(PROPERTY_GEO_DRAFT_KEY))
+  const [filtersDraft] = useState(() => loadDraft<PropertyFiltersDraft>(filtersDraftKey(mode)))
+  const [showFilters, setShowFilters] = useState(filtersDraft.showFilters ?? true)
   const [hasSearched, setHasSearched] = useState(false)
-  const [sortMode, setSortMode] = useState<SortMode>('newest')
+  const [locationApplied, setLocationApplied] = useState(geoDraft.locationApplied ?? false)
+  const [sortMode, setSortMode] = useState<SortMode>(filtersDraft.sortMode ?? 'newest')
   const [activeSearchPanel, setActiveSearchPanel] = useState<SearchPanel>(null)
-  const [selectedGovernorate, setSelectedGovernorate] = useState('damascus')
-  const [selectedCity, setSelectedCity] = useState('damascus-city')
-  const [selectedStreet, setSelectedStreet] = useState('old-city')
+  const [selectedGovernorate, setSelectedGovernorate] = useState(geoDraft.governorate ?? 'damascus')
+  const [selectedCity, setSelectedCity] = useState(geoDraft.city ?? 'damascus-city')
+  const [selectedStreet, setSelectedStreet] = useState(geoDraft.street ?? 'old-city')
   // A real bug caught by an independent re-audit: amenities/trust used to default to
   // pre-checked ('wifi','parking','verifiedHost') even though none of these reach the backend
   // for RENTALS/BUY (only propertyType and numeric price/bedrooms/bathrooms are ever forwarded --
   // see server/routes/listings.mjs) -- so a first-time visitor saw active-looking filter
   // checkmarks that silently did nothing. Default to unselected, same as `access`, until the
   // filtering these groups imply is actually wired up server-side.
-  const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>({
-    sort: 'newest',
-    priceBand: 'any',
-    propertyType: 'any',
-    roomType: 'any',
-    bedType: 'any',
-    amenities: [],
-    access: [],
-    trust: [],
-  })
+  const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>(
+    filtersDraft.visualFilters ?? DEFAULT_VISUAL_FILTERS,
+  )
   const hasGuestAccount = typeof window !== 'undefined' && Boolean(sessionStorage.getItem(GUEST_TOKEN_KEY))
   const activeFilterLabels = useMemo(
     () => selectedFilterLabels(renterPropertyFilterGroups, visualFilters, lang),
@@ -385,11 +455,35 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   if (appliedMode !== mode) {
     setAppliedMode(mode)
     resetApplicationState()
+    // SEARCH side of the same transition (finding 2.1, kept strictly separate from the reset
+    // above): filters/sort are per-mode, so switch to the incoming mode's own saved filters.
+    // Without this the persist effect would immediately write the outgoing mode's filters over
+    // the incoming mode's saved search. Geography is shared and is deliberately left alone.
+    const incoming = loadDraft<PropertyFiltersDraft>(filtersDraftKey(mode))
+    setVisualFilters(incoming.visualFilters ?? DEFAULT_VISUAL_FILTERS)
+    setSortMode(incoming.sortMode ?? 'newest')
+    setShowFilters(incoming.showFilters ?? true)
   }
 
   useEffect(() => {
-    void loadRentals()
+    // Re-apply the customer's own location narrowing when it was part of the restored search, so
+    // returning from a property detail shows the search they left, not a broad reset list.
+    void loadRentals(locationApplied)
   }, [mode])
+
+  // Persist SEARCH state only (see the draft shapes above) so it survives the detail round-trip.
+  useEffect(() => {
+    saveDraft(PROPERTY_GEO_DRAFT_KEY, {
+      governorate: selectedGovernorate,
+      city: selectedCity,
+      street: selectedStreet,
+      locationApplied,
+    })
+  }, [selectedGovernorate, selectedCity, selectedStreet, locationApplied])
+
+  useEffect(() => {
+    saveDraft(filtersDraftKey(mode), { visualFilters, sortMode, showFilters })
+  }, [mode, visualFilters, sortMode, showFilters])
 
   async function loadRentals(explicit = false) {
     setStatus('loading')
@@ -488,6 +582,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setMessage(t.applied)
     setActiveSearchPanel(null)
     setHasSearched(true)
+    setLocationApplied(true)
     setShowFilters(false)
     // Re-run the fetch so the selected filters (incl. location) actually apply to the results.
     void loadRentals(true)

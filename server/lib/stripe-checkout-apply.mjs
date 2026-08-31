@@ -4,10 +4,10 @@
 // path — see that route's handling of a stripe_checkout-rail PaymentEvent) can call it, and so the
 // webhook path can wrap it with the same attempts/dead-letter bookkeeping the payment_intent rail
 // already has (see payment-event-pipeline.mjs).
-import { db } from './prisma.mjs'
 import { approvePaymentProof, firstAdminId, isProviderRefUniqueViolation } from './finance-ledger.mjs'
 import { verifyAndLockClaim, ClaimLostError } from './payment-event-pipeline.mjs'
 import { reauthorizeAtCommit } from './commit-authorization.mjs'
+import { withTx, dbOrTx } from './tx-scope.mjs'
 
 // `verifyOwnership` and `markSettled`, if supplied, both run INSIDE this function's own transaction —
 // see applyStripeCheckoutEvent below, the ONLY caller that ever supplies either (bound to a webhook
@@ -33,9 +33,17 @@ import { reauthorizeAtCommit } from './commit-authorization.mjs'
 // explicitly refused it as the fix. It runs INSIDE this function's own transaction, after ownership
 // (webhook rail) is proven and before ANY effect-producing read or write, so a throw from it rolls
 // the entire transaction back with nothing committed.
+// SEC-002R round 5: `withTx` instead of `db().$transaction` directly -- see the identical note on
+// applyPaymentIntentEvent in routes/payment-intents.mjs. Invoked from the merged claim+effects
+// pipeline this body becomes a SAVEPOINT-delimited subtransaction of the pipeline's single
+// transaction (so the claim and these effects commit atomically together, and a throw here rolls
+// these effects back while leaving that transaction usable); invoked standalone -- the
+// `/api/payments/stripe/confirm` route, which has no claim concept at all, and the direct-call
+// regression suites -- it opens a real transaction exactly as before. This function's own logic is
+// unchanged in either mode.
 export async function finalizeStripeSession(session, { verifyOwnership, beforeEffects, markSettled } = {}) {
   try {
-   return await db().$transaction(async (tx) => {
+   return await withTx(async (tx) => {
     if (verifyOwnership) await verifyOwnership(tx)
     if (beforeEffects) await beforeEffects(tx)
 
@@ -87,8 +95,14 @@ export async function finalizeStripeSession(session, { verifyOwnership, beforeEf
     // back) -- correct, because nothing NEW was written by THIS attempt to make atomic with anything:
     // the real effect was already fully committed by whichever transaction won the race. See
     // applyStripeCheckoutEvent, which resolves the event row's own marking for exactly this case.
+    // SEC-002R round 5: `dbOrTx()`, not `db()`. Under the merged pipeline transaction withTx has just
+    // rolled this attempt's savepoint back, so the transaction is usable again and this read must run
+    // ON it -- a read from a separate pooled connection would be correct here too (the winning proof
+    // is committed by definition), but keeping every statement of the apply path on the one
+    // transaction is what guarantees no statement can ever contend with the locks that transaction
+    // itself is holding.
     if (isProviderRefUniqueViolation(err)) {
-      return db().paymentProof.findFirst({ where: { provider: 'stripe', providerRef: session.id } })
+      return dbOrTx().paymentProof.findFirst({ where: { provider: 'stripe', providerRef: session.id } })
     }
     throw err
   }
@@ -170,12 +184,17 @@ export async function applyStripeCheckoutEvent({ eventId, session, claimToken, b
     // attempt to roll back; mark this row APPLIED too, matching the effect that already, safely,
     // settled elsewhere. Required to succeed -- a lost claim here still throws, never silently
     // reports success.
-    const marked = await db().paymentEvent.updateMany({
+    // SEC-002R round 5: `dbOrTx()`, not `db()`. This one is not a preference, it is REQUIRED. Under
+    // the merged pipeline transaction the payment_events row is FOR UPDATE-locked by that very
+    // transaction; issuing this UPDATE on a second pooled connection would block on a lock that can
+    // only be released by the transaction that is synchronously awaiting this call -- a guaranteed
+    // self-deadlock, resolvable only by the transaction timeout.
+    const marked = await dbOrTx().paymentEvent.updateMany({
       where: { id: eventId, claimToken, processingStatus: { not: 'APPLIED' } },
       data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null, claimToken: null, claimExpiresAt: null },
     })
     if (marked.count === 0) {
-      const current = await db().paymentEvent.findUnique({ where: { id: eventId } })
+      const current = await dbOrTx().paymentEvent.findUnique({ where: { id: eventId } })
       if (current?.processingStatus !== 'APPLIED') throw new ClaimLostError(eventId)
     }
     appliedOutcome = true

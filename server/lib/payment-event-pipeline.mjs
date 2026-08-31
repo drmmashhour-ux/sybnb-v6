@@ -4,21 +4,29 @@
 // bounded automatic-retry ceiling before a human is needed, and safe handling of a concurrent
 // duplicate application — without a second, drifting copy of this bookkeeping.
 //
-// Each rail supplies its own `apply()` closure: fully self-contained business logic (it manages its
-// own DB transaction and is responsible for marking the PaymentEvent row APPLIED/IGNORED itself,
-// atomically with its own business-state write — this module does not impose an outer transaction
-// boundary, since the two rails' own apply logic already differs in shape: the payment_intent rail's
-// apply is one transaction; the stripe_checkout rail's apply delegates to finalizeStripeSession,
-// which manages its own transaction and is also called synchronously from a non-webhook route). This
-// module only owns: bumping attempts before the attempt, and recording FAILED/DEAD_LETTERED/a benign
+// Each rail supplies its own `apply()` closure: self-contained business logic, responsible for
+// marking the PaymentEvent row APPLIED/IGNORED itself, atomically with its own business-state write.
+// This module owns: bumping attempts before the attempt, and recording FAILED/DEAD_LETTERED/a benign
 // duplicate collision after — the part that must behave identically regardless of rail. Each rail's
-// apply() transaction MUST call verifyAndLockClaim() (below) as its own first statement, before any
-// business-effect write — see that function's comment for why (round 7: a worker whose claim has
-// already been reclaimed must never be able to execute, let alone commit, a real financial effect).
+// apply MUST call verifyAndLockClaim() (below) as its own first statement, before any business-effect
+// write — see that function's comment for why (round 7: a worker whose claim has already been
+// reclaimed must never be able to execute, let alone commit, a real financial effect).
+//
+// SEC-002R ROUND 5 CHANGED THE TRANSACTION BOUNDARY. Until round 4 this module deliberately imposed
+// NO outer transaction: it committed the claim on its own, and each rail's apply() then opened its
+// own separate transaction. That split is what left A8 at "bounded race remains" -- see
+// applyPaymentEvent() below for the full account. There is now ONE transaction spanning the claim,
+// the commit-boundary re-authorization and the rail's effects, and each rail's apply logic enlists in
+// it via withTx()/the ambient scope in tx-scope.mjs rather than opening a second one. Both rails'
+// apply functions keep their existing shape and signature; what changed is only which transaction
+// they run in. finalizeStripeSession is still separately callable from the non-webhook
+// `/api/payments/stripe/confirm` route, where it opens a real transaction of its own exactly as
+// before.
 import { randomUUID } from 'node:crypto'
 import { db } from './prisma.mjs'
 import { log, errorSummary } from './logger.mjs'
 import { isProviderRefUniqueViolation } from './finance-ledger.mjs'
+import { MERGED_TX_OPTIONS, runInTxScope, savepoint, rollbackToSavepoint } from './tx-scope.mjs'
 
 // After this many failed apply attempts on the same event, stop retrying automatically and mark it
 // DEAD_LETTERED — it needs a human via the admin replay endpoint instead of an unbounded retry loop.
@@ -226,124 +234,110 @@ export const CLAIM_DURATION_MS = 120_000
 //
 // Two changes make that structurally impossible:
 //
-//   1. The claim CAS now runs inside a transaction, and `authorizeClaim` (when the caller supplies
-//      one -- only the admin replay route does; a provider webhook has no actor to re-authorize)
-//      runs inside that SAME transaction, AFTER the CAS. Ordering matters twice over: after, so the
-//      event row's lock is taken BEFORE the user_sessions/users locks reauthorizeAtCommit() takes,
-//      matching the lock order the rails' own apply() transactions already use (event row first, via
-//      verifyAndLockClaim, then session/user) -- opposite orders here would be a real deadlock
-//      window between the claim phase and a concurrent apply phase. A throw rolls the increment back
-//      with the row untouched.
-//   2. A re-authorization failure thrown from anywhere INSIDE apply() is no longer treated as a
-//      processing failure at all (see the catch below). It releases the claim and reverses this
-//      attempt's own increment instead of recording FAILED/DEAD_LETTERED -- the same "this attempt
-//      genuinely did nothing" reasoning ClaimLostError already relies on. Without this, a revocation
-//      landing in the microseconds between the claim and the apply would still leave a real mark.
-// SEC-002R round 3, item 6. Bounded retry around the compensating reversal of a refused attempt's
-// own claim. Small and fixed: the reversal is one short UPDATE against a row this attempt still owns
-// by token, so the only realistic failures are transient (a serialization/deadlock blip, a connection
-// dropped mid-flight). Retrying that a couple of times converts the common transient case into a
-// clean reversal instead of a permanently stranded row; retrying it MORE would just delay surfacing a
-// genuinely dead database, which is the case the caller must hear about rather than wait on.
+//   1. `authorizeClaim` (when the caller supplies one -- only the admin replay route does; a provider
+//      webhook has no actor to re-authorize) runs inside the SAME transaction as the claim CAS, so a
+//      throw takes the increment with it and the row is left untouched. Rounds 2-4 ran it
+//      immediately after the CAS; round 5 moved it to the last statement before the single commit --
+//      see THE COMMIT GATE in applyPaymentEvent below for why that is equivalent-or-stronger once
+//      the claim and the effects share one transaction, and why the earlier position became an
+//      active lock-window hazard.
+//   2. A re-authorization failure thrown from anywhere INSIDE apply() is not treated as a processing
+//      failure at all (see the catch below). Rounds 2-4 compensated for it with a later reversal
+//      transaction; round 5 rolls the claim back to a SAVEPOINT inside the one transaction instead,
+//      so there is no reversal to compensate with, and nothing durable to compensate FOR.
 //
-// `count: 0` is a success, not a failure: it means a newer claimant has already taken the row over
-// (our token is no longer current), so there is nothing of ours left to reverse and the newer
-// claimant's state is authoritative -- the same reasoning every other token-bound write here relies
-// on.
-const REVERSAL_MAX_ATTEMPTS = 3
-const REVERSAL_RETRY_BASE_MS = 50
-
-async function reverseRefusedClaim({ eventId, token, restored }) {
-  let lastError = null
-  for (let attempt = 1; attempt <= REVERSAL_MAX_ATTEMPTS; attempt++) {
-    try {
-      const result = await db().paymentEvent.updateMany({
-        where: { id: eventId, claimToken: token, processingStatus: 'APPLYING' },
-        data: { attempts: { decrement: 1 }, processingStatus: restored, claimToken: null, claimExpiresAt: null },
-      })
-      if (attempt > 1) log.error('payment_event_reauth_release_recovered', { eventId, attempt, count: result.count })
-      return { ok: true, count: result.count }
-    } catch (e2) {
-      lastError = e2
-      log.error('payment_event_reauth_release_attempt_failed', { eventId, attempt, err: errorSummary(e2) })
-      if (attempt < REVERSAL_MAX_ATTEMPTS) {
-        await new Promise((resolve) => setTimeout(resolve, REVERSAL_RETRY_BASE_MS * attempt))
-      }
-    }
-  }
-  return { ok: false, error: lastError }
-}
-
-// The durable half of "never lose a failed reversal". An append-only audit row naming the event, the
-// claim token that still holds it, and the status the reversal INTENDED to restore -- enough for a
-// human to finish the compensation by hand without reconstructing anything. Deliberately actorless
-// (actorUserId is nullable): this module is rail- and actor-agnostic, and the actor whose revocation
-// triggered the refusal is emphatically not the author of this record.
+// SEC-002R round 5. The two savepoints that give ONE transaction the two independent rollback depths
+// the claim/effects merge needs. Fixed literals, never interpolated from anything caller-supplied.
 //
-// This can itself fail -- if the database is what broke, it will. That is why it is a SECOND line and
-// not the only one: its success/failure is reported back to the caller, which raises a
-// distinguishable error either way, so the condition can never be silently dropped the way the bare
-// `.catch(log)` this replaced allowed.
-async function recordStrandedClaim({ eventId, token, restored, reversalError, cause }) {
-  try {
-    await db().adminAuditLog.create({
-      data: {
-        actorUserId: null,
-        action: 'PAYMENT_EVENT_REAUTH_REVERSAL_FAILED',
-        entityType: 'payment_event',
-        entityId: eventId,
-        before: { processingStatus: 'APPLYING', claimToken: token },
-        after: {
-          intendedRestoredStatus: restored,
-          intendedAttemptsDelta: -1,
-          reauthorizationCode: cause?.code ?? null,
-          reversalError: errorSummary(reversalError),
-          needsManualReconciliation: true,
-        },
-      },
-    })
-    return true
-  } catch (e3) {
-    log.error('payment_event_stranded_claim_marker_failed', { eventId, err: errorSummary(e3) })
-    return false
-  }
-}
+//   sp_before_claim   -- established AFTER the event row's FOR UPDATE lock is taken and BEFORE the
+//                        claim CAS. Rolling back to it undoes the attempts increment, the APPLYING
+//                        transition and the claim token, leaving the transaction net-zero, WITHOUT
+//                        dropping the row lock (locks taken before a savepoint survive a rollback to
+//                        it -- empirically verified, see tx-scope.mjs). This is the depth a
+//                        RE-AUTHORIZATION failure rolls back to.
+//   sp_before_effects -- established after the claim is established and authorized, immediately
+//                        before the rail's own effect logic runs. Rolling back to it undoes every
+//                        financial effect while KEEPING the claim durable, and simultaneously
+//                        recovers the transaction from Postgres's aborted state so the failure
+//                        bookkeeping below can still be written and committed. This is the depth
+//                        every OTHER failure class rolls back to -- exactly reproducing what the old
+//                        separate apply transaction's rollback did, without being a separate
+//                        transaction.
+const SP_BEFORE_CLAIM = 'sp_before_claim'
+const SP_BEFORE_EFFECTS = 'sp_before_effects'
 
 export async function applyPaymentEvent({ eventId, rail, apply, authorizeClaim = null }) {
   const token = randomUUID()
   const now = new Date()
   const claimExpiresAt = new Date(now.getTime() + CLAIM_DURATION_MS)
-  // Captured inside the claim transaction so a refused/reversed attempt can restore exactly what it
-  // found, rather than guessing a status.
+
+  // SEC-002R ROUND 5 -- THE MERGED CLAIM+EFFECTS TRANSACTION.
   //
-  // SEC-002R round 3, item 6 (a). This read was a PLAIN, NON-LOCKING findUnique, taken BEFORE the
-  // locking CAS updateMany below. Under READ COMMITTED (Prisma/Postgres default) each statement gets
-  // its own snapshot and a plain SELECT never blocks on another transaction's row lock, so the two
-  // statements could observe DIFFERENT committed states: findUnique reads 'FAILED', a concurrent
-  // transaction commits 'DEAD_LETTERED', the CAS (which re-reads under its own lock, and for which
-  // DEAD_LETTERED is equally claimable) then claims the row -- leaving priorStatus holding a value
-  // that was never this attempt's true prior state. On the reversal path below that stale value is
-  // written back verbatim, so a refused replay by a revoked actor SILENTLY UN-DEAD-LETTERS a real
-  // payment event: it goes back on the automatic retry path a human had already been made
-  // responsible for.
+  // Through round 4 this function opened a CLAIM transaction that COMMITTED, then called apply(),
+  // which opened its OWN, separate transaction for the re-authorization and the money-moving
+  // effects. A re-authorization refusal rolled that second transaction back with nothing committed
+  // (correct), but the claim was by then already durable, so a THIRD compensating transaction had to
+  // decrement attempts and restore the prior status afterwards. Between commit #1 and commit #3 the
+  // row was durably APPLYING with an inflated attempts count -- observable by any concurrent reader,
+  // and permanent if the process died in between. That window is the whole of what A8 still carried
+  // as "bounded race remains"; no amount of retrying or marker-writing around the third transaction
+  // could close it, because the window is created by there BEING a third transaction.
   //
-  // Reading it FOR UPDATE closes that window completely rather than narrowing it. The row lock is
-  // taken by this first statement and held for the whole claim transaction, so the CAS that follows
-  // operates on the same locked row this value came from -- there is no instant in between for
-  // anyone else to commit. Either a concurrent writer committed BEFORE our lock was granted (and
-  // this SELECT observes its value, which IS the true prior status) or it blocks until we commit.
-  // There is no third ordering. Lock order is unchanged and still event row -> user_sessions ->
-  // users: this takes the payment_events row lock strictly BEFORE authorizeClaim() takes the session
-  // and user locks, which is the same order the rails' own apply() transactions use
-  // (verifyAndLockClaim first, then beforeEffects) -- so the claim phase and a concurrent apply phase
-  // still cannot deadlock against each other.
-  let priorStatus = null
-  const claim = await db().$transaction(async (tx) => {
+  // There is now ONE transaction. The claim CAS, the claim's re-authorization, the effects'
+  // re-authorization and the effects themselves all live inside it, and it commits once. A concurrent
+  // reader sees either the pre-claim row (before this commits) or the fully-resolved outcome (after)
+  // -- there is no third, intermediate durable state to observe, and a crash at any point simply
+  // leaves the pre-claim row, since an uncommitted transaction leaves nothing behind.
+  //
+  // The two rollback depths the old two-transaction split provided are preserved exactly, as
+  // SAVEPOINTs rather than as transaction boundaries:
+  //
+  //   * a RE-AUTHORIZATION failure rolls back to sp_before_claim  -> the claim itself is undone, so a
+  //     revoked actor leaves no mark whatsoever. This replaces the old compensating transaction, and
+  //     is strictly stronger than it: it is not a compensating WRITE that guesses at a prior status
+  //     and could fail or be interrupted, it is Postgres restoring the row byte-for-byte to what it
+  //     actually was. There is no reversal that can fail, so there is nothing left to strand, retry
+  //     or record a reconciliation marker for -- reverseRefusedClaim()/recordStrandedClaim() and the
+  //     PAYMENT_EVENT_REAUTH_REVERSAL_FAILED error class are deleted rather than improved, because
+  //     the condition they existed to report can no longer arise.
+  //
+  //   * EVERY OTHER failure (unknown reference, amount/currency mismatch, unsupported type, any
+  //     genuine business or data error) rolls back only to sp_before_effects -> the effects are
+  //     undone but the claim's attempts increment SURVIVES and is committed along with the
+  //     FAILED/DEAD_LETTERED bookkeeping below. That is byte-for-byte the old behavior and it is
+  //     load-bearing: if the increment rolled back with the effects, DEAD_LETTER_THRESHOLD would
+  //     never be reached and the bounded retry ceiling would silently become an infinite retry loop.
+  //     The dead-letter decision logic itself is unchanged, and still reads the post-claim attempts
+  //     value back from the row rather than trusting a local.
+  //
+  // LOCK ORDER is unchanged: payment_events (this row, below) -> user_sessions -> users (taken by
+  // reauthorizeAtCommit, whether via authorizeClaim here or via the rail's beforeEffects) -> then the
+  // effect tables. It is now held on ONE connection for the whole span instead of being taken, split
+  // and retaken across two, which removes a lock gap rather than adding one. No new lock class and no
+  // new ordering is introduced.
+  const outcome = await db().$transaction(async (tx) => {
+    // Lock BEFORE the savepoint, deliberately. Row locks acquired before a savepoint survive
+    // ROLLBACK TO that savepoint (verified -- see tx-scope.mjs), so taking it here guarantees the
+    // event-row lock is held for the ENTIRE transaction even on the path that rolls the claim all the
+    // way back. Taking it after sp_before_claim would put the lock inside the rolled-back scope,
+    // which is exactly the thing that must not happen: this lock is what serializes every other
+    // claimant for the whole claim+effects span.
+    //
+    // (Round 3, item 6a, preserved verbatim in intent: reading priorStatus FOR UPDATE rather than
+    // with a plain findUnique is what closed the stale-read race in which a concurrent
+    // DEAD_LETTERED commit could be silently un-dead-lettered by a reversal writing back a status
+    // that was never this attempt's true prior state. Under the merge the restore is done by
+    // Postgres itself rather than by writing priorStatus back, so that race is closed twice over --
+    // but the locking read stays, because it is also what makes the CAS below operate on a row no
+    // one else can be moving underneath us.)
     const beforeRows = await tx.$queryRaw`
       SELECT processing_status FROM payment_events WHERE id = ${eventId}::uuid FOR UPDATE
     `
-    priorStatus = beforeRows[0]?.processing_status ?? null
-    const result = await tx.paymentEvent.updateMany({
+    const priorStatus = beforeRows[0]?.processing_status ?? null
+
+    await savepoint(tx, SP_BEFORE_CLAIM)
+
+    const claim = await tx.paymentEvent.updateMany({
       where: {
         id: eventId,
         OR: [
@@ -353,140 +347,176 @@ export async function applyPaymentEvent({ eventId, rail, apply, authorizeClaim =
       },
       data: { attempts: { increment: 1 }, lastAttemptAt: now, processingStatus: 'APPLYING', claimToken: token, claimExpiresAt },
     })
-    // Only meaningful once this attempt actually owns the row. A losing claim wrote nothing, so
-    // there is nothing for an authorization failure to protect and no reason to spend the round trip.
-    if (result.count > 0 && authorizeClaim) await authorizeClaim(tx)
-    return result
-  })
-  if (claim.count === 0) {
-    // Lost the claim race. Report duplicate:true only once we can actually see the terminal APPLIED
-    // outcome; a row currently held by an ACTIVE (unexpired) claim reports retryable:true instead of
-    // guessing at an outcome that hasn't happened yet -- this is NEVER acknowledged as a final
-    // success. Callers still return HTTP 200 (the event IS durably stored and genuinely owned by
-    // someone), but the response body itself makes no false completion claim.
-    const current = await db().paymentEvent.findUnique({ where: { id: eventId } })
-    if (current?.processingStatus === 'APPLIED') return { applied: false, duplicate: true, claimed: false }
-    return { applied: false, duplicate: false, claimed: false, retryable: true, status: current?.processingStatus ?? null }
-  }
-  try {
-    // apply() is trusted to mark the row APPLIED or IGNORED itself on success, bound to `token` -- see
-    // module comment and each rail's own apply function (applyPaymentIntentEvent /
-    // applyStripeCheckoutEvent).
-    return await apply(token)
-  } catch (err) {
-    if (err?.claimLost) {
-      // verifyAndLockClaim() (called first, inside apply()'s own transaction, before any business
-      // effect) found this claim already reclaimed -- the transaction rolled back on its own, nothing
-      // committed. Never touch attempts/lastError/processingStatus here: whatever the newer claimant
-      // has established (or is still establishing) is authoritative, and this attempt genuinely did
-      // nothing to it.
-      return { applied: false, duplicate: false, claimLost: true, retryable: true }
+
+    if (claim.count === 0) {
+      // Lost the claim race. Report duplicate:true only once we can actually see the terminal APPLIED
+      // outcome; a row currently held by an ACTIVE (unexpired) claim reports retryable:true instead of
+      // guessing at an outcome that hasn't happened yet -- this is NEVER acknowledged as a final
+      // success. Callers still return HTTP 200 (the event IS durably stored and genuinely owned by
+      // someone), but the response body itself makes no false completion claim.
+      //
+      // Read inside this transaction, under the lock we already hold, rather than from a separate
+      // connection after a commit: whoever beat us to the row necessarily committed before our lock
+      // was granted, so this observes their settled state and cannot catch them mid-flight.
+      const current = await tx.paymentEvent.findUnique({ where: { id: eventId } })
+      if (current?.processingStatus === 'APPLIED') return { result: { applied: false, duplicate: true, claimed: false } }
+      return { result: { applied: false, duplicate: false, claimed: false, retryable: true, status: current?.processingStatus ?? null } }
     }
-    if (err?.reauthorizationFailure) {
-      // SEC-002R round 2 (A8). The acting admin's authority was revoked between this attempt's claim
-      // and its effects; reauthorizeAtCommit() threw inside the rail's own apply() transaction, which
-      // rolled back on its own with NOTHING committed. Treating that as a processing failure would
-      // let a revoked actor leave a permanent mark on a real payment event -- an attempts increment
-      // that counts toward DEAD_LETTER_THRESHOLD, a lastError, and a downgraded processingStatus --
-      // which is exactly the residual the owner refused to accept as "bookkeeping only".
-      //
-      // So this attempt is reversed rather than recorded: its own increment is decremented back out
-      // and the row is restored to the status it held before the claim, with the claim released. All
-      // of it is bound to `token`, so a newer claimant that has since taken over is never stomped on.
-      // A prior APPLYING (an expired, abandoned claim this attempt reclaimed) restores as FAILED --
-      // restoring APPLYING with a null claimExpiresAt would match neither branch of the claim query
-      // above and strand the row permanently, while FAILED is both truthful (an earlier attempt did
-      // not complete) and immediately reclaimable.
-      //
-      // SEC-002R round 3, item 6. Round 2 described this reversal as giving A8 "atomicity
-      // guaranteed". It did not, on two counts, and both are now addressed:
-      //
-      //   (i) priorStatus was read without a lock -- see the claim transaction above, now FOR UPDATE.
-      //       That was the half that could produce a WRONG restored status, and it is closed.
-      //
-      //  (ii) the reversal is a SEPARATE transaction whose failure was silently swallowed by a bare
-      //       `.catch(log)`. The separateness is not fixable and is stated here as an architectural
-      //       fact, not glossed: the re-authorization throws INSIDE the rail's own apply()
-      //       transaction, which Postgres then rolls back in full -- by construction NOTHING written
-      //       in that transaction can survive, so the compensation cannot live there. Nor can the
-      //       claim simply be deferred until re-auth is known to pass: the claim MUST commit
-      //       independently, because (a) its APPLYING marker plus claimExpiresAt is what makes
-      //       concurrent workers lose the CAS and what makes a crashed worker's abandoned claim
-      //       recoverable at all, and (b) `attempts` must SURVIVE a failed apply -- if the increment
-      //       rolled back with the effects, DEAD_LETTER_THRESHOLD could never be reached and the
-      //       bounded retry ceiling that protects every legitimate caller would silently become an
-      //       infinite retry loop. Merging the two phases would break exactly those semantics for
-      //       every honest webhook delivery, which is the trade the owner's option (b) describes.
-      //
-      //       What IS fixable is losing the compensation silently. It is now bounded-retried and,
-      //       if it still cannot be applied, NOT swallowed: a durable reconciliation marker is
-      //       written and a distinguishable error is raised instead of the reauthorization error, so
-      //       the caller (and, on the admin replay route, that route's own audit row) records a
-      //       stranded claim rather than reporting a clean refusal over a row left at APPLYING with
-      //       an inflated attempts count.
-      const restored = priorStatus === 'APPLYING' || priorStatus == null ? 'FAILED' : priorStatus
-      const reversal = await reverseRefusedClaim({ eventId, token, restored })
-      if (!reversal.ok) {
-        const marked = await recordStrandedClaim({ eventId, token, restored, reversalError: reversal.error, cause: err })
-        log.error('payment_event_reauth_reversal_unrecoverable', {
-          eventId, rail, restored, markerWritten: marked, err: errorSummary(reversal.error),
-        })
-        const stranded = new Error(
-          `Re-authorization refused payment event ${eventId}, but this attempt's claim could not be reversed; the row is stranded at APPLYING with an un-decremented attempts count and needs manual reconciliation.`,
-        )
-        stranded.code = 'PAYMENT_EVENT_REAUTH_REVERSAL_FAILED'
-        stranded.reversalFailed = true
-        stranded.markerWritten = marked
-        stranded.cause = reversal.error
-        stranded.reauthorizationCause = err
-        // Deliberately NOT annotated with .statusCode/.expose -- same reasoning as the generic
-        // failure path below: this must fall through to a safe generic 500, never leak internals.
-        throw stranded
+
+    await savepoint(tx, SP_BEFORE_EFFECTS)
+
+    let pending
+    try {
+      // apply() is trusted to mark the row APPLIED or IGNORED itself on success, bound to `token` --
+      // see module comment and each rail's own apply function (applyPaymentIntentEvent /
+      // applyStripeCheckoutEvent). It now runs INSIDE this transaction: the ambient scope is what
+      // carries `tx` into it, so the ~10 existing `apply: (claimToken) => ...` closures (four of them
+      // in frozen round-1..4 suites) keep working untouched while their rail logic enlists in this
+      // transaction instead of opening a second one. `tx` is also passed explicitly as a second
+      // argument for any future call site that prefers to thread it by hand.
+      const result = await runInTxScope(tx, () => apply(token, tx))
+      pending = { result }
+    } catch (err) {
+      // Recover the transaction from Postgres's aborted state and undo every effect this attempt
+      // made, while keeping the claim. Both rails' apply logic already rolled its own savepoint back
+      // on the way out (withTx), so in the ordinary case this is a no-op re-assertion -- it is done
+      // unconditionally anyway because `apply` is an arbitrary caller-supplied closure and this
+      // function must be able to keep writing regardless of how far it got.
+      await rollbackToSavepoint(tx, SP_BEFORE_EFFECTS)
+
+      if (err?.reauthorizationFailure) {
+        // The acting actor's authority was revoked between admission and this commit boundary;
+        // reauthorizeAtCommit() threw. Undo the CLAIM too. After this statement the transaction has
+        // made no net change at all -- attempts, processingStatus, claimToken, claimExpiresAt and
+        // lastAttemptAt are all exactly the values the FOR UPDATE read above saw, restored by
+        // Postgres rather than re-written by us. The transaction then commits that net-zero result
+        // and the refusal is re-thrown to the caller BELOW, outside the transaction, so the caller
+        // (and, on the admin replay route, its own audit row) still records a real, refused attempt.
+        await rollbackToSavepoint(tx, SP_BEFORE_CLAIM)
+        return { rethrow: err, reauthRolledBack: true, priorStatus }
       }
-      throw err
+
+      if (err?.claimLost) {
+        // verifyAndLockClaim() found this claim already reclaimed. Under the merge this is
+        // structurally unreachable for a claim minted by THIS function -- the event row's lock is
+        // held continuously from before the CAS until commit, so no one can take the row over in
+        // between -- but the branch is kept for callers that hand apply() a foreign token. Semantics
+        // are unchanged from round 4: never touch attempts/lastError/processingStatus, because
+        // whatever the newer claimant has established is authoritative.
+        pending = { result: { applied: false, duplicate: false, claimLost: true, retryable: true } }
+      } else if (isProviderRefUniqueViolation(err)) {
+
+        // A SEPARATE claim round (a genuinely later redelivery or replay, or a different event row
+        // for the same underlying object) already applied this exact effect and committed first --
+        // this attempt's effects have just been rolled back to sp_before_effects, but the underlying
+        // payment WAS genuinely applied. Mark this delivery APPLIED too (a benign duplicate), not
+        // FAILED -- otherwise a normal, harmless race would dead-letter a payment that already
+        // settled correctly.
+        pending = { duplicateSettlement: true }
+      } else {
+        // Every other failure class: a genuine business/data error. The claim STAYS (we rolled back
+        // only to sp_before_effects), so this attempt durably consumes one attempt and the dead-letter
+        // ceiling keeps counting exactly as it did before the merge.
+        pending = { failure: err }
+      }
     }
-    if (isProviderRefUniqueViolation(err)) {
-      // A SEPARATE claim round (a genuinely later redelivery or replay, not a concurrent one — those
-      // are impossible per the comment above) already applied this exact event and committed first —
-      // this attempt collided with that and rolled back, but the underlying payment WAS genuinely
-      // applied by the sibling round. Mark this delivery APPLIED too (a benign duplicate), not FAILED
-      // — otherwise a normal, harmless race would dead-letter a payment that already settled
-      // correctly. Bound to `token`: if a newer claimant has since taken over (this worker's own claim
-      // expired while it was mid-flight), this write correctly becomes a no-op instead of stomping on
-      // whatever the newer claimant established.
-      await db().paymentEvent.updateMany({
+
+    // ---------------------------------------------------------------------------------------------
+    // THE COMMIT GATE. `authorizeClaim` -- the acting actor's live authority, re-checked against
+    // authoritative DB state with user_sessions/users LOCKED until this transaction commits.
+    //
+    // SEC-002R round 5 moved this from "immediately after the CAS, before apply()" to here, the last
+    // statement before the single commit. In the two-transaction design the position mattered: the
+    // claim transaction committed on its own, so the check HAD to precede it or the claim escaped
+    // ungated. Under the merge there is exactly one commit, so what matters is only that no path
+    // reaching it can bypass this check and that the lock is still held when it happens -- both of
+    // which are true here, for the success path, the benign-duplicate path, the claim-lost path and
+    // the FAILED/DEAD_LETTERED path alike. This is also the more literal reading of what
+    // commit-authorization.mjs exists to do ("authorization that is still true at the moment an
+    // irreversible mutation commits").
+    //
+    // Nothing runs unauthorized as a result: in production `authorizeClaim` is only ever supplied by
+    // the admin replay route, which passes the SAME reauthorizeAtCommit hook as the rail's
+    // `beforeEffects` -- and that one still runs inside apply(), before the first effect-producing
+    // statement, exactly as rounds 1-4 established. This is the second, unbypassable gate behind it,
+    // not a replacement for it.
+    //
+    // Moving it here also removes a real lock-window hazard the merge would otherwise have
+    // introduced: held from before apply(), the user_sessions/users locks would have spanned the
+    // whole effects phase, so any concurrent revocation of that actor would block for the duration of
+    // a payment application rather than merely being ordered against it.
+    if (authorizeClaim) {
+      try {
+        await authorizeClaim(tx)
+      } catch (authErr) {
+        if (!authErr?.reauthorizationFailure) throw authErr
+        await rollbackToSavepoint(tx, SP_BEFORE_CLAIM)
+        return { rethrow: authErr, reauthRolledBack: true, priorStatus }
+      }
+    }
+
+    if (pending.duplicateSettlement) {
+      // Bound to `token`, which we still hold.
+      await tx.paymentEvent.updateMany({
         where: { id: eventId, claimToken: token, processingStatus: { not: 'APPLIED' } },
         data: { processingStatus: 'APPLIED', appliedAt: new Date(), lastError: null, claimToken: null, claimExpiresAt: null },
       })
-      return { applied: false, duplicate: true }
+      return { result: { applied: false, duplicate: true } }
     }
-    // Re-read this claim's own freshly-incremented attempts value rather than trusting a stale local
-    // variable — with the CAS claim above, `claim` doesn't carry the row's new field values (updateMany
-    // only returns a count), so the post-claim attempts figure must be read back explicitly.
-    const claimed = await db().paymentEvent.findUnique({ where: { id: eventId } })
-    const dead = (claimed?.attempts ?? 0) >= DEAD_LETTER_THRESHOLD
-    // Bound to `token`, same reasoning as the benign-duplicate write above: a stale worker's own
-    // failure-handling must never downgrade whatever a newer claimant has already established.
-    await db()
-      .paymentEvent.updateMany({
-        where: { id: eventId, claimToken: token, processingStatus: 'APPLYING' },
-        data: {
-          processingStatus: dead ? 'DEAD_LETTERED' : 'FAILED',
-          // Pre-sanitized at write time (never the raw error) — a DB column is a permanent record,
-          // stronger guarantee needed than key-based log redaction alone.
-          lastError: JSON.stringify(errorSummary(err)).slice(0, 2000),
-          lastAttemptAt: new Date(),
-          claimToken: null,
-          claimExpiresAt: null,
-        },
-      })
-      .catch((e2) => log.error('payment_event_failure_record_failed', { eventId, err: errorSummary(e2) }))
-    log.error('payment_webhook_apply_failed', { eventId, rail, attempts: claimed?.attempts, dead, err: errorSummary(err) })
+
+    if (pending.failure) {
+      // Re-read this claim's own freshly-incremented attempts value rather than trusting a stale
+      // local variable -- the CAS above returns only a count. Read through `tx` so it sees this
+      // transaction's own uncommitted increment, which is precisely the value that is about to be
+      // committed.
+      const claimed = await tx.paymentEvent.findUnique({ where: { id: eventId } })
+      const dead = (claimed?.attempts ?? 0) >= DEAD_LETTER_THRESHOLD
+      try {
+        await tx.paymentEvent.updateMany({
+          where: { id: eventId, claimToken: token, processingStatus: 'APPLYING' },
+          data: {
+            processingStatus: dead ? 'DEAD_LETTERED' : 'FAILED',
+            // Pre-sanitized at write time (never the raw error) — a DB column is a permanent record,
+            // stronger guarantee needed than key-based log redaction alone.
+            lastError: JSON.stringify(errorSummary(pending.failure)).slice(0, 2000),
+            lastAttemptAt: new Date(),
+            claimToken: null,
+            claimExpiresAt: null,
+          },
+        })
+      } catch (e2) {
+        // Preserves round 4's contract that a failure of the BOOKKEEPING write must never mask the
+        // real error the caller needs to see. Recovering to sp_before_effects first is what makes
+        // that possible inside a single transaction: without it the aborted transaction could not
+        // commit at all and Prisma would surface this secondary error in place of the real one.
+        await rollbackToSavepoint(tx, SP_BEFORE_EFFECTS).catch(() => {})
+        log.error('payment_event_failure_record_failed', { eventId, err: errorSummary(e2) })
+      }
+      return { rethrow: pending.failure, failure: { attempts: claimed?.attempts, dead } }
+    }
+
+    return { result: pending.result }
+  }, MERGED_TX_OPTIONS)
+
+  // Everything below runs after the single transaction has COMMITTED. Re-throwing here rather than
+  // from inside the callback is what lets a refusal both (a) leave the database in the fully-resolved
+  // state the branch above decided on, and (b) still reach the caller as a thrown error.
+  if (outcome.reauthRolledBack) {
+    log.error('payment_event_reauth_claim_rolled_back', {
+      eventId, rail, restoredTo: outcome.priorStatus, code: outcome.rethrow?.code ?? null,
+    })
+    throw outcome.rethrow
+  }
+  if (outcome.failure) {
+    log.error('payment_webhook_apply_failed', {
+      eventId, rail, attempts: outcome.failure.attempts, dead: outcome.failure.dead, err: errorSummary(outcome.rethrow),
+    })
     // Never re-annotate err with a bare statusCode here — handleRouteError (responses.mjs) exposes
     // .message whenever .statusCode is set even without .expose. Re-throwing unannotated lets a
     // genuine infra failure fall through to the safe generic 500.
-    throw err
+    throw outcome.rethrow
   }
+  return outcome.result
 }
 
 // Both webhook routes call this to decide their ACTUAL HTTP status from an applyPaymentEvent() result

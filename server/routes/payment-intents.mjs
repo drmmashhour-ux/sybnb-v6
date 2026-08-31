@@ -14,6 +14,7 @@ import { log } from '../lib/logger.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { applyPaymentEvent as applyPaymentEventPipeline, intakeEvent, verifyAndLockClaim, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
 import { applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
+import { withTx } from '../lib/tx-scope.mjs'
 
 function fail(statusCode, code, message) {
   const error = new Error(message)
@@ -152,9 +153,17 @@ async function applyPaymentIntentRefund(tx, { intent }) {
 // hook finalizeStripeSession() already offers the other rail. The ONLY caller that supplies it is
 // the admin replay route, which uses it to re-authorize the acting admin at the commit boundary;
 // the webhook path never supplies it, because a provider delivery has no session behind it at all.
+// SEC-002R round 5: `withTx` instead of `db().$transaction` directly. When this rail is invoked from
+// the merged claim+effects pipeline (both production call sites), it now runs INSIDE the pipeline's
+// single transaction as a SAVEPOINT-delimited subtransaction, so the claim and these effects commit
+// atomically together; opening a second transaction here would take a second connection and block
+// forever on the event-row lock the pipeline's transaction is holding. When invoked standalone (the
+// direct-call regression suites), withTx opens a real transaction exactly as before. Either way this
+// function still receives a `tx`, still gets all-or-nothing rollback on a throw, and its own logic is
+// completely unchanged.
 async function applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToken, beforeEffects }) {
   const target = targetStatusFor(type)
-  return db().$transaction(async (tx) => {
+  return withTx(async (tx) => {
     await verifyAndLockClaim(tx, { eventId, claimToken })
     if (beforeEffects) await beforeEffects(tx)
 

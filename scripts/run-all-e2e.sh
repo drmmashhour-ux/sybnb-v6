@@ -163,6 +163,13 @@ run_full "otp"              otp-identity.e2e.mjs
   # asserts the receivable through the REAL payment endpoint (/api/payments/local-wallet-proof), which
   # requires the full payment-policy config this phase already exports.
   run_full "commit-boundary-r4" commit-boundary-reauthorization-round4.e2e.mjs
+  # SEC-002R round 5 (A8): the payment-event CLAIM and its money-moving EFFECTS merged into ONE
+  # transaction via Postgres SAVEPOINTs, eliminating the separate compensating-reversal transaction
+  # and the durable APPLYING/attempts-incremented window it left behind. Additive again -- rounds 1-4
+  # above are frozen evidence and still run unchanged. Registered with `run` rather than `run_full`
+  # (unlike rounds 1-4) because it exercises the shared payment-event pipeline directly on BOTH rails
+  # and therefore belongs inside the PAYMENT_ONLY=1 gate, not only in full mode.
+  run "commit-boundary-r5" commit-boundary-reauthorization-round5.e2e.mjs
   run_full "resend-webhook"   resend-webhook.e2e.mjs
 run_full "storage"          storage.e2e.mjs
 run_full "legal"            legal-consent.e2e.mjs

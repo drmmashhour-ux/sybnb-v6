@@ -456,3 +456,102 @@ writes no marker), so the branch is proven not to fire spuriously; that it fires
 database genuinely fails is code-review only, and is stated as such.
 
 All suites are registered in `scripts/run-all-e2e.sh` and run against local `sybnb_v6` only.
+
+---
+
+## 10. Round 5 — A8: the claim and its effects merged into ONE transaction (SAVEPOINTs)
+
+Round 3 left A8 at **"bounded race remains"**, explicitly not "atomicity guaranteed", and §8.2 above
+argued the residual was architectural: *"Merging the claim and apply phases would break exactly those
+two behaviours for every honest webhook delivery."* Round 5 shows that conclusion was **too strong**.
+It was true of merging them into one *rollback scope*; it is not true of merging them into one
+*transaction with two savepoints*, which is what Postgres provides for exactly this shape of problem.
+
+### 10.1 The mechanism
+
+`server/lib/payment-event-pipeline.mjs#applyPaymentEvent` now opens **one** transaction:
+
+```
+SELECT processing_status FROM payment_events WHERE id = $1 FOR UPDATE   <- lock BEFORE the savepoint
+SAVEPOINT sp_before_claim
+  claim CAS (attempts +1, APPLYING, claimToken, claimExpiresAt)
+  SAVEPOINT sp_before_effects
+    apply()  ->  verifyAndLockClaim -> beforeEffects (reauthorizeAtCommit) -> the real effects
+  [commit gate: authorizeClaim]
+COMMIT
+```
+
+Two rollback depths replace what used to be two (and, on the refusal path, three) transactions:
+
+| Outcome | Rollback depth | Net committed state |
+|---|---|---|
+| success | none | claim **and** effects, together |
+| re-authorization refusal | `ROLLBACK TO sp_before_claim` | **nothing** — the row is restored by Postgres, byte for byte |
+| any other failure (business/data) | `ROLLBACK TO sp_before_effects` | claim's `attempts` increment + `FAILED`/`DEAD_LETTERED` |
+
+The third row is the one that makes the merge possible at all: it preserves, unchanged, the property
+§8.2 correctly identified as load-bearing — `attempts` **must** survive a failed apply or
+`DEAD_LETTER_THRESHOLD` becomes unreachable and the bounded retry ceiling becomes an infinite loop.
+
+Four Prisma/Postgres properties this depends on were verified empirically against this repo's own
+versions before the design was committed to (see the header of `server/lib/tx-scope.mjs`): savepoint
+statements work inside a Prisma interactive transaction; a failed statement does **not** permanently
+poison that transaction (`ROLLBACK TO SAVEPOINT` recovers it — verified for raw SQL errors, P2010 and
+the P2002 unique violation the benign-duplicate path depends on); row locks taken **before** a
+savepoint survive a rollback to it; and the rollback genuinely undoes the writes.
+
+### 10.2 What this closes
+
+- **The compensating reversal transaction is deleted, not improved.** `reverseRefusedClaim()`,
+  `recordStrandedClaim()`, the retry/backoff constants and the `PAYMENT_EVENT_REAUTH_REVERSAL_FAILED`
+  error class and audit action are all gone. There is no separate step left whose failure could be
+  swallowed, so gap (3) of §8.2 is **eliminated** rather than mitigated — and the "not covered by any
+  test, code-verified only" note at the end of §9 is moot, because the branch it referred to no longer
+  exists.
+- **The durable intermediate state is gone.** A concurrent reader can observe the pre-claim row or the
+  fully-resolved outcome, never `APPLYING` with an inflated `attempts`. A crash at any point leaves the
+  pre-claim row, because an uncommitted transaction leaves nothing behind.
+- **Gap (2) — the stale `priorStatus` read — stays closed, and is now closed twice over.** The locking
+  read is unchanged; on top of it, the restore no longer writes a remembered status back at all.
+
+### 10.3 Deliberate design changes a reviewer should scrutinise
+
+- **`authorizeClaim` moved from "immediately after the CAS" to the last statement before COMMIT.**
+  With one commit boundary, what matters is that no committing path can bypass the check and that its
+  locks are held until commit — both true. The earlier position also became an active hazard once the
+  transaction spanned the effects: it would have held `user_sessions`/`users` locks for the whole
+  effects phase, blocking any concurrent revocation of that actor for the duration of a payment
+  application. The rail's `beforeEffects` check still runs *before* the first effect-producing
+  statement, exactly as rounds 1–4 established, so nothing runs unauthorized.
+- **Each rail's apply logic now enlists in the pipeline's transaction** via `withTx()` and a narrow
+  `AsyncLocalStorage` scope (`server/lib/tx-scope.mjs`) rather than opening its own. `db()` is
+  deliberately **not** made scope-aware — that would silently enlist unrelated code (session
+  revocation, audit logging) into the payment transaction, where a `ROLLBACK TO SAVEPOINT` could undo
+  a genuine unrelated write.
+- **Concurrent duplicate deliveries for the same event now queue** on the event-row lock for the whole
+  claim+effects span instead of failing their CAS immediately. The loser then usually observes
+  `APPLIED` and reports a benign `duplicate` (HTTP 200) where it previously more often reported
+  `retryable` (HTTP 409). Proven safe by the 20-way and 5-way concurrency suites.
+
+### 10.4 Known conflict with round 3 §6a-2 / §6a-3 — NOT resolved here
+
+Round 3 §6a-2 and §6a-3 assert, by reading from a **separate connection** while `apply()` is running,
+that *"the CLAIM had genuinely COMMITTED before the revocation"* (status `APPLYING`, `attempts` 2 → 3,
+a token held). Those are assertions **about the two-transaction architecture itself**, and no
+single-transaction design can satisfy them: uncommitted data is invisible across connections, by
+definition. They **fail** under round 5 (round 3 otherwise scores 90/92 — all of §6a-6..15, all of §6b
+including the stale-`priorStatus` differential, and all of §6c on the stripe rail still pass unchanged).
+
+Round 3 has **not** been edited; it is frozen evidence. Round 5's §3/§4/§15 assert the exact opposite
+property on purpose. Whether the two assertions should be superseded is an owner decision, recorded
+here rather than resolved unilaterally.
+
+### 10.5 Evidence
+
+| Suite | Covers |
+|---|---|
+| `tests/e2e/commit-boundary-reauthorization-round5.e2e.mjs` | Round 5, 66 checks, **both rails**. Same-`xmin` proof that one transaction wrote the claim row and the `PaymentProof` (§1/§2); continuous sampling from a separate connection proving no intermediate durable state ever exists (§3/§4); byte-identical whole-row rollback on refusal (§5/§6); the retry contract and dead-letter ceiling unchanged (§7/§8); **3 simultaneous claim attempts on one event with a revocation landing mid-window, 6 repetitions per rail, asserting exactly one coherent outcome and never torn state (§9/§10)**; 5-way serialization control (§11); the stale-`priorStatus` differential re-proved (§12); the reversal machinery proven absent from the code and behaviourally never triggered (§13); `FOR UPDATE NOWAIT` probes proving the event-row lock is held for the entire merged transaction (§14); and the positive statement of the merge — the commit-boundary check sees the claim through the transaction while a separate connection still sees the pre-claim row (§15). |
+
+**Verdict for A8 after round 5: atomicity guaranteed** for the claim/effects boundary — stated as the
+implementer's claim, pending the independent code-level spot-check. SEC-002R as a whole is **not**
+self-declared closed here.

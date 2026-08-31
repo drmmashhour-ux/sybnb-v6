@@ -298,6 +298,9 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [message, setMessage] = useState('')
   const [sentRequest, setSentRequest] = useState<RentalRequest | null>(null)
   const [sendState, setSendState] = useState<'idle' | 'saving' | 'error'>('idle')
+  // UX-4B finding 1.3: binds uploaded documents to the exact mode + listing they were collected
+  // under, so they can never be submitted against a different property or after a mode switch.
+  const [documentsContext, setDocumentsContext] = useState<{ mode: 'rentals' | 'buy'; listingId: string } | null>(null)
   const [showFilters, setShowFilters] = useState(true)
   const [hasSearched, setHasSearched] = useState(false)
   const [sortMode, setSortMode] = useState<SortMode>('newest')
@@ -351,6 +354,39 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     [visibleListings, selectedId],
   )
 
+  // UX-4B finding 1.3 -- APPLICATION/TRANSACTION state isolation, Rentals <-> Buy.
+  //
+  // App.tsx renders this same component for both /rentals and /buy with NO `key`
+  // (src/app/App.tsx:203,205), so React keeps ONE instance alive across the switch and only the
+  // `mode` prop changes. The existing `useEffect(..., [mode])` below re-fetched listings but reset
+  // nothing else, so every piece of transactional state survived the switch: documents uploaded
+  // against a rental property stayed attached under Buy, an accepted rental agreement counted as
+  // an accepted purchase agreement, and a request already sent to IMMOContact still read as sent
+  // in the other mode.
+  //
+  // SEARCH state (governorate/city/street, visual filters, sort) is deliberately NOT touched here.
+  // Geography must persist across the switch, and search continuity is the separate concern that
+  // finding 2.1 owns. These are two separate containers on purpose.
+  function resetApplicationState() {
+    setSelectedId('')
+    setDocuments([])
+    setDocumentsContext(null)
+    setUploadingCount(0)
+    setUploadError('')
+    setAcceptedAgreement(false)
+    setSentRequest(null)
+    setSendState('idle')
+    setMessage('')
+  }
+
+  // Derived-during-render rather than an effect, so no frame of the new mode is ever painted
+  // still holding the previous mode's application state.
+  const [appliedMode, setAppliedMode] = useState(mode)
+  if (appliedMode !== mode) {
+    setAppliedMode(mode)
+    resetApplicationState()
+  }
+
   useEffect(() => {
     void loadRentals()
   }, [mode])
@@ -375,7 +411,15 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       setListings(results.listings)
       setNextCursor(results.nextCursor)
       setLastQuery({ division, filters })
-      setSelectedId(results.listings[0]?.id || '')
+      const nextSelectedId = results.listings[0]?.id || ''
+      // Re-running a search re-points the selected property. Documents/agreement collected for the
+      // previously selected property must not silently follow onto a different one (finding 1.3).
+      if (documentsContext && documentsContext.listingId !== nextSelectedId) {
+        setDocuments([])
+        setDocumentsContext(null)
+        setAcceptedAgreement(false)
+      }
+      setSelectedId(nextSelectedId)
       setStatus('ready')
       // Show available results by default — consistent with Stays/Cars/Marketplace/New Construction,
       // which auto-populate. The search capsule still refines; this removes the empty-looking
@@ -458,13 +502,18 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     if (!fileList.length) return
     setUploadError('')
     setUploadingCount(fileList.length)
+    // Capture the mode AND property this upload is being made for, so it can never later be
+    // submitted under a different one (finding 1.3, proof 7).
+    const contextAtUpload = { mode, listingId: selectedListing?.id || '' }
     try {
       const session = getStoredGuestSession()
       if (!session) throw new Error(t.required)
+      if (!contextAtUpload.listingId) throw new Error(t.required)
       const uploaded = await Promise.all(
         fileList.map(async (file) => ({ name: file.name, url: await uploadPaymentProofFile(file, session.token) })),
       )
       setDocuments((current) => [...current, ...uploaded])
+      setDocumentsContext(contextAtUpload)
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : t.required)
     } finally {
@@ -476,6 +525,17 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     if (!hasGuestAccount || !selectedListing || documents.length === 0 || !acceptedAgreement) {
       setMessage(t.required)
       if (!hasGuestAccount) openAccount()
+      return
+    }
+
+    // Fail closed: never submit documents against a mode/property they were not collected for
+    // (finding 1.3, proof 7). Under normal use the context always matches; a mismatch means the
+    // selection moved underneath the upload, so the customer must re-attach for this property.
+    if (!documentsContext || documentsContext.mode !== mode || documentsContext.listingId !== selectedListing.id) {
+      setDocuments([])
+      setDocumentsContext(null)
+      setAcceptedAgreement(false)
+      setMessage(t.required)
       return
     }
 

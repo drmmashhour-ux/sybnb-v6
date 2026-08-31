@@ -8,6 +8,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { idempotencyKey } from '../lib/security.mjs'
 import { applyRoleChange, setAccountStatus, REVOCATION_REASONS } from '../lib/session-store.mjs'
+import { runBoundedRevocation } from '../lib/revocation-contention.mjs'
 // SEC-002R (finding N4): getAuthContext() runs ONCE, in server/index.mjs, before the route handler
 // has even read the request body, and its result is trusted for the rest of the request. Every
 // Class A (irreversible money-moving or privilege-changing) handler in this file re-asserts that
@@ -888,14 +889,24 @@ export async function handleAdmin(req, res, url, context) {
     // suspension after the acting admin's own session had already been revoked mid-request.
     // setAccountStatus() now accepts the caller's transaction, so the re-authorization and the
     // status write are one atomic unit with no window between them.
-    const { before, after } = await db().$transaction(async (tx) => {
+    //
+    // SEC-F1: the transaction RUNNER changed (db().$transaction -> runBoundedRevocation); the
+    // contents did not. The commit-boundary re-authorization is still the first thing that happens
+    // inside the transaction, still holds the acting admin's session/account locks through to
+    // commit, and still rolls the status write back if it throws -- the SEC-002R protection is
+    // byte-for-byte the same. What the runner adds is a Postgres-side lock_timeout so that blocking
+    // on the TARGET's rows (held by the target's own in-flight Class A transaction, for up to the
+    // 60s round-5 payment bound) can no longer hang this request and then fail as an ambiguous 500
+    // having suspended nobody. A reauthorization refusal is not a contention error, so it still
+    // propagates on the first attempt with its own SEC-002R code, unretried.
+    const { before, after } = await runBoundedRevocation(async (tx) => {
       await reauthorizeAtCommit(tx, context, {
         action: 'ADMIN_ACCOUNT_STATUS_CHANGED',
         requiredRoles: ['ADMIN'],
         interestedPartyIds: [targetUserId],
       })
       return setAccountStatus(targetUserId, status, reason, { tx })
-    })
+    }, { action: 'ADMIN_ACCOUNT_STATUS_CHANGED' })
 
     await db().adminAuditLog.create({
       data: {
@@ -954,14 +965,15 @@ export async function handleAdmin(req, res, url, context) {
     // SEC-002R Class A: granting or stripping a role is the other privilege mutation N4 applies to.
     // Same shape as the status handler above -- one transaction covering both the acting admin's
     // commit-boundary re-authorization and the role write it authorizes.
-    const { before, after } = await db().$transaction(async (tx) => {
+    // SEC-F1: same runner swap, same reasoning, as the status handler above. Contents unchanged.
+    const { before, after } = await runBoundedRevocation(async (tx) => {
       await reauthorizeAtCommit(tx, context, {
         action: 'ADMIN_USER_ROLES_CHANGED',
         requiredRoles: ['ADMIN'],
         interestedPartyIds: [targetUserId],
       })
       return applyRoleChange(targetUserId, { add, remove }, REVOCATION_REASONS.ROLE_CHANGED, { tx })
-    })
+    }, { action: 'ADMIN_USER_ROLES_CHANGED' })
 
     await db().adminAuditLog.create({
       data: {

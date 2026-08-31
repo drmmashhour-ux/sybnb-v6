@@ -170,6 +170,11 @@ run_full "otp"              otp-identity.e2e.mjs
   # (unlike rounds 1-4) because it exercises the shared payment-event pipeline directly on BOTH rails
   # and therefore belongs inside the PAYMENT_ONLY=1 gate, not only in full mode.
   run "commit-boundary-r5" commit-boundary-reauthorization-round5.e2e.mjs
+  # SEC-F1 (follow-up to SEC-002R, separate item): the INVERSE problem -- revocation itself
+  # (logout-all / admin suspend / admin role removal) failing SILENTLY with a generic 500 (P2028)
+  # while a Class A transaction holds the target's user_sessions/users rows, leaving the token live.
+  # Additive: every SEC-002R suite above is frozen evidence and still runs unchanged.
+  run_full "sec-f1-revocation-contention" sec-f1-revocation-contention.e2e.mjs
   run_full "resend-webhook"   resend-webhook.e2e.mjs
 run_full "storage"          storage.e2e.mjs
 run_full "legal"            legal-consent.e2e.mjs

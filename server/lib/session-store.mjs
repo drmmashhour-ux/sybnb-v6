@@ -21,6 +21,7 @@
 import { randomUUID } from 'node:crypto'
 import { db } from './prisma.mjs'
 import { createSessionToken, SESSION_TTL_SECONDS } from './security.mjs'
+import { runBoundedRevocation } from './revocation-contention.mjs'
 
 export const REVOCATION_REASONS = {
   LOGOUT: 'LOGOUT',
@@ -107,7 +108,15 @@ export async function revokeUserAccess(userId, reason, options = {}) {
     })
     return updated.sessionEpoch
   }
-  return tx ? run(tx) : db().$transaction(run)
+  // SEC-F1: when this opens its OWN transaction (POST /api/auth/logout-all, credential reset), it
+  // must be bounded. Both rows it writes are exactly the rows a Class A transaction holds FOR UPDATE
+  // for its whole duration, so an unbounded write here hung for the holder's full lifetime and then
+  // died with an ambiguous P2028/500 having revoked nothing. runBoundedRevocation() caps the lock
+  // wait in Postgres, retries inside a small budget, and otherwise raises an explicit,
+  // provably-nothing-was-written REVOCATION_CONTENDED refusal. When the caller supplies `tx`, the
+  // bound is that caller's responsibility (see the admin routes) -- nesting a second one here would
+  // be a no-op at best and would silently re-scope the caller's transaction at worst.
+  return tx ? run(tx) : runBoundedRevocation(run, { action: `REVOKE_USER_ACCESS:${reason}` })
 }
 
 // Account status changes are security state, not profile state: moving to SUSPENDED or DELETED must
@@ -140,7 +149,8 @@ export async function setAccountStatus(userId, status, reason, options = {}) {
     const after = await client.user.update({ where: { id: userId }, data: { status }, select: { id: true, status: true } })
     return { before, after }
   }
-  return tx ? run(tx) : db().$transaction(run)
+  // SEC-F1: same bound as revokeUserAccess() above, for direct (non-route) callers.
+  return tx ? run(tx) : runBoundedRevocation(run, { action: `SET_ACCOUNT_STATUS:${status}` })
 }
 
 // Role changes made through this function revoke every session for the account, in BOTH directions.
@@ -174,7 +184,8 @@ export async function applyRoleChange(userId, { add = [], remove = [] }, reason 
     await revokeUserAccess(userId, reason, { tx: client })
     return { before: before.map((r) => r.role), after: after.map((r) => r.role) }
   }
-  return tx ? run(tx) : db().$transaction(run)
+  // SEC-F1: same bound as revokeUserAccess() above, for direct (non-route) callers.
+  return tx ? run(tx) : runBoundedRevocation(run, { action: 'APPLY_ROLE_CHANGE' })
 }
 
 // Hook for the separate password-reset work item (out of scope for SEC-002, which is why there is

@@ -77,6 +77,11 @@ export function handleRouteError(res, error) {
     error: {
       code: error.code || 'INTERNAL_ERROR',
       message: error.expose ? error.message : error.statusCode ? error.message : 'Unexpected V6 API error.',
+      // SEC-F1: a few refusals must say more than "it failed" -- a contended revocation has to state
+      // in the body that containment did NOT happen and that a retry is meaningful, rather than
+      // leaving the caller to infer it from a status code. Only set on errors that opt in by
+      // attaching `details`, so every existing error response shape is byte-identical.
+      ...(error.details && typeof error.details === 'object' && !Array.isArray(error.details) ? error.details : {}),
     },
   })
 }

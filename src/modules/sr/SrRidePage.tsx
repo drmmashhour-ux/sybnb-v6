@@ -33,7 +33,7 @@ const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRE
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { RideMap } from '../../shared/maps/RideMap'
-import { isSrRideLocationConfirmed } from './srRideLocationGuard'
+import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
 
 type Props = {
   lang: Lang
@@ -224,16 +224,23 @@ const rideCategoryByFilter: Record<string, string> = {
 export function SrRidePage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
-  const [pickup, setPickup] = useState(isAr ? 'دمشق، المالكي' : 'Damascus, Malki')
-  const [dropoff, setDropoff] = useState(isAr ? 'دمشق، المزة' : 'Damascus, Mezzeh')
-  // SEC-F1-adjacent UX-4A fix (Priority A): the two lines above are display
-  // defaults, not real addresses. Without this pair, requestRide() could
-  // submit them as a genuine trip with zero user interaction. Flipped true
-  // by any real source of a location -- manual edit, a saved-place chip, or
-  // a successful GPS fix -- and enforced in requestRide() itself, not just
-  // the submit button's disabled state.
-  const [pickupTouched, setPickupTouched] = useState(false)
-  const [dropoffTouched, setDropoffTouched] = useState(false)
+  const PICKUP_DEFAULT_TEXT = isAr ? 'دمشق، المالكي' : 'Damascus, Malki'
+  const DROPOFF_DEFAULT_TEXT = isAr ? 'دمشق، المزة' : 'Damascus, Mezzeh'
+  const [pickup, setPickup] = useState(PICKUP_DEFAULT_TEXT)
+  const [dropoff, setDropoff] = useState(DROPOFF_DEFAULT_TEXT)
+  // SEC-F1-adjacent UX-4A fix (Priority A, refined twice after adversarial
+  // review): the two lines above are display defaults, not real addresses.
+  // Without tracking below, requestRide() could submit them as a genuine
+  // trip with zero user interaction. Each endpoint's SOURCE is tracked
+  // (not a bare touched boolean, which can't distinguish a trustworthy GPS
+  // fix from a later hand-edit that invalidates it), and manual-source text
+  // is additionally checked against the literal seeded default above (an
+  // edit-then-revert-to-placeholder must still be rejected) -- see
+  // srRideLocationGuard.ts for the full two-round reasoning and enforced
+  // semantics. Enforced in requestRide() itself, not just the submit
+  // button's disabled state.
+  const [pickupSource, setPickupSource] = useState<SrRideLocationSource>('default')
+  const [dropoffSource, setDropoffSource] = useState<SrRideLocationSource>('default')
   const [category, setCategory] = useState(categories[0])
   const [lowDataMode, setLowDataMode] = useState(true)
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>()
@@ -426,7 +433,7 @@ export function SrRidePage({ lang }: Props) {
         setAccuracyMeters(Math.round(position.coords.accuracy))
         setPickupCoords({ lat: position.coords.latitude, lng: position.coords.longitude })
         setPickup(isAr ? 'موقعي الحالي' : 'Current location')
-        setPickupTouched(true)
+        setPickupSource('gps')
       },
       () => {
         setAccuracyMeters(undefined)
@@ -442,7 +449,14 @@ export function SrRidePage({ lang }: Props) {
     // submission path -- not only via the button's disabled attribute --
     // so this can't be bypassed by any other future call site of
     // requestRide() forgetting to check the button state first.
-    if (!isSrRideLocationConfirmed({ pickupTouched, dropoffTouched, pickup, dropoff })) {
+    if (!isSrRideLocationConfirmed({
+              pickupSource,
+              dropoffSource,
+              pickup,
+              dropoff,
+              pickupDefaultText: PICKUP_DEFAULT_TEXT,
+              dropoffDefaultText: DROPOFF_DEFAULT_TEXT,
+            })) {
       setStatus('error')
       setMessage(t.locationNotConfirmed)
       return
@@ -634,7 +648,8 @@ export function SrRidePage({ lang }: Props) {
                     style={styles.chipButton}
                     onClick={() => {
                       setPickup(place.address)
-                      setPickupTouched(true)
+                      setPickupSource('saved')
+                      setPickupCoords(undefined)
                     }}
                   >
                     {place.label}
@@ -644,7 +659,7 @@ export function SrRidePage({ lang }: Props) {
                     style={styles.chipButton}
                     onClick={() => {
                       setDropoff(place.address)
-                      setDropoffTouched(true)
+                      setDropoffSource('saved')
                     }}
                   >
                     → {t.dropoff}
@@ -664,7 +679,13 @@ export function SrRidePage({ lang }: Props) {
               value={pickup}
               onChange={(event) => {
                 setPickup(event.target.value)
-                setPickupTouched(true)
+                setPickupSource('manual')
+                // A hand-edit invalidates any earlier GPS fix -- the
+                // coordinates no longer necessarily correspond to this
+                // text, so they must not ride along to requestRide()
+                // (UX-4A Priority A, GPS-then-destructive-edit case).
+                setPickupCoords(undefined)
+                setAccuracyMeters(undefined)
               }}
             />
           </label>
@@ -724,7 +745,7 @@ export function SrRidePage({ lang }: Props) {
               value={dropoff}
               onChange={(event) => {
                 setDropoff(event.target.value)
-                setDropoffTouched(true)
+                setDropoffSource('manual')
               }}
             />
           </label>
@@ -836,7 +857,14 @@ export function SrRidePage({ lang }: Props) {
             disabled={
               status === 'saving' ||
               (scheduleForLater && !scheduledFor) ||
-              !isSrRideLocationConfirmed({ pickupTouched, dropoffTouched, pickup, dropoff })
+              !isSrRideLocationConfirmed({
+              pickupSource,
+              dropoffSource,
+              pickup,
+              dropoff,
+              pickupDefaultText: PICKUP_DEFAULT_TEXT,
+              dropoffDefaultText: DROPOFF_DEFAULT_TEXT,
+            })
             }
             style={styles.primaryButton}
             onClick={() => void requestRide()}

@@ -533,7 +533,7 @@ savepoint survive a rollback to it; and the rollback genuinely undoes the writes
   `APPLIED` and reports a benign `duplicate` (HTTP 200) where it previously more often reported
   `retryable` (HTTP 409). Proven safe by the 20-way and 5-way concurrency suites.
 
-### 10.4 Known conflict with round 3 §6a-2 / §6a-3 — NOT resolved here
+### 10.4 Known conflict with round 3 §6a-2 / §6a-3 — owner-ruled, expected-obsolete
 
 Round 3 §6a-2 and §6a-3 assert, by reading from a **separate connection** while `apply()` is running,
 that *"the CLAIM had genuinely COMMITTED before the revocation"* (status `APPLYING`, `attempts` 2 → 3,
@@ -542,9 +542,25 @@ single-transaction design can satisfy them: uncommitted data is invisible across
 definition. They **fail** under round 5 (round 3 otherwise scores 90/92 — all of §6a-6..15, all of §6b
 including the stale-`priorStatus` differential, and all of §6c on the stripe rail still pass unchanged).
 
-Round 3 has **not** been edited; it is frozen evidence. Round 5's §3/§4/§15 assert the exact opposite
-property on purpose. Whether the two assertions should be superseded is an owner decision, recorded
-here rather than resolved unilaterally.
+Round 3 has **not** been edited; it remains frozen evidence, unmodified. Round 5's §3/§4/§15 assert the
+exact opposite property, deliberately — that is the security fix. An independent code-level spot-check
+of round 5 corroborated this reading from the source (row lock taken before the first savepoint, the two
+rollback depths genuinely discriminated in code, no unscoped `db()` write on either effects path) and
+recommended the fresh behavioral verifier confirm it live rather than rely on source-level inference
+alone.
+
+**Owner ruling (2026-08-30): ACCEPTED as an expected obsolete-architecture invalidation, not a security
+regression.**
+
+> Expected obsolete assertions after architecture replacement: §6a-2/§6a-3 describe the former
+> separate-transaction architecture and are intentionally unsatisfiable under the R5 atomic transaction
+> design. They remain frozen as historical evidence and are not counted as security regressions.
+
+No compatibility shim was requested or will be added to make §6a-2/§6a-3 pass — doing so would
+reintroduce the externally-observable intermediate durable-claim state that round 5 was ordered to
+eliminate. The fresh independent behavioral verifier (below) is tasked with reproducing §6a-2/§6a-3
+live and confirming the failure cause is exactly "claim not visible pre-commit," not a different defect,
+converting this from a source-level read into behavioral evidence.
 
 ### 10.5 Evidence
 
@@ -552,6 +568,11 @@ here rather than resolved unilaterally.
 |---|---|
 | `tests/e2e/commit-boundary-reauthorization-round5.e2e.mjs` | Round 5, 66 checks, **both rails**. Same-`xmin` proof that one transaction wrote the claim row and the `PaymentProof` (§1/§2); continuous sampling from a separate connection proving no intermediate durable state ever exists (§3/§4); byte-identical whole-row rollback on refusal (§5/§6); the retry contract and dead-letter ceiling unchanged (§7/§8); **3 simultaneous claim attempts on one event with a revocation landing mid-window, 6 repetitions per rail, asserting exactly one coherent outcome and never torn state (§9/§10)**; 5-way serialization control (§11); the stale-`priorStatus` differential re-proved (§12); the reversal machinery proven absent from the code and behaviourally never triggered (§13); `FOR UPDATE NOWAIT` probes proving the event-row lock is held for the entire merged transaction (§14); and the positive statement of the merge — the commit-boundary check sees the claim through the transaction while a separate connection still sees the pre-claim row (§15). |
 
-**Verdict for A8 after round 5: atomicity guaranteed** for the claim/effects boundary — stated as the
-implementer's claim, pending the independent code-level spot-check. SEC-002R as a whole is **not**
-self-declared closed here.
+**Verdict for A8 after round 5: atomicity guaranteed** for the claim/effects boundary — implementer's
+claim, **independently confirmed at the code level** by a fresh spot-check (row lock precedes the first
+savepoint; the two rollback depths are genuinely discriminated in code, not merely narrated; every
+effects-path call site on both rails traced by hand uses the scoped transaction, none use the unscoped
+`db()` client; the compensating-reversal machinery is verifiably deleted — `grep -c '\$transaction('` on
+the pipeline file is exactly 1). Status: **A8 — atomicity guaranteed at code level; live behavioral
+confirmation pending**, tracked in §11 below. SEC-002R as a whole is **not** self-declared closed here —
+final PASS is the owner's call, after the fresh independent behavioral verifier reports.

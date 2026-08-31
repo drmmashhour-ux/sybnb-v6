@@ -169,7 +169,7 @@ export async function handleWallet(req, res, url, context) {
     }
     if (gift.status !== 'SENT') throw giftClaimError()
     if (gift.recipientPhoneHash !== phoneHash) {
-      await registerFailedGiftClaim(gift)
+      await registerFailedGiftClaim(gift, context)
       throw giftClaimError()
     }
     if (gift.lockedUntil && gift.lockedUntil > new Date()) {
@@ -177,7 +177,7 @@ export async function handleWallet(req, res, url, context) {
       throw error
     }
     if (!verifyGiftClaimCode(gift, body.code)) {
-      const updatedGift = await registerFailedGiftClaim(gift)
+      const updatedGift = await registerFailedGiftClaim(gift, context)
       if (updatedGift.lockedUntil && updatedGift.lockedUntil > new Date()) {
         throw giftClaimError('Gift claim is temporarily locked after too many attempts.', 'GIFT_CLAIM_LOCKED')
       }
@@ -240,14 +240,26 @@ export async function handleWallet(req, res, url, context) {
   return false
 }
 
-async function registerFailedGiftClaim(gift) {
+// SEC-002R round 2. This is the same shape as finding A8: a durable write that a failed request
+// makes on ANOTHER party's row, sitting outside the re-authorized transaction. Three failed attempts
+// set a 10-minute lockout on the gift, so a revoked session could still deny a legitimate recipient
+// access to their own money for a window, and could keep doing it. The owner explicitly refused
+// "it's only bookkeeping" as a justification for exactly this class of residual on A8, so it is
+// closed here too rather than documented as acceptable: the counter/lockout write now runs in its
+// own transaction whose first statement re-establishes the acting account's live authority under
+// the same user_sessions/users locks every other Class A site takes. A revoked actor's wrong code
+// gets the commit-boundary refusal and leaves the gift row untouched.
+async function registerFailedGiftClaim(gift, context) {
   const nextAttempts = gift.claimAttemptCount + 1
-  return db().walletGift.update({
-    where: { id: gift.id },
-    data: {
-      claimAttemptCount: { increment: 1 },
-      lockedUntil: nextAttempts >= 3 ? new Date(Date.now() + 1000 * 60 * 10) : gift.lockedUntil,
-    },
+  return db().$transaction(async (tx) => {
+    await reauthorizeAtCommit(tx, context, { action: 'WALLET_GIFT_CLAIM_FAILED' })
+    return tx.walletGift.update({
+      where: { id: gift.id },
+      data: {
+        claimAttemptCount: { increment: 1 },
+        lockedUntil: nextAttempts >= 3 ? new Date(Date.now() + 1000 * 60 * 10) : gift.lockedUntil,
+      },
+    })
   })
 }
 

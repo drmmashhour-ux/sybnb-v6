@@ -653,6 +653,51 @@ async function main() {
   }
 
   // =============================================================================================
+  console.log('\n=== 5b. WALLET GIFT FAILED-CLAIM LOCKOUT — the A8-shaped residual on this route ===')
+  // =============================================================================================
+  // registerFailedGiftClaim() writes a durable attempt counter, and a 10-minute lockout at 3 tries,
+  // onto ANOTHER party's gift row -- and it ran outside the claim's re-authorized transaction, before
+  // it. Same shape as A8's claim bookkeeping: a revoked session could still deny a legitimate
+  // recipient access to their own money, repeatedly. Closed rather than documented as acceptable.
+  {
+    await fundWallet(ids.sender, 5_000_000)
+    const SENDER = (await session(ids.sender)).token
+    const recipientPhone = `+96394${String(RUN).slice(-7)}`
+    const giftRes = await call('POST', '/api/wallet/gifts', SENDER, { amountMinor: 9_000, currency: 'SYP', recipientPhone })
+    const gift = giftRes.j?.gift
+    check('5b-fixture: a claimable gift exists', gift?.status === 'SENT', JSON.stringify(giftRes.j).slice(0, 200))
+    check('5b-fixture: attempt counter starts at 0', gift.claimAttemptCount === 0, String(gift.claimAttemptCount))
+
+    const raceToken = (await session(ids.guest2)).token
+    const res = await raceBody({
+      method: 'POST',
+      path: `/api/wallet/gifts/${gift.id}/claim`,
+      token: raceToken,
+      // Right phone, WRONG code -- the branch that registers a failed attempt.
+      body: { phone: recipientPhone, code: '000000' },
+      actorId: ids.guest2,
+      adminMarker: false,
+      label: '5b. gift-failed-claim',
+      revoke: () => logoutAll(ids.guest2, '5b'),
+    })
+
+    check('5b-a. in-flight failed claim is REFUSED', res.status !== 200, `status=${res.status} body=${JSON.stringify(res.j)}`)
+    check('5b-b. refusal is a COMMIT-BOUNDARY refusal, not GIFT_CODE_INVALID', isBoundaryRefusal(res), `${res.status} ${code(res)}`)
+    const after = await db().walletGift.findUnique({ where: { id: gift.id } })
+    check('5b-c. DB: attempt counter did NOT advance', after.claimAttemptCount === 0, String(after.claimAttemptCount))
+    check('5b-d. DB: no lockout was applied to the recipient', after.lockedUntil === null, String(after.lockedUntil))
+
+    // Control: identical wrong code, live session -- the counter MUST advance, proving 5b-c measured
+    // a real, reachable write rather than a branch the request never got to.
+    const fresh = (await session(ids.guest2)).token
+    const ok = await call('POST', `/api/wallet/gifts/${gift.id}/claim`, fresh, { phone: recipientPhone, code: '000000' })
+    check('5b-e. control: identical wrong code with a live session reaches the real failure path',
+      code(ok) === 'GIFT_CODE_INVALID', `${ok.status} ${code(ok)}`)
+    const ctrl = await db().walletGift.findUnique({ where: { id: gift.id } })
+    check('5b-f. DB: control genuinely committed the attempt counter (0 -> 1)', ctrl.claimAttemptCount === 1, String(ctrl.claimAttemptCount))
+  }
+
+  // =============================================================================================
   console.log('\n=== 6. A5 REVIEW QUEUE — all six decision types, raced individually ===')
   // =============================================================================================
   // Round 1 raced only payment-APPROVE and iddocument-APPROVE. The dispatcher is ONE transaction

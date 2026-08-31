@@ -206,10 +206,14 @@ async function applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToke
   })
 }
 
-async function applyPaymentEvent({ eventId, intentId, type, obj, beforeEffects }) {
+// SEC-002R round 2 (A8): `authorizeClaim` is threaded through to the pipeline so the CLAIM itself
+// (attempts increment + APPLYING) is gated on the acting actor's live authority, not just the
+// effects. Supplied only by the admin replay route; the live webhook path passes neither hook.
+async function applyPaymentEvent({ eventId, intentId, type, obj, beforeEffects, authorizeClaim }) {
   return applyPaymentEventPipeline({
     eventId,
     rail: 'payment_intent',
+    authorizeClaim,
     apply: (claimToken) => applyPaymentIntentEvent({ eventId, intentId, type, obj, claimToken, beforeEffects }),
   })
 }
@@ -822,6 +826,7 @@ export async function handlePaymentIntents(req, res, url, context) {
           type: eventRow.type,
           obj: { id: eventRow.providerObjectId, amount_minor: eventRow.amountMinor, currency: eventRow.currency },
           beforeEffects: reauthorizeReplay,
+          authorizeClaim: reauthorizeReplay,
         })
       } else {
         // payment_status comes from the durably-stored, authenticated value (migration 022) --
@@ -835,6 +840,8 @@ export async function handlePaymentIntents(req, res, url, context) {
         result = await applyPaymentEventPipeline({
           eventId: eventRow.id,
           rail: 'stripe_checkout',
+          // SEC-002R round 2 (A8): gate the claim/attempts bookkeeping itself, not only the effects.
+          authorizeClaim: reauthorizeReplay,
           apply: (claimToken) => applyStripeCheckoutEvent({
             eventId: eventRow.id,
             session: {
@@ -860,7 +867,16 @@ export async function handlePaymentIntents(req, res, url, context) {
         entityType: 'payment_event',
         entityId: eventRow.id,
         before,
-        after: { processingStatus: after.processingStatus, attempts: after.attempts },
+        after: {
+          processingStatus: after.processingStatus,
+          attempts: after.attempts,
+          // SEC-002R round 2: name the refusal explicitly. With A8's claim gating, a replay refused
+          // at the commit boundary leaves processingStatus and attempts EXACTLY as it found them --
+          // which is the point, but it also makes the before/after pair alone indistinguishable from
+          // "nothing happened". The refusal code is what makes this row readable as a real, refused
+          // attempt by a revoked actor rather than a no-op.
+          ...(replayError ? { refused: replayError.code || 'REPLAY_FAILED' } : {}),
+        },
       },
     })
     if (replayError) throw replayError

@@ -17,6 +17,11 @@ import {
   validateActivePromoCode,
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
+// SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
+// file -- promo-code creation, promo-code activation toggling, and business-account onboarding --
+// were bare db().x.create/update calls with no transaction and no commit-boundary re-authorization.
+// G2 was reproduced live against a revoked admin. See server/lib/commit-authorization.mjs.
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
@@ -464,6 +469,15 @@ export async function handleSrRides(req, res, url, context) {
     // paired with a third ride, but the guard costs nothing and means a violated assumption fails
     // safe (0 rows updated) instead of silently re-discounting an already-paired ride.
     const claimResult = await db().$transaction(async (tx) => {
+      // SEC-002R round 2, fresh-sweep Class A. A claim does two things a revoked actor must not be
+      // able to commit: it MUTATES fareMinor on up to two riders' rides (the pooling discount --
+      // real money the platform will bill), and it dispatches THIS driver to a live passenger. A
+      // driver suspended or de-roled mid-request is precisely the actor who must not end up assigned
+      // to a rider. Runs before the claim write, under the user_sessions/users locks.
+      await reauthorizeAtCommit(tx, context, {
+        action: 'SR_RIDE_CLAIMED',
+        requiredRoles: ['DRIVER'],
+      })
       const claimed = await tx.rideRequest.updateMany({
         where: { id: claimMatch[1], driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
         data: {
@@ -708,17 +722,35 @@ export async function handleSrRides(req, res, url, context) {
         throw error
       }
 
+      // SEC-002R round 2, finding G2 (reproduced live against a revoked admin). A promo code is a
+      // commercial instrument: once it exists and is active, any rider who learns the string gets a
+      // real, permanent discount off real ride revenue, and redemptions are irreversible. Class A.
+      // The create and its audit row now share ONE transaction whose first statement re-establishes
+      // the acting admin's authority under held user_sessions/users locks.
       let promoCode
       try {
-        promoCode = await db().promoCode.create({
-          data: {
-            code,
-            discountType,
-            discountValue: Math.round(discountValue),
-            maxDiscountMinor: Number.isFinite(Number(body.maxDiscountMinor)) ? Math.round(Number(body.maxDiscountMinor)) : undefined,
-            expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
-            createdByAdminId: context.user.id,
-          },
+        promoCode = await db().$transaction(async (tx) => {
+          await reauthorizeAtCommit(tx, context, {
+            action: 'SR_PROMO_CODE_CREATED',
+            requiredRoles: ['ADMIN'],
+          })
+          const created = await tx.promoCode.create({
+            data: {
+              code,
+              discountType,
+              discountValue: Math.round(discountValue),
+              maxDiscountMinor: Number.isFinite(Number(body.maxDiscountMinor)) ? Math.round(Number(body.maxDiscountMinor)) : undefined,
+              expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+              createdByAdminId: context.user.id,
+            },
+          })
+          // An admin-experience audit found promo-code/business-account admin actions were the only
+          // admin-mutating routes in this file with no audit trail at all -- every other admin
+          // decision here (ride cancel/assign/claim) already logs. Closing that gap.
+          await tx.adminAuditLog.create({
+            data: { actorUserId: context.user.id, action: 'SR_PROMO_CODE_CREATED', entityType: 'promo_codes', entityId: created.id, before: null, after: created },
+          })
+          return created
         })
       } catch (err) {
         if (err?.code === 'P2002') {
@@ -730,12 +762,6 @@ export async function handleSrRides(req, res, url, context) {
         }
         throw err
       }
-      // An admin-experience audit found promo-code/business-account admin actions were the only
-      // admin-mutating routes in this file with no audit trail at all -- every other admin
-      // decision here (ride cancel/assign/claim) already logs. Closing that gap.
-      await db().adminAuditLog.create({
-        data: { actorUserId: context.user.id, action: 'SR_PROMO_CODE_CREATED', entityType: 'promo_codes', entityId: promoCode.id, before: null, after: promoCode },
-      })
       return json(res, 201, { ok: true, promoCode })
     }
     return methodNotAllowed(res, ['GET', 'POST'])
@@ -757,12 +783,23 @@ export async function handleSrRides(req, res, url, context) {
       error.expose = true
       throw error
     }
-    const promoCode = await db().promoCode.update({
-      where: { id: promoCodeMatch[1] },
-      data: { active: Boolean(body.active) },
-    })
-    await db().adminAuditLog.create({
-      data: { actorUserId: context.user.id, action: 'SR_PROMO_CODE_TOGGLED', entityType: 'promo_codes', entityId: promoCode.id, before: existingPromoCode, after: promoCode },
+    // SEC-002R round 2, same-shape sweep. Classified Class A: this is the ONLY switch that turns a
+    // discount instrument on or off. Activating one makes real, unrecoverable discounts immediately
+    // redeemable by anyone holding the code; deactivating one is a live commercial control. Same
+    // treatment as the create above.
+    const promoCode = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, {
+        action: 'SR_PROMO_CODE_TOGGLED',
+        requiredRoles: ['ADMIN'],
+      })
+      const toggled = await tx.promoCode.update({
+        where: { id: promoCodeMatch[1] },
+        data: { active: Boolean(body.active) },
+      })
+      await tx.adminAuditLog.create({
+        data: { actorUserId: context.user.id, action: 'SR_PROMO_CODE_TOGGLED', entityType: 'promo_codes', entityId: toggled.id, before: existingPromoCode, after: toggled },
+      })
+      return toggled
     })
     return json(res, 200, { ok: true, promoCode })
   }
@@ -805,12 +842,30 @@ export async function handleSrRides(req, res, url, context) {
         throw error
       }
 
-      const businessAccount = await db().businessAccount.create({
-        data: { name, billingContactEmail, adminUserId: adminUser.id },
-        include: { admin: { select: { id: true, displayName: true, email: true } } },
-      })
-      await db().adminAuditLog.create({
-        data: { actorUserId: context.user.id, action: 'SR_BUSINESS_ACCOUNT_CREATED', entityType: 'business_accounts', entityId: businessAccount.id, before: null, after: businessAccount },
+      // SEC-002R round 2, same-shape sweep. Classified Class A: this is a PRIVILEGE grant. It makes
+      // the named user a business admin, and business.mjs's loadOwnBusinessAccount() derives that
+      // authority purely from `businessAccount.adminUserId === context.user.id` -- so creating this
+      // row hands that person the standing power to add and remove members who can then bill real
+      // rides to the company. Same class as a role change, and treated the same way.
+      const businessAccount = await db().$transaction(async (tx) => {
+        await reauthorizeAtCommit(tx, context, {
+          action: 'SR_BUSINESS_ACCOUNT_CREATED',
+          requiredRoles: ['ADMIN'],
+          // NOT passing interestedPartyIds: [adminUser.id] here, deliberately. A platform admin
+          // onboarding a company whose designated business admin is themselves is a genuine
+          // self-dealing gap (nothing in this file or in business.mjs blocks it, unlike the nine
+          // admin decision paths hardened in 115aa09), but closing it introduces a NEW refusal on a
+          // path that has never had one -- a policy decision, not a commit-boundary one, and outside
+          // this round's mandate. Flagged in the SEC-002R round-2 report as a recommended follow-up.
+        })
+        const created = await tx.businessAccount.create({
+          data: { name, billingContactEmail, adminUserId: adminUser.id },
+          include: { admin: { select: { id: true, displayName: true, email: true } } },
+        })
+        await tx.adminAuditLog.create({
+          data: { actorUserId: context.user.id, action: 'SR_BUSINESS_ACCOUNT_CREATED', entityType: 'business_accounts', entityId: created.id, before: null, after: created },
+        })
+        return created
       })
       return json(res, 201, { ok: true, businessAccount })
     }

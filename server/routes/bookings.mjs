@@ -9,6 +9,12 @@ import {
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
+// SEC-002R round 2. The fresh, from-scratch mutation sweep this round required classified guest
+// cancellation as Class A: it marks real payment proofs REFUNDED and calls createRefundRequest(),
+// which RESERVES refund capacity against the payment proof's own ledger counters -- an irreversible
+// commitment of real money, made by a non-admin actor, in a handler whose authority was established
+// long before the transaction opens. See server/lib/commit-authorization.mjs.
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
 export async function handleBookings(req, res, url, context) {
   const cancelMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/cancel$/)
@@ -61,6 +67,15 @@ export async function handleBookings(req, res, url, context) {
     }
 
     const booking = await db().$transaction(async (tx) => {
+      // SEC-002R Class A. First statement in the transaction, before the proof status rewrite and
+      // before createRefundRequest() reserves anything: proves the cancelling guest's session is
+      // still live, their account still ACTIVE, their epoch still current and GUEST still held,
+      // under the user_sessions/users locks that stop a concurrent revocation from landing inside
+      // this window. A failure throws and Postgres rolls back everything below it.
+      await reauthorizeAtCommit(tx, context, {
+        action: 'BOOKING_GUEST_CANCELLED',
+        requiredRoles: ['GUEST'],
+      })
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
       const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor)
 

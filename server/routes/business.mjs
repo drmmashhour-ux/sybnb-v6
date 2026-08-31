@@ -1,6 +1,11 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+// SEC-002R round 2. The fresh mutation sweep classified business membership add/remove as Class A:
+// membership IS the authority to bill real rides to a company (sr-rides.mjs resolves corporate
+// billing from a live membership row, never from client input), so creating or destroying one is a
+// privilege change with direct financial consequence. See server/lib/commit-authorization.mjs.
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
 // SR Ride vs. Uber gap-closure: business/corporate accounts. No new auth role -- a "business
 // admin" is just a signed-in GUEST whose id matches businessAccount.adminUserId, the same
@@ -77,9 +82,19 @@ export async function handleBusiness(req, res, url, context) {
     }
 
     try {
-      const member = await db().businessAccountMember.create({
-        data: { businessAccountId: account.id, userId: user.id },
-        include: { user: { select: { id: true, displayName: true, email: true } } },
+      const member = await db().$transaction(async (tx) => {
+        // SEC-002R Class A: granting a rider the standing ability to charge rides to this company.
+        // The business-admin check itself (loadOwnBusinessAccount, above) ran before the body was
+        // even read; this re-establishes the acting account's live authority inside the same
+        // transaction as the grant.
+        await reauthorizeAtCommit(tx, context, {
+          action: 'BUSINESS_MEMBER_ADDED',
+          requiredRoles: ['GUEST'],
+        })
+        return tx.businessAccountMember.create({
+          data: { businessAccountId: account.id, userId: user.id },
+          include: { user: { select: { id: true, displayName: true, email: true } } },
+        })
       })
       return json(res, 201, { ok: true, member })
     } catch (err) {
@@ -99,8 +114,16 @@ export async function handleBusiness(req, res, url, context) {
     if (req.method !== 'DELETE') return methodNotAllowed(res, ['DELETE'])
     requireAuth(context, ['GUEST'])
     const account = await loadOwnBusinessAccount(context)
-    await db().businessAccountMember.deleteMany({
-      where: { businessAccountId: account.id, userId: removeMemberMatch[1] },
+    // SEC-002R Class A: revoking a rider's corporate billing authority is the same class of change
+    // as granting it, and a deleteMany is genuinely irreversible -- there is no undo endpoint.
+    await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, {
+        action: 'BUSINESS_MEMBER_REMOVED',
+        requiredRoles: ['GUEST'],
+      })
+      await tx.businessAccountMember.deleteMany({
+        where: { businessAccountId: account.id, userId: removeMemberMatch[1] },
+      })
     })
     return json(res, 200, { ok: true })
   }

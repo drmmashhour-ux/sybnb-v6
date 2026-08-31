@@ -214,19 +214,55 @@ export const CLAIM_DURATION_MS = 120_000
 // keeps redelivering (its own retry schedule is what makes recovery automatic once the abandoned
 // claim's expiry passes -- no new background worker needed) instead of ever being told this delivery
 // is done when it might not be.
-export async function applyPaymentEvent({ eventId, rail, apply }) {
+//
+// (SEC-002R round 2, finding A8) `authorizeClaim` closes the gap independent review found in round 1.
+// Round 1 protected only the rail's own apply() transaction, via each rail's beforeEffects hook. The
+// CLAIM below -- `attempts: { increment: 1 }` plus the move to APPLYING -- and the failure-path write
+// further down were BOTH outside that boundary and BEFORE it, so a revoked admin's replay still
+// committed a real attempts increment, and on the 5th such attempt pushed a genuine event into
+// DEAD_LETTERED, which removes it from CLAIMABLE_STATUSES... no: DEAD_LETTERED IS claimable, but it
+// is the state that takes an event off the automatic webhook-retry path and makes it depend on a
+// human. Either way it is durable, adversary-controlled state change by an actor with no session.
+//
+// Two changes make that structurally impossible:
+//
+//   1. The claim CAS now runs inside a transaction, and `authorizeClaim` (when the caller supplies
+//      one -- only the admin replay route does; a provider webhook has no actor to re-authorize)
+//      runs inside that SAME transaction, AFTER the CAS. Ordering matters twice over: after, so the
+//      event row's lock is taken BEFORE the user_sessions/users locks reauthorizeAtCommit() takes,
+//      matching the lock order the rails' own apply() transactions already use (event row first, via
+//      verifyAndLockClaim, then session/user) -- opposite orders here would be a real deadlock
+//      window between the claim phase and a concurrent apply phase. A throw rolls the increment back
+//      with the row untouched.
+//   2. A re-authorization failure thrown from anywhere INSIDE apply() is no longer treated as a
+//      processing failure at all (see the catch below). It releases the claim and reverses this
+//      attempt's own increment instead of recording FAILED/DEAD_LETTERED -- the same "this attempt
+//      genuinely did nothing" reasoning ClaimLostError already relies on. Without this, a revocation
+//      landing in the microseconds between the claim and the apply would still leave a real mark.
+export async function applyPaymentEvent({ eventId, rail, apply, authorizeClaim = null }) {
   const token = randomUUID()
   const now = new Date()
   const claimExpiresAt = new Date(now.getTime() + CLAIM_DURATION_MS)
-  const claim = await db().paymentEvent.updateMany({
-    where: {
-      id: eventId,
-      OR: [
-        { processingStatus: { in: CLAIMABLE_STATUSES } },
-        { processingStatus: 'APPLYING', claimExpiresAt: { lt: now } },
-      ],
-    },
-    data: { attempts: { increment: 1 }, lastAttemptAt: now, processingStatus: 'APPLYING', claimToken: token, claimExpiresAt },
+  // Captured inside the claim transaction so a refused/reversed attempt can restore exactly what it
+  // found, rather than guessing a status.
+  let priorStatus = null
+  const claim = await db().$transaction(async (tx) => {
+    const before = await tx.paymentEvent.findUnique({ where: { id: eventId }, select: { processingStatus: true } })
+    priorStatus = before?.processingStatus ?? null
+    const result = await tx.paymentEvent.updateMany({
+      where: {
+        id: eventId,
+        OR: [
+          { processingStatus: { in: CLAIMABLE_STATUSES } },
+          { processingStatus: 'APPLYING', claimExpiresAt: { lt: now } },
+        ],
+      },
+      data: { attempts: { increment: 1 }, lastAttemptAt: now, processingStatus: 'APPLYING', claimToken: token, claimExpiresAt },
+    })
+    // Only meaningful once this attempt actually owns the row. A losing claim wrote nothing, so
+    // there is nothing for an authorization failure to protect and no reason to spend the round trip.
+    if (result.count > 0 && authorizeClaim) await authorizeClaim(tx)
+    return result
   })
   if (claim.count === 0) {
     // Lost the claim race. Report duplicate:true only once we can actually see the terminal APPLIED
@@ -251,6 +287,30 @@ export async function applyPaymentEvent({ eventId, rail, apply }) {
       // has established (or is still establishing) is authoritative, and this attempt genuinely did
       // nothing to it.
       return { applied: false, duplicate: false, claimLost: true, retryable: true }
+    }
+    if (err?.reauthorizationFailure) {
+      // SEC-002R round 2 (A8). The acting admin's authority was revoked between this attempt's claim
+      // and its effects; reauthorizeAtCommit() threw inside the rail's own apply() transaction, which
+      // rolled back on its own with NOTHING committed. Treating that as a processing failure would
+      // let a revoked actor leave a permanent mark on a real payment event -- an attempts increment
+      // that counts toward DEAD_LETTER_THRESHOLD, a lastError, and a downgraded processingStatus --
+      // which is exactly the residual the owner refused to accept as "bookkeeping only".
+      //
+      // So this attempt is reversed rather than recorded: its own increment is decremented back out
+      // and the row is restored to the status it held before the claim, with the claim released. All
+      // of it is bound to `token`, so a newer claimant that has since taken over is never stomped on.
+      // A prior APPLYING (an expired, abandoned claim this attempt reclaimed) restores as FAILED --
+      // restoring APPLYING with a null claimExpiresAt would match neither branch of the claim query
+      // above and strand the row permanently, while FAILED is both truthful (an earlier attempt did
+      // not complete) and immediately reclaimable.
+      const restored = priorStatus === 'APPLYING' || priorStatus == null ? 'FAILED' : priorStatus
+      await db()
+        .paymentEvent.updateMany({
+          where: { id: eventId, claimToken: token, processingStatus: 'APPLYING' },
+          data: { attempts: { decrement: 1 }, processingStatus: restored, claimToken: null, claimExpiresAt: null },
+        })
+        .catch((e2) => log.error('payment_event_reauth_release_failed', { eventId, err: errorSummary(e2) }))
+      throw err
     }
     if (isProviderRefUniqueViolation(err)) {
       // A SEPARATE claim round (a genuinely later redelivery or replay, not a concurrent one — those

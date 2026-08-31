@@ -34,20 +34,32 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
 
-    const review = await db().listingReview.update({
-      where: { id: existing.id },
-      data: { hiddenAt: new Date(), hiddenByAdminId: context.user.id },
-    })
-
-    await db().adminAuditLog.create({
-      data: {
-        actorUserId: context.user.id,
+    // SEC-002R round 2. Classified Class A on the fresh sweep. Hiding a review is a moderation
+    // decision with a durable, publicly-visible effect (the review disappears from the listing page
+    // and from the host's rating surface) and it stamps hiddenByAdminId -- attributing the act to an
+    // account. There is no un-hide endpoint anywhere in this codebase, so from the API's own surface
+    // this is one-way. Same transaction, same lock order, same helper as every other Class A site;
+    // the audit row moves inside the transaction too, so a refused request leaves neither.
+    const review = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, {
         action: 'ADMIN_REVIEW_HIDDEN',
-        entityType: 'listing_reviews',
-        entityId: review.id,
-        before: existing,
-        after: review,
-      },
+        requiredRoles: ['ADMIN', 'SUPPORT'],
+      })
+      const hidden = await tx.listingReview.update({
+        where: { id: existing.id },
+        data: { hiddenAt: new Date(), hiddenByAdminId: context.user.id },
+      })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'ADMIN_REVIEW_HIDDEN',
+          entityType: 'listing_reviews',
+          entityId: hidden.id,
+          before: existing,
+          after: hidden,
+        },
+      })
+      return hidden
     })
 
     return json(res, 200, { ok: true, review })
@@ -991,34 +1003,81 @@ export async function handleAdmin(req, res, url, context) {
       throw error
     }
 
+    // SEC-002R round 2, finding G1. Independent adversarial testing reproduced this live: a revoked
+    // admin's write here committed 265ms after the same token was proven dead by a 401 on a fresh
+    // request. The handler was four independent, untransacted operations -- a blob write, a
+    // db().user.update() rewriting ANOTHER user's KYC state, an IRREVERSIBLE deletion of that user's
+    // previous identity document, and a bare audit-log insert -- with no re-authorization anywhere.
+    //
+    // The filesystem/object side cannot join a Postgres transaction, so the ordering below is what
+    // carries the guarantee instead:
+    //
+    //   1. Write the NEW blob first. It is inert until a row points at it, and orphaning one costs
+    //      storage, not correctness.
+    //   2. Do EVERY durable DB effect -- the target's KYC state and the audit row -- inside ONE
+    //      transaction, with reauthorizeAtCommit() as its first statement under held
+    //      user_sessions/users locks. A revoked actor gets no user row change and no audit row.
+    //   3. Delete the PREVIOUS document only AFTER that transaction has genuinely committed. This is
+    //      the ordering the owner specifically called for: authority is proven before the destructive
+    //      delete, so a refused request can never destroy a real user's prior KYC evidence. The
+    //      previous ref is re-read INSIDE the transaction too, so a concurrent upload's document is
+    //      never the one deleted.
+    //   4. If the transaction is refused or fails, delete the NEW blob written in step 1, so a
+    //      refused request leaves nothing behind at all.
     const storageKey = await saveIdDocument(fileBase64, mimeType)
-    const updated = await db().user.update({
-      where: { id: targetUserId },
-      data: {
-        idDocumentRef: storageKey,
-        idDocumentMimeType: mimeType,
-        idDocumentSubmittedAt: new Date(),
-        idDocumentStatus: 'PENDING_REVIEW',
-        idDocumentReviewedById: null,
-        idDocumentReviewedAt: null,
-      },
-      select: ID_DOCUMENT_SAFE_SELECT,
-    })
-
-    if (previous.idDocumentRef && previous.idDocumentRef !== storageKey) {
-      await deleteIdDocument(previous.idDocumentRef)
+    let updated
+    let supersededRef = null
+    try {
+      ;({ updated, supersededRef } = await db().$transaction(async (tx) => {
+        const current = await tx.user.findUnique({ where: { id: targetUserId }, select: { idDocumentRef: true } })
+        if (!current) {
+          const error = new Error('Customer not found.')
+          error.statusCode = 404
+          error.code = 'USER_NOT_FOUND'
+          error.expose = true
+          throw error
+        }
+        // This route admits ADMIN or SUPPORT, so the commit-boundary role predicate must admit the
+        // same pair -- narrowing it to ADMIN here would silently break SUPPORT's real workflow, and
+        // widening the route is a separate policy decision, not this fix's to make.
+        await reauthorizeAtCommit(tx, context, {
+          action: 'ID_DOCUMENT_UPLOADED_BY_ADMIN',
+          requiredRoles: ['ADMIN', 'SUPPORT'],
+        })
+        const row = await tx.user.update({
+          where: { id: targetUserId },
+          data: {
+            idDocumentRef: storageKey,
+            idDocumentMimeType: mimeType,
+            idDocumentSubmittedAt: new Date(),
+            idDocumentStatus: 'PENDING_REVIEW',
+            idDocumentReviewedById: null,
+            idDocumentReviewedAt: null,
+          },
+          select: ID_DOCUMENT_SAFE_SELECT,
+        })
+        await tx.adminAuditLog.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'ID_DOCUMENT_UPLOADED_BY_ADMIN',
+            entityType: 'iddocuments',
+            entityId: targetUserId,
+            before: {},
+            after: row,
+          },
+        })
+        return { updated: row, supersededRef: current.idDocumentRef }
+      }))
+    } catch (err) {
+      // Nothing in the DB references the blob written above; a refused or failed request must not
+      // leave it lying in the KYC bucket.
+      await deleteIdDocument(storageKey).catch(() => {})
+      throw err
     }
 
-    await db().adminAuditLog.create({
-      data: {
-        actorUserId: context.user.id,
-        action: 'ID_DOCUMENT_UPLOADED_BY_ADMIN',
-        entityType: 'iddocuments',
-        entityId: targetUserId,
-        before: {},
-        after: updated,
-      },
-    })
+    if (supersededRef && supersededRef !== storageKey) {
+      await deleteIdDocument(supersededRef)
+    }
 
     return json(res, 200, { ok: true, user: updated })
   }

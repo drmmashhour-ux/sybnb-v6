@@ -7,6 +7,7 @@
 import { db } from './prisma.mjs'
 import { approvePaymentProof, firstAdminId, isProviderRefUniqueViolation } from './finance-ledger.mjs'
 import { verifyAndLockClaim, ClaimLostError } from './payment-event-pipeline.mjs'
+import { reauthorizeAtCommit } from './commit-authorization.mjs'
 
 // `verifyOwnership` and `markSettled`, if supplied, both run INSIDE this function's own transaction —
 // see applyStripeCheckoutEvent below, the ONLY caller that ever supplies either (bound to a webhook
@@ -18,13 +19,25 @@ import { verifyAndLockClaim, ClaimLostError } from './payment-event-pipeline.mjs
 // own transaction, then marked the event row APPLIED as a SEPARATE statement afterward -- a crash in
 // that narrow window could leave real financial effects committed while the event stayed stuck at
 // APPLYING forever, and the round-7 code didn't even check whether that separate write succeeded).
-// The `/api/payments/stripe/confirm` route calls this function directly with no options object at
-// all: that path has no claim concept (it is driven by user action, not a webhook claim), so neither
-// hook runs there — both parameters are entirely absent for that call site, not merely no-ops.
-export async function finalizeStripeSession(session, { verifyOwnership, markSettled } = {}) {
+// The `/api/payments/stripe/confirm` route has no claim concept (it is driven by user action, not a
+// webhook claim), so neither of those two hooks runs there. It DOES supply `beforeEffects` — see
+// below and confirmStripeCheckoutSessionForActor().
+//
+// SEC-002R round 2 (GAP-1). `beforeEffects` is now a first-class parameter of THIS function rather
+// than something only applyStripeCheckoutEvent knew how to inject. Independent review found the
+// round-1 fix left `/api/payments/stripe/confirm` calling this function with no options object at
+// all -- so the PaymentProof create + approvePaymentProof below (the same money-moving primitive the
+// review-queue payment-approve path protects) ran with NO commit-boundary re-authorization
+// whatsoever. That path was unreachable in practice only because 'stripe' is absent from
+// APPROVED_PROVIDER_CONFIGS; a configuration gate is not an authorization boundary, and the owner
+// explicitly refused it as the fix. It runs INSIDE this function's own transaction, after ownership
+// (webhook rail) is proven and before ANY effect-producing read or write, so a throw from it rolls
+// the entire transaction back with nothing committed.
+export async function finalizeStripeSession(session, { verifyOwnership, beforeEffects, markSettled } = {}) {
   try {
    return await db().$transaction(async (tx) => {
     if (verifyOwnership) await verifyOwnership(tx)
+    if (beforeEffects) await beforeEffects(tx)
 
     const bookingId = session.metadata?.bookingId
     if (!bookingId || session.payment_status !== 'paid') {
@@ -81,6 +94,34 @@ export async function finalizeStripeSession(session, { verifyOwnership, markSett
   }
 }
 
+// SEC-002R round 2 (GAP-1) — the confirm rail's Class A seam.
+//
+// `/api/payments/stripe/confirm` is a GUEST-authenticated request that finalizes a real card charge:
+// it creates a PaymentProof and immediately auto-approves it via approvePaymentProof(), which posts
+// the host HOLD, the platform-share CREDIT and the protection fee, and confirms the booking. That is
+// the SAME irreversible money-moving primitive the review-queue payment-approve path (admin.mjs's
+// Class A dispatcher) is protected for, so it gets the same commit-boundary guarantee.
+//
+// Defined HERE rather than inline in the route so there is exactly one definition of "what this rail
+// re-authorizes", callable by both the route and the regression suite -- the suite cannot drive the
+// route end-to-end (that requires a live Stripe account to answer
+// stripe.checkout.sessions.retrieve), so it races THIS function, which is the entire body of the
+// route's effect.
+//
+// requiredRoles is ['GUEST'] to mirror the route's own requireAuth(context, ['GUEST']): if the actor
+// loses GUEST between admission and commit, the finalization must not land either. Ownership of the
+// checkout session (session.metadata.guestId === actor) is checked by the route against Stripe's own
+// authenticated response and is not re-derivable inside the transaction, so it stays where it is;
+// what this adds is the account/session/role authority half, which IS re-derivable and IS lockable.
+export async function confirmStripeCheckoutSessionForActor({ session, context }) {
+  return finalizeStripeSession(session, {
+    beforeEffects: (tx) => reauthorizeAtCommit(tx, context, {
+      action: 'STRIPE_CHECKOUT_CONFIRMED',
+      requiredRoles: ['GUEST'],
+    }),
+  })
+}
+
 // Wraps finalizeStripeSession for the durable webhook-apply seam: marks the PaymentEvent row APPLIED
 // (session finalized, or already had been — both resolve to the same settled proof) or IGNORED (a
 // structural no-op: unpaid session, or the booking is no longer in a state this can apply to) via the
@@ -102,8 +143,12 @@ export async function applyStripeCheckoutEvent({ eventId, session, claimToken, b
   const proof = await finalizeStripeSession(session, {
     verifyOwnership: async (tx) => {
       await verifyAndLockClaim(tx, { eventId, claimToken })
-      if (beforeEffects) await beforeEffects(tx)
     },
+    // Forwarded to finalizeStripeSession's own `beforeEffects` slot, which runs immediately after
+    // verifyOwnership above and before any effect-producing statement -- identical ordering to the
+    // round-1 version that nested it inside verifyOwnership, now expressed through the shared
+    // parameter so the confirm route and the replay route use ONE mechanism, not two.
+    beforeEffects,
     markSettled: async (tx, { applied }) => {
       const marked = await tx.paymentEvent.updateMany({
         where: { id: eventId, claimToken },

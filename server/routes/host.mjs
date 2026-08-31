@@ -10,6 +10,11 @@ import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
+// SEC-002R round 2. The fresh mutation sweep classified the host's own confirm/cancel decision as
+// Class A for the same reason the guest's cancellation is: cancelling marks real payment proofs
+// REFUNDED and calls createRefundRequest(), which reserves refund capacity against the proof's
+// ledger counters. See server/lib/commit-authorization.mjs.
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
 export async function handleHost(req, res, url, context) {
   if (url.pathname === '/api/host/earnings') {
@@ -215,6 +220,14 @@ export async function handleHost(req, res, url, context) {
     }
 
     const booking = await db().$transaction(async (tx) => {
+      // SEC-002R Class A. Runs before the proof rewrite and before createRefundRequest() reserves
+      // anything, under the user_sessions/users locks. Roles mirror this route's own requireAuth
+      // list exactly (['HOST', 'SELLER']) -- a host who loses HOST mid-request must not be able to
+      // land a cancellation that commits the platform to a refund.
+      await reauthorizeAtCommit(tx, context, {
+        action: `HOST_${status}`,
+        requiredRoles: ['HOST', 'SELLER'],
+      })
       const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
 
       if (status === 'CANCELLED') {

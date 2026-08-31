@@ -8,7 +8,7 @@ import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 import { log } from '../lib/logger.mjs'
-import { finalizeStripeSession, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
+import { confirmStripeCheckoutSessionForActor, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
 import { applyPaymentEvent, intakeEvent, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
@@ -280,7 +280,15 @@ export async function handlePayments(req, res, url, context) {
       actor: { roles: context.roles },
     })
 
-    const proof = await finalizeStripeSession(session)
+    // SEC-002R round 2, GAP-1. This call creates a PaymentProof and auto-approves it (host HOLD +
+    // platform CREDIT + protection fee + booking confirmation) -- Class A, irreversible money
+    // movement. Round 1 called finalizeStripeSession(session) with NO options at all, so this rail
+    // had no commit-boundary re-authorization whatsoever; independent review found it, and the fact
+    // that 'stripe' is absent from APPROVED_PROVIDER_CONFIGS was explicitly rejected as a fix (a
+    // configuration flag is not an authorization boundary, and this route is one config change away
+    // from live). confirmStripeCheckoutSessionForActor() runs reauthorizeAtCommit() INSIDE
+    // finalizeStripeSession's own transaction, before the first effect-producing statement.
+    const proof = await confirmStripeCheckoutSessionForActor({ session, context })
     if (!proof) {
       const error = new Error('Could not confirm this payment against the booking.')
       error.statusCode = 409

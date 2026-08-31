@@ -33,6 +33,7 @@ const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRE
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { RideMap } from '../../shared/maps/RideMap'
+import { isSrRideLocationConfirmed } from './srRideLocationGuard'
 
 type Props = {
   lang: Lang
@@ -63,6 +64,7 @@ const copy = {
     saving: 'جار الحفظ',
     gps: 'استخدام موقعي الحالي',
     manualHint: 'يمكن متابعة الطلب حتى بدون GPS عبر العناوين اليدوية.',
+    locationNotConfirmed: 'يرجى تأكيد نقطة الانطلاق والوجهة (بالكتابة أو عبر GPS) قبل طلب الرحلة.',
     driverNotAssigned: 'لم يُعيّن سائق بعد',
     verifiedDriver: 'هوية موثقة',
     waitingForDriver: 'بانتظار قبول أحد السائقين القريبين للرحلة...',
@@ -147,6 +149,7 @@ const copy = {
     saving: 'Saving',
     gps: 'Use my current location',
     manualHint: 'The request can continue without GPS through manual addresses.',
+    locationNotConfirmed: 'Please confirm both pickup and dropoff (by typing or via GPS) before requesting a ride.',
     driverNotAssigned: 'Not assigned yet',
     verifiedDriver: 'Verified identity',
     waitingForDriver: 'Waiting for a nearby driver to accept the ride...',
@@ -223,6 +226,14 @@ export function SrRidePage({ lang }: Props) {
   const isAr = lang === 'ar'
   const [pickup, setPickup] = useState(isAr ? 'دمشق، المالكي' : 'Damascus, Malki')
   const [dropoff, setDropoff] = useState(isAr ? 'دمشق، المزة' : 'Damascus, Mezzeh')
+  // SEC-F1-adjacent UX-4A fix (Priority A): the two lines above are display
+  // defaults, not real addresses. Without this pair, requestRide() could
+  // submit them as a genuine trip with zero user interaction. Flipped true
+  // by any real source of a location -- manual edit, a saved-place chip, or
+  // a successful GPS fix -- and enforced in requestRide() itself, not just
+  // the submit button's disabled state.
+  const [pickupTouched, setPickupTouched] = useState(false)
+  const [dropoffTouched, setDropoffTouched] = useState(false)
   const [category, setCategory] = useState(categories[0])
   const [lowDataMode, setLowDataMode] = useState(true)
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>()
@@ -415,6 +426,7 @@ export function SrRidePage({ lang }: Props) {
         setAccuracyMeters(Math.round(position.coords.accuracy))
         setPickupCoords({ lat: position.coords.latitude, lng: position.coords.longitude })
         setPickup(isAr ? 'موقعي الحالي' : 'Current location')
+        setPickupTouched(true)
       },
       () => {
         setAccuracyMeters(undefined)
@@ -426,6 +438,16 @@ export function SrRidePage({ lang }: Props) {
   }
 
   async function requestRide() {
+    // SEC-F1-adjacent UX-4A fix (Priority A): enforced here, in the actual
+    // submission path -- not only via the button's disabled attribute --
+    // so this can't be bypassed by any other future call site of
+    // requestRide() forgetting to check the button state first.
+    if (!isSrRideLocationConfirmed({ pickupTouched, dropoffTouched, pickup, dropoff })) {
+      setStatus('error')
+      setMessage(t.locationNotConfirmed)
+      return
+    }
+
     setStatus('saving')
     setMessage('')
 
@@ -607,10 +629,24 @@ export function SrRidePage({ lang }: Props) {
             <div style={styles.savedPlacesRow}>
               {savedPlaces.map((place) => (
                 <span key={place.id} style={styles.savedPlaceChip}>
-                  <button type="button" style={styles.chipButton} onClick={() => setPickup(place.address)}>
+                  <button
+                    type="button"
+                    style={styles.chipButton}
+                    onClick={() => {
+                      setPickup(place.address)
+                      setPickupTouched(true)
+                    }}
+                  >
                     {place.label}
                   </button>
-                  <button type="button" style={styles.chipButton} onClick={() => setDropoff(place.address)}>
+                  <button
+                    type="button"
+                    style={styles.chipButton}
+                    onClick={() => {
+                      setDropoff(place.address)
+                      setDropoffTouched(true)
+                    }}
+                  >
                     → {t.dropoff}
                   </button>
                   <button type="button" style={styles.chipButton} onClick={() => void removeSavedPlace(place.id)}>
@@ -623,7 +659,14 @@ export function SrRidePage({ lang }: Props) {
 
           <label style={styles.label}>
             {t.pickup}
-            <input style={styles.input} value={pickup} onChange={(event) => setPickup(event.target.value)} />
+            <input
+              style={styles.input}
+              value={pickup}
+              onChange={(event) => {
+                setPickup(event.target.value)
+                setPickupTouched(true)
+              }}
+            />
           </label>
 
           {!ride && (
@@ -676,7 +719,14 @@ export function SrRidePage({ lang }: Props) {
 
           <label style={styles.label}>
             {t.dropoff}
-            <input style={styles.input} value={dropoff} onChange={(event) => setDropoff(event.target.value)} />
+            <input
+              style={styles.input}
+              value={dropoff}
+              onChange={(event) => {
+                setDropoff(event.target.value)
+                setDropoffTouched(true)
+              }}
+            />
           </label>
 
           <section style={styles.categoryCapsule}>
@@ -783,7 +833,11 @@ export function SrRidePage({ lang }: Props) {
           )}
 
           <button
-            disabled={status === 'saving' || (scheduleForLater && !scheduledFor)}
+            disabled={
+              status === 'saving' ||
+              (scheduleForLater && !scheduledFor) ||
+              !isSrRideLocationConfirmed({ pickupTouched, dropoffTouched, pickup, dropoff })
+            }
             style={styles.primaryButton}
             onClick={() => void requestRide()}
           >

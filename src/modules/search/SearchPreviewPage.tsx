@@ -400,7 +400,17 @@ function searchSummary(value: UnifiedSearchValue, lang: Lang) {
 // Only real-estate divisions carry bedrooms/bathrooms metadata server-side (see
 // server/routes/listings.mjs's bedroomsMin/bathroomsMin JSON-path filter) -- CARS and
 // MARKETPLACE listings never do, so sending these for them matches nothing.
-const HAS_BEDROOM_BATHROOM_FILTERS = new Set<UnifiedSearchValue['division']>(['stays', 'rentals', 'buy', 'newConstruction'])
+// UX-4A fix (Priority B, 2026-08-31): 'newConstruction' removed. The only
+// division actually routed through this component that used to be in this
+// Set -- 'rentals'/'buy' route through a separate RentalsPage.tsx instead
+// -- so 'newConstruction' was silently sending bedroomsMin=1/bathroomsMin=1
+// on every search with zero visible or editable UI for it (UnifiedSearchBar's
+// steppers are `isStay`-only). This does remove a real filter capability
+// New Construction listings could otherwise support (its sellers do capture
+// real bedroom/bathroom metadata via SellerListingWizard) -- the correct
+// long-term fix is real stepper UI for this division, not yet authorized;
+// this closes the invisible-default bug without building that UI.
+const HAS_BEDROOM_BATHROOM_FILTERS = new Set<UnifiedSearchValue['division']>(['stays', 'rentals', 'buy'])
 
 const GOV_TO_CITY: Record<string, string> = {
   damascus: 'Damascus',

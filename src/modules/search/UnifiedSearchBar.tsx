@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { visualFilterGroupsForDivision, type VisualFilterSelection } from '../../engines/filters'
@@ -264,6 +264,19 @@ const DIVISION_ATTRIBUTE_DEFAULTS: Pick<
   payments: [],
 }
 
+// UX-4B finding 1.1. Takes a stored draft and returns it with the division-specific attributes
+// stripped back to defaults whenever the draft was written under a DIFFERENT division than the one
+// now being opened. Geography (governorate/city/area/locationTouched/customPlaceName), dates,
+// guests, keyword and price are deliberately left untouched -- they are legitimate cross-division
+// search context and must keep persisting.
+export function restoreDraftForDivision(
+  draft: Partial<UnifiedSearchValue>,
+  division: SearchDivision,
+): Partial<UnifiedSearchValue> {
+  if (!draft.division || draft.division === division) return draft
+  return { ...draft, ...DIVISION_ATTRIBUTE_DEFAULTS }
+}
+
 type FilterOption = {
   icon: string
   key: string
@@ -344,9 +357,27 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     access: [],
     meals: [],
     payments: [],
-    ...loadSearchDraft(),
+    // UX-4B finding 1.1: the draft is what carries geography across division journeys -- that is
+    // intended and must survive. What must NOT survive is a division-specific attribute
+    // (Brand=Toyota under CARS, Category under MARKETPLACE, condition, etc.). switchDivision()
+    // already strips those, but the in-page tab is not the only way a guest changes division:
+    // each division route mounts its own SearchPreviewPage, keyed per division in App.tsx
+    // (src/app/App.tsx:201-211), so a /cars -> /marketplace navigation rebuilds this state from
+    // the draft here and never reaches switchDivision. The reset existed, the remount path simply
+    // walked around it. Apply the same defaults on this path too.
+    ...restoreDraftForDivision(loadSearchDraft(), initialDivision),
     division: initialDivision,
   }))
+
+  // Same reset for the route-change path where this component stays mounted and only the
+  // initialDivision prop changes. Guarded on an actual prop change, so a guest's own in-page tab
+  // switch is never undone.
+  const lastInitialDivision = useRef(initialDivision)
+  useEffect(() => {
+    if (lastInitialDivision.current === initialDivision) return
+    lastInitialDivision.current = initialDivision
+    setValue((current) => ({ ...current, division: initialDivision, ...DIVISION_ATTRIBUTE_DEFAULTS }))
+  }, [initialDivision])
 
   useEffect(() => {
     if (typeof window === 'undefined') return

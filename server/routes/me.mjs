@@ -4,6 +4,8 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { defaultCurrency } from '../lib/country.mjs'
+// SEC-002R round 3, item 1: the self-service half of finding G1 -- see the id-document handler below.
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
 export async function handleMe(req, res, url, context) {
   if (url.pathname === '/api/me/id-document') {
@@ -22,26 +24,68 @@ export async function handleMe(req, res, url, context) {
       throw error
     }
 
+    // SEC-002R round 3, item 1. This is the SELF-SERVICE side of finding G1 (server/routes/admin.mjs
+    // /api/admin/id-document/:userId/upload, fixed in round 2) -- structurally the same defect and
+    // therefore the same fix, mirrored statement for statement. Before this change the handler was
+    // three untransacted operations with no commit-boundary re-authorization anywhere: a blob write,
+    // a bare db().user.update() rewriting the actor's own KYC state, and -- the part that matters --
+    // an IRREVERSIBLE deleteIdDocument() of the actor's own previous identity document, executed
+    // whether or not the actor still had any authority at the moment it ran.
+    //
+    // The filesystem/object side cannot join a Postgres transaction, so ordering carries the
+    // guarantee (identical to the admin path's):
+    //
+    //   1. Write the NEW blob first. It is inert until a row points at it; orphaning one costs
+    //      storage, not correctness.
+    //   2. Do the durable DB effect inside ONE transaction with reauthorizeAtCommit() as its first
+    //      statement, under held user_sessions/users locks. A revoked actor gets no row change.
+    //   3. Delete the PREVIOUS document only AFTER that transaction has genuinely committed -- never
+    //      on a refused or thrown path. The previous ref is re-read INSIDE the transaction, so a
+    //      concurrent upload's document is never the one destroyed.
+    //   4. If the transaction is refused or fails, delete the NEW blob from step 1, so a refused
+    //      request leaves nothing behind at all.
+    //
+    // requiredRoles is deliberately EMPTY: this route's own requireAuth(context) takes no roles --
+    // any signed-in account may submit its own KYC document. The re-check therefore asserts exactly
+    // what admission asserted (live session, non-revoked, unexpired, current epoch, ACTIVE account)
+    // and nothing more. No interestedPartyIds either: the actor IS legitimately the subject here.
+    // Unlike the admin path there is no audit row on this route to bring inside the transaction --
+    // this handler never wrote one, and adding one is a separate change, not this fix's to make.
     const storageKey = await saveIdDocument(fileBase64, mimeType)
-    const previous = await db().user.findUnique({ where: { id: context.user.id }, select: { idDocumentRef: true } })
-
-    const user = await db().user.update({
-      where: { id: context.user.id },
-      data: {
-        idDocumentRef: storageKey,
-        idDocumentMimeType: mimeType,
-        idDocumentSubmittedAt: new Date(),
-        idDocumentStatus: 'PENDING_REVIEW',
-        idDocumentReviewedById: null,
-        idDocumentReviewedAt: null,
-      },
-      select: { id: true, idDocumentRef: true, idDocumentSubmittedAt: true, idDocumentStatus: true },
-    })
+    let user
+    let supersededRef = null
+    try {
+      ;({ user, supersededRef } = await db().$transaction(async (tx) => {
+        await reauthorizeAtCommit(tx, context, { action: 'ID_DOCUMENT_SUBMITTED' })
+        const current = await tx.user.findUnique({
+          where: { id: context.user.id },
+          select: { idDocumentRef: true },
+        })
+        const row = await tx.user.update({
+          where: { id: context.user.id },
+          data: {
+            idDocumentRef: storageKey,
+            idDocumentMimeType: mimeType,
+            idDocumentSubmittedAt: new Date(),
+            idDocumentStatus: 'PENDING_REVIEW',
+            idDocumentReviewedById: null,
+            idDocumentReviewedAt: null,
+          },
+          select: { id: true, idDocumentRef: true, idDocumentSubmittedAt: true, idDocumentStatus: true },
+        })
+        return { user: row, supersededRef: current?.idDocumentRef ?? null }
+      }))
+    } catch (err) {
+      // Nothing in the DB references the blob written above; a refused or failed request must not
+      // leave it lying in the KYC bucket.
+      await deleteIdDocument(storageKey).catch(() => {})
+      throw err
+    }
 
     // Replacing a previous submission (e.g. after a rejection) — remove the old file now that the
-    // new one is safely written and the DB row points at the new one.
-    if (previous?.idDocumentRef && previous.idDocumentRef !== storageKey) {
-      await deleteIdDocument(previous.idDocumentRef)
+    // new one is safely written, the DB row points at the new one, and that write has COMMITTED.
+    if (supersededRef && supersededRef !== storageKey) {
+      await deleteIdDocument(supersededRef)
     }
 
     return json(res, 200, { ok: true, user })

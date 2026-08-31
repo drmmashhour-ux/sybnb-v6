@@ -21,7 +21,10 @@ import { sendPushNotification } from '../lib/push-notifications.mjs'
 // file -- promo-code creation, promo-code activation toggling, and business-account onboarding --
 // were bare db().x.create/update calls with no transaction and no commit-boundary re-authorization.
 // G2 was reproduced live against a revoked admin. See server/lib/commit-authorization.mjs.
-import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
+// SEC-002R round 3 additionally wires this file's ride cancel (money: cancellationFeeMinor) and
+// admin/support driver assignment (dispatch to a live passenger), and closes the business-account
+// self-dealing gap round 2 left open -- see each call site.
+import { REAUTH_FAILURE_CODES, reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
@@ -326,11 +329,28 @@ export async function handleSrRides(req, res, url, context) {
       ? Math.round((existing.fareMinor * RIDE_CANCELLATION_FEE_PERCENT) / 100)
       : null
 
-    // Optimistic-concurrency guard: re-check the status we read so a driver claim/arrival
-    // landing at the same moment cannot be silently overwritten by this cancel.
-    const cancelResult = await db().rideRequest.updateMany({
-      where: { id: existing.id, status: existing.status },
-      data: { status: 'CANCELLED', cancellationFeeMinor },
+    // SEC-002R round 3, item 3. Class A: `cancellationFeeMinor` is a REAL money field, computed from
+    // the ride's own locked fareMinor, and there is no endpoint anywhere that reverses it -- once
+    // this row commits, the rider owes that fee. Before this change it was a bare, untransacted
+    // updateMany with no commit-boundary re-authorization.
+    //
+    // requiredRoles MATCHES this route's own requireAuth(context, ['GUEST']) exactly -- not widened,
+    // not narrowed. This route is SELF-SCOPED (the `existing.riderId !== context.user.id` check
+    // above), so interestedPartyIds is deliberately NOT passed: the actor legitimately IS the
+    // interested party on their own cancellation, and passing it would refuse every real cancel.
+    // The self-scope is additionally carried INTO the guarded write (`riderId` in the WHERE clause)
+    // so the protected statement is self-contained rather than relying on the pre-transaction read.
+    const cancelResult = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, {
+        action: 'SR_RIDER_CANCELLED',
+        requiredRoles: ['GUEST'],
+      })
+      // Optimistic-concurrency guard: re-check the status we read so a driver claim/arrival
+      // landing at the same moment cannot be silently overwritten by this cancel.
+      return tx.rideRequest.updateMany({
+        where: { id: existing.id, status: existing.status, riderId: context.user.id },
+        data: { status: 'CANCELLED', cancellationFeeMinor },
+      })
     })
 
     if (cancelResult.count === 0) {
@@ -387,12 +407,32 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
-    // Re-check status in the WHERE clause (optimistic concurrency): if another admin/support
-    // agent assigned a driver to this ride between our read and this write, this matches zero
-    // rows instead of silently overwriting their assignment.
-    const assignResult = await db().rideRequest.updateMany({
-      where: { id: assignMatch[1], status: existing.status },
-      data: { driverId: driver.id, status: 'DRIVER_ASSIGNED' },
+    // SEC-002R round 3, item 2. Class A, and the SAME durable effect as /claim below (protected in
+    // round 2): this dispatches a named driver to a live passenger. Before this change it was a
+    // bare, untransacted updateMany with no commit-boundary re-authorization, so a suspended or
+    // de-roled admin/support agent could still commit a real dispatch. Mirrors the /claim fix's
+    // shape exactly -- reauthorizeAtCommit() first, under held user_sessions/users locks, then the
+    // guarded write, in one transaction.
+    //
+    // requiredRoles MATCHES this route's own requireAuth(context, ['ADMIN', 'SUPPORT']) -- admitting
+    // the same pair, since narrowing to ADMIN would silently break SUPPORT's real dispatch workflow
+    // and widening is a policy decision, not this fix's. No interestedPartyIds: the driver being
+    // assigned is validated as a real ACTIVE DRIVER account above, and an admin assigning THEMSELVES
+    // is not expressible here (assignment requires the target to hold DRIVER; an admin who also held
+    // DRIVER self-assigning is a distinct policy question, recorded in the round-3 report, not
+    // silently decided here).
+    const assignResult = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, {
+        action: 'SR_DRIVER_ASSIGNED',
+        requiredRoles: ['ADMIN', 'SUPPORT'],
+      })
+      // Re-check status in the WHERE clause (optimistic concurrency): if another admin/support
+      // agent assigned a driver to this ride between our read and this write, this matches zero
+      // rows instead of silently overwriting their assignment.
+      return tx.rideRequest.updateMany({
+        where: { id: assignMatch[1], status: existing.status },
+        data: { driverId: driver.id, status: 'DRIVER_ASSIGNED' },
+      })
     })
 
     if (assignResult.count === 0) {
@@ -848,18 +888,54 @@ export async function handleSrRides(req, res, url, context) {
       // row hands that person the standing power to add and remove members who can then bill real
       // rides to the company. Same class as a role change, and treated the same way.
       const businessAccount = await db().$transaction(async (tx) => {
+        // SEC-002R round 3, item 5 -- the self-dealing gap round 2 deliberately left open is now
+        // CLOSED, on the owner's explicit instruction.
+        //
+        // THE ATTACK. `adminUserId` is the whole of a business account's authority: business.mjs's
+        // loadOwnBusinessAccount() derives "is this caller the company's admin" from
+        // `businessAccount.adminUserId === context.user.id` and nothing else. A platform ADMIN who
+        // named THEMSELVES here therefore walked straight into POST /api/business/members (already
+        // commit-boundary-protected, but protection is not the question -- authority is) and granted
+        // any rider standing power to bill real rides to that company, whose corporate usage
+        // business.mjs then totals as genuine money owed. One admin, acting alone, creating the
+        // company AND holding its purse: exactly the class closed for the other nine admin decision
+        // paths in 115aa09, on a path that had no check of any kind.
+        //
+        // THE FIX. The identical predicate those nine use -- "the actor must not be an interested
+        // party in the thing they are deciding" -- via the SAME shared mechanism
+        // (reauthorizeAtCommit's interestedPartyIds), not a parallel one. `adminUser.id` is re-read
+        // INSIDE this transaction, by the same email, immediately before the check: a genuine
+        // commit-boundary comparison, not a replay of the admission-time one, so an account swap
+        // committing between the outer lookup and this write cannot slip past it. The refusal
+        // carries its own code (BUSINESS_ACCOUNT_SELF_DEALING) rather than the review-queue wording,
+        // because an operator hitting it needs to be told which rule they hit.
+        //
+        // SCOPE, stated honestly: this blocks the actor naming THEMSELVES. "Any account they
+        // control" is NOT determinable in this codebase -- there is no account-ownership or
+        // delegation graph, so an admin who controls a second, unrelated account can still name that
+        // one. That residual is recorded in docs/security/sec-002r-mutation-inventory.md; it is a
+        // collusion/second-identity problem, not something this check can see.
+        const designated = await tx.user.findUnique({ where: { email: adminEmail }, select: { id: true } })
+        if (!designated) {
+          const error = new Error('No account exists with the admin email. That person must sign up first.')
+          error.statusCode = 404
+          error.code = 'BUSINESS_ACCOUNT_ADMIN_NOT_FOUND'
+          error.expose = true
+          throw error
+        }
         await reauthorizeAtCommit(tx, context, {
           action: 'SR_BUSINESS_ACCOUNT_CREATED',
           requiredRoles: ['ADMIN'],
-          // NOT passing interestedPartyIds: [adminUser.id] here, deliberately. A platform admin
-          // onboarding a company whose designated business admin is themselves is a genuine
-          // self-dealing gap (nothing in this file or in business.mjs blocks it, unlike the nine
-          // admin decision paths hardened in 115aa09), but closing it introduces a NEW refusal on a
-          // path that has never had one -- a policy decision, not a commit-boundary one, and outside
-          // this round's mandate. Flagged in the SEC-002R round-2 report as a recommended follow-up.
+          interestedPartyIds: [designated.id],
+          selfDealingError: {
+            code: REAUTH_FAILURE_CODES.BUSINESS_ACCOUNT_SELF_DEALING,
+            message: 'An admin cannot create a business account naming themselves as its business admin.',
+          },
         })
         const created = await tx.businessAccount.create({
-          data: { name, billingContactEmail, adminUserId: adminUser.id },
+          // designated.id, not the pre-transaction adminUser.id: the row created is the one the
+          // self-dealing check above actually ruled on.
+          data: { name, billingContactEmail, adminUserId: designated.id },
           include: { admin: { select: { id: true, displayName: true, email: true } } },
         })
         await tx.adminAuditLog.create({

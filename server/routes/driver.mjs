@@ -6,6 +6,9 @@ import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { updateDriverLocation } from '../lib/live-map.mjs'
 import { activateScheduledRides } from '../lib/ride-schedule.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
+// SEC-002R round 3, item 4: the COMPLETED transition is what makes a fare billable -- see the ride
+// status handler below.
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
 const RIDER_STATUS_PUSH_COPY = {
   DRIVER_ARRIVING: { title: 'Your driver is arriving', body: 'Your SR driver is on the way to your pickup point.' },
@@ -180,13 +183,36 @@ export async function handleDriver(req, res, url, context) {
 
     assertDriverRideTransition(existing.status, nextStatus)
 
-    // Re-check status in the WHERE clause (optimistic concurrency): if another request already
-    // moved this ride between our read and this write, this matches zero rows instead of
-    // silently applying a transition that was only valid for the stale status we read.
-    const updateResult = await db().rideRequest.updateMany({
-      where: { id: existing.id, status: existing.status },
-      data: { status: nextStatus },
-    })
+    // SEC-002R round 3, item 4. The COMPLETED transition specifically is Class A: it is what makes a
+    // fare BILLABLE. server/routes/business.mjs's /api/business/usage totals corporate spend as
+    // `rides.filter(r => r.status === 'COMPLETED').reduce((sum, r) => sum + r.fareMinor, 0)`, and
+    // this driver route's own overview computes earningsMinor the same way -- so writing COMPLETED
+    // is the act that turns a trip into money owed by a company and owed to a driver. There is no
+    // un-complete endpoint. Before this change it was a bare, untransacted updateMany.
+    //
+    // requiredRoles MATCHES this route's own requireAuth(context, ['DRIVER']) exactly. The route is
+    // SELF-SCOPED (the `driverId: context.user.id` filter on the read above), so interestedPartyIds
+    // is deliberately not passed -- the driver legitimately IS the beneficiary of their own
+    // completed ride. The self-scope is carried into the guarded write's WHERE clause so the
+    // protected statement stands on its own rather than trusting the pre-transaction read.
+    //
+    // The OTHER transitions on this route (DRIVER_ARRIVING, IN_PROGRESS) are deliberately left as
+    // they are: neither is summed by any money computation in this codebase, neither is irreversible
+    // in any financial sense, and expanding to them would be scope this round was not given. Noted
+    // in docs/security/sec-002r-mutation-inventory.md as Class B rather than silently widened.
+    const guardedWhere = { id: existing.id, status: existing.status, driverId: context.user.id }
+    const updateResult = nextStatus === 'COMPLETED'
+      ? await db().$transaction(async (tx) => {
+          await reauthorizeAtCommit(tx, context, {
+            action: 'SR_RIDE_COMPLETED',
+            requiredRoles: ['DRIVER'],
+          })
+          return tx.rideRequest.updateMany({ where: guardedWhere, data: { status: nextStatus } })
+        })
+      // Re-check status in the WHERE clause (optimistic concurrency): if another request already
+      // moved this ride between our read and this write, this matches zero rows instead of
+      // silently applying a transition that was only valid for the stale status we read.
+      : await db().rideRequest.updateMany({ where: guardedWhere, data: { status: nextStatus } })
 
     if (updateResult.count === 0) {
       const error = new Error('Ride status changed before this update could apply. Reload and try again.')

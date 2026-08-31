@@ -152,6 +152,11 @@ run_full "otp"              otp-identity.e2e.mjs
   # and still runs unchanged. The stripe_checkout REPLAY half of round 2 cannot run here (that
   # operation is policy-refused on this server) -- it runs in the stripe-approved phase below.
   run_full "commit-boundary-r2" commit-boundary-reauthorization-round2.e2e.mjs
+  # SEC-002R round 3 (post-round-2 spot-check). Additive again: rounds 1 and 2 above are frozen
+  # evidence and still run unchanged. Both A8 rails' reversal branches are exercised in-process by
+  # this suite (the production seam, not HTTP -- see the file header for why), so unlike round 2 it
+  # needs no separate stripe-approved server phase.
+  run_full "commit-boundary-r3" commit-boundary-reauthorization-round3.e2e.mjs
   run_full "resend-webhook"   resend-webhook.e2e.mjs
 run_full "storage"          storage.e2e.mjs
 run_full "legal"            legal-consent.e2e.mjs

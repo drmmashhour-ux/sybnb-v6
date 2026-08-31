@@ -74,6 +74,12 @@ export const REAUTH_FAILURE_CODES = {
   EPOCH_STALE: 'SESSION_EPOCH_STALE_BEFORE_COMMIT',
   ROLE_LOST: 'ROLE_REVOKED_BEFORE_COMMIT',
   SELF_DEALING: 'SELF_REVIEW_FORBIDDEN',
+  // SEC-002R round 3, item 5. The self-dealing predicate below is genuinely shared, but its default
+  // wording ("approve or reject their own submission") is review-queue language. Creating a business
+  // account naming yourself as its business-admin is the same CLASS of conflict of interest and uses
+  // the same predicate, but it is not a review decision, and an operator reading a 403 needs to be
+  // told which rule they hit. See the `selfDealingError` option on reauthorizeAtCommit().
+  BUSINESS_ACCOUNT_SELF_DEALING: 'BUSINESS_ACCOUNT_SELF_DEALING',
 }
 
 function authError(message, code) {
@@ -108,8 +114,15 @@ function forbiddenError(message, code) {
  * @param {string}   options.action              short label, used only in the audit/error text
  * @param {string[]} [options.requiredRoles]     roles of which the actor must still hold at least one
  * @param {string[]} [options.interestedPartyIds] ids the actor must still not be, re-checked here
+ * @param {{code: string, message: string}} [options.selfDealingError]  overrides the wording/code of
+ *        the interestedPartyIds refusal for call sites that are not review-queue decisions. The
+ *        PREDICATE is unchanged and still shared -- this only names the rule that was hit.
  */
-export async function reauthorizeAtCommit(tx, context, { action, requiredRoles = [], interestedPartyIds = [] } = {}) {
+export async function reauthorizeAtCommit(
+  tx,
+  context,
+  { action, requiredRoles = [], interestedPartyIds = [], selfDealingError = null } = {},
+) {
   // Fail closed on a malformed context rather than treating "nothing to check" as "check passed".
   // Nothing in the current codebase can reach a Class A handler without a context, but a future
   // caller that forgets to pass one must get a refusal, not a silent bypass.
@@ -193,8 +206,8 @@ export async function reauthorizeAtCommit(tx, context, { action, requiredRoles =
   // commit-boundary check and not a replay of the admission-time comparison.
   if (interestedPartyIds.filter(Boolean).includes(userId)) {
     throw forbiddenError(
-      'An admin cannot approve or reject their own submission.',
-      REAUTH_FAILURE_CODES.SELF_DEALING,
+      selfDealingError?.message || 'An admin cannot approve or reject their own submission.',
+      selfDealingError?.code || REAUTH_FAILURE_CODES.SELF_DEALING,
     )
   }
 

@@ -239,16 +239,110 @@ export const CLAIM_DURATION_MS = 120_000
 //      attempt's own increment instead of recording FAILED/DEAD_LETTERED -- the same "this attempt
 //      genuinely did nothing" reasoning ClaimLostError already relies on. Without this, a revocation
 //      landing in the microseconds between the claim and the apply would still leave a real mark.
+// SEC-002R round 3, item 6. Bounded retry around the compensating reversal of a refused attempt's
+// own claim. Small and fixed: the reversal is one short UPDATE against a row this attempt still owns
+// by token, so the only realistic failures are transient (a serialization/deadlock blip, a connection
+// dropped mid-flight). Retrying that a couple of times converts the common transient case into a
+// clean reversal instead of a permanently stranded row; retrying it MORE would just delay surfacing a
+// genuinely dead database, which is the case the caller must hear about rather than wait on.
+//
+// `count: 0` is a success, not a failure: it means a newer claimant has already taken the row over
+// (our token is no longer current), so there is nothing of ours left to reverse and the newer
+// claimant's state is authoritative -- the same reasoning every other token-bound write here relies
+// on.
+const REVERSAL_MAX_ATTEMPTS = 3
+const REVERSAL_RETRY_BASE_MS = 50
+
+async function reverseRefusedClaim({ eventId, token, restored }) {
+  let lastError = null
+  for (let attempt = 1; attempt <= REVERSAL_MAX_ATTEMPTS; attempt++) {
+    try {
+      const result = await db().paymentEvent.updateMany({
+        where: { id: eventId, claimToken: token, processingStatus: 'APPLYING' },
+        data: { attempts: { decrement: 1 }, processingStatus: restored, claimToken: null, claimExpiresAt: null },
+      })
+      if (attempt > 1) log.error('payment_event_reauth_release_recovered', { eventId, attempt, count: result.count })
+      return { ok: true, count: result.count }
+    } catch (e2) {
+      lastError = e2
+      log.error('payment_event_reauth_release_attempt_failed', { eventId, attempt, err: errorSummary(e2) })
+      if (attempt < REVERSAL_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, REVERSAL_RETRY_BASE_MS * attempt))
+      }
+    }
+  }
+  return { ok: false, error: lastError }
+}
+
+// The durable half of "never lose a failed reversal". An append-only audit row naming the event, the
+// claim token that still holds it, and the status the reversal INTENDED to restore -- enough for a
+// human to finish the compensation by hand without reconstructing anything. Deliberately actorless
+// (actorUserId is nullable): this module is rail- and actor-agnostic, and the actor whose revocation
+// triggered the refusal is emphatically not the author of this record.
+//
+// This can itself fail -- if the database is what broke, it will. That is why it is a SECOND line and
+// not the only one: its success/failure is reported back to the caller, which raises a
+// distinguishable error either way, so the condition can never be silently dropped the way the bare
+// `.catch(log)` this replaced allowed.
+async function recordStrandedClaim({ eventId, token, restored, reversalError, cause }) {
+  try {
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: null,
+        action: 'PAYMENT_EVENT_REAUTH_REVERSAL_FAILED',
+        entityType: 'payment_event',
+        entityId: eventId,
+        before: { processingStatus: 'APPLYING', claimToken: token },
+        after: {
+          intendedRestoredStatus: restored,
+          intendedAttemptsDelta: -1,
+          reauthorizationCode: cause?.code ?? null,
+          reversalError: errorSummary(reversalError),
+          needsManualReconciliation: true,
+        },
+      },
+    })
+    return true
+  } catch (e3) {
+    log.error('payment_event_stranded_claim_marker_failed', { eventId, err: errorSummary(e3) })
+    return false
+  }
+}
+
 export async function applyPaymentEvent({ eventId, rail, apply, authorizeClaim = null }) {
   const token = randomUUID()
   const now = new Date()
   const claimExpiresAt = new Date(now.getTime() + CLAIM_DURATION_MS)
   // Captured inside the claim transaction so a refused/reversed attempt can restore exactly what it
   // found, rather than guessing a status.
+  //
+  // SEC-002R round 3, item 6 (a). This read was a PLAIN, NON-LOCKING findUnique, taken BEFORE the
+  // locking CAS updateMany below. Under READ COMMITTED (Prisma/Postgres default) each statement gets
+  // its own snapshot and a plain SELECT never blocks on another transaction's row lock, so the two
+  // statements could observe DIFFERENT committed states: findUnique reads 'FAILED', a concurrent
+  // transaction commits 'DEAD_LETTERED', the CAS (which re-reads under its own lock, and for which
+  // DEAD_LETTERED is equally claimable) then claims the row -- leaving priorStatus holding a value
+  // that was never this attempt's true prior state. On the reversal path below that stale value is
+  // written back verbatim, so a refused replay by a revoked actor SILENTLY UN-DEAD-LETTERS a real
+  // payment event: it goes back on the automatic retry path a human had already been made
+  // responsible for.
+  //
+  // Reading it FOR UPDATE closes that window completely rather than narrowing it. The row lock is
+  // taken by this first statement and held for the whole claim transaction, so the CAS that follows
+  // operates on the same locked row this value came from -- there is no instant in between for
+  // anyone else to commit. Either a concurrent writer committed BEFORE our lock was granted (and
+  // this SELECT observes its value, which IS the true prior status) or it blocks until we commit.
+  // There is no third ordering. Lock order is unchanged and still event row -> user_sessions ->
+  // users: this takes the payment_events row lock strictly BEFORE authorizeClaim() takes the session
+  // and user locks, which is the same order the rails' own apply() transactions use
+  // (verifyAndLockClaim first, then beforeEffects) -- so the claim phase and a concurrent apply phase
+  // still cannot deadlock against each other.
   let priorStatus = null
   const claim = await db().$transaction(async (tx) => {
-    const before = await tx.paymentEvent.findUnique({ where: { id: eventId }, select: { processingStatus: true } })
-    priorStatus = before?.processingStatus ?? null
+    const beforeRows = await tx.$queryRaw`
+      SELECT processing_status FROM payment_events WHERE id = ${eventId}::uuid FOR UPDATE
+    `
+    priorStatus = beforeRows[0]?.processing_status ?? null
     const result = await tx.paymentEvent.updateMany({
       where: {
         id: eventId,
@@ -303,13 +397,52 @@ export async function applyPaymentEvent({ eventId, rail, apply, authorizeClaim =
       // restoring APPLYING with a null claimExpiresAt would match neither branch of the claim query
       // above and strand the row permanently, while FAILED is both truthful (an earlier attempt did
       // not complete) and immediately reclaimable.
+      //
+      // SEC-002R round 3, item 6. Round 2 described this reversal as giving A8 "atomicity
+      // guaranteed". It did not, on two counts, and both are now addressed:
+      //
+      //   (i) priorStatus was read without a lock -- see the claim transaction above, now FOR UPDATE.
+      //       That was the half that could produce a WRONG restored status, and it is closed.
+      //
+      //  (ii) the reversal is a SEPARATE transaction whose failure was silently swallowed by a bare
+      //       `.catch(log)`. The separateness is not fixable and is stated here as an architectural
+      //       fact, not glossed: the re-authorization throws INSIDE the rail's own apply()
+      //       transaction, which Postgres then rolls back in full -- by construction NOTHING written
+      //       in that transaction can survive, so the compensation cannot live there. Nor can the
+      //       claim simply be deferred until re-auth is known to pass: the claim MUST commit
+      //       independently, because (a) its APPLYING marker plus claimExpiresAt is what makes
+      //       concurrent workers lose the CAS and what makes a crashed worker's abandoned claim
+      //       recoverable at all, and (b) `attempts` must SURVIVE a failed apply -- if the increment
+      //       rolled back with the effects, DEAD_LETTER_THRESHOLD could never be reached and the
+      //       bounded retry ceiling that protects every legitimate caller would silently become an
+      //       infinite retry loop. Merging the two phases would break exactly those semantics for
+      //       every honest webhook delivery, which is the trade the owner's option (b) describes.
+      //
+      //       What IS fixable is losing the compensation silently. It is now bounded-retried and,
+      //       if it still cannot be applied, NOT swallowed: a durable reconciliation marker is
+      //       written and a distinguishable error is raised instead of the reauthorization error, so
+      //       the caller (and, on the admin replay route, that route's own audit row) records a
+      //       stranded claim rather than reporting a clean refusal over a row left at APPLYING with
+      //       an inflated attempts count.
       const restored = priorStatus === 'APPLYING' || priorStatus == null ? 'FAILED' : priorStatus
-      await db()
-        .paymentEvent.updateMany({
-          where: { id: eventId, claimToken: token, processingStatus: 'APPLYING' },
-          data: { attempts: { decrement: 1 }, processingStatus: restored, claimToken: null, claimExpiresAt: null },
+      const reversal = await reverseRefusedClaim({ eventId, token, restored })
+      if (!reversal.ok) {
+        const marked = await recordStrandedClaim({ eventId, token, restored, reversalError: reversal.error, cause: err })
+        log.error('payment_event_reauth_reversal_unrecoverable', {
+          eventId, rail, restored, markerWritten: marked, err: errorSummary(reversal.error),
         })
-        .catch((e2) => log.error('payment_event_reauth_release_failed', { eventId, err: errorSummary(e2) }))
+        const stranded = new Error(
+          `Re-authorization refused payment event ${eventId}, but this attempt's claim could not be reversed; the row is stranded at APPLYING with an un-decremented attempts count and needs manual reconciliation.`,
+        )
+        stranded.code = 'PAYMENT_EVENT_REAUTH_REVERSAL_FAILED'
+        stranded.reversalFailed = true
+        stranded.markerWritten = marked
+        stranded.cause = reversal.error
+        stranded.reauthorizationCause = err
+        // Deliberately NOT annotated with .statusCode/.expose -- same reasoning as the generic
+        // failure path below: this must fall through to a safe generic 500, never leak internals.
+        throw stranded
+      }
       throw err
     }
     if (isProviderRefUniqueViolation(err)) {

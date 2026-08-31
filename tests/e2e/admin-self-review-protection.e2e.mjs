@@ -130,14 +130,34 @@ console.log('\n=== 2. WALLET GIFT ===')
 
 console.log('\n=== 3. BOOKING ===')
 {
-  const listing = await db().listing.findFirst({ where: { ownerId: hostId, division: 'STAYS', status: 'APPROVED' } })
-  if (!listing) {
-    console.log('  SKIP booking section -- no APPROVED STAYS listing found for fixture host ' + hostId + ' (run the main regression suite first to seed one, or point HOST at a seeded host).')
-  } else {
-    // Randomized offset (not a fixed day count) -- this fixture host's listing accumulates
-    // bookings across repeated runs of this suite, and a fixed date range collides with a
-    // leftover booking from an earlier run (409 BOOKING_DATES_UNAVAILABLE).
-    const dayOffset = 60 + Math.floor(Math.random() * 300)
+  // SEC-002R round 3, item 8 -- FIXTURE HYGIENE ONLY. No assertion below changed.
+  //
+  // This section used to reuse whatever APPROVED STAYS listing the shared fixture host already had,
+  // and pick a RANDOM day offset (60-359) to dodge the bookings earlier runs had left on it. That is
+  // a birthday problem, not a fix: the shared listing accumulates one more permanent 3-night
+  // REQUESTED/CONFIRMED block per run, so the collision probability grows monotonically and the
+  // suite intermittently died on 409 BOOKING_DATES_UNAVAILABLE at the fixture step -- polluting the
+  // regression signal for work that has nothing to do with it.
+  //
+  // Root cause removed instead: this run gets its OWN listing, created fresh here and used by
+  // nothing else, so its calendar is empty by construction and a plain deterministic date range can
+  // never collide. Owner is still the fixture HOST (never adminGuestId) -- the self-review check
+  // this section proves resolves interested parties as [booking.guestId, listing.ownerId], so the
+  // owner must remain someone OTHER than the acting admin for the test to mean anything.
+  const listing = await db().listing.create({
+    data: {
+      ownerId: hostId,
+      division: 'STAYS',
+      titleAr: 'اختبار حجز المراجعة الذاتية',
+      titleEn: `self-review booking fixture ${randomUUID().slice(0, 8)}`,
+      status: 'APPROVED',
+      priceMinor: 100000,
+      currency: 'SYP',
+      metadata: {},
+    },
+  })
+  {
+    const dayOffset = 90
     const checkIn = new Date(Date.now() + dayOffset * 86400000).toISOString().slice(0, 10)
     const checkOut = new Date(Date.now() + (dayOffset + 3) * 86400000).toISOString().slice(0, 10)
     const bookingRes = await call('POST', '/api/bookings', AG, { listingId: listing.id, checkIn, checkOut })

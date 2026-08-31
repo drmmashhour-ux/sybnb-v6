@@ -157,6 +157,12 @@ run_full "otp"              otp-identity.e2e.mjs
   # this suite (the production seam, not HTTP -- see the file header for why), so unlike round 2 it
   # needs no separate stripe-approved server phase.
   run_full "commit-boundary-r3" commit-boundary-reauthorization-round3.e2e.mjs
+  # SEC-002R round 4 (post-round-3 spot-check): the CANCELLED transition on
+  # PATCH /api/driver/rides/:id/status, which round 3 protected only for COMPLETED. Additive again --
+  # rounds 1-3 above are frozen evidence and still run unchanged. Needs this phase's server because it
+  # asserts the receivable through the REAL payment endpoint (/api/payments/local-wallet-proof), which
+  # requires the full payment-policy config this phase already exports.
+  run_full "commit-boundary-r4" commit-boundary-reauthorization-round4.e2e.mjs
   run_full "resend-webhook"   resend-webhook.e2e.mjs
 run_full "storage"          storage.e2e.mjs
 run_full "legal"            legal-consent.e2e.mjs

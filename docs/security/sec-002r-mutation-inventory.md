@@ -159,14 +159,14 @@ Detail, per entry:
 - **R2-9 failed gift claim.** Auth checked: session/account/epoch. Mutation: counter + lockout on a
   third party's row.
 
-### 5.3 Round 3 (this round) — 6 items
+### 5.3 Round 3 (`a43dd3d`) — 6 items
 
 | # | Endpoint / service | File:line | What it does | Class | Verdict |
 |---|---|---|---|---|---|
 | R3-1 | `PATCH /api/me/id-document` | `server/routes/me.mjs:11` (call `:59`) | Rewrites the actor's own KYC state + **irreversibly deletes** their previous ID document | A | atomicity guaranteed |
 | R3-2 | `PATCH /api/sr/rides/:id/assign-driver` | `server/routes/sr-rides.mjs:380` (call `:425`) | Dispatches a named driver to a live passenger | A | atomicity guaranteed |
 | R3-3 | `PATCH /api/sr/rides/:id/cancel` | `server/routes/sr-rides.mjs:296` (call `:344`) | Writes `cancellationFeeMinor` — a real money field with no reversal endpoint | A | atomicity guaranteed |
-| R3-4 | `PATCH /api/driver/rides/:id/status` → `COMPLETED` | `server/routes/driver.mjs:166` (call `:206`) | Makes a fare billable to a corporate account and payable to a driver | A | atomicity guaranteed |
+| R3-4 | `PATCH /api/driver/rides/:id/status` → `COMPLETED` | `server/routes/driver.mjs:172` (call `:231`) | Makes a fare billable to a corporate account and payable to a driver | A | atomicity guaranteed |
 | R3-5 | `POST /api/admin/sr/business-accounts` (self-dealing) | `server/routes/sr-rides.mjs:850` (call `:926`) | An ADMIN naming themselves the business-admin of a company they create | A | atomicity guaranteed for the boundary; **residual: collusion / second identity**, §8.1 |
 | R3-6 | A8 reversal mechanism | `server/lib/payment-event-pipeline.mjs` | Compensating reversal of a refused claim | A | **bounded race remains** — see §7 |
 
@@ -213,17 +213,91 @@ Detail, per entry:
   `rides.filter(r => r.status === 'COMPLETED').reduce((sum, r) => sum + r.fareMinor, 0)`, and
   `server/routes/driver.mjs`'s own overview computes `earningsMinor` the same way — writing COMPLETED
   is the act that turns a trip into money owed. There is no un-complete endpoint. *Audit side
-  effects:* `DRIVER_COMPLETED`, post-commit (§6.1). *Scope note:* the other transitions on this route
-  (`DRIVER_ARRIVING`, `IN_PROGRESS`) are Class B — see §6.2 — and were deliberately not wrapped.
-  *Verdict: atomicity guaranteed for the COMPLETED transition.*
+  effects:* `DRIVER_COMPLETED`, post-commit (§6.1). *Verdict: atomicity guaranteed for the COMPLETED
+  transition.* *Scope note, corrected in round 4:* round 3 recorded the other three transitions as
+  Class B on the reasoning that COMPLETED was the only financially-relevant one. That was **wrong for
+  `CANCELLED`**, which is equally terminal and equally financial in the opposite direction; it is now
+  R4-1 below. `DRIVER_ARRIVING` and `IN_PROGRESS` remain B — §5.4 enumerates all four transitions of
+  this one route in one place.
 - **R3-5 business-account self-dealing.** See §8.1 for the full mechanism.
 - **R3-6 A8 reversal.** See §7.
+
+### 5.4 Round 4 — `PATCH /api/driver/rides/:id/status`, all four transitions in one place
+
+Round 3 protected this route's `COMPLETED` transition and classified "the other transitions" as B in a
+single line, naming only `DRIVER_ARRIVING` and `IN_PROGRESS`. An independent code-level spot-check of
+round 3 found that reasoning incomplete: the route can also produce **`CANCELLED`**, from all three
+prior states (`server/routes/driver.mjs:299-313`), and round 3's entry never considered it. This
+section replaces the single-line scope note with an explicit, per-transition classification. It is a
+correction and an addition to the driver-status entry only; no other entry in this document is
+weakened or removed.
+
+| # | Transition | Reachable from | Terminal? | Class | Verdict |
+|---|---|---|---|---|---|
+| — | → `DRIVER_ARRIVING` | `DRIVER_ASSIGNED` | no | B | admission-time authorization only |
+| — | → `IN_PROGRESS` | `DRIVER_ARRIVING` | no | B | admission-time authorization only |
+| R3-4 | → `COMPLETED` | `IN_PROGRESS` | **yes** | **A** | atomicity guaranteed (round 3, `a43dd3d`) |
+| R4-1 | → `CANCELLED` | `DRIVER_ASSIGNED`, `DRIVER_ARRIVING`, `IN_PROGRESS` | **yes** | **A** | atomicity guaranteed (round 4) |
+
+- **→ `DRIVER_ARRIVING` — Class B.** *Reason:* no financial computation anywhere in this codebase
+  reads this status. Its only readers are `server/lib/ride-pooling.mjs:48` (driver capacity), 
+  `server/routes/messages.mjs:34` (messaging eligibility), `server/routes/sr-rides.mjs:33`
+  (live-tracking eligibility) and `:312` (rider-cancellable window), and this route's own `active`
+  count (`driver.mjs:160`) — none of which sums, moves or extinguishes money. Not terminal: the ride
+  still proceeds to `IN_PROGRESS`/`COMPLETED`/`CANCELLED`, and the two terminal transitions are
+  themselves Class A-protected. Not irreversible in any security-relevant sense. Fee-neutral: it moves
+  the ride *within* the `driverAlreadyCommitted` set at `sr-rides.mjs:327` (`DRIVER_ASSIGNED` and
+  `DRIVER_ARRIVING` are both members), so it cannot change the `cancellationFeeMinor` a rider cancel
+  would compute. *Treatment: admission-time authorization only.*
+- **→ `IN_PROGRESS` — Class B.** *Reason:* same readers, same absence of any money computation reading
+  the status. Not terminal — it leads to `COMPLETED` or `CANCELLED`, both Class A-protected — and the
+  fare it carries is neither created nor destroyed by it. It does close the rider's own cancellation
+  window (`sr-rides.mjs:312` excludes `IN_PROGRESS` from `riderCancellable`), which is a lifecycle
+  effect, not a ledger one: it *preserves* the receivable rather than moving or erasing it, and the
+  money consequence downstream of it runs through R3-4/R4-1, which are protected. *Treatment:
+  admission-time authorization only.*
+- **R3-4 → `COMPLETED` — Class A, protected since round 3 (`a43dd3d`).** See the R3-4 detail entry in
+  §5.3 for the full transaction-boundary documentation. Protected code:
+  `server/routes/driver.mjs:229-236` (guard call at `:231`). *Verdict: atomicity guaranteed.*
+- **R4-1 → `CANCELLED` — Class A, protected this round.** *Why Class A:* the transition is terminal —
+  `assertDriverRideTransition` (`server/routes/driver.mjs:299-313`) has no edge out of `CANCELLED` —
+  and this handler writes **only `status`** on it, never `cancellationFeeMinor` (the sole writer of
+  that field is the rider-cancel path, `server/routes/sr-rides.mjs:328`). A ride driven to `CANCELLED`
+  here therefore lands with `cancellationFeeMinor` NULL, and `server/routes/payments.mjs:591-601`
+  admits a ride for payment only when it is `COMPLETED` **or**
+  `{ status: 'CANCELLED', cancellationFeeMinor: { not: null } }` — a NULL-fee `CANCELLED` ride matches
+  neither, so it silently drops out of the payable set entirely, and simultaneously out of
+  `earningsMinor` (`driver.mjs:162`) and `/api/business/usage` (`business.mjs`), which both filter on
+  `status === 'COMPLETED'`. This is the destruction of a real receivable, with no endpoint anywhere
+  that reverses it — the same irreversibility as R3-4 in the opposite direction, and the exact class
+  of harm SEC-002R exists to prevent. Before this round a driver whose session had been revoked or
+  whose account had been suspended mid-flight could still commit it. *Auth checked:* session exists /
+  owned by this user / not revoked / not expired; account exists and `ACTIVE`; `session_epoch` equals
+  the admitted epoch; the `DRIVER` role still held — `requiredRoles: ['DRIVER']`, matching this
+  route's own `requireAuth(context, ['DRIVER'])` exactly, neither widened nor narrowed. No
+  `interestedPartyIds`: the route is self-scoped (`driverId: context.user.id` on the pre-transaction
+  read), so the actor legitimately *is* the counterparty on their own ride and passing it would refuse
+  every real cancellation. *Rows locked:* `user_sessions` (actor's session) then `users` (actor), both
+  `SELECT ... FOR UPDATE` held to commit, then the `ride_requests` row via the guarded `updateMany`.
+  *Lock order:* `user_sessions` → `users` → `ride_requests`, as §4. *Mutation:* `status → CANCELLED`,
+  guarded on the read status **and** on `driverId: context.user.id`, so the protected statement stands
+  on its own rather than trusting the pre-transaction read (optimistic concurrency preserved
+  unchanged; a zero-row match still raises `DRIVER_RIDE_STATUS_CONFLICT`). *Audit side effects:*
+  `DRIVER_CANCELLED`, written after commit in its own transaction — the same Class B audit gap as
+  §6.1, and a refused transition writes no audit row at all because the handler throws before reaching
+  it. *Non-transactional side effect:* none — `RIDER_STATUS_PUSH_COPY` has no `CANCELLED` entry, so
+  this transition fires no push notification even on the success path. *Revocation paths sharing that
+  state:* `revokeSession` (user_sessions), `revokeUserAccess` (user_sessions → users),
+  `setAccountStatus` and `applyRoleChange` (both, via `revokeUserAccess`), `revokeAfterCredentialReset`
+  — all in `server/lib/session-store.mjs`, all writing one or both of the two locked rows, so no
+  revocation can commit inside this window. *Protected code:* `server/routes/driver.mjs:229-236`
+  (guard call at `:231`). *Verdict: atomicity guaranteed.*
 
 ---
 
 ## 6. Class B — reversible or non-privilege, deliberately not commit-boundary re-authorized
 
-### 6.1 The out-of-transaction audit-log write (A2, A3, A6, A7, A8, booking-cancel, host-decision, driver-claim, R3-2, R3-3, R3-4)
+### 6.1 The out-of-transaction audit-log write (A2, A3, A6, A7, A8, booking-cancel, host-decision, driver-claim, R3-2, R3-3, R3-4, R4-1)
 
 These handlers write their `AdminAuditLog` row **after** the protected mutation commits, in a separate
 transaction. Classified **Class B** by the independent round-2 spot-check and preserved as such:
@@ -238,7 +312,8 @@ the transaction; those are not part of this gap.)
 
 | Endpoint / service | File:line | Reason it is B, not A |
 |---|---|---|
-| `PATCH /api/driver/rides/:id/status` → `DRIVER_ARRIVING`, `IN_PROGRESS` | `server/routes/driver.mjs:166` | Neither status is summed by any money computation in this codebase; neither is financially irreversible. Only the COMPLETED transition is (R3-4). |
+| `PATCH /api/driver/rides/:id/status` → `DRIVER_ARRIVING`, `IN_PROGRESS` | `server/routes/driver.mjs:172` | Neither status is read by any money computation in this codebase (readers are pooling capacity, messaging eligibility, live tracking, the rider-cancellable window, and the `active` count); neither is terminal, and neither is financially irreversible. Full per-transition reasoning in §5.4. |
+| `PATCH /api/driver/rides/:id/status` → `CANCELLED` — *original round-3 classification* | `server/routes/driver.mjs:172` | **Superseded.** Round 3 protected only `COMPLETED` and recorded "the other transitions" as B, naming just `DRIVER_ARRIVING` and `IN_PROGRESS` — it never considered `CANCELLED` at all. `CANCELLED` is terminal and, written by this route (which never sets `cancellationFeeMinor`), erases the ride from the payable set in `payments.mjs:591-601` and from `earningsMinor`. Reclassified A and fixed in round 4 as R4-1 (§5.4). Kept here as a record of a classification that was incomplete. |
 | Advertising-payment binding on listing create | `server/routes/listings.mjs` | Released again by campaign rejection; no ledger entry. |
 | `PATCH /api/admin/id-document/:userId/upload` — *original round-1 classification* | `server/routes/admin.mjs:980` | **Superseded.** Round 1 called this B on the reasoning that it only ever REMOVES an entitlement (fail-safe). That reasoning missed the irreversible `deleteIdDocument()` of the target's prior document. Reclassified A and fixed in round 2 as G1. Kept here as a record of a classification that was wrong. |
 | `PATCH /api/sr/rides/:id/assign-driver`, promo codes, business accounts — *original round-1 classification* | `server/routes/sr-rides.mjs` | **Superseded.** Round 1 called these "reversible admin config". Promo codes and business accounts were reclassified A in round 2; assign-driver was reclassified A in round 3 (R3-2) — it is the same durable effect as `/claim`, which round 2 had already protected. |
@@ -370,6 +445,7 @@ and is not described as closed.
 | `tests/e2e/commit-boundary-reauthorization-round2.e2e.mjs` | Round 2, 227 checks. **Frozen.** |
 | `tests/e2e/commit-boundary-reauthorization-stripe-round2.e2e.mjs` | Round 2, stripe_checkout replay rail, 19 checks. **Frozen.** |
 | `tests/e2e/commit-boundary-reauthorization-round3.e2e.mjs` | Round 3, items 1–6, 92 checks — including the business-account self-dealing rule (§5), the A8 reversal branch on **both** rails, and the differential proof of the stale-`priorStatus` fix (§6b). |
+| `tests/e2e/commit-boundary-reauthorization-round4.e2e.mjs` | Round 4, R4-1, 35 checks — the `CANCELLED` transition raced from **all three** source states (`IN_PROGRESS` and `DRIVER_ARRIVING` via the slow-body dribble, `DRIVER_ASSIGNED` via a table-lock stall), with the surviving receivable proven through the **real** `/api/payments/local-wallet-proof` endpoint and the real driver overview, a positive control on each technique, and a counterfactual section showing what a committed cancellation actually destroys. |
 | `tests/e2e/admin-self-review-protection.e2e.mjs` | The nine `115aa09` self-dealing paths. Round 3 changed only its booking fixture (a dedicated fresh listing instead of a shared one) — no assertion changed. |
 
 **Not covered by any test, code-verified only:** the *failure* leg of A8's reversal — the bounded

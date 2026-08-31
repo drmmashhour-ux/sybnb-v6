@@ -6,9 +6,15 @@ import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { updateDriverLocation } from '../lib/live-map.mjs'
 import { activateScheduledRides } from '../lib/ride-schedule.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
-// SEC-002R round 3, item 4: the COMPLETED transition is what makes a fare billable -- see the ride
-// status handler below.
+// SEC-002R rounds 3 and 4: the two TERMINAL transitions this route can write are Class A -- COMPLETED
+// makes a fare billable, CANCELLED irreversibly destroys a receivable. See the ride status handler
+// below for the full reasoning on each.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
+
+// SEC-002R: the transitions this route may write that are IRREVERSIBLE and financially load-bearing,
+// and therefore re-authorized at the commit boundary. Both are terminal states. See the ride status
+// handler for the per-status reasoning and for why the two intermediate transitions are not here.
+const COMMIT_PROTECTED_DRIVER_STATUSES = new Set(['COMPLETED', 'CANCELLED'])
 
 const RIDER_STATUS_PUSH_COPY = {
   DRIVER_ARRIVING: { title: 'Your driver is arriving', body: 'Your SR driver is on the way to your pickup point.' },
@@ -183,28 +189,47 @@ export async function handleDriver(req, res, url, context) {
 
     assertDriverRideTransition(existing.status, nextStatus)
 
-    // SEC-002R round 3, item 4. The COMPLETED transition specifically is Class A: it is what makes a
-    // fare BILLABLE. server/routes/business.mjs's /api/business/usage totals corporate spend as
-    // `rides.filter(r => r.status === 'COMPLETED').reduce((sum, r) => sum + r.fareMinor, 0)`, and
-    // this driver route's own overview computes earningsMinor the same way -- so writing COMPLETED
-    // is the act that turns a trip into money owed by a company and owed to a driver. There is no
-    // un-complete endpoint. Before this change it was a bare, untransacted updateMany.
+    // SEC-002R rounds 3 (COMPLETED) and 4 (CANCELLED). The two TERMINAL transitions this route can
+    // write are Class A; the two intermediate ones are not. Which is which, and why:
     //
-    // requiredRoles MATCHES this route's own requireAuth(context, ['DRIVER']) exactly. The route is
-    // SELF-SCOPED (the `driverId: context.user.id` filter on the read above), so interestedPartyIds
-    // is deliberately not passed -- the driver legitimately IS the beneficiary of their own
-    // completed ride. The self-scope is carried into the guarded write's WHERE clause so the
+    //   COMPLETED  (round 3, item 4) -- this is what makes a fare BILLABLE.
+    //     server/routes/business.mjs's /api/business/usage totals corporate spend as
+    //     `rides.filter(r => r.status === 'COMPLETED').reduce((sum, r) => sum + r.fareMinor, 0)`, and
+    //     this route's own overview computes earningsMinor the same way -- so writing COMPLETED is
+    //     the act that turns a trip into money owed by a company and owed to a driver. There is no
+    //     un-complete endpoint.
+    //
+    //   CANCELLED  (round 4) -- this DESTROYS a receivable, which is the same irreversibility in the
+    //     opposite direction, and round 3's reasoning missed it. CANCELLED is reachable from ALL
+    //     THREE prior states (see assertDriverRideTransition below) and is terminal: nothing moves a
+    //     ride back out of it. This handler writes ONLY `status` on that transition -- it never sets
+    //     `cancellationFeeMinor`, unlike the rider-cancel path in server/routes/sr-rides.mjs:328,
+    //     which is the sole writer of that field. So a ride driven to CANCELLED here lands with
+    //     `cancellationFeeMinor` NULL, and server/routes/payments.mjs:591-601 admits a ride for
+    //     payment only when it is `COMPLETED` or `{ status: 'CANCELLED', cancellationFeeMinor:
+    //     { not: null } }` -- a NULL-fee CANCELLED ride matches neither, so it drops out of the
+    //     payable set entirely, and out of earningsMinor/business usage (both of which filter on
+    //     COMPLETED) at the same time. A driver whose session or account authority was revoked
+    //     mid-flight could therefore still commit the one write that permanently erases a real,
+    //     already-earned receivable. Same Class A severity as COMPLETED, protected the same way.
+    //
+    // requiredRoles MATCHES this route's own requireAuth(context, ['DRIVER']) exactly, for both. The
+    // route is SELF-SCOPED (the `driverId: context.user.id` filter on the read above), so
+    // interestedPartyIds is deliberately not passed -- the driver legitimately IS the counterparty on
+    // their own ride. The self-scope is carried into the guarded write's WHERE clause so the
     // protected statement stands on its own rather than trusting the pre-transaction read.
     //
     // The OTHER transitions on this route (DRIVER_ARRIVING, IN_PROGRESS) are deliberately left as
-    // they are: neither is summed by any money computation in this codebase, neither is irreversible
-    // in any financial sense, and expanding to them would be scope this round was not given. Noted
-    // in docs/security/sec-002r-mutation-inventory.md as Class B rather than silently widened.
+    // they are: neither status is read by any money computation in this codebase (they appear only in
+    // pooling capacity, messaging eligibility, live-tracking and the "active" count), neither is
+    // terminal -- both still lead to COMPLETED or CANCELLED, which ARE protected -- and neither is
+    // irreversible in any financial sense. Noted in docs/security/sec-002r-mutation-inventory.md as
+    // Class B rather than silently widened.
     const guardedWhere = { id: existing.id, status: existing.status, driverId: context.user.id }
-    const updateResult = nextStatus === 'COMPLETED'
+    const updateResult = COMMIT_PROTECTED_DRIVER_STATUSES.has(nextStatus)
       ? await db().$transaction(async (tx) => {
           await reauthorizeAtCommit(tx, context, {
-            action: 'SR_RIDE_COMPLETED',
+            action: `SR_RIDE_${nextStatus}`,
             requiredRoles: ['DRIVER'],
           })
           return tx.rideRequest.updateMany({ where: guardedWhere, data: { status: nextStatus } })

@@ -576,3 +576,81 @@ effects-path call site on both rails traced by hand uses the scoped transaction,
 the pipeline file is exactly 1). Status: **A8 — atomicity guaranteed at code level; live behavioral
 confirmation pending**, tracked in §11 below. SEC-002R as a whole is **not** self-declared closed here —
 final PASS is the owner's call, after the fresh independent behavioral verifier reports.
+
+## 11. Final independent behavioral verification and closure (2026-08-31)
+
+A fresh, independent behavioral verifier — no implementer report, no mid-run coaching — attacked the
+frozen R1–R5 baseline at commit `1e87c91` live: real HTTP, real revocation (`logout-all`, suspension,
+role removal), real concurrency, and direct `psql` DB-state evidence on every case (never HTTP status
+alone). Full raw report is in the session transcript this section was written from; summary:
+
+- **Part 1 — Class A inventory re-attack: 49/49 PASS.** Representative and expanded coverage across all
+  nine inventory sections (payout release, refund execute/legacy-accept, cancellation finalization, all
+  raced review-queue decision types, account status, role change, wallet gift create/claim, GAP-1 stripe
+  confirm, G1/G2, business-account self-dealing, promo codes, business membership, driver cancel/complete,
+  ride claim/assign/cancel, KYC self-service and admin upload, review hide, host request decisions) — zero
+  Class A mutations committed despite revoked authority, on any endpoint, with either the slow-body or
+  DB-lock-stall technique. Every refusal paired with a positive control proving the same request commits
+  with live authority. The business-account self-dealing block (`403 BUSINESS_ACCOUNT_SELF_DEALING`)
+  confirmed live with zero rows written.
+- **Part 2 — A8, 10/10 PASS.** Both rails confirmed over real HTTP; revocation fired while the merged
+  transaction was genuinely open (not just pre-request); 3-way concurrent same-event delivery with
+  mid-window revocation, 12 reps across both rails, zero torn states; refusal proven net-zero across all
+  33 columns of the event row with zero stranded markers anywhere in `admin_audit_logs`, confirming the
+  reversal machinery is deleted, not dormant; the retry/dead-letter contract independently proven intact
+  and discriminated from the auth-failure path (attempts persisted 1→5, `DEAD_LETTERED` exactly at
+  threshold); **120 samples polled from a separate connection during a genuinely open transaction never
+  once observed the intermediate `APPLYING` state** — the exact property A8 lacked before round 5; §6a-2/
+  §6a-3 reproduced live with an independent determination that the cause is exactly cross-connection
+  invisibility of uncommitted data, confirmed alongside the surrounding security assertions in the same
+  run still passing; the P2002/savepoint-recovery path forced deterministically with two distinct admins
+  and confirmed in the Postgres server log — exactly one financial effect, no partial write; the
+  historical self-deadlock scenario reproduced and resolved in ~11.3s (bounded by the test's own stall,
+  not a timeout) — no recurrence; a 16-way duplicate burst on both rails moved money exactly once
+  regardless of HTTP status distribution.
+
+**New finding, F-1 (MEDIUM, reproducible)**: while a Class A transaction is genuinely stalled, a
+revocation attempt against that same actor (`logout-all`, suspend, role removal) fails with HTTP 500
+(`P2028`, Prisma transaction-timeout) and **does not revoke** — the token remains live, confirmed by a
+follow-up authenticated call succeeding, with the caller given no indication the revocation failed to
+apply. This is the inverse of a commit-boundary bypass: the authorization/commit-boundary property itself
+held in every case, but the *containment* control (an operator trying to revoke a suspicious actor) can
+silently fail during exactly the kind of high-load/contended window it would be used in. Round 5's
+widened transaction timeout (60s) widens the window this can occur in. All three revocation vectors share
+`revokeUserAccess()` as the common path. Not remediated during verification — reported only.
+
+### 11.1 Owner ruling — SEC-002R: PASS / CLOSED (2026-08-31)
+
+The final independent behavioral verifier fulfilled the gate's purpose: zero Class A post-revocation
+bypasses found, anywhere, across the entire frozen R1–R5 inventory, on direct DB evidence. **A8's status
+is upgraded from "atomicity guaranteed at code level" to "ATOMICITY GUARANTEED — independently
+behaviorally verified"** on both rails, including the P2002/savepoint-recovery path and the historical
+deadlock scenario.
+
+**F-1 does not reopen SEC-002R.** It does not demonstrate a Class A authorization bypass or a torn
+financial mutation — it is a distinct finding (revocation availability/containment failure under
+transaction contention), classified separately:
+
+**F-1 — MEDIUM · REQUIRED BEFORE PUBLIC LAUNCH** (not before SEC-002R closure). Tracked as a standalone
+ticket: **SEC-F1 — Revocation availability under Class A transaction contention.** Acceptance criterion
+is explicitly NOT "make the HTTP 500 go away" — it is that a revocation attempted during a stalled Class A
+transaction must either (a) succeed reliably within a bounded time, or (b) fail in an explicit,
+fail-safe way that lets the operator retry/escalate and never leaves them believing containment
+succeeded while the actor's token remains live. SEC-F1 must close before **PUBLIC RELEASE — GO** (see
+[[sybnb-final-public-release-control]]), not before this gate.
+
+**Final state:**
+
+| | |
+|---|---|
+| SEC-002R | **PASS / CLOSED** |
+| R1–R5 | FROZEN / ACCEPTED |
+| A8 | **ATOMICITY GUARANTEED — code + independent behavioral verification** |
+| Class A post-revocation bypasses found | **0** |
+| F-1 | MEDIUM · separate ticket SEC-F1 · required before public launch, not before this closure |
+| SYBNB overall public release | **NOT YET GO** — Final Public-Release Control (all 10 areas) has not yet run |
+
+The next step is not a round 6 of SEC-002R. It is SEC-F1 as a pre-launch requirement, followed by the
+full Final Public-Release Control gate — the only gate authorized to issue SYBNB a
+PUBLIC RELEASE — GO / CONDITIONAL GO / NO-GO verdict. A security gate passing is not the same statement
+as the platform being ready for the public.

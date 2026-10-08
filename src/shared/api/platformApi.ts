@@ -1270,6 +1270,7 @@ export async function fetchSrQuote(input: {
   category: string
   lowDataMode: boolean
   pickupCoords?: { lat: number; lng: number }
+  stops?: string[]
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; quote: PlatformSrQuote }>('/api/sr/quote', {

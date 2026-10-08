@@ -41,6 +41,13 @@ export async function handleSrRides(req, res, url, context) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
     const body = await readJson(req)
+    // Include stops so the quoted fare/distance match what the ride-create path (which already
+    // accounts for stops) will actually charge -- otherwise a multi-stop rider is shown a cheaper
+    // direct-trip estimate and then billed the longer multi-leg fare.
+    const quoteStops = (Array.isArray(body.stops) ? body.stops : [])
+      .map((stop) => String(stop || '').trim())
+      .filter(Boolean)
+      .slice(0, 3)
     const quote = quoteSrRideForActiveCountry({
       pickup: body.pickup,
       dropoff: body.dropoff,
@@ -48,6 +55,8 @@ export async function handleSrRides(req, res, url, context) {
       lowDataMode: Boolean(body.lowDataMode),
       pickupCoordsOverride: body.pickupCoords,
       dropoffCoordsOverride: body.dropoffCoords,
+      stops: quoteStops,
+      stopCoordsOverrides: Array.isArray(body.stopCoords) ? body.stopCoords : [],
     })
     return json(res, 200, { ok: true, quote })
   }
@@ -405,6 +414,24 @@ export async function handleSrRides(req, res, url, context) {
       error.code = 'RIDE_NOT_ASSIGNABLE'
       error.expose = true
       throw error
+    }
+
+    // Same accessibility guarantee the self-claim path enforces: a rider who marked
+    // accessibilityRequired needs a driver whose vehicle is self-declared capable. Without this the
+    // admin/support dispatch could assign a non-capable driver and silently break that guarantee
+    // (CAPSULE_RULES.noFakeTrustSignal).
+    if (existing.accessibilityRequired) {
+      const assignedDriverProfile = await db().driverProfile.findUnique({
+        where: { userId: driver.id },
+        select: { accessibilityCapable: true },
+      })
+      if (!assignedDriverProfile?.accessibilityCapable) {
+        const error = new Error('This ride requires an accessibility-capable vehicle.')
+        error.statusCode = 400
+        error.code = 'RIDE_ACCESSIBILITY_MISMATCH'
+        error.expose = true
+        throw error
+      }
     }
 
     // SEC-002R round 3, item 2. Class A, and the SAME durable effect as /claim below (protected in

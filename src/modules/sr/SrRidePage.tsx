@@ -34,6 +34,7 @@ import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { RideMap } from '../../shared/maps/RideMap'
 import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
+import { srFallbackFareMinor } from './srFareModel'
 
 type Props = {
   lang: Lang
@@ -43,7 +44,7 @@ const copy = {
   ar: {
     back: 'العودة للرئيسية',
     title: 'سير',
-    subtitle: 'طلب رحلة حقيقي محفوظ في قاعدة البيانات، يُعرض مباشرة على السائقين القريبين ليقبلوه بأنفسهم.',
+    subtitle: 'طلب رحلة حقيقي محفوظ، يُعرض مباشرة على السائقين المتاحين ليقبلوه بأنفسهم.',
     mode: 'وضع بيانات منخفض',
     pickup: 'نقطة الانطلاق',
     dropoff: 'الوجهة',
@@ -111,7 +112,7 @@ const copy = {
     notificationsEnabled: 'الإشعارات مفعّلة',
     billToBusiness: 'احتساب الرحلة على حساب {company}',
     billedToBusiness: 'محتسبة على حساب الشركة',
-    shareable: 'رحلة مشتركة (وفّر 15%، قد يشاركك السائق راكباً آخر على نفس الطريق)',
+    shareable: 'رحلة مشتركة — وفّر 15% إذا شاركك السائق راكباً آخر على نفس الطريق',
     sharedRide: 'رحلة مشتركة',
     rateTitle: 'قيّم رحلتك',
     rateSubmit: 'إرسال التقييم',
@@ -128,7 +129,7 @@ const copy = {
   en: {
     back: 'Back to landing',
     title: 'SR Ride',
-    subtitle: 'Real ride request saved in PostgreSQL, broadcast live to nearby drivers to self-accept.',
+    subtitle: 'A real ride request, saved and broadcast live to available drivers to self-accept.',
     mode: 'Low-data mode',
     pickup: 'Pickup',
     dropoff: 'Dropoff',
@@ -196,7 +197,7 @@ const copy = {
     notificationsEnabled: 'Notifications enabled',
     billToBusiness: 'Bill this ride to {company}',
     billedToBusiness: 'Billed to your company account',
-    shareable: 'Share & save 15% (a driver may pick up another rider along the way)',
+    shareable: 'Share your ride — save 15% if a driver pools you with another rider along the way',
     sharedRide: 'Shared ride',
     rateTitle: 'Rate your ride',
     rateSubmit: 'Submit rating',
@@ -217,8 +218,14 @@ const categories = ['SR Economy', 'SR Comfort', 'SR SUV']
 const rideCategoryByFilter: Record<string, string> = {
   economy: 'SR Economy',
   comfort: 'SR Comfort',
-  premium: 'SR Comfort',
   familyVan: 'SR SUV',
+}
+
+// Reverse of the above: keep the category strip and the filter-panel category selection in sync.
+const filterKeyByCategory: Record<string, string> = {
+  'SR Economy': 'economy',
+  'SR Comfort': 'comfort',
+  'SR SUV': 'familyVan',
 }
 
 export function SrRidePage({ lang }: Props) {
@@ -268,6 +275,10 @@ export function SrRidePage({ lang }: Props) {
   const [scheduledFor, setScheduledFor] = useState('')
   const [accessibilityRequired, setAccessibilityRequired] = useState(false)
   const [stops, setStops] = useState<string[]>([])
+  // Stable, trimmed, non-empty stop list — used both for the fare estimate (so the preview matches
+  // what the server will charge for a multi-stop trip) and the ride request. Memoized on `stops` so
+  // it only changes when the rider actually edits a stop, not on every render.
+  const trimmedStops = useMemo(() => stops.map((stop) => stop.trim()).filter(Boolean), [stops])
   const [promoCode, setPromoCode] = useState('')
   const [pushStatus, setPushStatus] = useState<'idle' | 'enabling' | 'enabled' | 'error'>('idle')
   const [businessAccountName, setBusinessAccountName] = useState<string | null>(null)
@@ -278,10 +289,9 @@ export function SrRidePage({ lang }: Props) {
   const [savingPlace, setSavingPlace] = useState(false)
   const rideFilterGroups = useMemo(() => srRideFilterGroupsFromConfig(), [])
 
-  const fallbackFareMinor = useMemo(() => {
-    const base = category === 'SR SUV' ? 58000 : category === 'SR Comfort' ? 46000 : 35000
-    return lowDataMode ? base : base + 2500
-  }, [category, lowDataMode])
+  // Pre-quote estimate derived from the SAME rate model the server uses (srFareModel), so it
+  // matches the server's own estimated fare instead of a stale flat rate several times too high.
+  const fallbackFareMinor = useMemo(() => srFallbackFareMinor(category, lowDataMode), [category, lowDataMode])
 
   const fareMinor = ride?.fareMinor ?? quote?.fareMinor ?? fallbackFareMinor
   // CAPSULE_RULES.noFakeTrustSignal: quote.estimated alone doesn't distinguish "GPS was imprecise
@@ -293,10 +303,10 @@ export function SrRidePage({ lang }: Props) {
   useEffect(() => {
     if (ride) return
     const timer = window.setTimeout(() => {
-      fetchSrQuote({ pickup, dropoff, category, lowDataMode, pickupCoords }).then(setQuote).catch(() => setQuote(null))
+      fetchSrQuote({ pickup, dropoff, category, lowDataMode, pickupCoords, stops: trimmedStops }).then(setQuote).catch(() => setQuote(null))
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [pickup, dropoff, category, lowDataMode, pickupCoords, ride])
+  }, [pickup, dropoff, category, lowDataMode, pickupCoords, ride, trimmedStops])
 
   useEffect(() => {
     fetchSavedPlaces().then(setSavedPlaces).catch(() => setSavedPlaces([]))
@@ -757,7 +767,13 @@ export function SrRidePage({ lang }: Props) {
                 <button
                   key={item}
                   style={item === category ? styles.categoryActive : styles.categoryButton}
-                  onClick={() => setCategory(item)}
+                  onClick={() => {
+                    setCategory(item)
+                    // Keep the filter-panel category in sync, so toggling a feature chip (which runs
+                    // updateRideFilters and re-derives category from srRideCategory) can't silently
+                    // revert the strip's choice back to Economy.
+                    setRideFilters((previous) => ({ ...previous, srRideCategory: filterKeyByCategory[item] || 'economy' }))
+                  }}
                   type="button"
                 >
                   {item}

@@ -407,7 +407,6 @@ export const srRideCategoryFilterGroup: VisualFilterGroup = {
   options: [
     { id: 'economy', label: { ar: 'اقتصادي', en: 'Economy' }, art: 'sr-ride-economy' },
     { id: 'comfort', label: { ar: 'مريح', en: 'Comfort' }, art: 'sr-ride-comfort' },
-    { id: 'premium', label: { ar: 'فاخر', en: 'Premium' }, art: 'sr-ride-premium' },
     { id: 'familyVan', label: { ar: 'فان عائلي', en: 'Family van' }, art: 'sr-ride-family-van' },
   ],
 }

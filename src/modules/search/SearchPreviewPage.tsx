@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
+import { governorateCityName } from '../../engines/search'
 import { fetchApprovedListings, isSampleListing, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { SearchStateCard } from './SearchStates'
@@ -210,7 +211,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             // default to Damascus for display, and CARS/MARKETPLACE listings are almost never
             // geotagged, so applying that untouched default as a filter silently zeroed out
             // every explicit search in those divisions.
-            city: value.locationTouched ? GOV_TO_CITY[value.governorate] || undefined : undefined,
+            city: value.locationTouched ? governorateCityName(value.governorate) : undefined,
           }
         : undefined
       const division = toApiDivision(value?.division || effectiveInitialDivision)
@@ -411,14 +412,6 @@ function searchSummary(value: UnifiedSearchValue, lang: Lang) {
 // long-term fix is real stepper UI for this division, not yet authorized;
 // this closes the invisible-default bug without building that UI.
 const HAS_BEDROOM_BATHROOM_FILTERS = new Set<UnifiedSearchValue['division']>(['stays', 'rentals', 'buy'])
-
-const GOV_TO_CITY: Record<string, string> = {
-  damascus: 'Damascus',
-  aleppo: 'Aleppo',
-  latakia: 'Latakia',
-  homs: 'Homs',
-  tartus: 'Tartus',
-}
 
 function toApiDivision(division: UnifiedSearchValue['division']) {
   const map: Record<UnifiedSearchValue['division'], string> = {

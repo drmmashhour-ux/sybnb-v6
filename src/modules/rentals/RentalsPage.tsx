@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
-import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
+import { getCity, getGovernorate, governorateCityName, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { fetchApprovedListings, getStoredGuestSession, sendListingInquiryMessage, uploadPaymentProofFile, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
@@ -113,14 +113,6 @@ function saveDraft(key: string, draft: unknown) {
   }
 }
 
-// Map governorate key -> the English city name stored in listing.location.city (Syria's 5 governorates).
-const GOV_TO_CITY: Record<string, string> = {
-  damascus: 'Damascus',
-  aleppo: 'Aleppo',
-  latakia: 'Latakia',
-  homs: 'Homs',
-  tartus: 'Tartus',
-}
 const mainGroupOptions = [
   { id: 'apartment', ar: 'شقة', en: 'Apartment' },
   { id: 'villa', ar: 'فيلا', en: 'Villa' },
@@ -497,7 +489,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       const division = isBuyMode ? 'BUY' : 'RENTALS'
       const filters = {
         attributes: visualFilters,
-        city: explicit ? GOV_TO_CITY[selectedGovernorate] : undefined,
+        city: explicit ? governorateCityName(selectedGovernorate) : undefined,
         sort: typeof visualFilters.sort === 'string' ? visualFilters.sort : undefined,
         priceBand: typeof visualFilters.priceBand === 'string' ? visualFilters.priceBand : undefined,
       }

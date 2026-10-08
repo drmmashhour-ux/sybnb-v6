@@ -1,0 +1,62 @@
+# SYBNB V6 — API deploy blueprint (managed stack).
+# Frontend deploys separately to Cloudflare Pages; this file provisions the Node API only.
+# DB is managed Postgres+PostGIS (Neon/Supabase) and object storage is Cloudflare R2 — both are
+# set as dashboard secrets below (sync: false), so this blueprint stays provider-flexible.
+# See SYBNB_CLOUD_MIGRATION.md for the full, step-by-step runbook.
+services:
+  - type: web
+    name: sybnb-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # ~$7/mo; the free tier sleeps and is not suitable for an API.
+    healthCheckPath: /api/health/ready
+    # Migrations run as a pre-deploy step (never baked into the image). Requires DATABASE_URL.
+    preDeployCommand: "npx prisma migrate deploy"
+    autoDeploy: false        # deploy on demand; flip to true to deploy on every push to the branch.
+    envVars:
+      # --- non-secret config ---
+      - key: NODE_ENV
+        value: production
+      - key: SYBNB_COUNTRY
+        value: syria
+      - key: API_HOST
+        value: 0.0.0.0
+      # PORT is injected by Render; the server honors it (API_PORT || PORT). Do not hardcode.
+      # --- secrets: set these in the Render dashboard (Environment tab) ---
+      - key: DATABASE_URL            # Neon/Supabase Postgres+PostGIS URL. Behind a pooler add &pgbouncer=true
+        sync: false
+      - key: AUTH_SECRET             # long random string
+        sync: false
+      - key: PHONE_HASH_SECRET       # long random string
+        sync: false
+      - key: CORS_ORIGIN             # https://sybnb.app (the Cloudflare Pages custom domain)
+        sync: false
+      # --- object storage: Cloudflare R2 (S3-compatible) ---
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: STORAGE_S3_BUCKET
+        sync: false
+      - key: STORAGE_S3_REGION
+        value: auto                  # R2 uses 'auto'
+      - key: STORAGE_S3_ENDPOINT     # https://<accountid>.r2.cloudflarestorage.com
+        sync: false
+      - key: STORAGE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: STORAGE_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: STORAGE_S3_FORCE_PATH_STYLE
+        value: "true"
+      # --- email: Resend (primary auth channel; must be live in production) ---
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_FROM
+        sync: false                  # e.g. no-reply@sybnb.app (domain verified in Resend)
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
+      # --- SMS: sandbox until a live provider is wired (email OTP is primary for Syria) ---
+      - key: SMS_PROVIDER
+        value: sandbox
+      # --- payments: OFF by default. Leave these UNSET until live payments are authorized. ---
+      # STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / PAYMENT_WEBHOOK_SECRET / PAYMENTS_ENABLED

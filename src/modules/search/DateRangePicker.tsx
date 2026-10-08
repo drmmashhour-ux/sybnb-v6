@@ -31,7 +31,8 @@ const MONTHS = {
 }
 
 const DAYS = {
-  ar: ['س', 'ح', 'ن', 'ث', 'ر', 'خ', 'ج'],
+  // Sunday-first, matching Date#getDay() used for the grid offset (was Saturday-first: off by one).
+  ar: ['ح', 'ن', 'ث', 'ر', 'خ', 'ج', 'س'],
   en: ['S', 'M', 'T', 'W', 'T', 'F', 'S'],
   fr: ['D', 'L', 'M', 'M', 'J', 'V', 'S'],
 }
@@ -232,9 +233,9 @@ export function DateRangePicker({ lang, value, onChange, onClose, disabledDates,
       </div>
 
       <div style={styles.summary}>
-        <span>{t.checkIn}: <b>{formatDateForLang(value.checkIn, lang)}</b></span>
-        <span>{t.checkOut}: <b>{formatDateForLang(value.checkOut, lang)}</b></span>
-        <span>{t.nights}: <b>{nightsBetween(value.checkIn, value.checkOut)}</b></span>
+        <span>{t.checkIn}{lang === 'fr' ? ' :' : ':'} <b>{formatDateForLang(value.checkIn, lang)}</b></span>
+        <span>{t.checkOut}{lang === 'fr' ? ' :' : ':'} <b>{formatDateForLang(value.checkOut, lang)}</b></span>
+        <span>{t.nights}{lang === 'fr' ? ' :' : ':'} <b>{nightsBetween(value.checkIn, value.checkOut)}</b></span>
       </div>
 
       <div style={styles.actions}>

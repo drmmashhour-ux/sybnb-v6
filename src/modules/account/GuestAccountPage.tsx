@@ -187,6 +187,18 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
     window.location.hash = returnPath
   }
 
+  // When this screen is a gate shown in place of the protected page, returnPath IS the current
+  // route, so jumping "back" to it would just re-show sign-in; step back in history instead.
+  function goBackFromAccount() {
+    const current = window.location.hash.replace(/^#/, '') || '/'
+    if (current === returnPath) {
+      if (window.history.length > 1) window.history.back()
+      else window.location.hash = '/'
+      return
+    }
+    window.location.hash = returnPath
+  }
+
   function submitEmail() {
     if (!emailValid) return say(t.invalidEmail)
     say('')
@@ -303,7 +315,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
       <section style={styles.card}>
         <header style={styles.header}>
           {step === 'email' ? (
-            <button style={styles.iconButton} onClick={() => (window.location.hash = returnPath)} aria-label={t.back}>
+            <button style={styles.iconButton} onClick={goBackFromAccount} aria-label={t.back}>
               ×
             </button>
           ) : (
@@ -374,11 +386,22 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
                 {t.forgot}
               </button>
               <p style={styles.hint}>{t.passwordHint}</p>
-              <label style={styles.rememberRow}>
-                <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
+              {/* Explicit id/htmlFor + aria-label: some a11y tools read the wrapped checkbox's name as
+                  its default value "on". Default stays unchecked unless the user opted in before
+                  (useState(getKeepSignedIn())). */}
+              <label style={styles.rememberRow} htmlFor="guest-keep-signed-in">
+                <input
+                  id="guest-keep-signed-in"
+                  type="checkbox"
+                  name="keepSignedIn"
+                  checked={remember}
+                  aria-label={t.keepSignedIn}
+                  aria-describedby="guest-keep-signed-in-hint"
+                  onChange={(event) => setRemember(event.target.checked)}
+                />
                 <span>
                   {t.keepSignedIn}
-                  <small style={styles.rememberHint}>{t.keepSignedInHint}</small>
+                  <small id="guest-keep-signed-in-hint" style={styles.rememberHint}>{t.keepSignedInHint}</small>
                 </span>
               </label>
             </>

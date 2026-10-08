@@ -56,16 +56,20 @@ export function listingMapTarget(listing: PlatformListing, title: string, lang: 
     stringFrom(location.governorateAr ?? metadata.governorateAr),
     stringFrom(location.governorate ?? metadata.governorate),
   ].filter(Boolean)
-  const uniqueParts = Array.from(new Set(addressParts))
+  // Show place names in one script only (Arabic UI: Arabic names; EN/FR: Latin names), so the label
+  // never mixes "المالكي, Damascus, دمشق". Fall back to every part if none match the UI script.
+  const isArabicText = (value: string) => /[\u0600-\u06FF]/.test(value)
+  const sameScript = addressParts.filter((part) => (lang === 'ar' ? isArabicText(part) : !isArabicText(part)))
+  const uniqueParts = Array.from(new Set(sameScript.length ? sameScript : addressParts))
   const hasRealLocation = uniqueParts.length > 0
   const hasCoordinates = typeof lat === 'number' && typeof lng === 'number'
-  const country = lang === 'ar' ? 'سوريا' : 'Syria'
+  const country = lang === 'ar' ? 'سوريا' : lang === 'fr' ? 'Syrie' : 'Syria'
   // A listing with no real address text used to silently fabricate `${title}, Damascus, Syria` --
   // a specific, disprovable city claim that could (and did) contradict the listing's own title.
   // "Syria" alone stays true (SYBNB is Syria-only today, no other country profile is active), but a
   // specific city was never confirmed and must never be invented. CAPSULE_RULES.noFakeTrustSignal.
-  const pinnedLocation = lang === 'ar' ? 'موقع محدد على الخريطة' : 'Pinned location'
-  const locationNotProvided = lang === 'ar' ? 'لم يتم تحديد الموقع' : 'Location not provided'
+  const pinnedLocation = lang === 'ar' ? 'موقع محدد على الخريطة' : lang === 'fr' ? 'Emplacement indiqué' : 'Pinned location'
+  const locationNotProvided = lang === 'ar' ? 'لم يتم تحديد الموقع' : lang === 'fr' ? 'Emplacement non indiqué' : 'Location not provided'
   const label = hasRealLocation
     ? uniqueParts.join(lang === 'ar' ? '، ' : ', ')
     : hasCoordinates

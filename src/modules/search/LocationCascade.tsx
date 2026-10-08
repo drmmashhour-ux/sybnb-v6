@@ -12,6 +12,8 @@ type LocationCascadeProps = {
   lang: Lang
   value: LocationValue
   onChange: (value: LocationValue) => void
+  // When given, the governorate panel offers "All of Syria" to drop the location filter.
+  onClear?: () => void
 }
 
 const T = {
@@ -25,6 +27,7 @@ const T = {
     allGovernorates: 'كل المحافظات',
     cities: 'المدن / الأقضية',
     areas: 'المناطق / الشوارع',
+    allSyria: 'كل سوريا',
   },
   en: {
     governorate: 'Governorate / State',
@@ -36,6 +39,7 @@ const T = {
     allGovernorates: 'All governorates',
     cities: 'Cities / Districts',
     areas: 'Areas / Streets',
+    allSyria: 'All of Syria',
   },
   fr: {
     governorate: 'Gouvernorat / État',
@@ -47,6 +51,7 @@ const T = {
     allGovernorates: 'Tous les gouvernorats',
     cities: 'Villes / Districts',
     areas: 'Quartiers / Rues',
+    allSyria: 'Toute la Syrie',
   },
 }
 
@@ -62,7 +67,7 @@ const AR_LABEL_OVERRIDES: Record<string, string> = {
 
 type Panel = 'governorate' | 'city' | 'area'
 
-export function LocationCascade({ lang, value, onChange }: LocationCascadeProps) {
+export function LocationCascade({ lang, value, onChange, onClear }: LocationCascadeProps) {
   const [openPanel, setOpenPanel] = useState<Panel | null>(null)
   const governorate = getGovernorate(value.governorate)
   const city = getCity(value.governorate, value.city)
@@ -88,11 +93,11 @@ export function LocationCascade({ lang, value, onChange }: LocationCascadeProps)
   return (
     <div style={styles.shell}>
       <div style={styles.searchRow} dir={lang === 'ar' ? 'rtl' : 'ltr'}>
-        <TouchField label={t.governorate} value={displayLabel(governorate)} active={openPanel === 'governorate'} onClick={() => setOpenPanel(openPanel === 'governorate' ? null : 'governorate')} />
-        <TouchField label={t.city} value={displayLabel(city) || t.chooseCity} active={openPanel === 'city'} onClick={() => setOpenPanel(openPanel === 'city' ? null : 'city')} />
+        <TouchField label={t.governorate} value={displayLabel(governorate) || t.allSyria} active={openPanel === 'governorate'} onClick={() => setOpenPanel(openPanel === 'governorate' ? null : 'governorate')} />
+        <TouchField label={t.city} value={displayLabel(city) || (governorate ? t.chooseCity : t.chooseGovernorate)} active={openPanel === 'city'} onClick={() => setOpenPanel(openPanel === 'city' ? null : 'city')} />
         <TouchField
           label={t.area}
-          value={displayLabel(city?.areas.find((item) => item.key === value.area)) || t.chooseArea}
+          value={displayLabel(city?.areas.find((item) => item.key === value.area)) || (city ? t.chooseArea : t.chooseCity)}
           active={openPanel === 'area'}
           onClick={() => setOpenPanel(openPanel === 'area' ? null : 'area')}
         />
@@ -101,6 +106,11 @@ export function LocationCascade({ lang, value, onChange }: LocationCascadeProps)
       {openPanel === 'governorate' && (
         <TouchPanel label={t.allGovernorates}>
           <div style={styles.govGrid}>
+            {onClear ? (
+              <ChoiceButton active={!value.governorate} onClick={() => { onClear(); setOpenPanel(null) }}>
+                {t.allSyria}
+              </ChoiceButton>
+            ) : null}
             {SYRIA_GOVERNORATES.map((item) => (
               <ChoiceButton key={item.key} active={item.key === value.governorate} onClick={() => selectGovernorate(item.key)}>
                 {displayLabel(item)}

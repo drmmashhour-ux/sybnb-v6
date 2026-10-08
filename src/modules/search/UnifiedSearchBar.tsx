@@ -309,6 +309,11 @@ const DIVISION_ATTRIBUTE_DEFAULTS: Pick<
   | 'access'
   | 'meals'
   | 'payments'
+  | 'sort'
+  | 'priceBand'
+  | 'keyword'
+  | 'minPrice'
+  | 'maxPrice'
 > = {
   propertyType: 'any',
   furnishing: 'any',
@@ -329,13 +334,20 @@ const DIVISION_ATTRIBUTE_DEFAULTS: Pick<
   access: [],
   meals: [],
   payments: [],
+  // Sort, price and keyword are division-specific too: a car price band or a "Toyota" keyword
+  // makes no sense under Marketplace, and carrying them over silently narrowed the next category.
+  sort: 'newest',
+  priceBand: 'any',
+  keyword: '',
+  minPrice: '',
+  maxPrice: '',
 }
 
 // UX-4B finding 1.1. Takes a stored draft and returns it with the division-specific attributes
 // stripped back to defaults whenever the draft was written under a DIFFERENT division than the one
-// now being opened. Geography (governorate/city/area/locationTouched/customPlaceName), dates,
-// guests, keyword and price are deliberately left untouched -- they are legitimate cross-division
-// search context and must keep persisting.
+// now being opened. Geography (governorate/city/area/locationTouched/customPlaceName), dates and
+// guests are deliberately left untouched -- they are legitimate cross-division search context and
+// must keep persisting. Keyword, sort and price are reset with the other division filters.
 export function restoreDraftForDivision(
   draft: Partial<UnifiedSearchValue>,
   division: SearchDivision,
@@ -384,13 +396,16 @@ const conditionOptions: FilterOption[] = [
   { key: 'new', labelKey: 'new', icon: 'N' },
   { key: 'used', labelKey: 'used', icon: 'U' },
 ]
-export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivision = false, onSearch }: UnifiedSearchBarProps) {
-  const t = T[lang]
-  const [openCalendar, setOpenCalendar] = useState(false)
-  const [showFilters, setShowFilters] = useState(false)
-  const [value, setValue] = useState<UnifiedSearchValue>(() => ({
-    governorate: 'damascus',
-    city: 'damascus-city',
+// The search state a freshly mounted search bar starts from (defaults + the session draft, with
+// division-specific filters reset when the draft belongs to another division). Exported so the
+// results page can run its first search with exactly what the bar shows -- otherwise a restored
+// city is displayed in the bar while the list underneath ignores it.
+export function restoredSearchValue(initialDivision: SearchDivision): UnifiedSearchValue {
+  const restored: UnifiedSearchValue = {
+    // No location until the guest picks one ("All of Syria"). Defaulting the picker to Damascus
+    // showed a city that the results never applied.
+    governorate: '',
+    city: '',
     area: '',
     locationTouched: false,
     customPlaceName: '',
@@ -433,7 +448,16 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     // walked around it. Apply the same defaults on this path too.
     ...restoreDraftForDivision(loadSearchDraft(), initialDivision),
     division: initialDivision,
-  }))
+  }
+  // Older drafts carried the untouched Damascus default; never show a location that is not applied.
+  return restored.locationTouched ? restored : { ...restored, governorate: '', city: '', area: '' }
+}
+
+export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivision = false, onSearch }: UnifiedSearchBarProps) {
+  const t = T[lang]
+  const [openCalendar, setOpenCalendar] = useState(false)
+  const [showFilters, setShowFilters] = useState(false)
+  const [value, setValue] = useState<UnifiedSearchValue>(() => restoredSearchValue(initialDivision))
 
   // Same reset for the route-change path where this component stays mounted and only the
   // initialDivision prop changes. Guarded on an actual prop change, so a guest's own in-page tab
@@ -480,7 +504,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     const parts = [
       t[value.division],
       governorate ? labelFor(lang, governorate) : '',
-      city ? labelFor(lang, city) : '',
+      city && labelFor(lang, city) !== labelFor(lang, governorate) ? labelFor(lang, city) : '',
       area ? labelFor(lang, area) : '',
       value.customPlaceName.trim() ? value.customPlaceName.trim() : '',
       isStay && value.checkIn ? value.checkIn : '',
@@ -566,7 +590,18 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
         <LocationCascade
           lang={lang}
           value={{ governorate: value.governorate, city: value.city, area: value.area }}
-          onChange={(next) => update({ ...next, locationTouched: true })}
+          onChange={(next) => {
+            // Choosing a governorate narrows the results right away (the server filters by the
+            // governorate's city), instead of only once the guest also presses Search.
+            const nextValue = { ...value, ...next, locationTouched: true }
+            setValue(nextValue)
+            if (next.governorate !== value.governorate || !value.locationTouched) onSearch?.(nextValue)
+          }}
+          onClear={() => {
+            const nextValue = { ...value, governorate: '', city: '', area: '', locationTouched: false }
+            setValue(nextValue)
+            onSearch?.(nextValue)
+          }}
         />
         <div style={styles.depthNote}>{t.locationDepth}</div>
 

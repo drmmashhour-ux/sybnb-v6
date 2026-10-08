@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { pick, text, type Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   createPrototypeBooking,
   fetchListingAvailability,
@@ -15,9 +15,10 @@ import {
   type PlatformListingReview,
 } from '../../shared/api/platformApi'
 import { authStorage } from '../../shared/api/authStorage'
-import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
-import { propertyFilterGroup, sellerCarFilterGroupsFromConfig } from '../../engines/filters'
-import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
+import { divisionText, listingDescriptionText, moneyText, statusText } from '../../shared/i18n/display'
+import { listingDisplayTitle } from '../../shared/listing/displayTitle'
+import { ListingSpecs } from './ListingSpecs'
+import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey, type GoogleMapTarget } from '../../shared/maps/googleMapCapsule'
 import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { guestFeeSummary } from '../bookings/guestFeeSummary'
 import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
@@ -340,7 +341,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     count: 0,
   })
 
-  const title = listing ? listingTitleText(listing, lang) : ''
+  const title = listing ? listingDisplayTitle(listing, lang) || `${divisionText(listing.division, lang)} ${listing.id.slice(0, 8).toUpperCase()}` : ''
   const actionLabel = useMemo(() => actionForDivision(listing?.division || 'STAYS', lang), [lang, listing?.division])
   const detailCopy = useMemo(() => detailCopyForDivision(listing?.division || 'STAYS', lang, t), [lang, listing?.division, t])
   const returnPath = useMemo(() => readListingReturnPath(), [])
@@ -474,7 +475,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     setMessage('')
 
     try {
-      setListing(await fetchPrototypeListing(listingId))
+      const loaded = await fetchPrototypeListing(listingId)
+      setListing(loaded)
+      syncListingReturnPath(loaded.division)
       setStatus('ready')
     } catch (error) {
       setStatus('error')
@@ -488,13 +491,13 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       listing.division === 'STAYS' &&
       (!isValidDate(dateRange.checkIn) || !isValidDate(dateRange.checkOut) || nightsBetween(dateRange.checkIn, dateRange.checkOut) < 1)
     ) {
-      setActiveTab('terms')
+      setShowDatePicker(true)
       setMessage(t.datesRequired)
       return
     }
     const hasCustomerAccount = customerReady
     if (!hasCustomerAccount) {
-      window.location.hash = `/account/open/${listing.id}`
+      goToAccountAndBack(listing.id)
       return
     }
     if (listing.division === 'STAYS' && !acceptedGuestAgreement) {
@@ -546,8 +549,8 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   function openContactTunnel() {
     if (!listing || typeof window === 'undefined') return
     if (!authStorage.getItem(GUEST_SESSION_TOKEN_KEY)) {
-      sessionStorage.setItem(GUEST_RETURN_PATH_KEY, '/immocontact')
-      window.location.hash = '/account/open'
+      // Sign in first, then come back to THIS listing (not a generic inbox/stays page).
+      goToAccountAndBack(listing.id)
       return
     }
     window.location.hash = '/immocontact'
@@ -574,20 +577,33 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     setMessage(pick(lang, 'تم نسخ رابط الإعلان.', 'Listing link copied.', 'Lien de l’annonce copié.'))
   }
 
+  const colon = lang === 'fr' ? ' : ' : ': '
+  const isStays = listing?.division === 'STAYS'
+  const unit = listing ? priceUnitText(listing.division, lang) : ''
+  const mediaUrls = listing
+    ? (listing.media || []).map((item) => item.url || item.src || item.assetUrl).filter((value): value is string => typeof value === 'string')
+    : []
+  const mediaCount = mediaUrls.length
+  const placeLabel = listing ? localizedPlaceLabel(mapTarget, lang) : ''
+  const primaryLabel = status === 'saving' ? t.saving : actionLabel
+
+  function showMedia(step: 1 | -1) {
+    if (mediaCount < 2) return
+    setActiveMedia((current) => (current + step + mediaCount) % mediaCount)
+  }
+
+  const messageBox = message ? (
+    <section ref={messageRef} style={styles.alert} role="alert">{message}</section>
+  ) : null
+
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <section style={styles.flowNav} aria-label={pick(lang, 'التنقل بين الخطوات', 'Step navigation', 'Navigation entre les étapes')}>
-        <button style={styles.arrowButton} onClick={() => (window.location.hash = returnPath)} aria-label={pick(lang, 'السابق', 'Back', 'Retour')}>
-          ‹
-        </button>
-        <button style={styles.arrowButton} disabled={!listing || status === 'saving'} onClick={() => void requestListing()} aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}>
-          ›
-        </button>
-      </section>
+      {/* The global breadcrumb bar (AppShell .flow-step-nav) is translucent and lets the listing show
+          through while scrolling. Give it a solid surface while this page is mounted. */}
+      <style>{LISTING_PAGE_CSS}</style>
 
       {status === 'loading' && <section style={styles.panel}>{t.loading}</section>}
-      {status === 'error' && <section ref={messageRef} style={styles.alert}>{message}</section>}
-      {status !== 'error' && message && <section ref={messageRef} style={styles.alert}>{message}</section>}
+      {!listing && messageBox}
 
       {status === 'error' && !listing && (
         <section style={styles.panel}>
@@ -606,49 +622,56 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       {listing && (
         <>
           <section style={styles.detailHero}>
-            <button style={styles.heroIconButton} onClick={shareListing} aria-label={t.share}>
+            <button type="button" style={styles.heroIconButton} onClick={shareListing} aria-label={t.share}>
               ↗
             </button>
-            <button style={styles.heroNextButton} disabled={status === 'saving'} onClick={() => void requestListing()} aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}>
-              →
-            </button>
             <div style={styles.media}>
-              {(() => {
-                const mediaUrls = (listing.media || [])
-                  .map((item) => item.url || item.src || item.assetUrl)
-                  .filter((value): value is string => typeof value === 'string')
-                const heroSrc = mediaUrls[activeMedia] || listingImage(listing)
-                return (
-                  <>
-                    <img
-                      src={heroSrc}
-                      alt={title}
-                      style={styles.mediaImage}
-                      onError={(event) => {
-                        const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
-                        if (event.currentTarget.src.endsWith(fallback)) return
-                        event.currentTarget.src = fallback
-                      }}
-                    />
-                    {mediaUrls.length > 1 && (
-                      <div style={styles.thumbStrip} role="group" aria-label={pick(lang, 'صور الإعلان', 'Listing photos', 'Photos de l’annonce')}>
-                        {mediaUrls.map((url, index) => (
-                          <button
-                            key={`${url}-${index}`}
-                            type="button"
-                            onClick={() => setActiveMedia(index)}
-                            aria-label={`${title} ${index + 1}`}
-                            aria-current={index === activeMedia}
-                            style={index === activeMedia ? styles.thumbActive : styles.thumb}
-                          >
-                            <img src={url} alt="" style={styles.thumbImg} />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )
-              })()}
+              <img
+                src={mediaUrls[activeMedia] || listingImage(listing)}
+                alt={title}
+                style={styles.mediaImage}
+                onError={(event) => {
+                  const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+                  if (event.currentTarget.src.endsWith(fallback)) return
+                  event.currentTarget.src = fallback
+                }}
+              />
+              {mediaCount > 1 && (
+                <>
+                  {/* Gallery arrows only move between photos -- they never start the booking/sign-in flow. */}
+                  <button
+                    type="button"
+                    style={{ ...styles.galleryArrow, insetInlineStart: 12 }}
+                    onClick={() => showMedia(-1)}
+                    aria-label={pick(lang, 'الصورة السابقة', 'Previous photo', 'Photo précédente')}
+                  >
+                    {isAr ? '›' : '‹'}
+                  </button>
+                  <button
+                    type="button"
+                    style={{ ...styles.galleryArrow, insetInlineEnd: 12 }}
+                    onClick={() => showMedia(1)}
+                    aria-label={pick(lang, 'الصورة التالية', 'Next photo', 'Photo suivante')}
+                  >
+                    {isAr ? '‹' : '›'}
+                  </button>
+                  <span style={styles.galleryCounter} dir="ltr">{activeMedia + 1} / {mediaCount}</span>
+                  <div style={styles.thumbStrip} role="group" aria-label={pick(lang, 'صور الإعلان', 'Listing photos', 'Photos de l’annonce')}>
+                    {mediaUrls.map((url, index) => (
+                      <button
+                        key={`${url}-${index}`}
+                        type="button"
+                        onClick={() => setActiveMedia(index)}
+                        aria-label={`${title} ${index + 1}`}
+                        aria-current={index === activeMedia}
+                        style={index === activeMedia ? styles.thumbActive : styles.thumb}
+                      >
+                        <img src={url} alt="" style={styles.thumbImg} />
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
               <span style={styles.mediaBadge}>{divisionText(listing.division, lang)}</span>
               {listing.instantBookEnabled && <span style={styles.instantBookBadge}>{t.instantBookBadge}</span>}
             </div>
@@ -657,276 +680,323 @@ export function ListingDetailPage({ listingId, lang }: Props) {
           <section style={styles.detailBody}>
             <div style={styles.titleBlock}>
               <h1 style={styles.title}>{title}</h1>
-              <span style={styles.locationLine}>⌖ {mapTarget?.label || divisionText(listing.division, lang)}</span>
+              <span style={styles.locationLine}>⌖ {placeLabel || divisionText(listing.division, lang)}</span>
             </div>
 
-            <div style={styles.tabRow} role="tablist" aria-label={pick(lang, 'تفاصيل الإعلان', 'Listing details', 'Détails de l’annonce')}>
-              <button style={activeTab === 'terms' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('terms')}>{t.terms}</button>
-              <button style={activeTab === 'host' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('host')}>{t.host}</button>
-              <button style={activeTab === 'location' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('location')}>{t.location}</button>
-              <button style={activeTab === 'reviews' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('reviews')}>{t.reviews}</button>
-            </div>
-
-            <section style={styles.figmaTrustCard}>
-              {/* "Protected" only applies to Stays, the one division that actually transacts through
-                  SYBNB — showing it on contact-only divisions would overclaim (matches the gating
-                  already applied to the payment-protected card further down). */}
-              {listing.division === 'STAYS' && <strong>{t.protectedTitle}</strong>}
-              <small>
-                {reviewSummary.count > 0
-                  ? `${t.rating} ${reviewSummary.average} ★ (${reviewSummary.count})`
-                  : t.noReviewsYet}
+            {/* Price block: always visible, independent of the active tab. */}
+            <section style={styles.priceBlock} aria-label={t.price}>
+              <div style={styles.priceHeadline}>
+                <strong style={styles.priceAmount} dir={isAr ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
+                {unit && <span style={styles.priceUnit}>/ {unit}</span>}
+              </div>
+              {(isStays || feesStandard.totalMinor !== listing.priceMinor) && (
+                <small style={styles.priceSub}>
+                  {quoteLoading
+                    ? t.quoteLoading
+                    : `${t.totalDue}${colon}${moneyText(feesStandard.totalMinor, listing.currency, lang)}${
+                        isStays ? ` · ${stayQuote ? stayQuote.nights : 1} ${nightsWord(stayQuote ? stayQuote.nights : 1, lang)}` : ''
+                      }`}
+                  {isStays && !quoteLoading ? ` · ${t.feesIncluded}` : ''}
+                </small>
+              )}
+              <small style={styles.ratingLine}>
+                {reviewSummary.count > 0 ? `★ ${reviewSummary.average} · ${t.reviewsCount(reviewSummary.count)}` : t.noReviewsYet}
+                {isStays ? ` · ${t.protectedTitle}` : ''}
               </small>
             </section>
 
-            <section style={styles.bookingSteps}>
-              <h2>{detailCopy.howToBook}</h2>
-              {detailCopy.stepRows.slice(0, 4).map((step, index) => (
-                <div key={step} style={styles.bookingStep}>
-                  <b>{index + 1}</b>
-                  <span>{step}</span>
-                </div>
+            <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
+            <ListingSpecs division={listing.division} metadata={listing.metadata} lang={lang} />
+
+            <div style={styles.tabRow} role="tablist" aria-label={pick(lang, 'تفاصيل الإعلان', 'Listing details', 'Détails de l’annonce')}>
+              {(['terms', 'host', 'location', 'reviews'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab}
+                  style={activeTab === tab ? styles.tabActive : styles.tab}
+                  onClick={() => setActiveTab(tab)}
+                >
+                  {t[tab]}
+                </button>
               ))}
-              {listing.instantBookEnabled && <p style={styles.instantBookNote}>⚡ {t.instantBookExplain}</p>}
+            </div>
+
+            <section style={styles.tabPanel} role="tabpanel">
+              {activeTab === 'terms' && (
+                <TermsPanel listing={listing} lang={lang} checkIn={dateRange.checkIn} agreementTitle={detailCopy.agreementTitle} agreementVersionLabel={t.agreementVersionLabel} />
+              )}
+
+              {activeTab === 'host' && (
+                <div style={styles.trustGrid}>
+                  <article style={styles.trustCard}>
+                    <strong>{isStays ? t.host : pick(lang, 'المعلن', 'Seller', 'Vendeur')}</strong>
+                    <HostCard
+                      lang={lang}
+                      ownerId={listing.ownerId}
+                      fallbackName={listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}
+                      profile={hostProfile}
+                      onLoad={setHostProfile}
+                    />
+                  </article>
+                  {/* Payment protection only applies to the division that actually transacts (Stays);
+                      showing it on contact-only divisions (Rentals/Buy/Cars/Marketplace) would overclaim. */}
+                  {isStays && (
+                    <article style={styles.trustCard}>
+                      <strong>{t.paymentProtected}</strong>
+                      <span>{t.protected}</span>
+                    </article>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'location' && (
+                <section style={styles.mapPanel}>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <strong>{detailCopy.mapTitle}</strong>
+                    <span style={styles.placeText}>⌖ {placeLabel}</span>
+                    <span style={styles.body}>{detailCopy.mapCopy}</span>
+                  </div>
+                  <div style={styles.mapCanvas} aria-label={detailCopy.mapTitle}>
+                    <iframe
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                      src={googleMapsEmbedUrl(listing, title, lang)}
+                      style={styles.mapFrame}
+                      title={detailCopy.mapTitle}
+                    />
+                    <div style={styles.mapLocationCard}>
+                      <span style={styles.mapPin}>{detailCopy.mapPin}</span>
+                      <strong>{placeLabel}</strong>
+                      {mapTarget?.hasCoordinates ? (
+                        <small dir="ltr">{mapTarget.query}</small>
+                      ) : mapTarget?.hasRealLocation ? (
+                        <small>{t.mapApproximate}</small>
+                      ) : null}
+                    </div>
+                  </div>
+                  <a href={googleMapsSearchUrl(listing, title, lang)} rel="noreferrer" target="_blank" style={styles.secondaryLinkButton}>
+                    {t.openGoogleMaps}
+                  </a>
+                  <div style={offlineMapReady ? styles.offlineMapReady : styles.offlineMapCard}>
+                    <div>
+                      <strong>{offlineMapReady ? t.offlineMapReady : t.mapRequiresInternet}</strong>
+                      <span>{t.offlineMapCopy}</span>
+                      <small dir="ltr">{mapTarget?.hasCoordinates ? mapTarget.query : placeLabel}</small>
+                    </div>
+                    <button type="button" style={offlineMapReady ? styles.offlineMapSavedButton : styles.offlineMapButton} onClick={saveOfflineMap}>
+                      {offlineMapReady ? '✓' : t.saveOfflineMap}
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {activeTab === 'reviews' && (
+                <div style={{ display: 'grid', gap: 12 }}>
+                  <Info
+                    label={t.rating}
+                    value={reviewSummary.count > 0 ? `${reviewSummary.average} ★ (${t.reviewsCount(reviewSummary.count)})` : t.noReviewsYet}
+                  />
+                  {reviewSummary.reviews.length > 0 ? (
+                    <div style={styles.grid}>
+                      {reviewSummary.reviews.map((review) => (
+                        <article key={review.id} style={styles.info}>
+                          <span dir={isAr ? 'rtl' : 'ltr'}>{review.guest?.displayName || pick(lang, 'ضيف', 'Guest', 'Voyageur')} · {'★'.repeat(review.rating)}</span>
+                          <strong dir={isAr ? 'rtl' : 'ltr'}>{review.comment || ''}</strong>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={styles.body}>
+                      {pick(
+                        lang,
+                        'لم يكتب أحد تقييماً لهذا الإعلان بعد. تظهر التقييمات هنا بعد إتمام تعاملات حقيقية عبر SYBNB.',
+                        'Nobody has reviewed this listing yet. Reviews appear here after real transactions through SYBNB.',
+                        'Personne n’a encore évalué cette annonce. Les commentaires s’affichent ici après de vraies transactions via SYBNB.',
+                      )}
+                    </p>
+                  )}
+                </div>
+              )}
             </section>
           </section>
 
-          {activeTab === 'terms' && (
-            <section style={styles.tabPanel}>
-              <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
-              {listing.division === 'CARS' && <VehicleSpecs metadata={listing.metadata} lang={lang} />}
-              {['BUY', 'RENTALS', 'NEW_CONSTRUCTION'].includes(listing.division) && (
-                <PropertySpecs metadata={listing.metadata} lang={lang} division={listing.division} />
-              )}
-              {!customerReady && <div style={styles.accountHint}>{t.requestOnlyAfterAccount}</div>}
-              {listing.division === 'STAYS' && (
-                <>
-                  <section style={styles.protectionChoice}>
-                    <strong>{t.datesTitle}</strong>
-                    {showDatePicker ? (
-                      <DateRangePicker
+          {/* Booking / contact block: always visible below the tabs, whatever tab is active. */}
+          <section id="listing-booking" style={styles.bookingBlock}>
+            {!customerReady && <div style={styles.accountHint}>{accountHintText(listing.division, lang)}</div>}
+
+            {isStays && (
+              <>
+                <section style={styles.protectionChoice}>
+                  <strong>{t.datesTitle}</strong>
+                  {showDatePicker ? (
+                    <DateRangePicker
+                      lang={lang}
+                      value={dateRange}
+                      onChange={setDateRange}
+                      onClose={() => setShowDatePicker(false)}
+                      disabledDates={disabledDates}
+                      disabledHint={t.datesRequired}
+                    />
+                  ) : (
+                    <div style={styles.dateFieldsRow}>
+                      <DateField
                         lang={lang}
-                        value={dateRange}
-                        onChange={setDateRange}
-                        onClose={() => setShowDatePicker(false)}
-                        disabledDates={disabledDates}
-                        disabledHint={t.datesRequired}
+                        label={pick(lang, 'تاريخ الدخول', 'Check-in', 'Arrivée')}
+                        value={dateRange.checkIn}
+                        onClick={() => setShowDatePicker(true)}
                       />
-                    ) : (
-                      <div style={styles.dateFieldsRow}>
-                        <DateField
-                          lang={lang}
-                          label={pick(lang, 'تاريخ الدخول', 'Check-in', 'Arrivée')}
-                          value={dateRange.checkIn}
-                          onClick={() => setShowDatePicker(true)}
-                        />
-                        <DateField
-                          lang={lang}
-                          label={pick(lang, 'تاريخ الخروج', 'Check-out', 'Départ')}
-                          value={dateRange.checkOut}
-                          onClick={() => setShowDatePicker(true)}
-                        />
-                      </div>
-                    )}
-                  </section>
-
-                  <section style={styles.protectionChoice}>
-                    <strong>{t.protectionChoice}</strong>
-                    <div style={styles.protectionOptions}>
-                      <button
-                        style={!cancellationProtection ? styles.protectionOptionActive : styles.protectionOption}
-                        onClick={() => setCancellationProtection(false)}
-                      >
-                        <b>{t.standardRate}</b>
-                        <span>{t.standardCopy}</span>
-                        <em style={styles.cancellationCutoff}>{freeCancellationLabel(dateRange.checkIn, false, lang)}</em>
-                        <small>
-                          {quoteLoading
-                            ? t.quoteLoading
-                            : stayQuote
-                              ? `${moneyText(feesStandard.totalMinor, listing.currency, lang)} · ${stayQuote.nights} ${pick(lang, 'ليالٍ', 'nights', 'nuits')}`
-                              : moneyText(feesStandard.totalMinor, listing.currency, lang)}
-                        </small>
-                        {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
-                      </button>
-                      <button
-                        style={cancellationProtection ? styles.protectionOptionActive : styles.protectionOption}
-                        onClick={() => setCancellationProtection(true)}
-                      >
-                        <b>{t.protectedRate}</b>
-                        <span>{t.protectedCopy}</span>
-                        <em style={styles.cancellationCutoff}>{freeCancellationLabel(dateRange.checkIn, true, lang)}</em>
-                        <small>{t.protectionFee}: {moneyText(protectionFeeMinor, listing.currency, lang)}</small>
-                        <small>{t.totalDue}: {moneyText(protectedTotalMinor, listing.currency, lang)}</small>
-                        {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
-                      </button>
+                      <DateField
+                        lang={lang}
+                        label={pick(lang, 'تاريخ الخروج', 'Check-out', 'Départ')}
+                        value={dateRange.checkOut}
+                        onClick={() => setShowDatePicker(true)}
+                      />
                     </div>
-                    {!quoteLoading && (feesStandard.cleaningFeeMinor > 0 || feesStandard.taxesMinor > 0 || feesStandard.serviceFeeMinor > 0 || feesStandard.parkingFeeMinor > 0) && (
-                      <div style={styles.feeBreakdownRow}>
-                        <span>{t.stayAmount}: {moneyText(feesStandard.stayAmountMinor, listing.currency, lang)}</span>
-                        {feesStandard.cleaningFeeMinor > 0 && (
-                          <span>{t.cleaningFee}: {moneyText(feesStandard.cleaningFeeMinor, listing.currency, lang)}</span>
-                        )}
-                        {feesStandard.taxesMinor > 0 && <span>{t.taxes}: {moneyText(feesStandard.taxesMinor, listing.currency, lang)}</span>}
-                        {feesStandard.serviceFeeMinor > 0 && (
-                          <span>{t.serviceFee}: {moneyText(feesStandard.serviceFeeMinor, listing.currency, lang)}</span>
-                        )}
-                        {feesStandard.parkingFeeMinor > 0 && (
-                          <span>{t.parkingFee}: {moneyText(feesStandard.parkingFeeMinor, listing.currency, lang)}</span>
-                        )}
-                      </div>
-                    )}
-                  </section>
-                </>
-              )}
-            </section>
-          )}
-
-          {activeTab === 'location' && (
-            <section style={styles.tabPanel}>
-              <section style={styles.mapPanel}>
-                <div>
-                  <strong>{detailCopy.mapTitle}</strong>
-                  <span>{detailCopy.mapCopy}</span>
-                </div>
-                <div style={styles.mapCanvas} aria-label={detailCopy.mapTitle}>
-                  <iframe
-                    loading="lazy"
-                    referrerPolicy="no-referrer-when-downgrade"
-                    src={googleMapsEmbedUrl(listing, title, lang)}
-                    style={styles.mapFrame}
-                    title={detailCopy.mapTitle}
-                  />
-                  <div style={styles.mapLocationCard}>
-                    <span style={styles.mapPin}>{detailCopy.mapPin}</span>
-                    <strong>{mapTarget?.label}</strong>
-                    {mapTarget?.hasCoordinates ? (
-                      <small>{mapTarget.query}</small>
-                    ) : mapTarget?.hasRealLocation ? (
-                      <small>{t.mapApproximate}</small>
-                    ) : null}
-                  </div>
-                </div>
-                <a href={googleMapsSearchUrl(listing, title, lang)} rel="noreferrer" target="_blank" style={styles.secondaryLinkButton}>
-                  {t.openGoogleMaps}
-                </a>
-                <div style={offlineMapReady ? styles.offlineMapReady : styles.offlineMapCard}>
-                  <div>
-                    <strong>{offlineMapReady ? t.offlineMapReady : t.mapRequiresInternet}</strong>
-                    <span>{t.offlineMapCopy}</span>
-                    <small dir="ltr">{mapTarget?.hasCoordinates ? mapTarget.query : mapTarget?.label}</small>
-                  </div>
-                  <button style={offlineMapReady ? styles.offlineMapSavedButton : styles.offlineMapButton} onClick={saveOfflineMap}>
-                    {offlineMapReady ? '✓' : t.saveOfflineMap}
-                  </button>
-                </div>
-              </section>
-            </section>
-          )}
-
-          {activeTab === 'host' && (
-            <section style={styles.trustGrid}>
-              <article style={styles.trustCard}>
-                <strong>{t.host}</strong>
-                <HostCard
-                  lang={lang}
-                  ownerId={listing.ownerId}
-                  fallbackName={listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}
-                  profile={hostProfile}
-                  onLoad={setHostProfile}
-                />
-              </article>
-              {/* Payment protection only applies to the division that actually transacts (Stays);
-                  showing it on contact-only divisions (Rentals/Buy/Cars/Marketplace) would overclaim. */}
-              {listing.division === 'STAYS' && (
-                <article style={styles.trustCard}>
-                  <strong>{t.paymentProtected}</strong>
-                  <span>{t.protected}</span>
-                </article>
-              )}
-            </section>
-          )}
-
-          {activeTab === 'reviews' && (
-            <>
-              <section style={styles.grid}>
-                <Info
-                  label={t.rating}
-                  value={reviewSummary.count > 0 ? `${reviewSummary.average} ★ (${t.reviewsCount(reviewSummary.count)})` : t.noReviewsYet}
-                />
-                {listing.status !== 'APPROVED' && (
-                  <Info label={t.status} value={statusText(listing.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
-                )}
-                <Info label={t.reference} value={listing.id.slice(0, 8).toUpperCase()} />
-              </section>
-              {reviewSummary.reviews.length > 0 && (
-                <section style={styles.grid}>
-                  {reviewSummary.reviews.map((review) => (
-                    <article key={review.id} style={styles.info}>
-                      <span dir={isAr ? 'rtl' : 'ltr'}>{review.guest?.displayName || (pick(lang, 'ضيف', 'Guest', 'Voyageur'))} · {'★'.repeat(review.rating)}</span>
-                      <strong dir={isAr ? 'rtl' : 'ltr'}>{review.comment || ''}</strong>
-                    </article>
-                  ))}
+                  )}
                 </section>
+
+                <section style={styles.protectionChoice}>
+                  <strong>{t.protectionChoice}</strong>
+                  <div style={styles.protectionOptions}>
+                    <button
+                      type="button"
+                      style={!cancellationProtection ? styles.protectionOptionActive : styles.protectionOption}
+                      onClick={() => setCancellationProtection(false)}
+                    >
+                      <b>{t.standardRate}</b>
+                      <span>{t.standardCopy}</span>
+                      <em style={styles.cancellationCutoff}>{freeCancellationLabel(dateRange.checkIn, false, lang)}</em>
+                      <small>
+                        {quoteLoading
+                          ? t.quoteLoading
+                          : stayQuote
+                            ? `${moneyText(feesStandard.totalMinor, listing.currency, lang)} · ${stayQuote.nights} ${nightsWord(stayQuote.nights, lang)}`
+                            : moneyText(feesStandard.totalMinor, listing.currency, lang)}
+                      </small>
+                      {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
+                    </button>
+                    <button
+                      type="button"
+                      style={cancellationProtection ? styles.protectionOptionActive : styles.protectionOption}
+                      onClick={() => setCancellationProtection(true)}
+                    >
+                      <b>{t.protectedRate}</b>
+                      <span>{t.protectedCopy}</span>
+                      <em style={styles.cancellationCutoff}>{freeCancellationLabel(dateRange.checkIn, true, lang)}</em>
+                      <small>{t.protectionFee}{colon}{moneyText(protectionFeeMinor, listing.currency, lang)}</small>
+                      <small>{t.totalDue}{colon}{moneyText(protectedTotalMinor, listing.currency, lang)}</small>
+                      {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
+                    </button>
+                  </div>
+                  {!quoteLoading && (feesStandard.cleaningFeeMinor > 0 || feesStandard.taxesMinor > 0 || feesStandard.serviceFeeMinor > 0 || feesStandard.parkingFeeMinor > 0) && (
+                    <div style={styles.feeBreakdownRow}>
+                      <span>{t.stayAmount}{colon}{moneyText(feesStandard.stayAmountMinor, listing.currency, lang)}</span>
+                      {feesStandard.cleaningFeeMinor > 0 && (
+                        <span>{t.cleaningFee}{colon}{moneyText(feesStandard.cleaningFeeMinor, listing.currency, lang)}</span>
+                      )}
+                      {feesStandard.taxesMinor > 0 && <span>{t.taxes}{colon}{moneyText(feesStandard.taxesMinor, listing.currency, lang)}</span>}
+                      {feesStandard.serviceFeeMinor > 0 && (
+                        <span>{t.serviceFee}{colon}{moneyText(feesStandard.serviceFeeMinor, listing.currency, lang)}</span>
+                      )}
+                      {feesStandard.parkingFeeMinor > 0 && (
+                        <span>{t.parkingFee}{colon}{moneyText(feesStandard.parkingFeeMinor, listing.currency, lang)}</span>
+                      )}
+                    </div>
+                  )}
+                </section>
+
+                {!booking && (
+                  // Inline (not sticky) so it never covers the listing while scrolling.
+                  <label style={styles.agreementBox}>
+                    <input
+                      checked={acceptedGuestAgreement}
+                      onChange={(event) => {
+                        setAcceptedGuestAgreement(event.target.checked)
+                        if (event.target.checked && message === t.agreementRequired) setMessage('')
+                      }}
+                      style={styles.agreementInput}
+                      type="checkbox"
+                    />
+                    <span style={{ display: 'grid', gap: 6 }}>
+                      <strong>{detailCopy.agreementTitle}</strong>
+                      <small>{detailCopy.agreementCopy}</small>
+                      <em>{t.agreementVersionLabel}</em>
+                    </span>
+                  </label>
+                )}
+              </>
+            )}
+
+            {messageBox}
+
+            {booking && (
+              <section style={styles.panel}>
+                <strong>{t.requestStatus}{colon}{statusText(booking.status, lang)}</strong>
+                <button type="button" style={styles.primaryButton} onClick={() => (window.location.hash = `/booking/${booking.id}`)}>
+                  {t.payment}
+                </button>
+              </section>
+            )}
+
+            {inquirySent && (
+              <section style={styles.panel}>
+                <strong>{t.inquirySentTitle}</strong>
+                <p style={styles.body}>{t.inquirySentCopy}</p>
+                <button type="button" style={styles.primaryButton} onClick={() => (window.location.hash = '/immocontact')}>
+                  {t.openInbox}
+                </button>
+              </section>
+            )}
+
+            <div style={styles.actions}>
+              {isStays && (
+                <button type="button" style={styles.secondaryButton} onClick={openContactTunnel}>
+                  {pick(lang, 'تواصل مع المضيف', 'Contact host', 'Contacter l’hôte')}
+                </button>
               )}
-            </>
-          )}
+              {!inquirySent && !booking && (
+                <button type="button" disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
+                  {primaryLabel}
+                </button>
+              )}
+            </div>
+          </section>
+
+          <section style={styles.bookingSteps}>
+            <h2 style={{ margin: 0, fontSize: 20 }}>{detailCopy.howToBook}</h2>
+            {detailCopy.stepRows.slice(0, 4).map((step, index) => (
+              <div key={step} style={styles.bookingStep}>
+                <b>{index + 1}</b>
+                <span>{step}</span>
+              </div>
+            ))}
+            {listing.instantBookEnabled && <p style={styles.instantBookNote}>⚡ {t.instantBookExplain}</p>}
+          </section>
 
           <section style={styles.grid}>
-            <Info label={t.price} value={moneyText(feesStandard.totalMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
-            <Info label={t.owner} value={listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()} />
+            <Info label={isStays ? t.host : t.owner} value={listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()} />
             <Info label={t.division} value={divisionText(listing.division, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+            <Info label={t.reference} value={listing.id.slice(0, 8).toUpperCase()} />
+            {listing.status !== 'APPROVED' && <Info label={t.status} value={statusText(listing.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />}
             {customerReady ? <Info label={t.accountReady} value="✓" dir={isAr ? 'rtl' : 'ltr'} /> : null}
             {booking ? <Info label={t.requestStatus} value={statusText(booking.status, lang)} dir={isAr ? 'rtl' : 'ltr'} /> : null}
           </section>
 
-          {booking && (
-            <section style={styles.panel}>
-              <strong>{t.requestStatus}: {statusText(booking.status, lang)}</strong>
-              <button style={styles.primaryButton} onClick={() => (window.location.hash = `/booking/${booking.id}`)}>
-                {t.payment}
+          {/* Compact sticky bar: price + the one primary action only (no agreement text), so it never
+              covers a large part of the listing. */}
+          {!inquirySent && !booking && (
+            <section style={styles.bottomActionBar}>
+              <div style={styles.bottomPrice}>
+                <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
+                {unit && <span>/ {unit}</span>}
+              </div>
+              <button type="button" disabled={status === 'saving'} style={styles.primaryButtonCompact} onClick={() => void requestListing()}>
+                {primaryLabel}
               </button>
             </section>
           )}
-
-          {inquirySent && (
-            <section style={styles.panel}>
-              <strong>{t.inquirySentTitle}</strong>
-              <p style={styles.body}>{t.inquirySentCopy}</p>
-              <button style={styles.primaryButton} onClick={() => (window.location.hash = '/immocontact')}>
-                {t.openInbox}
-              </button>
-            </section>
-          )}
-
-          <section style={styles.bottomActionBar}>
-            {listing.division === 'STAYS' && !booking && (
-              <label style={{ ...styles.agreementBox, gridColumn: '1 / -1' }}>
-                <input
-                  checked={acceptedGuestAgreement}
-                  onChange={(event) => {
-                    setAcceptedGuestAgreement(event.target.checked)
-                    if (event.target.checked && message === t.agreementRequired) setMessage('')
-                  }}
-                  style={styles.agreementInput}
-                  type="checkbox"
-                />
-                <span>
-                  <strong>{detailCopy.agreementTitle}</strong>
-                  <small>{detailCopy.agreementCopy}</small>
-                  <em>{t.agreementVersionLabel}</em>
-                </span>
-              </label>
-            )}
-            <button style={styles.secondaryButton} onClick={openContactTunnel}>
-              {t.bottomContact}
-            </button>
-            {!inquirySent && (
-              <button disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
-                {status === 'saving' ? t.saving : customerReady ? actionLabel : t.dashboard}
-              </button>
-            )}
-          </section>
         </>
       )}
     </main>
@@ -957,10 +1027,11 @@ function actionForDivision(division: string, lang: Lang) {
   const actions: Record<string, Record<Lang, string>> = {
     STAYS: { ar: 'إرسال طلب الحجز', en: 'Send booking request', fr: 'Envoyer la demande de réservation' },
     RENTALS: { ar: 'طلب تواصل', en: 'Request contact', fr: 'Demander un contact' },
-    BUY: { ar: 'طلب زيارة', en: 'Request visit', fr: 'Demander une visite' },
+    // Non-bookable divisions only open a conversation with the seller -- never "booking" wording.
+    BUY: { ar: 'تواصل مع البائع', en: 'Contact seller', fr: 'Contacter le vendeur' },
     CARS: { ar: 'تواصل مع البائع', en: 'Contact seller', fr: 'Contacter le vendeur' },
-    MARKETPLACE: { ar: 'طلب المنتج', en: 'Request item', fr: 'Demander l’article' },
-    NEW_CONSTRUCTION: { ar: 'حجز زيارة', en: 'Book visit', fr: 'Réserver une visite' },
+    MARKETPLACE: { ar: 'تواصل مع البائع', en: 'Contact seller', fr: 'Contacter le vendeur' },
+    NEW_CONSTRUCTION: { ar: 'تواصل مع البائع', en: 'Contact seller', fr: 'Contacter le vendeur' },
   }
   return actions[division]?.[lang] || actions.STAYS[lang]
 }
@@ -982,14 +1053,14 @@ function detailCopyForDivision(division: string, lang: Lang, fallback: typeof co
     },
     BUY: {
       mapTitle: pick(lang, 'موقع العقار', 'Property location', 'Emplacement du bien'),
-      mapCopy: pick(lang, 'موقع العقار المختار يظهر هنا. راجع المنطقة قبل طلب الزيارة.', 'The selected property location appears here. Review the area before requesting a visit.', 'L’emplacement du bien sélectionné s’affiche ici. Repérez le quartier avant de demander une visite.'),
+      mapCopy: pick(lang, 'موقع العقار المختار يظهر هنا. راجع المنطقة قبل التواصل مع البائع.', 'The selected property location appears here. Review the area before contacting the seller.', 'L’emplacement du bien sélectionné s’affiche ici. Repérez le quartier avant de contacter le vendeur.'),
       mapPin: pick(lang, 'موقع العقار', 'Property location', 'Emplacement du bien'),
       howToBook: pick(lang, 'كيف تسير العملية', 'How it works', 'Comment ça marche'),
       stepRows: pick(
         lang,
-        ['راجع تفاصيل العقار', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب الزيارة', 'نسّق موعد الزيارة داخل SYBNB'],
-        ['Review property details', 'Sign in or create account', 'Send visit request', 'Coordinate the visit inside SYBNB'],
-        ['Consultez le détail du bien', 'Connectez-vous ou créez un compte', 'Envoyez la demande de visite', 'Organisez la visite dans SYBNB'],
+        ['راجع تفاصيل العقار', 'سجّل الدخول أو أنشئ حساباً', 'تواصل مع البائع', 'نسّق موعد الزيارة داخل SYBNB'],
+        ['Review property details', 'Sign in or create account', 'Contact the seller', 'Coordinate the visit inside SYBNB'],
+        ['Consultez le détail du bien', 'Connectez-vous ou créez un compte', 'Contactez le vendeur', 'Organisez la visite dans SYBNB'],
       ),
     },
     CARS: {
@@ -1006,26 +1077,26 @@ function detailCopyForDivision(division: string, lang: Lang, fallback: typeof co
     },
     MARKETPLACE: {
       mapTitle: pick(lang, 'موقع العرض', 'Offer location', 'Emplacement de l’offre'),
-      mapCopy: pick(lang, 'موقع العرض يظهر هنا. راجع المنطقة قبل إرسال طلب المنتج.', 'The offer location appears here. Review the area before requesting the item.', 'L’emplacement de l’offre s’affiche ici. Repérez le quartier avant de demander l’article.'),
+      mapCopy: pick(lang, 'موقع العرض يظهر هنا. راجع المنطقة قبل التواصل مع البائع.', 'The offer location appears here. Review the area before contacting the seller.', 'L’emplacement de l’offre s’affiche ici. Repérez le quartier avant de contacter le vendeur.'),
       mapPin: pick(lang, 'موقع العرض', 'Offer location', 'Emplacement de l’offre'),
       howToBook: pick(lang, 'كيف تسير العملية', 'How it works', 'Comment ça marche'),
       stepRows: pick(
         lang,
-        ['راجع تفاصيل المنتج', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب المنتج', 'نسّق الاستلام مع البائع داخل SYBNB'],
-        ['Review item details', 'Sign in or create account', 'Send item request', 'Coordinate pickup with the seller inside SYBNB'],
-        ['Consultez le détail de l’article', 'Connectez-vous ou créez un compte', 'Envoyez la demande d’article', 'Organisez le retrait avec le vendeur dans SYBNB'],
+        ['راجع تفاصيل المنتج', 'سجّل الدخول أو أنشئ حساباً', 'تواصل مع البائع', 'نسّق الاستلام مع البائع داخل SYBNB'],
+        ['Review item details', 'Sign in or create account', 'Contact the seller', 'Coordinate pickup with the seller inside SYBNB'],
+        ['Consultez le détail de l’article', 'Connectez-vous ou créez un compte', 'Contactez le vendeur', 'Organisez le retrait avec le vendeur dans SYBNB'],
       ),
     },
     NEW_CONSTRUCTION: {
       mapTitle: pick(lang, 'موقع المشروع', 'Project location', 'Emplacement du projet'),
-      mapCopy: pick(lang, 'موقع المشروع يظهر هنا. افتح خرائط Google قبل حجز الزيارة.', 'The project location appears here. Open Google Maps before booking a visit.', 'L’emplacement du projet s’affiche ici. Ouvrez Google Maps avant de réserver une visite.'),
+      mapCopy: pick(lang, 'موقع المشروع يظهر هنا. افتح خرائط Google قبل التواصل مع البائع.', 'The project location appears here. Open Google Maps before contacting the seller.', 'L’emplacement du projet s’affiche ici. Ouvrez Google Maps avant de contacter le vendeur.'),
       mapPin: pick(lang, 'موقع المشروع', 'Project location', 'Emplacement du projet'),
       howToBook: pick(lang, 'كيف تسير العملية', 'How it works', 'Comment ça marche'),
       stepRows: pick(
         lang,
-        ['راجع تفاصيل المشروع', 'سجّل الدخول أو أنشئ حساباً', 'احجز موعد زيارة', 'نسّق الزيارة داخل SYBNB'],
-        ['Review project details', 'Sign in or create account', 'Book a visit', 'Coordinate the visit inside SYBNB'],
-        ['Consultez le détail du projet', 'Connectez-vous ou créez un compte', 'Réservez une visite', 'Organisez la visite dans SYBNB'],
+        ['راجع تفاصيل المشروع', 'سجّل الدخول أو أنشئ حساباً', 'تواصل مع البائع', 'نسّق الزيارة داخل SYBNB'],
+        ['Review project details', 'Sign in or create account', 'Contact the seller', 'Coordinate the visit inside SYBNB'],
+        ['Consultez le détail du projet', 'Connectez-vous ou créez un compte', 'Contactez le vendeur', 'Organisez la visite dans SYBNB'],
       ),
     },
   }
@@ -1070,93 +1141,182 @@ function readListingReturnPath() {
   }
 }
 
-// Renders the vehicle attributes a seller captured (metadata.visualFilters) as a labelled
-// spec list, localizing each stored value against the existing car filter option definitions.
-// Read-only: it surfaces already-persisted data, it does not add new vehicle schema.
-const CAR_SPEC_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition'] as const
+// Scoped to this page while it is mounted: the global breadcrumb bar is translucent and the listing
+// (photos, tabs) showed through it while scrolling. A permanent fix belongs in global.css.
+const LISTING_PAGE_CSS = `
+.flow-step-nav { background: #0d1222 !important; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); z-index: 30; }
+#listing-booking { scroll-margin-top: 150px; }
+`
 
-function VehicleSpecs({ metadata, lang }: { metadata: Record<string, unknown>; lang: Lang }) {
-  const groups = useMemo(() => sellerCarFilterGroupsFromConfig(), [])
-  const selection = (metadata?.visualFilters as Record<string, unknown> | undefined) || undefined
-  if (!selection) return null
-
-  const rows = CAR_SPEC_KEYS.map((key) => {
-    const raw = selection[key]
-    const value = typeof raw === 'string' ? raw : Array.isArray(raw) ? String(raw[0] || '') : ''
-    if (!value || value === 'any') return null
-    const group = groups.find((item) => item.id === key)
-    const option = group?.options.find((opt) => opt.id === value)
-    const label = group ? text(group.title, lang) : key
-    const display = option ? text(option.label, lang) : value
-    return { key, label, display }
-  }).filter(Boolean) as Array<{ key: string; label: string; display: string }>
-
-  if (rows.length === 0) return null
-
-  return (
-    <section style={styles.specGrid} aria-label={pick(lang, 'مواصفات المركبة', 'Vehicle specifications', 'Caractéristiques du véhicule')}>
-      <strong>{pick(lang, 'مواصفات المركبة', 'Vehicle specifications', 'Caractéristiques du véhicule')}</strong>
-      <dl style={styles.specList}>
-        {rows.map((row) => (
-          <div key={row.key} style={styles.specRow}>
-            <dt style={styles.specLabel}>{row.label}</dt>
-            <dd style={styles.specValue}>{row.display}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  )
+function goToAccountAndBack(listingId: string) {
+  if (typeof window === 'undefined') return
+  // /account/open/:id makes GuestAccountPage return to /listing/:id after sign-in; the stored
+  // return path is a fallback for any account screen that reads it instead.
+  try {
+    sessionStorage.setItem(GUEST_RETURN_PATH_KEY, `/listing/${listingId}`)
+  } catch {
+    // storage unavailable: the /account/open/:id route still carries the listing id
+  }
+  window.location.hash = `/account/open/${listingId}`
 }
 
-// Surfaces the property attributes a seller captured (metadata) as a labelled spec list for
-// BUY/RENTALS listings. Read-only over already-persisted data; adds no new property schema.
-function PropertySpecs({ metadata, lang, division = 'BUY' }: { metadata: Record<string, unknown>; lang: Lang; division?: string }) {
-  const isAr = lang === 'ar'
-  const md = metadata || {}
-  const heading = division === 'NEW_CONSTRUCTION' ? (pick(lang, 'تفاصيل المشروع', 'Project details', 'Détails du projet')) : pick(lang, 'تفاصيل العقار', 'Property details', 'Détails du bien')
-  const vf = (md.visualFilters as Record<string, unknown> | undefined) || {}
-  const typeValue = typeof vf.propertyType === 'string' ? vf.propertyType : typeof md.propertyType === 'string' ? md.propertyType : ''
-  const typeOption = propertyFilterGroup.options.find((opt) => opt.id === typeValue)
-  const locationLabel = [md.governorateLabel, md.cityLabel, md.areaLabel].filter((part) => typeof part === 'string' && part).join(isAr ? '، ' : ', ')
+const DIVISION_PATHS: Record<string, string> = {
+  STAYS: '/stays',
+  RENTALS: '/rentals',
+  BUY: '/buy',
+  CARS: '/cars',
+  MARKETPLACE: '/marketplace',
+  NEW_CONSTRUCTION: '/new-construction',
+}
 
-  const rows = [
-    typeValue && typeValue !== 'any' ? { key: 'type', label: pick(lang, 'نوع العقار', 'Property type', 'Type de bien'), display: typeOption ? text(typeOption.label, lang) : typeValue } : null,
-    Number(md.bedrooms) > 0 ? { key: 'beds', label: pick(lang, 'غرف النوم', 'Bedrooms', 'Chambres'), display: String(md.bedrooms) } : null,
-    Number(md.bathrooms) > 0 ? { key: 'baths', label: pick(lang, 'الحمامات', 'Bathrooms', 'Salles de bain'), display: String(md.bathrooms) } : null,
-    Number(md.sizeSqm) > 0 ? { key: 'size', label: pick(lang, 'المساحة (م²)', 'Size (m²)', 'Superficie (m²)'), display: String(md.sizeSqm) } : null,
-    locationLabel ? { key: 'loc', label: pick(lang, 'الموقع', 'Location', 'Emplacement'), display: locationLabel } : null,
-  ].filter(Boolean) as Array<{ key: string; label: string; display: string }>
+// The breadcrumb (AppShell) and the account page derive their section from the stored listing
+// return path. When the listing was opened directly (shared link) or from another division's page,
+// that path is missing or names the wrong section (e.g. "Short-term rental" on a car). Align it with
+// this listing's division; a non-division return path such as a search-results page is kept.
+function syncListingReturnPath(division: string) {
+  if (typeof window === 'undefined') return
+  const target = DIVISION_PATHS[division]
+  if (!target) return
+  try {
+    const stored = sessionStorage.getItem('sybnb-v6-listing-return-path') || ''
+    const storedDivisionPath = Object.values(DIVISION_PATHS).find((path) => stored === path || stored.startsWith(`${path}?`) || stored.startsWith(`${path}/`))
+    if (!stored || (storedDivisionPath && storedDivisionPath !== target)) {
+      sessionStorage.setItem('sybnb-v6-listing-return-path', target)
+    }
+  } catch {
+    // storage unavailable: breadcrumb falls back to its default
+  }
+}
 
-  if (rows.length === 0) return null
+function priceUnitText(division: string, lang: Lang) {
+  if (division === 'STAYS') return pick(lang, 'ليلة', 'night', 'nuit')
+  if (division === 'RENTALS') return pick(lang, 'شهر', 'month', 'mois')
+  return ''
+}
+
+function nightsWord(count: number, lang: Lang) {
+  if (lang === 'ar') return count === 1 ? 'ليلة' : count === 2 ? 'ليلتان' : 'ليالٍ'
+  if (lang === 'fr') return count > 1 ? 'nuits' : 'nuit'
+  return count === 1 ? 'night' : 'nights'
+}
+
+function accountHintText(division: string, lang: Lang) {
+  if (division === 'STAYS') return copy[lang].requestOnlyAfterAccount
+  if (division === 'RENTALS') {
+    return pick(lang, 'افتح حسابك أو سجّل الدخول أولاً، ثم تواصل مع المالك.', 'Open an account or sign in first, then contact the owner.', 'Ouvrez un compte ou connectez-vous d’abord, puis contactez le propriétaire.')
+  }
+  return pick(lang, 'افتح حسابك أو سجّل الدخول أولاً، ثم تواصل مع البائع.', 'Open an account or sign in first, then contact the seller.', 'Ouvrez un compte ou connectez-vous d’abord, puis contactez le vendeur.')
+}
+
+const ARABIC_RE = /[؀-ۿ]/
+
+// The map capsule label mixes Arabic and Latin address parts and has no French text; keep only the
+// parts written in the reader's script (falling back to whatever exists). Nothing is invented.
+function localizedPlaceLabel(target: GoogleMapTarget | null, lang: Lang) {
+  if (!target) return ''
+  if (!target.hasRealLocation) {
+    return target.hasCoordinates
+      ? pick(lang, 'موقع محدد على الخريطة', 'Pinned location', 'Emplacement épinglé sur la carte')
+      : pick(lang, 'لم يتم تحديد الموقع', 'Location not provided', 'Emplacement non précisé')
+  }
+  const parts = target.label.split(/\s*[،,]\s*/).filter(Boolean)
+  const arabic = parts.filter((part) => ARABIC_RE.test(part))
+  const latin = parts.filter((part) => !ARABIC_RE.test(part))
+  const chosen = lang === 'ar' ? (arabic.length ? arabic : latin) : latin.length ? latin : arabic
+  return Array.from(new Set(chosen)).join(lang === 'ar' ? '، ' : ', ')
+}
+
+// Terms tab: the cancellation policy for bookable stays, or a clear per-division note for
+// contact-only divisions. Only restates rules that already exist in the product (cancellation
+// windows from cancellationPolicy.ts, contact-only divisions never transact through SYBNB).
+function TermsPanel({
+  listing,
+  lang,
+  checkIn,
+  agreementTitle,
+  agreementVersionLabel,
+}: {
+  listing: PlatformListing
+  lang: Lang
+  checkIn: string
+  agreementTitle: string
+  agreementVersionLabel: string
+}) {
+  const md = listing.metadata || {}
+  const houseRules = typeof md.houseRules === 'string' && md.houseRules.trim()
+    ? md.houseRules.trim()
+    : Array.isArray(md.houseRules)
+      ? md.houseRules.filter((rule): rule is string => typeof rule === 'string' && rule.trim().length > 0).join(' · ')
+      : ''
+  const division = listing.division
+  const note =
+    division === 'RENTALS'
+      ? pick(
+          lang,
+          'شروط الإيجار (المدة، التأمين، مواعيد الدفع) يتم الاتفاق عليها مباشرة مع المالك عبر رسائل SYBNB. لا يتم أي دفع عبر SYBNB لهذا الإعلان.',
+          'Rental terms (duration, deposit, payment schedule) are agreed directly with the owner through SYBNB messages. No payment is made through SYBNB for this listing.',
+          'Les conditions de location (durée, dépôt, échéancier de paiement) se conviennent directement avec le propriétaire via la messagerie SYBNB. Aucun paiement ne passe par SYBNB pour cette annonce.',
+        )
+      : division === 'STAYS'
+        ? ''
+        : pick(
+            lang,
+            'السعر وشروط البيع يتم الاتفاق عليها مباشرة مع البائع عبر رسائل SYBNB. لا يتم أي دفع عبر SYBNB لهذا الإعلان.',
+            'Price and sale terms are agreed directly with the seller through SYBNB messages. No payment is made through SYBNB for this listing.',
+            'Le prix et les conditions de vente se conviennent directement avec le vendeur via la messagerie SYBNB. Aucun paiement ne passe par SYBNB pour cette annonce.',
+          )
 
   return (
-    <section style={styles.specGrid} aria-label={heading}>
-      <strong>{heading}</strong>
-      <dl style={styles.specList}>
-        {rows.map((row) => (
-          <div key={row.key} style={styles.specRow}>
-            <dt style={styles.specLabel}>{row.label}</dt>
-            <dd style={styles.specValue}>{row.display}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
+    <div style={{ display: 'grid', gap: 12 }}>
+      {division === 'STAYS' ? (
+        <>
+          <article style={styles.info}>
+            <span>{pick(lang, 'سياسة الإلغاء', 'Cancellation policy', 'Politique d’annulation')}</span>
+            <strong>{pick(lang, 'السعر العادي', 'Standard rate', 'Tarif standard')}{lang === 'fr' ? ' : ' : ': '}{freeCancellationLabel(checkIn, false, lang)}</strong>
+            <strong>{pick(lang, 'السعر المحمي', 'Protected rate', 'Tarif protégé')}{lang === 'fr' ? ' : ' : ': '}{freeCancellationLabel(checkIn, true, lang)}</strong>
+          </article>
+          <article style={styles.info}>
+            <span>{pick(lang, 'الدفع', 'Payment', 'Paiement')}</span>
+            <strong>
+              {pick(
+                lang,
+                `الدفع داخل SYBNB فقط. يتم قبول «${agreementTitle}» (${agreementVersionLabel}) عند إرسال طلب الحجز.`,
+                `Payment happens only inside SYBNB. The “${agreementTitle}” (${agreementVersionLabel}) is accepted when you send the booking request.`,
+                `Le paiement s’effectue uniquement dans SYBNB. Le « ${agreementTitle} » (${agreementVersionLabel}) est accepté à l’envoi de la demande de réservation.`,
+              )}
+            </strong>
+          </article>
+        </>
+      ) : (
+        <article style={styles.info}>
+          <span>{pick(lang, 'الشروط', 'Terms', 'Conditions')}</span>
+          <strong>{note}</strong>
+        </article>
+      )}
+      <article style={styles.info}>
+        <span>{division === 'STAYS' ? pick(lang, 'قواعد الإقامة', 'House rules', 'Règlement intérieur') : pick(lang, 'ملاحظات البائع', 'Seller notes', 'Notes du vendeur')}</span>
+        <strong>{houseRules || pick(lang, 'لم يضف المعلن قواعد إضافية.', 'The lister has not added extra rules.', 'L’annonceur n’a pas ajouté de règles particulières.')}</strong>
+      </article>
+    </div>
   )
 }
 
 const styles: Record<string, CSSProperties> = {
-  specGrid: { border: '1px solid #e3e8f0', borderRadius: 10, padding: 14, marginTop: 12, display: 'grid', gap: 10 },
-  specList: { display: 'grid', gap: 8, margin: 0 },
-  specRow: { display: 'flex', justifyContent: 'space-between', gap: 12, borderBottom: '1px solid #f0f3f8', paddingBottom: 6 },
-  specLabel: { color: '#5b667a', fontWeight: 700, margin: 0 },
-  specValue: { color: '#0f1830', fontWeight: 800, margin: 0 },
+  galleryArrow: { position: 'absolute', top: '50%', transform: 'translateY(-50%)', zIndex: 2, width: 46, height: 46, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.55)', color: '#fff', fontSize: 30, fontWeight: 900, display: 'grid', placeItems: 'center', cursor: 'pointer' },
+  galleryCounter: { position: 'absolute', top: 18, insetInlineEnd: 18, zIndex: 2, borderRadius: 999, background: 'rgba(0,0,0,.55)', color: '#fff', padding: '6px 10px', fontSize: 13, fontWeight: 800 },
+  priceBlock: { border: '1px solid #30384d', borderRadius: 12, background: '#151620', padding: 16, display: 'grid', gap: 6, justifyItems: 'center', textAlign: 'center' },
+  priceHeadline: { display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', justifyContent: 'center' },
+  priceAmount: { fontSize: 28, fontWeight: 950, color: '#fff' },
+  priceUnit: { color: '#9aa6ba', fontWeight: 800, fontSize: 16 },
+  priceSub: { color: '#c8cede', fontWeight: 700 },
+  ratingLine: { color: '#9aa6ba', fontWeight: 700 },
+  placeText: { color: '#fff', fontWeight: 800 },
+  bookingBlock: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', padding: 16, display: 'grid', gap: 14 },
+  bottomPrice: { display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', minWidth: 0, color: '#9aa6ba', fontWeight: 800 },
+  primaryButtonCompact: { minHeight: 44, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 16px', whiteSpace: 'nowrap' },
   page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '24px 16px 112px', display: 'grid', gap: 16, maxWidth: 1080, margin: '0 auto' },
-  back: { justifySelf: 'start', minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
-  flowNav: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
-  arrowButton: { width: 54, height: 54, borderRadius: 999, border: '1px solid #30384d', background: '#111827', color: '#fff', fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
   detailHero: { border: '1px solid #1e1e2a', borderRadius: 8, background: '#111118', minHeight: 330, overflow: 'hidden', position: 'relative' },
   heroIconButton: { position: 'absolute', top: 18, insetInlineStart: 18, zIndex: 2, width: 52, height: 52, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.42)', color: '#fff', fontSize: 28, fontWeight: 900, display: 'grid', placeItems: 'center', backdropFilter: 'blur(10px)' },
-  heroNextButton: { position: 'absolute', top: 18, insetInlineEnd: 18, zIndex: 2, width: 52, height: 52, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.42)', color: '#fff', fontSize: 28, fontWeight: 900, display: 'grid', placeItems: 'center', backdropFilter: 'blur(10px)' },
   media: { minHeight: 330, background: '#0b1120', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 950, textTransform: 'uppercase', position: 'relative', overflow: 'hidden' },
   mediaImage: { width: '100%', height: '100%', minHeight: 330, objectFit: 'cover', display: 'block' },
   thumbStrip: { position: 'absolute', left: 0, right: 0, bottom: 8, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', padding: '0 8px' },
@@ -1172,15 +1332,13 @@ const styles: Record<string, CSSProperties> = {
   tab: { minHeight: 42, border: 0, borderRadius: 999, background: '#20212b', color: '#c8cede', padding: '0 18px', fontWeight: 900 },
   tabActive: { minHeight: 42, border: '1px solid #5268ff', borderRadius: 999, background: '#5268ff', color: '#fff', padding: '0 18px', fontWeight: 950 },
   tabPanel: { display: 'grid', gap: 14 },
-  figmaTrustCard: { border: '1px solid #232635', borderRadius: 18, background: '#151620', padding: 18, display: 'grid', gap: 14 },
-  trustPills: { display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' },
   bookingSteps: { display: 'grid', gap: 10 },
   bookingStep: { display: 'grid', gridTemplateColumns: '38px minmax(0, 1fr)', alignItems: 'center', gap: 10, color: '#9aa6ba' },
   instantBookNote: { border: '1px solid rgba(213,169,21,.35)', borderRadius: 8, background: 'rgba(213,169,21,.08)', color: '#d5a915', padding: 12, fontWeight: 700 },
   accountHint: { border: '1px solid rgba(82,104,255,.45)', borderRadius: 8, background: 'rgba(82,104,255,.1)', color: '#dfe5ff', padding: 12, fontWeight: 900 },
   heroContent: { padding: 18, display: 'grid', gap: 12, alignContent: 'center' },
   eyebrow: { color: '#d5a915', letterSpacing: 2, fontWeight: 900, fontSize: 11, margin: 0 },
-  title: { margin: 0, fontSize: 42, lineHeight: 1.05 },
+  title: { margin: 0, fontSize: 'clamp(26px, 6vw, 42px)', lineHeight: 1.1 },
   body: { color: '#9aa6ba', lineHeight: 1.65, margin: 0 },
   actions: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
   primaryButton: { minHeight: 48, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 950, padding: '0 14px' },
@@ -1218,7 +1376,8 @@ const styles: Record<string, CSSProperties> = {
   recoverPrimary: { minHeight: 46, border: 0, borderRadius: 8, background: '#20d29b', color: '#06110e', fontWeight: 900, padding: '0 18px', cursor: 'pointer' },
   recoverSecondary: { minHeight: 46, border: '1px solid #30384d', borderRadius: 8, background: 'transparent', color: '#fff', fontWeight: 800, padding: '0 18px', cursor: 'pointer' },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
-  bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
+  // Compact: one row (price + primary action), ~70px tall, so it never hides much of the listing.
+  bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: '#0d0f18', boxShadow: '0 -10px 30px rgba(0,0,0,.35)', padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
 }
 
 // Airbnb-style "Hosted by" card: photo, name, city, member-since, languages, about. Loads the

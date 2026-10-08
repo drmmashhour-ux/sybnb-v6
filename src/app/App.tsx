@@ -21,6 +21,7 @@ const FinanceReconciliationPage = lazyNamed(() => import('../modules/finance/Fin
 const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'), 'GiftFlowRoutes')
 const GuestAccountPage = lazyNamed(() => import('../modules/account/GuestAccountPage'), 'GuestAccountPage')
 const BecomeHostPage = lazyNamed(() => import('../modules/account/BecomeHostPage'), 'BecomeHostPage')
+const HostWhyPage = lazyNamed(() => import('../modules/account/HostWhyPage'), 'HostWhyPage')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
 const HostProfilePage = lazyNamed(() => import('../modules/host/HostProfilePage'), 'HostProfilePage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
@@ -123,8 +124,20 @@ export function App() {
     sessionStorage.setItem('sybnb.v6.guestReturnPath', path)
   }
 
+  // Tells the shell which screen is really showing when a gate replaces the requested page, so the
+  // breadcrumb reads "… / Sign in" (or "Host / Become a host") instead of the protected page's name.
+  const shellGate: 'account' | 'become-host' | 'staff' | undefined = needsGuestAccountGate
+    ? 'account'
+    : staffRequiredRole === 'HOST' && !hasStaffSession && !hasGuestSession
+      ? 'account'
+      : staffRequiredRole === 'HOST' && !hasStaffSession
+        ? 'become-host'
+        : staffRequiredRole && !hasStaffSession
+          ? 'staff'
+          : undefined
+
   return (
-    <AppShell lang={lang} onLanguageChange={setLang} path={path}>
+    <AppShell lang={lang} onLanguageChange={setLang} path={path} gate={shellGate}>
       <Suspense fallback={<RouteLoading lang={lang} />}>
         {needsGuestAccountGate ? (
           <GuestAccountPage lang={lang} flow={guestGateFlow} returnPath={path} />
@@ -136,6 +149,9 @@ export function App() {
           <BecomeHostPage lang={lang} returnPath={path} />
         ) : staffRequiredRole && !hasStaffSession ? (
           <StaffAccessPage lang={lang} role={staffRequiredRole} returnPath={path} />
+        ) : path === '/host/why' ? (
+          // Public "Why host on SYBNB" landing (exempt from the HOST gate in getStaffRequiredRole).
+          <HostWhyPage lang={lang} />
         ) : isGiftFlowRoute(path) ? (
           <GiftFlowRoutes lang={lang} path={path} />
         ) : isTrustProtectionRoute(path) ? (
@@ -206,6 +222,9 @@ export function App() {
             exp={new URLSearchParams(sharedRideMatch[2] || '').get('exp') || ''}
             sig={new URLSearchParams(sharedRideMatch[2] || '').get('sig') || ''}
           />
+        ) : path === '/advertising' ? (
+          // Bare /advertising had no route (404). The advertising flow starts at /advertising/account.
+          <SellerDivisionRoutes lang={lang} path="/advertising/account" />
         ) : isSellerRoute(path) ? (
           <SellerDivisionRoutes lang={lang} path={path} />
         ) : path === '/search-preview' || path === '/stays' ? (
@@ -252,6 +271,7 @@ function hostFocusFromPath(path: string): 'stays' | 'cars' | 'newConstruction' |
 }
 
 function getStaffRequiredRole(path: string): 'ADMIN' | 'HOST' | 'DRIVER' | null {
+  if (path === '/host/why') return null // public host landing page
   if (path.startsWith('/host')) return 'HOST'
   if (path.startsWith('/driver')) return 'DRIVER'
   if (

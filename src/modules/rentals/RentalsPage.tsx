@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { pick, text, type Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
@@ -6,7 +6,9 @@ import { getCity, getGovernorate, governorateCityName, labelFor, SYRIA_GOVERNORA
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { fetchApprovedListings, getStoredGuestSession, sendListingInquiryMessage, uploadPaymentProofFile, type PlatformListing } from '../../shared/api/platformApi'
 import { authStorage } from '../../shared/api/authStorage'
-import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
+import { listingDescriptionText, listingTitleText, statusText } from '../../shared/i18n/display'
+import { listingDisplayTitle } from '../../shared/listing/displayTitle'
+import { listingPriceText } from '../search/listingPriceText'
 import { colors, withAlpha } from '../../shared/theme/tokens'
 
 type Props = {
@@ -38,6 +40,8 @@ type RentalRequest = {
 type SearchPanel = 'governorate' | 'city' | 'street' | null
 type SortMode = 'newest' | 'lowest'
 
+// Pseudo-option at the head of the governorate roulette that removes the location filter.
+const ALL_SYRIA_KEY = '__all__'
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 const GUEST_TOKEN_KEY = 'sybnb-v6-guest-token'
 
@@ -160,7 +164,7 @@ const copy = {
     showFilters: 'فتح خيارات الباحث',
     hideFilters: 'إغلاق خيارات الباحث',
     selectedFilters: 'الاختيارات',
-    noFilters: 'اختر خيارات البحث بنفس نظام STR.',
+    noFilters: 'اختر خيارات البحث بنفس نظام الإيجار اليومي.',
     renterTunnel: 'نفق المستأجر',
     live: 'نتائج مباشرة',
     selected: 'العقار المختار',
@@ -237,7 +241,7 @@ const copy = {
     showFilters: 'Open searcher choices',
     hideFilters: 'Close searcher choices',
     selectedFilters: 'Selected choices',
-    noFilters: 'Choose search options using the same STR system.',
+    noFilters: 'Choose search options the same way as for daily stays.',
     renterTunnel: 'Renter tunnel',
     live: 'Live results',
     selected: 'Selected property',
@@ -314,7 +318,7 @@ const copy = {
     showFilters: 'Ouvrir les options de recherche',
     hideFilters: 'Fermer les options de recherche',
     selectedFilters: 'Options choisies',
-    noFilters: 'Choisissez vos options de recherche avec le même système que STR.',
+    noFilters: 'Choisissez vos options de recherche avec le même système que pour les séjours.',
     renterTunnel: 'Parcours locataire',
     live: 'Résultats en direct',
     selected: 'Bien sélectionné',
@@ -482,6 +486,11 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [showFilters, setShowFilters] = useState(filtersDraft.showFilters ?? true)
   const [hasSearched, setHasSearched] = useState(false)
   const [locationApplied, setLocationApplied] = useState(geoDraft.locationApplied ?? false)
+  // Whether the customer has actually narrowed the list (location, property type or any filter).
+  // The result count is only shown from then on -- before that it is just the newest listings.
+  const [filtersApplied, setFiltersApplied] = useState(geoDraft.locationApplied ?? false)
+  // Only the newest request may update the list (choices now re-search immediately).
+  const requestSeq = useRef(0)
   const [sortMode, setSortMode] = useState<SortMode>(filtersDraft.sortMode ?? 'newest')
   const [activeSearchPanel, setActiveSearchPanel] = useState<SearchPanel>(null)
   const [selectedGovernorate, setSelectedGovernorate] = useState(geoDraft.governorate ?? 'damascus')
@@ -510,7 +519,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const selectedMainGroupOption = mainGroupOptions.find((option) => option.id === visualFilters.propertyType)
   const currentPanelOptions = (
     activeSearchPanel === 'governorate'
-      ? SYRIA_GOVERNORATES.map((item) => ({ key: item.key, label: labelFor(lang, item) }))
+      ? [{ key: ALL_SYRIA_KEY, label: pick(lang, 'كل سوريا', 'All of Syria', 'Toute la Syrie') }, ...SYRIA_GOVERNORATES.map((item) => ({ key: item.key, label: labelFor(lang, item) }))]
       : activeSearchPanel === 'city'
         ? (selectedGovernorateData?.cities || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
         : (selectedCityData?.areas || []).map((item) => ({ key: item.key, label: labelFor(lang, item) }))
@@ -588,7 +597,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     saveDraft(filtersDraftKey(mode), { visualFilters, sortMode, showFilters })
   }, [mode, visualFilters, sortMode, showFilters])
 
-  async function loadRentals(explicit = false) {
+  async function loadRentals(
+    explicit = false,
+    overrides: { governorate?: string; visualFilters?: VisualFilterSelection } = {},
+  ) {
+    const seq = ++requestSeq.current
+    const governorateKey = overrides.governorate ?? selectedGovernorate
+    const activeFilters = overrides.visualFilters ?? visualFilters
     setStatus('loading')
     setMessage('')
     try {
@@ -599,12 +614,13 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       // explicit capsule search, so the first broad load stays rich.
       const division = isBuyMode ? 'BUY' : 'RENTALS'
       const filters = {
-        attributes: visualFilters,
-        city: explicit ? governorateCityName(selectedGovernorate) : undefined,
-        sort: typeof visualFilters.sort === 'string' ? visualFilters.sort : undefined,
-        priceBand: typeof visualFilters.priceBand === 'string' ? visualFilters.priceBand : undefined,
+        attributes: activeFilters,
+        city: explicit && governorateKey ? governorateCityName(governorateKey) : undefined,
+        sort: typeof activeFilters.sort === 'string' ? activeFilters.sort : undefined,
+        priceBand: typeof activeFilters.priceBand === 'string' ? activeFilters.priceBand : undefined,
       }
       const results = await fetchApprovedListings(division, filters)
+      if (seq !== requestSeq.current) return
       setListings(results.listings)
       setNextCursor(results.nextCursor)
       setLastQuery({ division, filters })
@@ -623,6 +639,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       // "there are no listings" first impression without changing any business rule.
       setHasSearched(true)
     } catch (error) {
+      if (seq !== requestSeq.current) return
       setListings([])
       setNextCursor(null)
       setLastQuery(null)
@@ -634,8 +651,10 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   async function loadMoreListings() {
     if (!nextCursor || loadingMore || !lastQuery) return
     setLoadingMore(true)
+    const seq = requestSeq.current
     try {
       const results = await fetchApprovedListings(lastQuery.division, lastQuery.filters, nextCursor)
+      if (seq !== requestSeq.current) return
       setListings((prev) => [...prev, ...results.listings])
       setNextCursor(results.nextCursor)
     } catch {
@@ -666,12 +685,23 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   }
 
   function chooseGovernorate(value: string) {
+    if (value === ALL_SYRIA_KEY) {
+      // Drop the location filter and show listings from every governorate again.
+      setLocationApplied(false)
+      setActiveSearchPanel(null)
+      void loadRentals(false)
+      return
+    }
     const nextGovernorate = getGovernorate(value)
     const nextCity = nextGovernorate?.cities[0]
     setSelectedGovernorate(value)
     setSelectedCity(nextCity?.key || '')
     setSelectedStreet(nextCity?.areas[0]?.key || '')
     setActiveSearchPanel('city')
+    // Choosing a governorate narrows the list right away (the server filters by its city).
+    setLocationApplied(true)
+    setFiltersApplied(true)
+    void loadRentals(true, { governorate: value })
   }
 
   function chooseCity(value: string) {
@@ -679,6 +709,11 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setSelectedCity(value)
     setSelectedStreet(nextCity?.areas[0]?.key || '')
     setActiveSearchPanel('street')
+    if (!locationApplied) {
+      setLocationApplied(true)
+      setFiltersApplied(true)
+      void loadRentals(true)
+    }
   }
 
   function applySearchCapsule() {
@@ -686,13 +721,24 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     setActiveSearchPanel(null)
     setHasSearched(true)
     setLocationApplied(true)
+    setFiltersApplied(true)
     setShowFilters(false)
     // Re-run the fetch so the selected filters (incl. location) actually apply to the results.
     void loadRentals(true)
   }
 
+  // Property type and the other filters re-run the search immediately with the new selection,
+  // so the list reflects them without a separate Search press (it used to look ignored).
+  function applyVisualFilters(next: VisualFilterSelection) {
+    setVisualFilters(next)
+    setFiltersApplied(true)
+    void loadRentals(locationApplied, { visualFilters: next })
+  }
+
   function chooseMainGroup(value: string) {
-    setVisualFilters((current) => ({ ...current, propertyType: value }))
+    // Pressing the active type again clears it back to "any".
+    const propertyType = visualFilters.propertyType === value ? 'any' : value
+    applyVisualFilters({ ...visualFilters, propertyType })
   }
 
   async function uploadDocuments(files: FileList | null) {
@@ -796,7 +842,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
         </section>
         <div className="rentals-search-hero" style={styles.searchHero}>
           <button style={styles.searchButton} onClick={applySearchCapsule}>{t.search}</button>
-          <button style={activeSearchPanel === 'governorate' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'governorate' ? null : 'governorate')}>{selectedGovernorateLabel || t.governorate}</button>
+          <button style={activeSearchPanel === 'governorate' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'governorate' ? null : 'governorate')}>{locationApplied ? selectedGovernorateLabel || t.governorate : pick(lang, 'كل سوريا', 'All of Syria', 'Toute la Syrie')}</button>
           <button style={activeSearchPanel === 'city' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'city' ? null : 'city')}>{selectedCityLabel || t.city}</button>
           <button style={activeSearchPanel === 'street' ? styles.searchPillActive : styles.searchPill} onClick={() => setActiveSearchPanel(activeSearchPanel === 'street' ? null : 'street')}>{selectedStreetLabel || t.street}</button>
           <button style={styles.searchPillActive} onClick={() => setShowFilters((current) => !current)}>
@@ -819,7 +865,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
               {currentPanelOptions.map((option) => {
                 const selected = option.key === (
                   activeSearchPanel === 'governorate'
-                    ? selectedGovernorate
+                    ? (locationApplied ? selectedGovernorate : ALL_SYRIA_KEY)
                     : activeSearchPanel === 'city'
                       ? selectedCity
                       : selectedStreet
@@ -847,7 +893,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
             <div style={styles.rouletteCounter}>
               {currentPanelOptions.findIndex((option) => option.key === (
                 activeSearchPanel === 'governorate'
-                  ? selectedGovernorate
+                  ? (locationApplied ? selectedGovernorate : ALL_SYRIA_KEY)
                   : activeSearchPanel === 'city'
                     ? selectedCity
                     : selectedStreet
@@ -863,7 +909,11 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
       {!hasSearched ? <section style={styles.beforeSearchPanel}>{t.beforeSearch}</section> : null}
 
       {hasSearched ? <section style={styles.searchSummary}>
-        <strong>{selectedGovernorateLabel} · {selectedCityLabel} · {selectedStreetLabel}</strong>
+        <strong>
+          {locationApplied
+            ? [selectedGovernorateLabel, selectedCityLabel !== selectedGovernorateLabel ? selectedCityLabel : '', selectedStreetLabel].filter(Boolean).join(' · ')
+            : pick(lang, 'كل سوريا', 'All of Syria', 'Toute la Syrie')}
+        </strong>
         <span>{selectedMainGroupOption ? text(selectedMainGroupOption, lang) : null}</span>
       </section> : null}
 
@@ -884,21 +934,23 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 {t.lowestPrice}
               </button>
             </div>
-            <strong role="status" aria-live="polite">{t.availableResults} ({visibleListings.length})</strong>
+            <strong role="status" aria-live="polite">
+              {t.availableResults}{filtersApplied && status !== 'loading' ? ` (${visibleListings.length}${nextCursor ? '+' : ''})` : ''}
+            </strong>
           </div>
           <div style={styles.resultGrid}>
             {visibleListings.length ? visibleListings.map((listing) => (
               <article key={listing.id} style={selectedListing?.id === listing.id ? styles.resultCardActive : styles.resultCard}>
-                <img src={listingImage(listing, isBuyMode)} alt={listingTitleText(listing, lang)} style={styles.resultImage} />
+                <img src={listingImage(listing, isBuyMode)} alt={listingDisplayTitle(listing, lang)} style={styles.resultImage} />
                 <div style={styles.resultBody}>
                   {listing.status !== 'APPROVED' && (
                     <span style={styles.statusPill}>{statusText(listing.status, lang)}</span>
                   )}
-                  <h2 style={styles.cardTitle}>{listingTitleText(listing, lang)}</h2>
+                  <h2 style={styles.cardTitle}>{listingDisplayTitle(listing, lang)}</h2>
                   <p style={styles.cardBody}>{listingDescriptionText(listing, lang)}</p>
                   <div style={styles.metaRow}>
                     <span>{t.price}</span>
-                    <strong>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
+                    <strong>{listingPriceText(listing, lang)}</strong>
                   </div>
                   <button
                     style={styles.primaryButton}
@@ -938,7 +990,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 groups={renterPropertyFilterGroups}
                 lang={lang}
                 selection={visualFilters}
-                onChange={setVisualFilters}
+                onChange={applyVisualFilters}
               />
               <div style={styles.filterSummary}>
                 {activeFilterLabels.length
@@ -955,11 +1007,11 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
           {selectedListing ? (
             <>
               <section style={styles.selectedCard}>
-                <img src={listingImage(selectedListing, isBuyMode)} alt={listingTitleText(selectedListing, lang)} style={styles.selectedImage} />
+                <img src={listingImage(selectedListing, isBuyMode)} alt={listingDisplayTitle(selectedListing, lang)} style={styles.selectedImage} />
                 <div style={styles.selectedContent}>
-                  <h2 style={styles.selectedTitle}>{listingTitleText(selectedListing, lang)}</h2>
+                  <h2 style={styles.selectedTitle}>{listingDisplayTitle(selectedListing, lang)}</h2>
                   <p style={styles.cardBody}>{listingDescriptionText(selectedListing, lang)}</p>
-                  <Info label={t.price} value={moneyText(selectedListing.priceMinor, selectedListing.currency, lang)} />
+                  <Info label={t.price} value={listingPriceText(selectedListing, lang)} />
                   <Info label={t.owner} value={selectedListing.owner?.displayName || selectedListing.ownerId.slice(0, 8).toUpperCase()} />
                   {selectedListing.status !== 'APPROVED' && (
                     <Info label={t.status} value={statusText(selectedListing.status, lang)} />
@@ -989,7 +1041,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                   <li>{documents.length ? '✓ ' : '○ '}{t.stepDocumentsUploaded}{documents.length ? ` (${documents.length})` : ''}</li>
                   <li>{sentRequest ? '✓ ' : '○ '}{t.stepSentToImmoContact}</li>
                 </ol>
-                {sentRequest ? <small>{t.referenceLabel}: {sentRequest.id}</small> : null}
+                {sentRequest ? <small>{t.referenceLabel}{pick(lang, ':', ':', ' :')} {sentRequest.id}</small> : null}
               </section>
             </>
           ) : <p style={styles.empty}>{t.noSelection}</p>}
@@ -1017,7 +1069,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                     onChange={(event) => void uploadDocuments(event.target.files)}
                   />
                 </label>
-                {uploadError ? <p style={styles.empty} role="alert">{t.uploadFailed}: {uploadError}</p> : null}
+                {uploadError ? <p style={styles.empty} role="alert">{t.uploadFailed}{pick(lang, ':', ':', ' :')} {uploadError}</p> : null}
                 {documents.length ? (
                   <div style={styles.docList}>
                     <span>{documents.length} {t.docsReady}</span>

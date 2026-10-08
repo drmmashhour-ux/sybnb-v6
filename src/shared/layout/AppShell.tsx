@@ -9,20 +9,24 @@ type Props = {
   lang: Lang
   onLanguageChange: (lang: Lang) => void
   path: string
+  // Set by App when a gate screen replaces the requested page (sign-in, become-host, staff sign-in),
+  // so the breadcrumb describes the screen actually shown rather than the protected page.
+  gate?: 'account' | 'become-host' | 'staff'
   children: ReactNode
 }
 
 
-export function AppShell({ lang, onLanguageChange, path, children }: Props) {
+export function AppShell({ lang, onLanguageChange, path, gate, children }: Props) {
   const isAr = lang === 'ar'
   const isLanding = path === '/'
   const isAdvertisingTunnel = path.startsWith('/sell') || path.startsWith('/advertising')
   const isAdminControlRoom = path.startsWith('/admin')
-  const routeContext = getRouteContext(path, lang)
+  const routeContext = gate ? getGateRouteContext(path, gate, lang) : getRouteContext(path, lang)
   const showFlowNav = !isLanding && !isAdminControlRoom
   const guestSession = typeof window !== 'undefined' ? getStoredGuestSession() : null
   const isHost = typeof window !== 'undefined' && currentAccountIsHost()
-  const inHostArea = path.startsWith('/host')
+  // /host/why is the public host landing page, not the host area.
+  const inHostArea = path.startsWith('/host') && path !== '/host/why'
   // Airbnb-style host switch: one account; the same button turns into "Switch to traveling" inside
   // the host area. A non-host is taken to /host/stays, which shows the one-tap "Become a host" page.
   const hostSwitchLabel = inHostArea
@@ -100,7 +104,7 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
               </div>
             ) : (
               <div className="public-auth-actions">
-                <button className="menu-action" onClick={() => navigate('/host/stays')}>
+                <button className="menu-action" onClick={() => navigate('/host/why')}>
                   {pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte')}
                 </button>
                 <button className="primary-action" onClick={() => navigate('/account/open')}>
@@ -158,7 +162,7 @@ function getRouteContext(path: string, lang: Lang) {
       section: pick(lang, 'الإيجار الشهري', 'Monthly rental', 'Location au mois'),
       page: pick(lang, 'بحث العقارات', 'Property search', 'Recherche de propriétés'),
       backPath: home,
-      nextPath: '/account/open',
+      nextPath: '',
     }
   }
   if (path.startsWith('/cars')) {
@@ -195,33 +199,21 @@ function getRouteContext(path: string, lang: Lang) {
     }
   }
   if (path.startsWith('/listing/')) {
-    const id = path.split('/')[2] || ''
     const listingContext = routeContextFromReturnPath(readListingReturnPath(), lang)
     return {
       section: listingContext.section,
       page: listingContext.detailsPage,
       backPath: listingContext.backPath,
-      nextPath: `/account/open/${id}`,
+      // No breadcrumb "Next" here: it jumped to sign-in. The page's own buttons lead on.
+      nextPath: '',
     }
   }
   if (path.startsWith('/account/open')) {
     const id = path.split('/')[3] || ''
-    const returnPath = readGuestReturnPath()
-    if (!id && returnPath.startsWith('/rentals')) {
-      return {
-        section: pick(lang, 'الإيجار الشهري', 'Monthly rental', 'Location au mois'),
-        page: pick(lang, 'فتح حساب المستأجر', 'Open renter account', 'Ouvrir un compte locataire'),
-        backPath: '/rentals',
-        nextPath: '',
-      }
-    }
-    return {
-      section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'),
-      page: pick(lang, 'فتح الحساب', 'Open account', 'Ouvrir un compte'),
-      backPath: id ? `/listing/${id}` : '/stays',
-      // No "Next" on the sign-in screen: it skipped past the form and bounced straight back to it.
-      nextPath: '',
-    }
+    // With a listing id the user came from that listing; otherwise use whatever page stored its
+    // return path (sybnb.v6.guestReturnPath) so the breadcrumb names the right section.
+    const returnPath = id ? `/listing/${id}` : readGuestReturnPath()
+    return accountContext(returnPath, lang)
   }
   if (path.startsWith('/booking/')) {
     return {
@@ -256,6 +248,14 @@ function getRouteContext(path: string, lang: Lang) {
     }
   }
   if (path.startsWith('/host')) {
+    if (path === '/host/why') {
+      return {
+        section: pick(lang, 'المضيف', 'Host', 'Hôte'),
+        page: pick(lang, 'لماذا تستضيف على SYBNB', 'Why host on SYBNB', 'Pourquoi accueillir sur SYBNB'),
+        backPath: home,
+        nextPath: '',
+      }
+    }
     if (path === '/host/profile') {
       return {
         section: pick(lang, 'المضيف', 'Host', 'Hôte'),
@@ -365,6 +365,60 @@ function getRouteContext(path: string, lang: Lang) {
     backPath: home,
     nextPath: '',
   }
+}
+
+// Breadcrumb for a gate screen shown in place of `path` (App passes the gate kind).
+function getGateRouteContext(path: string, gate: 'account' | 'become-host' | 'staff', lang: Lang) {
+  if (gate === 'become-host') {
+    return {
+      section: pick(lang, 'المضيف', 'Host', 'Hôte'),
+      page: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'),
+      backPath: '/host/why',
+      nextPath: '',
+    }
+  }
+  if (gate === 'staff') {
+    return {
+      section: pick(lang, 'فريق SYBNB', 'SYBNB team', 'Équipe SYBNB'),
+      page: pick(lang, 'تسجيل دخول الفريق', 'Team sign-in', 'Connexion de l’équipe'),
+      backPath: '/',
+      nextPath: '',
+    }
+  }
+  return accountContext(path, lang)
+}
+
+// Sign-in / open-account screen: section follows where the user is headed (returnPath), page is
+// always the sign-in step, and Back returns to the page they came from (never to the gated page
+// itself, which would just show the sign-in again).
+function accountContext(returnPath: string, lang: Lang) {
+  const page = pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription')
+  const listingId = returnPath.match(/^\/listing\/([^/]+)$/)?.[1]
+  if (listingId) {
+    const listingContext = routeContextFromReturnPath(readListingReturnPath(), lang)
+    return { section: listingContext.section, page, backPath: returnPath, nextPath: '' }
+  }
+  if (returnPath.startsWith('/immocontact')) {
+    // Contacting an owner/seller: name the section of the listing they were browsing.
+    const listingContext = routeContextFromReturnPath(readListingReturnPath(), lang)
+    return { section: listingContext.section, page, backPath: listingContext.backPath, nextPath: '' }
+  }
+  if (returnPath.startsWith('/rentals')) {
+    return { section: pick(lang, 'الإيجار الشهري', 'Monthly rental', 'Location au mois'), page, backPath: '/rentals', nextPath: '' }
+  }
+  if (returnPath.startsWith('/buy')) {
+    return { section: pick(lang, 'شراء عقار', 'Buy property', 'Achat immobilier'), page, backPath: '/buy', nextPath: '' }
+  }
+  if (returnPath.startsWith('/host')) {
+    return { section: pick(lang, 'المضيف', 'Host', 'Hôte'), page, backPath: '/host/why', nextPath: '' }
+  }
+  if (returnPath === '/ride' || returnPath === '/ride-preview' || returnPath.startsWith('/business')) {
+    return { section: pick(lang, 'رحلات سير', 'SR Rides', 'Trajets SR'), page, backPath: '/', nextPath: '' }
+  }
+  if (returnPath.startsWith('/stays') || returnPath.startsWith('/booking') || returnPath.startsWith('/payment')) {
+    return { section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'), page, backPath: '/stays', nextPath: '' }
+  }
+  return { section: pick(lang, 'الحساب', 'Account', 'Compte'), page, backPath: '/', nextPath: '' }
 }
 
 function readGuestReturnPath() {

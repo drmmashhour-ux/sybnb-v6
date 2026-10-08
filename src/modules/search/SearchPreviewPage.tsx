@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
-import { governorateCityName } from '../../engines/search'
+import { getCity, getGovernorate, governorateCityName, labelFor, listingMatchesKeyword } from '../../engines/search'
 import { fetchApprovedListings, isSampleListing, type PlatformListing } from '../../shared/api/platformApi'
-import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
+import { listingDescriptionText, statusText } from '../../shared/i18n/display'
+import { listingDisplayTitle } from '../../shared/listing/displayTitle'
+import { listingPriceText } from './listingPriceText'
 import { SearchStateCard } from './SearchStates'
-import { UnifiedSearchBar } from './UnifiedSearchBar'
+import { restoredSearchValue, UnifiedSearchBar } from './UnifiedSearchBar'
 import type { SearchDivision, UnifiedSearchValue } from './UnifiedSearchBar'
 
 type SearchPreviewPageProps = {
@@ -223,22 +225,43 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [lastQuery, setLastQuery] = useState<{ division: string; filters?: Parameters<typeof fetchApprovedListings>[1] } | null>(null)
+  // Keyword filtering is client-side over the loaded results (the listings API has no keyword
+  // parameter): titles (AR/EN) and description, case-insensitive, Arabic-normalized.
+  const [activeKeyword, setActiveKeyword] = useState('')
+  // The bar is remounted (fresh from the cleared draft) when the guest resets the search.
+  const [barKey, setBarKey] = useState(0)
+  // Only the newest request may update the list (choosing a governorate searches immediately, so
+  // several requests can be in flight).
+  const requestSeq = useRef(0)
   const isStaysEntry = entry === 'stays'
   const isDirectDivisionEntry = isStaysEntry || initialDivision !== 'stays'
   const divisionCopy = t.divisionCopy[effectiveInitialDivision]
   const isSampleMode = listings.some(isSampleListing)
+  const visibleListings = useMemo(
+    () => (activeKeyword.trim() ? listings.filter((listing) => listingMatchesKeyword(listing, activeKeyword)) : listings),
+    [listings, activeKeyword],
+  )
+  // A count is only meaningful once the guest has searched or filtered; before that the list is
+  // just a sample of the newest listings, so no number is shown.
+  const hasSearched = lastSearch !== null
+  const countText = `${visibleListings.length}${nextCursor ? '+' : ''}`
 
   useEffect(() => {
     setEffectiveInitialDivision(readInitialSearchDivision(initialDivision))
   }, [initialDivision])
 
   useEffect(() => {
-    void runLiveSearch()
+    // Start from exactly what the bar shows: when the session already carries a chosen location
+    // (e.g. returning from a listing), the first list is narrowed by it too.
+    const restored = restoredSearchValue(effectiveInitialDivision)
+    void runLiveSearch(restored.locationTouched ? restored : undefined)
   }, [effectiveInitialDivision])
 
   async function runLiveSearch(value?: UnifiedSearchValue) {
+    const seq = ++requestSeq.current
     setState('loading')
     setLastSearch(value || null)
+    setActiveKeyword(value && value.division !== 'stays' ? value.keyword : '')
 
     try {
       const filters = value
@@ -274,16 +297,18 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             // default to Damascus for display, and CARS/MARKETPLACE listings are almost never
             // geotagged, so applying that untouched default as a filter silently zeroed out
             // every explicit search in those divisions.
-            city: value.locationTouched ? governorateCityName(value.governorate) : undefined,
+            city: value.locationTouched && value.governorate ? governorateCityName(value.governorate) : undefined,
           }
         : undefined
       const division = toApiDivision(value?.division || effectiveInitialDivision)
       const results = await fetchApprovedListings(division, filters)
+      if (seq !== requestSeq.current) return
       setListings(results.listings)
       setNextCursor(results.nextCursor)
       setLastQuery({ division, filters })
       setState('empty')
     } catch {
+      if (seq !== requestSeq.current) return
       setListings([])
       setNextCursor(null)
       setLastQuery(null)
@@ -294,8 +319,10 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   async function loadMoreResults() {
     if (!nextCursor || loadingMore || !lastQuery) return
     setLoadingMore(true)
+    const seq = requestSeq.current
     try {
       const results = await fetchApprovedListings(lastQuery.division, lastQuery.filters, nextCursor)
+      if (seq !== requestSeq.current) return
       setListings((prev) => [...prev, ...results.listings])
       setNextCursor(results.nextCursor)
     } catch {
@@ -304,6 +331,20 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
     } finally {
       setLoadingMore(false)
     }
+  }
+
+  // "Reset" / "Show all Syria": drop every filter (location and keyword included), clear the
+  // saved draft so the remounted bar starts empty, and reload the broad list.
+  function resetSearch() {
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.removeItem('sybnb-v6-search-draft')
+      } catch {
+        // Blocked storage only means the bar keeps its previous values.
+      }
+    }
+    setBarKey((key) => key + 1)
+    void runLiveSearch()
   }
 
   function openListing(listing: PlatformListing) {
@@ -321,8 +362,8 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         </button>
         <button
           style={flowStyles.arrow}
-          disabled={!listings[0]}
-          onClick={() => listings[0] && openListing(listings[0])}
+          disabled={!visibleListings[0]}
+          onClick={() => visibleListings[0] && openListing(visibleListings[0])}
           aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}
         >
           ›
@@ -345,24 +386,25 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           )}
         </div>
         <div className="search-hero-metrics" aria-label={pick(lang, 'حالة البحث', 'Search status', 'État de la recherche')}>
-          <strong>{listings.length}</strong>
+          {hasSearched ? <strong>{countText}</strong> : null}
           <small>{isSampleMode ? t.sampleResults : t.liveResults}</small>
         </div>
       </section>
 
       <UnifiedSearchBar
+        key={barKey}
         lang={lang}
         initialDivision={effectiveInitialDivision}
         lockedDivision={isDirectDivisionEntry}
         onSearch={(value) => void runLiveSearch(value)}
       />
 
-      {(state !== 'empty' || listings.length === 0) && (
+      {(state !== 'empty' || visibleListings.length === 0) && (
         <SearchStateCard
           lang={lang}
           state={state}
-          onReset={() => { setLastSearch(null); void runLiveSearch() }}
-          onShowAll={() => { setLastSearch(null); void runLiveSearch() }}
+          onReset={resetSearch}
+          onShowAll={resetSearch}
           onRetry={() => void runLiveSearch(lastSearch || undefined)}
         />
       )}
@@ -370,25 +412,25 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
       <section className="search-results">
         <div className="search-results-head">
           <span>{t.resultTitle}</span>
-          <strong>{listings.length}</strong>
+          {hasSearched ? <strong>{countText}</strong> : null}
         </div>
-        {listings.length ? (
+        {visibleListings.length ? (
           <div className="search-result-grid">
-            {listings.map((listing) => (
+            {visibleListings.map((listing) => (
               <article key={listing.id} className="search-result-card">
                 <div className="search-result-media">
-                  <img src={listingImage(listing)} alt={listingTitleText(listing, lang)} loading="lazy" />
+                  <img src={listingImage(listing)} alt={listingDisplayTitle(listing, lang)} loading="lazy" />
                   {!hasRealPhoto(listing) && <span className="search-result-no-photo">{t.noPhotoYet}</span>}
                 </div>
                 <div className="search-result-body">
                   {listing.status !== 'APPROVED' && (
                     <span className="search-result-status">{statusText(listing.status, lang)}</span>
                   )}
-                  <h2>{listingTitleText(listing, lang)}</h2>
+                  <h2>{listingDisplayTitle(listing, lang)}</h2>
                   <p>{listingDescriptionText(listing, lang)}</p>
                   <div className="search-result-meta">
                     <span>{t.price}</span>
-                    <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
+                    <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{listingPriceText(listing, lang)}</strong>
                   </div>
                   <div className="search-result-actions">
                     <button
@@ -442,6 +484,11 @@ function hasRealPhoto(listing: PlatformListing) {
 }
 
 function searchSummary(value: UnifiedSearchValue, lang: Lang) {
+  // Localized place labels only -- never the raw keys (e.g. "damascus-city").
+  const governorate = value.locationTouched ? getGovernorate(value.governorate) : undefined
+  const city = governorate ? getCity(value.governorate, value.city) : undefined
+  const area = city?.areas.find((item) => item.key === value.area)
+  const placeLabel = value.customPlaceName.trim() || labelFor(lang, area) || labelFor(lang, city) || labelFor(lang, governorate)
   const divisionLabel: Record<UnifiedSearchValue['division'], Record<Lang, string>> = {
     stays: { ar: 'إيجار يومي', en: 'Daily rental', fr: 'Séjour' },
     rentals: { ar: 'إيجار شهري', en: 'Monthly rental', fr: 'Location au mois' },
@@ -452,7 +499,7 @@ function searchSummary(value: UnifiedSearchValue, lang: Lang) {
   }
   return [
     divisionLabel[value.division][lang],
-    value.customPlaceName || value.area || value.city || value.governorate,
+    placeLabel,
     value.checkIn,
     value.checkOut,
     value.keyword,

@@ -7,6 +7,7 @@ import { navigate } from '../../app/routes'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { fetchActiveAdvertising } from '../../shared/api/platformApi'
 import type { ActiveAd } from '../../shared/api/platformApi'
+import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 
 const BANNER_KIND_PRIORITY = ['desktopBanner', 'mainBanner', 'tabletBanner', 'phoneBanner']
 
@@ -42,6 +43,32 @@ const DIVISION_ICONS: Record<DivisionId, string> = {
   'new-construction': '⊗',
   sell: '⊕',
   ride: '✕',
+}
+
+// Landing card titles in all three languages. DIVISIONS (engines/navigation/divisions.ts) only
+// carries ar/en, so French previously fell back to English on every card. "SR" is the ride service
+// (سير, "SR Ride" in src/modules/sr); it is named as a service here rather than a bare "SR".
+const DIVISION_TITLES: Record<DivisionId, { ar: string; en: string; fr: string }> = {
+  stays: { ar: 'الإيجار اليومي', en: 'Daily Stays', fr: 'Séjours courte durée' },
+  rentals: { ar: 'الإيجار الشهري', en: 'Monthly Rentals', fr: 'Location au mois' },
+  buy: { ar: 'شراء عقار', en: 'Buy Property', fr: 'Achat immobilier' },
+  cars: { ar: 'المركبات', en: 'Cars', fr: 'Véhicules' },
+  marketplace: { ar: 'السوق', en: 'Marketplace', fr: 'Marché' },
+  'new-construction': { ar: 'مشاريع جديدة', en: 'New Construction', fr: 'Projets neufs' },
+  sell: { ar: 'أضف إعلانك', en: 'Add a Listing', fr: 'Publier une annonce' },
+  ride: { ar: 'رحلات سير', en: 'SR Rides', fr: 'Trajets SR' },
+}
+
+// Host/seller entry: the "Add listing" card opens the public host landing page (/host/why), which
+// explains fees/payouts and routes stays & rentals hosts into the /host flow and property sellers
+// into /sell. Every other card keeps its division route.
+function divisionRoute(id: DivisionId, route: string) {
+  return id === 'sell' ? '/host/why' : route
+}
+
+function divisionTitle(id: DivisionId, fallback: { ar: string; en: string }, lang: Lang) {
+  const titles = DIVISION_TITLES[id]
+  return titles ? pick(lang, titles.ar, titles.en, titles.fr) : text(fallback, lang)
 }
 
 const ABOUT_COPY = {
@@ -145,9 +172,9 @@ export function LandingPage({ lang }: Props) {
           <p>
             {pick(
               lang,
-              'كل ما تحتاجه في مكان واحد - عقارات، سيارات، خدمات، وسير.',
-              'Everything you need in one place: property, cars, services, and SR.',
-              'Tout ce dont vous avez besoin au même endroit : immobilier, véhicules, services et SR.',
+              'كل ما تحتاجه في مكان واحد: عقارات، سيارات، خدمات، ورحلات سير.',
+              'Everything you need in one place: property, cars, services, and SR Rides.',
+              'Tout ce dont vous avez besoin au même endroit : immobilier, véhicules, services et Trajets SR.',
             )}
           </p>
           <div className="landing-actions">
@@ -219,7 +246,7 @@ export function LandingPage({ lang }: Props) {
             {activeAds.map((ad) => (
               <figure className="landing-sponsored-card" key={ad.id}>
                 <span className="landing-sponsored-tag">{pick(lang, 'إعلان ممول', 'Sponsored', 'Commandité')}</span>
-                <img alt={isAr ? ad.titleAr : ad.titleEn || ad.titleAr} loading="lazy" src={adBannerUrl(ad)} />
+                <img alt={listingDisplayTitle(ad, lang)} loading="lazy" src={adBannerUrl(ad)} />
               </figure>
             ))}
           </div>
@@ -230,6 +257,7 @@ export function LandingPage({ lang }: Props) {
       <section className="division-grid" aria-label={pick(lang, 'أقسام المنصة', 'Platform divisions', 'Sections de la plateforme')}>
         {DIVISIONS.map((division, index) => {
           const disabled = division.status === 'soon'
+          const title = divisionTitle(division.id, division.title, lang)
           return (
             <article
               className={`division-card ${disabled ? 'disabled' : ''}`}
@@ -239,8 +267,8 @@ export function LandingPage({ lang }: Props) {
               <button
                 className="division-card-hit"
                 disabled={disabled}
-                onClick={() => navigate(division.route)}
-                aria-label={text(division.title, lang)}
+                onClick={() => navigate(divisionRoute(division.id, division.route))}
+                aria-label={title}
               />
               <div className="division-media" aria-hidden="true">
                 <img src={DIVISION_PHOTOS[division.id]} alt="" loading="lazy" />
@@ -248,9 +276,9 @@ export function LandingPage({ lang }: Props) {
               <div className="division-card-content">
                 <div className="division-title-row">
                   <span className="division-icon" aria-hidden="true">{DIVISION_ICONS[division.id]}</span>
-                  <h2>{text(division.title, lang)}</h2>
+                  <h2>{title}</h2>
                 </div>
-                <small>{lang === 'ar' ? division.title.en : division.title.ar}</small>
+                <small>{lang === 'ar' ? DIVISION_TITLES[division.id].en : DIVISION_TITLES[division.id].ar}</small>
                 <span className="division-open">{disabled ? (pick(lang, 'قريباً', 'Soon', 'Bientôt')) : (pick(lang, 'افتح', 'Open', 'Ouvrir'))}</span>
               </div>
             </article>

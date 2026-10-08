@@ -313,6 +313,16 @@ function mergeAreas(primary: SyrianArea[], secondary: SyrianArea[]) {
   return merged
 }
 
+function normalizePlaceName(value: string) {
+  return String(value || '')
+    .replace(/[\u064B-\u0652\u0640]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function mergeGovernorateData(primary: SyrianGovernorate[], secondary: SyrianGovernorate[]) {
   const governorates = new Map<string, SyrianGovernorate>()
 
@@ -331,15 +341,21 @@ function mergeGovernorateData(primary: SyrianGovernorate[], secondary: SyrianGov
     }
 
     const cities = new Map(existingGovernorate.cities.map((city) => [city.key, city]))
+    // The OSM-derived data spells some cities under a different key (a-zaz vs azaz, jablah vs
+    // jableh, al-qardaha vs qardaha), which showed the same city twice in pickers. Match on the
+    // normalized Arabic name too and fold such a city into the existing entry.
+    const keyByArabicName = new Map(existingGovernorate.cities.map((city) => [normalizePlaceName(city.ar), city.key]))
 
     for (const city of governorate.cities) {
-      const existingCity = cities.get(city.key)
-      if (!existingCity) {
+      const matchedKey = cities.has(city.key) ? city.key : keyByArabicName.get(normalizePlaceName(city.ar))
+      const existingCity = matchedKey ? cities.get(matchedKey) : undefined
+      if (!existingCity || !matchedKey) {
         cities.set(city.key, city)
+        keyByArabicName.set(normalizePlaceName(city.ar), city.key)
         continue
       }
 
-      cities.set(city.key, {
+      cities.set(matchedKey, {
         ...existingCity,
         areas: mergeAreas(existingCity.areas, city.areas),
       })

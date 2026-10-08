@@ -17,6 +17,7 @@ const copy = {
     signedInAs: 'مسجّل الدخول باسم',
     cta: 'ابدأ الاستضافة',
     back: 'العودة إلى الحجز',
+    learnMore: 'كيف تعمل الاستضافة والرسوم',
     error: 'تعذّر تفعيل الاستضافة. حاول مرة أخرى.',
   },
   en: {
@@ -26,6 +27,7 @@ const copy = {
     signedInAs: 'Signed in as',
     cta: 'Start hosting',
     back: 'Back to booking',
+    learnMore: 'How hosting works and fees',
     error: 'Could not turn on hosting. Please try again.',
   },
   fr: {
@@ -35,6 +37,7 @@ const copy = {
     signedInAs: 'Connecté en tant que',
     cta: 'Commencer à accueillir',
     back: 'Retour à la réservation',
+    learnMore: 'Fonctionnement et frais de l’accueil',
     error: 'Impossible d’activer l’accueil. Veuillez réessayer.',
   },
 }
@@ -83,6 +86,9 @@ export function BecomeHostPage({ lang, returnPath }: Props) {
         {error ? <strong role="alert" style={styles.error}>{error}</strong> : null}
         <button style={{ ...styles.primary, opacity: busy ? 0.7 : 1 }} onClick={() => void start()} disabled={busy}>
           {busy ? '…' : t.cta}
+        </button>
+        <button style={styles.link} onClick={() => (window.location.hash = '/host/why')}>
+          {t.learnMore}
         </button>
         <button style={styles.link} onClick={() => (window.location.hash = '/stays')}>
           {t.back}

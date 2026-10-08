@@ -219,7 +219,9 @@ a {
 
 .flow-step-nav {
   align-items: center;
-  background: rgba(10, 15, 29, 0.72);
+  background: #0a0f1d;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  z-index: 30;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   color: #aeb8cc;

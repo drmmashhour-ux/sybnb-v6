@@ -122,6 +122,10 @@ export async function handleAuth(req, res, url, context) {
         where: {
           identifierHash: otpIdentifierHash,
           status: 'VERIFIED',
+          // Only an account-identity OTP may back a registration -- never a transactional one
+          // (payment-proof / wallet-claim). Registration is used for every role (guest/seller/
+          // staff/host), so all of their identity purposes are accepted.
+          purpose: { in: ['account-verify', 'guest-login', 'seller-login', 'staff-login', 'host-login'] },
           verifiedAt: { gt: new Date(Date.now() - OTP_BIND_WINDOW_MS) },
         },
         orderBy: { verifiedAt: 'desc' },
@@ -155,7 +159,9 @@ export async function handleAuth(req, res, url, context) {
         }
         return tx.user.create({
           data: {
-            email: body.email || undefined,
+            // Normalize the account identity the same way hashEmail does (trim + lowercase), so a
+            // later sign-in with a differently-cased spelling of the same address still matches.
+            email: body.email ? String(body.email).trim().toLowerCase() : undefined,
             phoneHash,
             passwordHash,
             displayName: body.displayName || body.email || 'SYBNB User',
@@ -191,7 +197,7 @@ export async function handleAuth(req, res, url, context) {
     if (await rateLimited(req, 'login')) return tooManyRequests(res)
     const body = await readJson(req)
     const where = body.email
-      ? { email: body.email }
+      ? { email: String(body.email).trim().toLowerCase() }
       : body.phone
         ? { phoneHash: hashPhone(body.phone) }
         : undefined

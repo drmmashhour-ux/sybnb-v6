@@ -55,6 +55,7 @@ const copy = {
     idDocumentEmpty: 'لم يتم رفع الهوية بعد. يمكنك رفعها لاحقاً قبل الدفع.',
     idDocumentRequired: 'ارفع صورة عن هويتك قبل الدفع.',
     codeSent: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني.',
+    verified: 'تم تأكيد البريد. اضغط الزر بالأسفل لإنشاء حسابك والمتابعة.',
     ready: 'تم تجهيز حساب العميل. يمكنك الآن إرسال طلب الحجز.',
     rentalsReady: 'تم تجهيز حساب العميل. يمكنك الآن متابعة طلب الإيجار.',
     rideReady: 'تم تجهيز حساب العميل. يمكنك الآن متابعة طلب الرحلة.',
@@ -103,6 +104,7 @@ const copy = {
     idDocumentEmpty: 'No ID uploaded yet. You can add it later before payment.',
     idDocumentRequired: 'Upload a photo of your ID before payment.',
     codeSent: 'Verification code sent to your email.',
+    verified: 'Email verified. Tap the button below to create your account and continue.',
     ready: 'Guest account is ready. You can now send the booking request.',
     rentalsReady: 'Guest account is ready. You can now continue the rental request.',
     rideReady: 'Guest account is ready. You can now continue the ride request.',
@@ -197,7 +199,14 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
         password,
       })
       if (mode === 'signup' && idDocumentFile) {
-        await submitGuestIdDocument(idDocumentFile)
+        // ID upload is OPTIONAL at this stage (see idDocumentHelp). A failure here (large file,
+        // transient 5xx, network) must never strand an already-created account on this screen --
+        // the user can re-upload later before payment. Swallow and continue to the gate/navigation.
+        try {
+          await submitGuestIdDocument(idDocumentFile)
+        } catch {
+          // non-fatal: account exists; ID can be added later before the first booking is confirmed.
+        }
       }
       sessionStorage.setItem(CUSTOMER_GATE_KEY, '1')
       if (listingId) sessionStorage.setItem(`${CUSTOMER_GATE_KEY}:${listingId}`, '1')
@@ -301,7 +310,10 @@ export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: 
               try {
                 const ok = await confirmOtp({ email: email.trim(), purpose: 'account-verify', code: code.trim() })
                 setCodeConfirmed(ok)
-                setStatus(ok ? readyMessage : t.error, ok ? 'success' : 'error')
+                // The OTP is verified, but the account is NOT created until complete() runs. Show a
+                // "verified — now create the account" message, not the post-creation "account ready,
+                // send your booking request" message (which would be a false success here).
+                setStatus(ok ? t.verified : t.error, ok ? 'success' : 'error')
               } catch (err) {
                 setCodeConfirmed(false)
                 setStatus(errText(err), 'error')

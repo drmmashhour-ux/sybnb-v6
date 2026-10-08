@@ -436,7 +436,8 @@ export async function createSellerAccountSession(input: {
   let session: PlatformAuthSession
   try {
     session = await register(account)
-  } catch {
+  } catch (error) {
+    if (!isAccountExistsError(error)) throw error
     session = await login(input.email, input.password)
   }
 
@@ -476,7 +477,8 @@ export async function createGuestAccountSession(input: {
   let session: PlatformAuthSession
   try {
     session = await register(account)
-  } catch {
+  } catch (error) {
+    if (!isAccountExistsError(error)) throw error
     session = await login(loginEmail, input.password)
   }
 
@@ -2035,7 +2037,8 @@ async function createStaffAccount(account: {
 }) {
   try {
     return await register(account)
-  } catch {
+  } catch (error) {
+    if (!isAccountExistsError(error)) throw error
     return login(account.email, account.password)
   }
 }
@@ -2120,4 +2123,13 @@ function isAuthApiError(error: unknown) {
     'status' in error &&
     ((error as { status?: number }).status === 401 || (error as { status?: number }).status === 403),
   )
+}
+
+// A register() call should only fall back to login() when the account already exists (409 /
+// ACCOUNT_ALREADY_EXISTS). For any other failure -- most importantly REGISTRATION_OTP_REQUIRED
+// (403, an expired/consumed verification code) -- falling back to login hides the real, actionable
+// error behind a misleading "Invalid login credentials." So: rethrow everything else.
+function isAccountExistsError(error: unknown) {
+  const e = error as { status?: number; code?: string } | null
+  return Boolean(e && typeof e === 'object' && (e.code === 'ACCOUNT_ALREADY_EXISTS' || e.status === 409))
 }

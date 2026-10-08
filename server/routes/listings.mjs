@@ -3,7 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
-import { resolveListingCityName } from '../lib/listing-location.mjs'
+import { normalizeBrowseCity, resolveListingCityName } from '../lib/listing-location.mjs'
 import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
@@ -190,7 +190,8 @@ export async function handleListings(req, res, url, context) {
     if (req.method === 'GET') {
       await expireOldListings()
       const division = url.searchParams.get('division') || undefined
-      const city = url.searchParams.get('city') || undefined
+      // Accept English, slug, Arabic or French city labels; match case-insensitively.
+      const city = normalizeBrowseCity(url.searchParams.get('city'))
 
       // Attribute filters match against the listing's stored visual-filter selection
       // (metadata.visualFilters.<key>). These keys are shared across divisions — the Cars
@@ -319,7 +320,7 @@ export async function handleListings(req, res, url, context) {
           where: {
             status: 'APPROVED',
             division,
-            location: city ? { city } : undefined,
+            location: city ? { city: { equals: city, mode: 'insensitive' } } : undefined,
             priceMinor: Object.keys(priceFilter).length ? priceFilter : undefined,
             AND: andConditions.length ? andConditions : undefined,
           },

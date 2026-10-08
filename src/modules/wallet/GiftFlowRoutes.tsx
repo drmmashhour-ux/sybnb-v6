@@ -45,6 +45,13 @@ export function GiftFlowRoutes({ lang, path }: GiftFlowRoutesProps) {
       .catch(() => setGiftPreviewFailed(true))
   }, [giftId])
 
+  // The success screen must only ever render from a REAL claim result held in memory. On a refresh
+  // or a direct navigation to /wallet/gift/success there is no claimResult, so send the user to
+  // their real wallet instead of rendering a fabricated 'gift added' confirmation.
+  useEffect(() => {
+    if (path === '/wallet/gift/success' && !claimResult) navigate('/wallet')
+  }, [path, claimResult])
+
   if (codeMatch) {
     return (
       <GiftCodeVerify
@@ -59,12 +66,15 @@ export function GiftFlowRoutes({ lang, path }: GiftFlowRoutesProps) {
   }
 
   if (path === '/wallet/gift/success') {
+    // No real claim in memory -> the redirect effect above sends the user to /wallet. Render
+    // nothing rather than a fabricated confirmation.
+    if (!claimResult) return null
     return (
       <GiftRedeemedSuccess
         lang={lang}
-        amount={claimResult ? moneyText(claimResult.gift.amountMinor, claimResult.gift.currency, lang) : undefined}
-        balance={claimResult ? moneyText(claimResult.wallet.cachedBalanceMinor, claimResult.wallet.currency, lang) : undefined}
-        reference={claimResult ? claimResult.gift.id.slice(0, 8).toUpperCase() : undefined}
+        amount={moneyText(claimResult.gift.amountMinor, claimResult.gift.currency, lang)}
+        balance={moneyText(claimResult.wallet.cachedBalanceMinor, claimResult.wallet.currency, lang)}
+        reference={claimResult.gift.id.slice(0, 8).toUpperCase()}
         onWallet={() => navigate('/wallet')}
         onRide={() => navigate('/ride')}
         onBrowse={() => navigate('/')}

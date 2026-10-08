@@ -332,6 +332,11 @@ export type PlatformWallet = {
   userId: string
   currency: string
   cachedBalanceMinor: number
+  // Server-computed over the full ledger (not just the 25 returned entries):
+  // availableMinor === cachedBalanceMinor; heldMinor === outstanding HOLD - RELEASE.
+  availableMinor?: number
+  heldMinor?: number
+  refundMinor?: number
   entries?: Array<Record<string, unknown>>
 }
 

@@ -15,7 +15,21 @@ export async function handleWallet(req, res, url, context) {
       where: { userId_currency: { userId: context.user.id, currency: defaultCurrency() } },
       include: { entries: { orderBy: { createdAt: 'desc' }, take: 25 } },
     })
-    return json(res, 200, { ok: true, wallet })
+    if (!wallet) return json(res, 200, { ok: true, wallet: null })
+    // cachedBalanceMinor is the SETTLED/available balance: a HOLD never touches it, and a RELEASE
+    // (or REFUND/CREDIT) increments it. So available = cachedBalanceMinor, and outstanding
+    // protected/held funds = sum(HOLD) - sum(RELEASE). Compute over the WHOLE ledger here (not the
+    // 25 most-recent entries the client sees) so a released payout no longer shows as still-held
+    // with zero available.
+    const [holdAgg, releaseAgg, refundAgg] = await Promise.all([
+      db().walletEntry.aggregate({ _sum: { amountMinor: true }, where: { walletId: wallet.id, type: 'HOLD' } }),
+      db().walletEntry.aggregate({ _sum: { amountMinor: true }, where: { walletId: wallet.id, type: 'RELEASE' } }),
+      db().walletEntry.aggregate({ _sum: { amountMinor: true }, where: { walletId: wallet.id, type: 'REFUND' } }),
+    ])
+    const heldMinor = Math.max(0, (holdAgg._sum.amountMinor || 0) - (releaseAgg._sum.amountMinor || 0))
+    const availableMinor = Math.max(0, wallet.cachedBalanceMinor || 0)
+    const refundMinor = Math.max(0, refundAgg._sum.amountMinor || 0)
+    return json(res, 200, { ok: true, wallet: { ...wallet, heldMinor, availableMinor, refundMinor } })
   }
 
   if (url.pathname === '/api/wallet/gifts') {

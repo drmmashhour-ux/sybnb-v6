@@ -40,6 +40,8 @@ const copy = {
     protectedFunds: 'مبلغك محمي',
     protectedCopy: 'لن يتم تحويل المبلغ للمضيف حتى تأكيد الحجز ومراجعة فريق SYBNB.',
     warning: 'لا تعتمد أي دفعة خارج SYBNB ضمن الحماية.',
+    rejectedTitle: 'لم تتم الموافقة على الدفع',
+    rejectedCopy: 'راجعت الإدارة هذه الدفعة ولم تتم الموافقة عليها. تواصل مع الدعم أو أعد إرسال إثبات دفع صحيح.',
     timeline: ['تم الإرسال', 'قيد المراجعة', 'موافقة المضيف', 'تحرير المبلغ'],
     pending: 'بانتظار مراجعة فريق SYBNB',
   },
@@ -73,6 +75,8 @@ const copy = {
     protectedFunds: 'Your money is protected',
     protectedCopy: 'Funds are not released to the host until booking confirmation and SYBNB team review.',
     warning: 'Payments outside SYBNB are not covered by protection.',
+    rejectedTitle: 'This payment was not approved',
+    rejectedCopy: 'Our team reviewed this payment and did not approve it. Contact support or resubmit a valid payment proof.',
     timeline: ['Submitted', 'Under review', 'Host approved', 'Released'],
     pending: 'Waiting for SYBNB review',
   },
@@ -193,19 +197,27 @@ export function PaymentReceiptPage({ lang, proofId }: Props) {
             <Info label={t.reviewed} value={proof.reviewedAt ? new Date(proof.reviewedAt).toLocaleString() : '-'} />
           </section>
 
-          <section style={styles.protectionPanel}>
-            <span style={styles.invoiceBadge}>{t.held}</span>
-            <strong>{t.protectedFunds}</strong>
-            <p>{t.protectedCopy}</p>
-            <div style={styles.timeline}>
-              {t.timeline.map((step, index) => (
-                <span key={step} style={index <= (proof.status === 'APPROVED' ? 3 : 1) ? styles.timelineActive : styles.timelineStep}>
-                  {index <= (proof.status === 'APPROVED' ? 3 : 1) ? '✓' : '•'} {step}
-                </span>
-              ))}
-            </div>
-            <small>{t.warning}</small>
-          </section>
+          {proof.status === 'REJECTED' ? (
+            <section style={styles.protectionPanel}>
+              <span style={styles.invoiceBadge}>{statusText(proof.status, lang)}</span>
+              <strong>{t.rejectedTitle}</strong>
+              <p>{t.rejectedCopy}</p>
+            </section>
+          ) : (
+            <section style={styles.protectionPanel}>
+              <span style={styles.invoiceBadge}>{t.held}</span>
+              <strong>{t.protectedFunds}</strong>
+              <p>{t.protectedCopy}</p>
+              <div style={styles.timeline}>
+                {t.timeline.map((step, index) => (
+                  <span key={step} style={index <= (proof.status === 'APPROVED' ? 3 : 1) ? styles.timelineActive : styles.timelineStep}>
+                    {index <= (proof.status === 'APPROVED' ? 3 : 1) ? '✓' : '•'} {step}
+                  </span>
+                ))}
+              </div>
+              <small>{t.warning}</small>
+            </section>
+          )}
 
           <section style={styles.actions}>
             <button style={styles.secondaryButton} onClick={shareReceipt}>{t.share}</button>

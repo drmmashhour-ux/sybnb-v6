@@ -14,7 +14,7 @@ import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
 import { fetchSellerOverview, getStoredSellerSession, submitSellerPlanProof, uploadPaymentProofFile } from '../../shared/api/platformApi'
 import { PaymentCapsule } from '../payments/PaymentCapsule'
-import { PaymentProofUpload, paymentProofReference } from '../payments/PaymentProofUpload'
+import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 
 type Props = {
   lang: Lang
@@ -86,6 +86,9 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
   const canSendToAdmin =
     sellerProfileStatus !== 'PENDING_REVIEW' &&
     sellerProfileStatus !== 'APPROVED' &&
+    // An external-proof method must have a REAL uploaded proof asset, not just a stale 'uploaded'
+    // flag (which can survive a failed upload or a reload with only file names persisted).
+    (!method.requiresExternalProof || paymentProofUrls.length > 0) &&
     canSendPaymentGateForReview({
       hasPaymentReference,
       paymentSucceeded: method.usesStripe ? stripeSucceeded : false,
@@ -172,7 +175,6 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
 
     const nextFiles = [...paymentUploadedFiles, ...files.map((file) => file.name)]
     setPaymentUploadedFiles(nextFiles)
-    setProofUploaded(true)
     window.sessionStorage.setItem(paymentFilesStorageKey, JSON.stringify(nextFiles))
 
     const session = getStoredSellerSession()
@@ -182,7 +184,13 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
     }
     try {
       const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
-      setPaymentProofUrls((current) => [...current, ...urls])
+      // Only mark the proof as uploaded once a REAL asset URL exists (previously set true before the
+      // upload, so a failed upload still let the request be 'sent to admin' with no document).
+      setPaymentProofUrls((current) => {
+        const merged = [...current, ...urls]
+        setProofUploaded(merged.length > 0)
+        return merged
+      })
       setProofUploadError('')
     } catch (error) {
       setProofUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
@@ -191,6 +199,13 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
 
   async function submitForReview() {
     const reference = paymentReference.trim() || `${method.destinationCode}-${followCode}`
+    // Never submit an external-proof payment without a real uploaded proof asset. The server drops
+    // a non-'payment-proof://' placeholder, which would create an admin review with no document.
+    if (method.requiresExternalProof && paymentProofUrls.length === 0) {
+      setSubmitState('error')
+      setSubmitError(isAr ? 'ارفع إثبات الدفع الحقيقي قبل الإرسال.' : 'Upload a real payment proof before submitting.')
+      return
+    }
     setSubmitState('saving')
     setSubmitError('')
 
@@ -199,7 +214,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
         amountMinor,
         currency: 'USD',
         providerRef: reference,
-        proofAssetUrl: paymentProofUrls[0] || paymentProofReference('advertising-payment-proof', paymentUploadedFiles),
+        proofAssetUrl: paymentProofUrls[0] || undefined,
         proofAssetUrls: paymentProofUrls,
         planCode,
         sellerType: 'advertising',

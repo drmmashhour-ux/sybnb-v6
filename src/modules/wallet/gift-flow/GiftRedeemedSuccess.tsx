@@ -47,15 +47,17 @@ export function GiftRedeemedSuccess({
   amount,
   balance,
   walletCreated = true,
-  reference = 'GFT-2026-0042',
+  reference,
   onWallet,
   onRide,
   onBrowse,
 }: GiftRedeemedSuccessProps) {
   const isAr = lang === 'ar'
   const t = T[lang]
-  const amountText = amount || (isAr ? '٥٠٬٠٠٠ ل.س' : '50,000 SYP')
-  const balanceText = balance || (isAr ? '١٢٥٬٠٠٠ ل.س' : '125,000 SYP')
+  // No fabricated amounts/balances: this screen renders only from a real claim result (its parent
+  // guards against rendering without one). Show a neutral placeholder if a field is ever missing.
+  const amountText = amount || '—'
+  const balanceText = balance || '—'
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={{ minHeight: '100vh', background: '#0a0a0f', color: '#f7f7fb', padding: 20, fontFamily: '"Cairo","Tajawal",Inter,sans-serif' }}>
       <section style={{ maxWidth: 520, margin: '0 auto', paddingTop: 30 }}>
@@ -86,7 +88,7 @@ export function GiftRedeemedSuccess({
             <strong>{t.type}</strong>
             <span dir={isAr ? 'rtl' : 'ltr'} style={{ color: '#22c55e', fontWeight: 900 }}>+{amountText}</span>
           </div>
-          <div style={{ marginTop: 8, color: '#9aa6ba' }}>{t.ref}: <span dir="ltr">{reference}</span></div>
+          <div style={{ marginTop: 8, color: '#9aa6ba' }}>{t.ref}: <span dir="ltr">{reference || '—'}</span></div>
         </div>
 
         <div style={{ display: 'grid', gap: 10, marginTop: 18 }}>

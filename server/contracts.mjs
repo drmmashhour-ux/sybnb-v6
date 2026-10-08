@@ -23,6 +23,7 @@ export const API_ENDPOINTS = [
   ['GET', '/api/wallet/gifts/:id', 'user', 'Read safe gift preview fields for a recipient claim link.'],
   ['POST', '/api/wallet/gifts/:id/claim', 'user', 'Claim a gift with persisted attempt locks and audit logging.'],
   ['GET', '/api/me/overview', 'user', 'Read the signed-in user dashboard overview.'],
+  ['POST', '/api/me/become-host', 'user', 'Add the HOST role to the signed-in account (one account for guest and host).'],
   ['GET', '/api/host/overview', 'user', 'Read host listings, requests, and operating totals.'],
   ['PATCH', '/api/host/requests/:id', 'user', 'Confirm or cancel a request for a host-owned listing.'],
   ['PATCH', '/api/host/listings/:id/status', 'user', 'Pause or resume a host-owned listing.'],

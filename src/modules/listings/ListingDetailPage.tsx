@@ -12,6 +12,7 @@ import {
   type PlatformListing,
   type PlatformListingReview,
 } from '../../shared/api/platformApi'
+import { authStorage } from '../../shared/api/authStorage'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { propertyFilterGroup, sellerCarFilterGroupsFromConfig } from '../../engines/filters'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey } from '../../shared/maps/googleMapCapsule'
@@ -292,11 +293,13 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       if (hasResetFlag) {
         sessionStorage.removeItem(CUSTOMER_GATE_KEY)
         sessionStorage.removeItem(accountKey)
-        sessionStorage.removeItem('sybnb-v6-guest-token')
-        sessionStorage.removeItem('sybnb.v6.guestSession')
+        authStorage.removeItem('sybnb-v6-guest-token')
+        authStorage.removeItem('sybnb.v6.guestSession')
         setCustomerReady(false)
       } else {
-        setCustomerReady(sessionStorage.getItem(CUSTOMER_GATE_KEY) === '1' || sessionStorage.getItem(accountKey) === '1')
+        // A signed-in customer is ready to book -- never ask them to sign up again just because the
+        // one-time per-tab flag is missing (new tab, return visit, signed in from the header).
+        setCustomerReady(Boolean(authStorage.getItem(GUEST_SESSION_TOKEN_KEY)) || sessionStorage.getItem(CUSTOMER_GATE_KEY) === '1' || sessionStorage.getItem(accountKey) === '1')
       }
 
       if (hasResetFlag || hasLegacyAccountReadyFlag) {
@@ -453,7 +456,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
   function openContactTunnel() {
     if (!listing || typeof window === 'undefined') return
-    if (!sessionStorage.getItem(GUEST_SESSION_TOKEN_KEY)) {
+    if (!authStorage.getItem(GUEST_SESSION_TOKEN_KEY)) {
       sessionStorage.setItem(GUEST_RETURN_PATH_KEY, '/immocontact')
       window.location.hash = '/account/open'
       return

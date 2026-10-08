@@ -366,6 +366,9 @@ export const GUEST_SESSION_KEY = 'sybnb.v6.guestSession'
 export const GUEST_SESSION_TOKEN_KEY = 'sybnb-v6-guest-token'
 export const STAFF_SESSION_KEY = 'sybnb.v6.staffSession'
 export const STAFF_SESSION_TOKEN_KEY = 'sybnb-v6-staff-token'
+
+export { authStorage } from './authStorage'
+import { authStorage } from './authStorage'
 export type HostDashboardMode = 'host' | 'seller'
 
 export async function fetchPrototypeHealth() {
@@ -451,7 +454,7 @@ export async function createSellerAccountSession(input: {
     sellerRole: input.sellerRole,
     planCode: input.planCode,
   }
-  sessionStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(storedSession))
+  authStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(storedSession))
   return storedSession
 }
 
@@ -487,8 +490,9 @@ export async function createGuestAccountSession(input: {
     session = await login(loginEmail, input.password)
   }
 
-  sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
-  sessionStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  mirrorHostAccess(session)
   return session
 }
 
@@ -496,8 +500,9 @@ export async function createGuestAccountSession(input: {
 // never required one). Stores the session exactly like createGuestAccountSession does.
 export async function signInGuestAccount(email: string, password: string) {
   const session = await login(email.trim(), password)
-  sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
-  sessionStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  mirrorHostAccess(session)
   return session
 }
 
@@ -547,7 +552,7 @@ export async function submitGuestIdDocument(file: File) {
 
 export function getStoredGuestSession(): PlatformAuthSession | null {
   try {
-    const raw = sessionStorage.getItem(GUEST_SESSION_KEY)
+    const raw = authStorage.getItem(GUEST_SESSION_KEY)
     if (!raw) return null
     const session = JSON.parse(raw) as PlatformAuthSession
     if (!session?.token || !session?.user) return null
@@ -558,8 +563,8 @@ export function getStoredGuestSession(): PlatformAuthSession | null {
 }
 
 export function clearGuestSession() {
-  sessionStorage.removeItem(GUEST_SESSION_KEY)
-  sessionStorage.removeItem(GUEST_SESSION_TOKEN_KEY)
+  authStorage.removeItem(GUEST_SESSION_KEY)
+  authStorage.removeItem(GUEST_SESSION_TOKEN_KEY)
   window.dispatchEvent(new Event('sybnb-session-changed'))
 }
 
@@ -581,6 +586,41 @@ async function revokeSessionOnServer(token: string | undefined | null): Promise<
   }
 }
 
+// One account for guest and host (Airbnb-style). The host area is gated on the "staff" session slot,
+// so when the signed-in customer's account carries HOST (or SELLER), the same session is mirrored
+// into that slot -- no second login, no second account. Never overwrites a DIFFERENT user's staff
+// session (e.g. an admin signed in on this browser).
+function mirrorHostAccess(session: PlatformAuthSession) {
+  const roles = session?.user?.roles || []
+  if (!session?.token || !(roles.includes('HOST') || roles.includes('SELLER'))) return
+  const existing = getStoredStaffSession()
+  if (existing && existing.user?.id !== session.user?.id) return
+  authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
+}
+
+export function currentAccountIsHost() {
+  const roles = getStoredGuestSession()?.user?.roles || []
+  return roles.includes('HOST') || roles.includes('SELLER')
+}
+
+// "Become a host": adds HOST to the signed-in account (POST /api/me/become-host), then refreshes
+// the stored session's roles so the host area opens immediately with the same sign-in.
+export async function becomeHost() {
+  const session = getStoredGuestSession()
+  if (!session?.token) throw new Error('Sign in first.')
+  const result = await apiRequest<{ ok: true; roles: string[] }>('/api/me/become-host', {
+    method: 'POST',
+    token: session.token,
+    body: {},
+  })
+  const updated = { ...session, user: { ...session.user, roles: result.roles } } as PlatformAuthSession
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(updated))
+  mirrorHostAccess(updated)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return updated
+}
+
 export async function signOutGuest(): Promise<{ serverRevoked: boolean }> {
   const session = getStoredGuestSession()
   const serverRevoked = await revokeSessionOnServer(session?.token)
@@ -588,6 +628,7 @@ export async function signOutGuest(): Promise<{ serverRevoked: boolean }> {
   // sessionStorage would be worse than a stale server-side row. The return value is what tells the
   // UI whether it may claim the session was actually revoked.
   clearGuestSession()
+  if (session?.token && getStoredStaffSession()?.token === session.token) clearStoredStaffSession()
   return { serverRevoked }
 }
 
@@ -607,6 +648,7 @@ export async function signOutAllLocalSessions(): Promise<{ serverRevoked: boolea
   const unique = Array.from(new Set(tokens.filter((token): token is string => Boolean(token))))
   const results = await Promise.all(unique.map((token) => revokeSessionOnServer(token)))
   sessionStorage.clear()
+  authStorage.clearAll()
   window.dispatchEvent(new Event('sybnb-session-changed'))
   return { serverRevoked: results.every(Boolean) }
 }
@@ -621,6 +663,7 @@ export async function signOutEverywhere(token: string): Promise<{ serverRevoked:
     serverRevoked = isAuthApiError(error)
   }
   sessionStorage.clear()
+  authStorage.clearAll()
   window.dispatchEvent(new Event('sybnb-session-changed'))
   return { serverRevoked }
 }
@@ -641,11 +684,11 @@ function purgeLocalSessionsForToken(token: string) {
   let changed = false
   const drop = (sessionKey: string, tokenKey?: string) => {
     try {
-      const raw = sessionStorage.getItem(sessionKey)
+      const raw = authStorage.getItem(sessionKey)
       const stored = raw ? (JSON.parse(raw) as { token?: string })?.token : undefined
       if (stored !== token) return
-      sessionStorage.removeItem(sessionKey)
-      if (tokenKey) sessionStorage.removeItem(tokenKey)
+      authStorage.removeItem(sessionKey)
+      if (tokenKey) authStorage.removeItem(tokenKey)
       changed = true
     } catch {
       // A malformed stored session is not something to crash an API error path over.
@@ -667,7 +710,7 @@ export async function fetchActiveSessions(token: string) {
 
 export function getStoredStaffSession(requiredRole?: 'ADMIN' | 'HOST' | 'SELLER' | 'DRIVER'): PlatformAuthSession | null {
   try {
-    const raw = sessionStorage.getItem(STAFF_SESSION_KEY)
+    const raw = authStorage.getItem(STAFF_SESSION_KEY)
     if (!raw) return null
     const session = JSON.parse(raw) as PlatformAuthSession
     if (!session?.token || !session?.user) return null
@@ -706,19 +749,19 @@ export async function createStaffAccountSession(
     ...(phone ? { phone } : { phone: '' }),
   }
   const session = input?.mode === 'signUp' ? await createStaffAccount(account) : await ensurePrototypeSession(account)
-  sessionStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
-  sessionStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
+  authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
   return session
 }
 
 export function clearStoredStaffSession() {
-  sessionStorage.removeItem(STAFF_SESSION_KEY)
-  sessionStorage.removeItem(STAFF_SESSION_TOKEN_KEY)
+  authStorage.removeItem(STAFF_SESSION_KEY)
+  authStorage.removeItem(STAFF_SESSION_TOKEN_KEY)
 }
 
 export function getStoredSellerSession(): PlatformAuthSession | null {
   try {
-    const raw = sessionStorage.getItem(SELLER_SESSION_KEY)
+    const raw = authStorage.getItem(SELLER_SESSION_KEY)
     if (!raw) return null
     const session = JSON.parse(raw) as PlatformAuthSession
     if (!session?.token || !session?.user) return null

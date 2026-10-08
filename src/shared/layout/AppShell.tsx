@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
-import { getStoredGuestSession, signOutGuest as revokeGuestSession } from '../api/platformApi'
+import { currentAccountIsHost, getStoredGuestSession, signOutGuest as revokeGuestSession } from '../api/platformApi'
 import { Footer } from './Footer'
 
 type Props = {
@@ -21,6 +21,16 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   const routeContext = getRouteContext(path, isAr)
   const showFlowNav = !isLanding && !isAdminControlRoom
   const guestSession = typeof window !== 'undefined' ? getStoredGuestSession() : null
+  const isHost = typeof window !== 'undefined' && currentAccountIsHost()
+  const inHostArea = path.startsWith('/host')
+  // Airbnb-style host switch: one account; the same button turns into "Switch to traveling" inside
+  // the host area. A non-host is taken to /host/stays, which shows the one-tap "Become a host" page.
+  const hostSwitchLabel = inHostArea
+    ? (isAr ? 'التبديل إلى السفر' : 'Switch to traveling')
+    : isHost
+      ? (isAr ? 'التبديل إلى الاستضافة' : 'Switch to hosting')
+      : (isAr ? 'استضف على SYBNB' : 'Become a host')
+  const hostSwitchPath = inHostArea ? '/stays' : '/host/stays'
 
   function goBack() {
     navigate(routeContext.backPath)
@@ -71,7 +81,10 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
               </button>
             </div>
             {guestSession ? (
-              <div className="public-auth-actions" aria-label={isAr ? 'حساب العميل' : 'Guest account'}>
+              <div className="public-auth-actions" aria-label={isAr ? 'حسابي' : 'My account'}>
+                <button className="menu-action" onClick={() => navigate(hostSwitchPath)}>
+                  {hostSwitchLabel}
+                </button>
                 <button className="menu-action" onClick={() => navigate('/dashboard')}>
                   {isAr ? `مرحباً، ${guestSession.user.displayName}` : `Hi, ${guestSession.user.displayName}`}
                 </button>
@@ -81,11 +94,11 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
               </div>
             ) : (
               <div className="public-auth-actions">
-                <button className="menu-action" onClick={() => navigate('/account/open')}>
-                  {isAr ? 'تسجيل الدخول' : 'Sign in'}
+                <button className="menu-action" onClick={() => navigate('/host/stays')}>
+                  {isAr ? 'استضف على SYBNB' : 'Become a host'}
                 </button>
                 <button className="primary-action" onClick={() => navigate('/account/open')}>
-                  {isAr ? 'إنشاء حساب' : 'Sign up'}
+                  {isAr ? 'تسجيل الدخول أو إنشاء حساب' : 'Log in or sign up'}
                 </button>
               </div>
             )}
@@ -193,14 +206,15 @@ function getRouteContext(path: string, isAr: boolean) {
         section: isAr ? 'الإيجار الشهري' : 'Monthly rental',
         page: isAr ? 'فتح حساب المستأجر' : 'Open renter account',
         backPath: '/rentals',
-        nextPath: '/rentals',
+        nextPath: '',
       }
     }
     return {
       section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
       page: isAr ? 'فتح الحساب' : 'Open account',
       backPath: id ? `/listing/${id}` : '/stays',
-      nextPath: id ? `/listing/${id}` : '/dashboard',
+      // No "Next" on the sign-in screen: it skipped past the form and bounced straight back to it.
+      nextPath: '',
     }
   }
   if (path.startsWith('/booking/')) {

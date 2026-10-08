@@ -5,6 +5,7 @@ import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../en
 import { getCity, getGovernorate, governorateCityName, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { fetchApprovedListings, getStoredGuestSession, sendListingInquiryMessage, uploadPaymentProofFile, type PlatformListing } from '../../shared/api/platformApi'
+import { authStorage } from '../../shared/api/authStorage'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { colors, withAlpha } from '../../shared/theme/tokens'
 
@@ -386,7 +387,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>(
     filtersDraft.visualFilters ?? DEFAULT_VISUAL_FILTERS,
   )
-  const hasGuestAccount = typeof window !== 'undefined' && Boolean(sessionStorage.getItem(GUEST_TOKEN_KEY))
+  const hasGuestAccount = typeof window !== 'undefined' && Boolean(authStorage.getItem(GUEST_TOKEN_KEY))
   const activeFilterLabels = useMemo(
     () => selectedFilterLabels(renterPropertyFilterGroups, visualFilters, lang),
     [lang, visualFilters],

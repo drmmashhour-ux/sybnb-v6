@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { confirmOtp, createGuestAccountSession, requestOtp, signInGuestAccount } from '../../shared/api/platformApi'
+import { confirmOtp, createGuestAccountSession, getStoredGuestSession, requestOtp, signInGuestAccount } from '../../shared/api/platformApi'
 
 // Airbnb-style account flow, one question per screen:
 //   1. email            -> "Log in or sign up"
@@ -106,6 +106,12 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
   useEffect(() => {
     focusRef.current?.focus()
   }, [step])
+
+  // Already signed in (persisted session): never ask again -- go straight back to where they were.
+  useEffect(() => {
+    if (getStoredGuestSession()) finishAndReturn()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function say(text: string, nextTone: 'error' | 'success' | 'info' = 'error') {
     setMessage(text)

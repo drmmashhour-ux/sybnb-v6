@@ -8,6 +8,7 @@ import { isSellerRoute } from '../modules/seller/sellerRoutes'
 import { isTrustProtectionRoute } from '../modules/trust/trustRoutes'
 import { isGiftFlowRoute } from '../modules/wallet/giftRoutes'
 import { getCurrentPath } from './routes'
+import { authStorage } from '../shared/api/authStorage'
 
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
 const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrainPage')
@@ -19,6 +20,7 @@ const DriverDashboardPage = lazyNamed(() => import('../modules/driver/DriverDash
 const FinanceReconciliationPage = lazyNamed(() => import('../modules/finance/FinanceReconciliationPage'), 'FinanceReconciliationPage')
 const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'), 'GiftFlowRoutes')
 const GuestAccountPage = lazyNamed(() => import('../modules/account/GuestAccountPage'), 'GuestAccountPage')
+const BecomeHostPage = lazyNamed(() => import('../modules/account/BecomeHostPage'), 'BecomeHostPage')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
 const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesPage'), 'HostInquiriesPage')
@@ -109,7 +111,7 @@ export function App() {
     || path === '/wallet/gift/code' || /^\/wallet\/gift\/code\/[^/]+$/.test(path)
   const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
   const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch ? 'generic' : 'stays'
-  const hasGuestSession = typeof window !== 'undefined' && Boolean(sessionStorage.getItem('sybnb-v6-guest-token'))
+  const hasGuestSession = typeof window !== 'undefined' && Boolean(authStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
   const hasAnyStaffSession = typeof window !== 'undefined' && hasAnyValidStaffSession()
@@ -125,6 +127,12 @@ export function App() {
       <Suspense fallback={<RouteLoading lang={lang} />}>
         {needsGuestAccountGate ? (
           <GuestAccountPage lang={lang} flow={guestGateFlow} returnPath={path} />
+        ) : staffRequiredRole === 'HOST' && !hasStaffSession && !hasGuestSession ? (
+          // Airbnb-style: hosting uses the SAME account. Not signed in -> the normal sign-in, then back here.
+          <GuestAccountPage lang={lang} flow="generic" returnPath={path} />
+        ) : staffRequiredRole === 'HOST' && !hasStaffSession ? (
+          // Signed in but not a host yet -> one-tap "Become a host" on this same account.
+          <BecomeHostPage lang={lang} returnPath={path} />
         ) : staffRequiredRole && !hasStaffSession ? (
           <StaffAccessPage lang={lang} role={staffRequiredRole} returnPath={path} />
         ) : isGiftFlowRoute(path) ? (
@@ -260,7 +268,7 @@ function getStaffRequiredRole(path: string): 'ADMIN' | 'HOST' | 'DRIVER' | null 
 function hasRequiredStaffSession(requiredRole: 'ADMIN' | 'HOST' | 'DRIVER' | null) {
   if (!requiredRole) return true
   try {
-    const raw = sessionStorage.getItem('sybnb.v6.staffSession')
+    const raw = authStorage.getItem('sybnb.v6.staffSession')
     if (!raw) return false
     const session = JSON.parse(raw) as { token?: string; user?: { roles?: string[] } }
     const roles = session.user?.roles || []
@@ -274,7 +282,7 @@ function hasRequiredStaffSession(requiredRole: 'ADMIN' | 'HOST' | 'DRIVER' | nul
 
 function hasAnyValidStaffSession() {
   try {
-    const raw = sessionStorage.getItem('sybnb.v6.staffSession')
+    const raw = authStorage.getItem('sybnb.v6.staffSession')
     if (!raw) return false
     const session = JSON.parse(raw) as { token?: string; user?: { roles?: string[] } }
     return Boolean(session.token && session.user?.roles?.length)

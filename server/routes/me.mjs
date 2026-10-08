@@ -8,6 +8,30 @@ import { defaultCurrency } from '../lib/country.mjs'
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
 export async function handleMe(req, res, url, context) {
+  // Airbnb-style "Become a host": one account for everything. A signed-in customer adds the HOST
+  // role to the SAME account instead of opening a separate host account. HOST is already publicly
+  // self-registerable (auth.mjs PUBLIC_REGISTER_ROLES), so this grants nothing a stranger cannot
+  // already obtain; it only stops forcing a second account. Grant-only, idempotent, and -- like the
+  // seller-plan grant in finance-ledger.mjs -- deliberately does NOT revoke the current session:
+  // roles are read live per request, so the very next host request is authorized. Any role REMOVAL
+  // still must go through applyRoleChange(). Commit-boundary re-authorization mirrors the other
+  // self-service mutation in this file, so a revoked/suspended actor cannot gain a role.
+  if (url.pathname === '/api/me/become-host') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const roles = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, { action: 'SELF_BECOME_HOST' })
+      await tx.userRole.upsert({
+        where: { userId_role: { userId: context.user.id, role: 'HOST' } },
+        create: { userId: context.user.id, role: 'HOST' },
+        update: {},
+      })
+      const rows = await tx.userRole.findMany({ where: { userId: context.user.id }, select: { role: true } })
+      return rows.map((row) => row.role)
+    })
+    return json(res, 200, { ok: true, roles })
+  }
+
   if (url.pathname === '/api/me/id-document') {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context)

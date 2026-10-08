@@ -428,5 +428,13 @@ function buildBookingMetadata(body, listing) {
       metadata.feeSnapshot = fees
     }
   }
+  // Persist the guest's acceptance of the short-term-rental agreement (the UI hard-blocks the
+  // booking until it is ticked, and that agreement binds the guest to the commission / in-platform-
+  // payment / dispute terms). It was previously sent by the client but never recorded — a silent
+  // no-op on a legally meaningful consent. Record WHAT was accepted and WHEN.
+  if (body.acceptedTerms === true) {
+    metadata.guestAgreementAcceptedAt = new Date().toISOString()
+    metadata.guestAgreementVersion = String(body.termsVersion || 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1')
+  }
   return metadata
 }

@@ -174,7 +174,19 @@ export function ImmocontactPage({ lang }: Props) {
   const hasQualifyingBooking = (overview?.bookings || []).some((booking) =>
     MESSAGING_ELIGIBLE_BOOKING_STATUSES.includes(booking.status),
   )
-  const messagingLocked = !isStaff && status === 'ready' && !hasQualifyingBooking
+  // The inbox must never be fully hidden just because the guest has no CONFIRMED booking yet:
+  // listing inquiries, payment/ride/gift and in-progress booking threads are all reachable flows,
+  // and a guest who sent an inquiry has to be able to read the host's reply here. Booking *messaging*
+  // for a non-qualifying booking is still gated per-thread (messagesStatus='locked' in the effect
+  // below). Only lock the whole page when there is genuinely nothing to show.
+  const hasAnyInboxContent =
+    inquiryThreadsRaw.length > 0 ||
+    (overview?.payments?.length ?? 0) > 0 ||
+    (overview?.rides?.length ?? 0) > 0 ||
+    (overview?.gifts?.sent?.length ?? 0) > 0 ||
+    (overview?.gifts?.claimed?.length ?? 0) > 0 ||
+    (overview?.bookings?.length ?? 0) > 0
+  const messagingLocked = !isStaff && status === 'ready' && !hasQualifyingBooking && !hasAnyInboxContent
 
   const bookingThreads = useMemo(
     () => (isStaff ? staffBookings : overview?.bookings || []).map((booking) => bookingThread(booking, lang)),

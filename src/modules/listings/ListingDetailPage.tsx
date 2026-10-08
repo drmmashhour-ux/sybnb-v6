@@ -261,9 +261,22 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     [listing],
   )
   const feesStandard = useMemo(() => guestFeeSummary({ amountMinor: displayedTotalMinor, listing: feeInput }), [displayedTotalMinor, feeInput])
+  // The server charges the cancellation-protection fee as 3% of ONE night's listing price (see
+  // buildBookingMetadata in server/routes/bookings.mjs — the value it stores wins over every 3%-of-
+  // total fallback). Pass that same base here so the price the guest evaluates equals the receipt
+  // and the actual charge, never a higher 3%-of-the-whole-stay figure. (If protection should instead
+  // scale with the full stay, that is a deliberate pricing change to make in buildBookingMetadata.)
+  const protectionFeeBaseMinor = listing?.priceMinor ?? 0
   const feesProtected = useMemo(
-    () => guestFeeSummary({ amountMinor: displayedTotalMinor, listing: feeInput, metadata: { cancellationProtectionPurchased: true } }),
-    [displayedTotalMinor, feeInput],
+    () => guestFeeSummary({
+      amountMinor: displayedTotalMinor,
+      listing: feeInput,
+      metadata: {
+        cancellationProtectionPurchased: true,
+        cancellationProtectionFeeMinor: Math.round(protectionFeeBaseMinor * 0.03),
+      },
+    }),
+    [displayedTotalMinor, feeInput, protectionFeeBaseMinor],
   )
   const protectionFeeMinor = feesProtected.cancellationProtectionFeeMinor
   const protectedTotalMinor = feesProtected.totalMinor

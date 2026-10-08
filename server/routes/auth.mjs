@@ -192,6 +192,58 @@ export async function handleAuth(req, res, url, context) {
     }
   }
 
+  // Forgot password. Proof of control of the account email = a VERIFIED, recent, single-use
+  // 'password-reset' OTP (POST /api/otp/send + /api/otp/verify). Then the new password replaces the
+  // old one and EVERY existing session on the account is revoked (CREDENTIAL_RESET), so anyone
+  // signed in with the old password is logged out everywhere. The same generic answer is given
+  // whether or not an account exists for the email, so this does not reveal who has an account.
+  if (url.pathname === '/api/auth/password-reset') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    if (await rateLimited(req, 'login')) return tooManyRequests(res)
+    const body = await readJson(req)
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
+    const newPassword = typeof body.newPassword === 'string' ? body.newPassword : ''
+    const generic = () => {
+      const error = new Error('The code is not valid or has expired. Request a new code and try again.')
+      error.statusCode = 403
+      error.code = 'PASSWORD_RESET_NOT_ALLOWED'
+      error.expose = true
+      return error
+    }
+    if (!email) throw generic()
+    if (newPassword.length < 8) {
+      const error = new Error('The new password needs at least 8 characters.')
+      error.statusCode = 400
+      error.code = 'PASSWORD_TOO_SHORT'
+      error.expose = true
+      throw error
+    }
+    const verified = await db().verificationCode.findFirst({
+      where: {
+        identifierHash: hashEmail(email),
+        status: 'VERIFIED',
+        purpose: 'password-reset',
+        verifiedAt: { gt: new Date(Date.now() - OTP_BIND_WINDOW_MS) },
+      },
+      orderBy: { verifiedAt: 'desc' },
+    })
+    if (!verified) throw generic()
+    const user = await db().user.findUnique({ where: { email }, select: { id: true, status: true } })
+    if (!user || user.status !== 'ACTIVE') throw generic()
+
+    await db().$transaction(async (tx) => {
+      // Single-use: only a still-VERIFIED code flips, so a replayed request cannot reset again.
+      const consumed = await tx.verificationCode.updateMany({
+        where: { id: verified.id, status: 'VERIFIED' },
+        data: { status: 'CANCELLED' },
+      })
+      if (consumed.count === 0) throw generic()
+      await tx.user.update({ where: { id: user.id }, data: { passwordHash: hashPassword(newPassword) } })
+      await revokeUserAccess(user.id, REVOCATION_REASONS.CREDENTIAL_RESET, { tx })
+    })
+    return json(res, 200, { ok: true })
+  }
+
   if (url.pathname === '/api/auth/login') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     if (await rateLimited(req, 'login')) return tooManyRequests(res)

@@ -16,6 +16,8 @@ const IP_MAX = 30
 const ALLOWED_PURPOSES = new Set([
   'guest-login', 'staff-login', 'seller-login', 'host-login',
   'account-verify', 'payment-proof', 'wallet-claim',
+  // Forgot password: the code proves control of the account's email before a new password is set.
+  'password-reset',
 ])
 
 // The plaintext code is exposed back to the caller ONLY in explicit test mode. In production this

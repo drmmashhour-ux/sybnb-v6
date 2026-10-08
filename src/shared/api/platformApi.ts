@@ -621,6 +621,15 @@ export async function becomeHost() {
   return updated
 }
 
+// Forgot password: after the 'password-reset' email code is verified, set the new password. The server
+// signs the account out on every device; the caller then signs in with the new password.
+export async function resetPassword(email: string, newPassword: string) {
+  await apiRequest<{ ok: true }>('/api/auth/password-reset', {
+    method: 'POST',
+    body: { email: email.trim(), newPassword },
+  })
+}
+
 // ---- Host profile (Airbnb-style): photo, about, languages, city --------------------------------
 export type HostProfile = {
   displayName: string | null
@@ -2169,7 +2178,7 @@ async function register(body: {
 
 // Server-authoritative OTP. The browser never generates or trusts the code — it asks the backend to
 // send it (by email; phone optional) and to verify it. The plaintext code is not returned in production.
-export type OtpPurpose = 'guest-login' | 'staff-login' | 'seller-login' | 'host-login' | 'account-verify' | 'payment-proof' | 'wallet-claim'
+export type OtpPurpose = 'guest-login' | 'staff-login' | 'seller-login' | 'host-login' | 'account-verify' | 'payment-proof' | 'wallet-claim' | 'password-reset'
 
 export async function requestOtp(input: { email?: string; phone?: string; purpose: OtpPurpose; channel?: 'email' | 'sms' | 'whatsapp' }) {
   return apiRequest<{ ok: true; sent: boolean; channel: string; masked: string; maskedEmail?: string; maskedPhone?: string; expiresAt: string; provider: string; devCode?: string }>(

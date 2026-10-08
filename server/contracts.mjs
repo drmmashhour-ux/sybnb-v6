@@ -2,6 +2,7 @@ export const API_ENDPOINTS = [
   ['GET', '/api/health', 'public', 'Check API service and PostgreSQL connectivity.'],
   ['GET', '/api/contracts', 'public', 'Read the prototype endpoint and security contract registry.'],
   ['POST', '/api/auth/register', 'public', 'Create account with server-side password hashing and phone hashing.'],
+  ['POST', '/api/auth/password-reset', 'public', 'Set a new password after a verified password-reset email code; revokes all sessions.'],
   ['POST', '/api/auth/login', 'public', 'Start a secure session after password verification.'],
   ['POST', '/api/auth/logout', 'user', 'Revoke the calling session server-side so its token stops working immediately.'],
   ['POST', '/api/auth/logout-all', 'user', 'Revoke every session for the account by bumping its security epoch.'],

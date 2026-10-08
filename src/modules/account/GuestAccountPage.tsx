@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { getKeepSignedIn, setKeepSignedIn } from '../../shared/api/authStorage'
-import { confirmOtp, createGuestAccountSession, getStoredGuestSession, requestOtp, signInGuestAccount } from '../../shared/api/platformApi'
+import { confirmOtp, createGuestAccountSession, getStoredGuestSession, requestOtp, resetPassword, signInGuestAccount } from '../../shared/api/platformApi'
 
 // Airbnb-style account flow, one question per screen:
 //   1. email            -> "Log in or sign up"
@@ -20,13 +20,19 @@ type Props = {
   returnPath?: string
 }
 
-type Step = 'email' | 'password' | 'finish'
+type Step = 'email' | 'password' | 'finish' | 'reset'
 
 const CUSTOMER_GATE_KEY = 'sybnb-v6-customer-account-ready'
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 
 const copy = {
   ar: {
+    forgot: 'نسيت كلمة المرور؟',
+    resetTitle: 'إعادة تعيين كلمة المرور',
+    resetBody: (masked: string) => `أرسلنا رمزاً من 6 أرقام إلى ${masked}. أدخله ثم اختر كلمة مرور جديدة.`,
+    newPassword: 'كلمة المرور الجديدة',
+    resetSave: 'حفظ كلمة المرور والدخول',
+    resetDone: 'تم تغيير كلمة المرور. تم تسجيل الخروج من الأجهزة الأخرى.',
     emailTitle: 'تسجيل الدخول أو إنشاء حساب',
     welcome: 'أهلاً بك في SYBNB',
     email: 'البريد الإلكتروني',
@@ -58,6 +64,12 @@ const copy = {
     ready: 'تم. حسابك جاهز.',
   },
   en: {
+    forgot: 'Forgot password?',
+    resetTitle: 'Reset your password',
+    resetBody: (masked: string) => `We sent a 6-digit code to ${masked}. Enter it, then choose a new password.`,
+    newPassword: 'New password',
+    resetSave: 'Save password and log in',
+    resetDone: 'Password changed. Other devices have been signed out.',
     emailTitle: 'Log in or sign up',
     welcome: 'Welcome to SYBNB',
     email: 'Email',
@@ -89,6 +101,12 @@ const copy = {
     ready: 'Done. Your account is ready.',
   },
   fr: {
+    forgot: 'Mot de passe oublié?',
+    resetTitle: 'Réinitialiser votre mot de passe',
+    resetBody: (masked: string) => `Nous avons envoyé un code à 6 chiffres à ${masked}. Saisissez-le, puis choisissez un nouveau mot de passe.`,
+    newPassword: 'Nouveau mot de passe',
+    resetSave: 'Enregistrer et se connecter',
+    resetDone: 'Mot de passe modifié. Les autres appareils ont été déconnectés.',
     emailTitle: 'Connexion ou inscription',
     welcome: 'Bienvenue sur SYBNB',
     email: 'Courriel',
@@ -211,6 +229,45 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
     }
   }
 
+  async function startReset() {
+    if (!emailValid) return say(t.invalidEmail)
+    setBusy(true)
+    say('')
+    try {
+      await requestOtp({ email: email.trim(), purpose: 'password-reset' })
+      setCode('')
+      setPassword('')
+      setStep('reset')
+    } catch (err) {
+      say(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submitReset() {
+    if (code.trim().length !== 6) return say(t.missingCode)
+    if (password.length < 8) return say(t.shortPassword)
+    setBusy(true)
+    say('')
+    setKeepSignedIn(remember)
+    try {
+      const ok = await confirmOtp({ email: email.trim(), purpose: 'password-reset', code: code.trim() })
+      if (!ok) {
+        say(t.missingCode)
+        return
+      }
+      await resetPassword(email, password)
+      await signInGuestAccount(email, password)
+      say(t.resetDone, 'success')
+      finishAndReturn()
+    } catch (err) {
+      say(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function submitFinish() {
     if (firstName.trim().length < 2 || lastName.trim().length < 2) return say(t.missingName)
     if (code.trim().length !== 6) return say(t.missingCode)
@@ -239,7 +296,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
     }
   }
 
-  const title = step === 'email' ? t.emailTitle : step === 'password' ? t.passwordTitle : t.finishTitle
+  const title = step === 'email' ? t.emailTitle : step === 'password' ? t.passwordTitle : step === 'reset' ? t.resetTitle : t.finishTitle
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -250,7 +307,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
               ×
             </button>
           ) : (
-            <button style={styles.iconButton} onClick={() => { say(''); setStep(step === 'finish' ? 'password' : 'email') }} aria-label={t.back}>
+            <button style={styles.iconButton} onClick={() => { say(''); setStep(step === 'finish' || step === 'reset' ? 'password' : 'email') }} aria-label={t.back}>
               {isAr ? '›' : '‹'}
             </button>
           )}
@@ -265,6 +322,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
             if (busy) return
             if (step === 'email') submitEmail()
             else if (step === 'password') void submitPassword()
+            else if (step === 'reset') void submitReset()
             else void submitFinish()
           }}
         >
@@ -312,6 +370,9 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
                   {showPassword ? t.hide : t.show}
                 </button>
               </div>
+              <button type="button" style={styles.linkButton} onClick={() => void startReset()} disabled={busy}>
+                {t.forgot}
+              </button>
               <p style={styles.hint}>{t.passwordHint}</p>
               <label style={styles.rememberRow}>
                 <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
@@ -320,6 +381,42 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
                   <small style={styles.rememberHint}>{t.keepSignedInHint}</small>
                 </span>
               </label>
+            </>
+          ) : null}
+
+          {step === 'reset' ? (
+            <>
+              <p style={styles.hint}>{t.resetBody(maskEmail(email))}</p>
+              <input
+                ref={focusRef}
+                dir="ltr"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                style={{ ...styles.input, ...styles.codeInput }}
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="••••••"
+                aria-label={t.code}
+              />
+              <button type="button" style={styles.linkButton} onClick={() => void startReset()} disabled={busy}>
+                {t.resend}
+              </button>
+              <div style={styles.passwordWrap}>
+                <input
+                  dir="ltr"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  style={{ ...styles.input, ...styles.passwordInput }}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={t.newPassword}
+                  aria-label={t.newPassword}
+                />
+                <button type="button" style={styles.showButton} onClick={() => setShowPassword((v) => !v)}>
+                  {showPassword ? t.hide : t.show}
+                </button>
+              </div>
             </>
           ) : null}
 
@@ -356,7 +453,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
           ) : null}
 
           <button type="submit" style={{ ...styles.primaryButton, opacity: busy ? 0.7 : 1 }} disabled={busy}>
-            {busy ? '…' : step === 'finish' ? t.agree : t.continue}
+            {busy ? '…' : step === 'finish' ? t.agree : step === 'reset' ? t.resetSave : t.continue}
           </button>
         </form>
       </section>

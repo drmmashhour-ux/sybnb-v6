@@ -38,11 +38,26 @@ const copy = {
     active: 'Active',
     admin: 'Admin',
   },
+  fr: {
+    back: 'Retour à l’accueil',
+    title: 'Comptes entreprises — SR Ride',
+    subtitle: 'Inscrivez une entreprise. L’administrateur de l’entreprise gère ensuite ses propres membres.',
+    name: 'Nom de l’entreprise',
+    billingEmail: 'Courriel de facturation',
+    adminEmail: 'Courriel de l’administrateur de l’entreprise (doit déjà avoir un compte)',
+    create: 'Créer un compte entreprise',
+    creating: 'Création...',
+    empty: 'Aucun compte entreprise pour l’instant.',
+    loading: 'Chargement...',
+    error: 'Impossible de charger les comptes entreprises',
+    active: 'Actif',
+    admin: 'Administrateur',
+  },
 }
 
 export function AdminBusinessAccountsPage({ lang }: Props) {
   const isAr = lang === 'ar'
-  const t = copy[isAr ? 'ar' : 'en']
+  const t = copy[lang]
   const [accounts, setAccounts] = useState<PlatformBusinessAccount[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')

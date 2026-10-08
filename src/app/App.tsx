@@ -298,7 +298,7 @@ function RouteLoading({ lang }: { lang: Lang }) {
   return (
     <main className="page-shell">
       <section className="panel">
-        <p>{text({ ar: 'جاري التحميل...', en: 'Loading...' }, lang)}</p>
+        <p>{text({ ar: 'جاري التحميل...', en: 'Loading...', fr: 'Chargement...' }, lang)}</p>
       </section>
     </main>
   )

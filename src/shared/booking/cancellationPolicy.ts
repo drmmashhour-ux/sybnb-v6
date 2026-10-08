@@ -1,4 +1,4 @@
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { localeForLang } from '../country/presentation'
 
 // Standard rate: free cancellation until this many days before check-in, then fees apply.
@@ -20,16 +20,16 @@ export function cancellationCutoffDate(checkIn: string | undefined, protectedPla
 }
 
 export function formatCancellationDate(date: Date, lang: Lang) {
-  return date.toLocaleDateString(localeForLang(lang), { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+  return date.toLocaleDateString(pick(lang, localeForLang('ar'), localeForLang('en'), 'fr-CA'), { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
 
 export function freeCancellationLabel(checkIn: string | undefined, protectedPlan: boolean, lang: Lang) {
   const cutoff = cancellationCutoffDate(checkIn, protectedPlan)
   if (!cutoff) {
-    return lang === 'ar'
-      ? (protectedPlan ? 'إلغاء مجاني حتى تاريخ الدخول' : 'إلغاء مجاني حتى 3 أيام قبل الدخول')
-      : (protectedPlan ? 'Free cancellation until check-in' : 'Free cancellation until 3 days before check-in')
+    return protectedPlan
+      ? pick(lang, 'إلغاء مجاني حتى تاريخ الدخول', 'Free cancellation until check-in', 'Annulation gratuite jusqu’à l’arrivée')
+      : pick(lang, 'إلغاء مجاني حتى 3 أيام قبل الدخول', 'Free cancellation until 3 days before check-in', 'Annulation gratuite jusqu’à 3 jours avant l’arrivée')
   }
   const dateText = formatCancellationDate(cutoff, lang)
-  return lang === 'ar' ? `إلغاء مجاني حتى ${dateText}` : `Free cancellation until ${dateText}`
+  return pick(lang, `إلغاء مجاني حتى ${dateText}`, `Free cancellation until ${dateText}`, `Annulation gratuite jusqu’au ${dateText}`)
 }

@@ -10,7 +10,7 @@ import {
 } from '../../../shared/api/platformApi'
 import { moneyText, statusText } from '../../../shared/i18n/display'
 
-type Lang = 'ar' | 'en'
+import type { Lang } from '../../../engines/language/languageEngine'
 type AdminGiftAction = 'allow' | 'block' | 'request_review'
 
 type GiftRecord = {
@@ -83,6 +83,32 @@ const T = {
     noteRequired: 'A note is required to block a gift.',
     actionDone: 'Decision recorded.',
     error: 'Gift review action failed.',
+  },
+  fr: {
+    title: 'Vérification des cadeaux du portefeuille',
+    ownerOnly: 'Propriétaire / administration uniquement',
+    subtitle: 'Les cadeaux de valeur élevée ou verrouillés apparaissent ici depuis la base de données avant de pouvoir être réclamés.',
+    refresh: 'Actualiser',
+    loading: 'Chargement',
+    empty: 'Aucun cadeau en attente de vérification.',
+    giftRef: 'Référence du cadeau',
+    sender: 'Expéditeur',
+    recipientHash: 'Empreinte du téléphone du destinataire',
+    hashNote: 'Le numéro de téléphone est haché et n’est jamais affiché en clair à l’administration.',
+    amount: 'Montant',
+    status: 'Statut',
+    message: 'Message',
+    created: 'Créé le',
+    expires: 'Expire le',
+    timeline: 'Journal d’audit des cadeaux',
+    note: 'Note de l’administration',
+    notePlaceholder: 'Indiquez la raison avant toute action sensible...',
+    allow: 'Autoriser le cadeau',
+    block: 'Bloquer le cadeau',
+    requestReview: 'Laisser en vérification',
+    noteRequired: 'Une note est requise pour bloquer un cadeau.',
+    actionDone: 'Décision enregistrée.',
+    error: 'Échec de l’action de vérification du cadeau.',
   },
 }
 

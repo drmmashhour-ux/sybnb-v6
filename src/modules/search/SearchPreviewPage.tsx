@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { governorateCityName } from '../../engines/search'
 import { fetchApprovedListings, isSampleListing, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
@@ -140,6 +140,69 @@ const T = {
       },
     },
   },
+  fr: {
+    title: 'Aperçu du moteur de recherche',
+    body: 'Recherchez par catégorie, photos, lieu, dates, prix et services, puis consultez le détail de la chambre avant de réserver.',
+    loading: 'Chargement',
+    empty: 'Aucun résultat',
+    error: 'Erreur',
+    lastSearch: 'Dernière recherche',
+    none: 'Aucune recherche pour le moment',
+    liveResults: 'Résultats en direct de la base de données',
+    sampleResults: 'Données de démonstration - base de données indisponible',
+    pendingOnly: 'Les annonces en cours de vérification restent masquées ici jusqu’à leur approbation par SYBNB.',
+    noResults: 'Aucun résultat ne correspond à votre recherche. Élargissez les filtres ou changez de lieu.',
+    price: 'Prix',
+    book: 'Voir le détail de la chambre',
+    details: 'Voir le détail',
+    filterTitle: 'Sélection intelligente',
+    resultTitle: 'Résultats correspondants',
+    loadMore: 'Afficher plus',
+    loadingMore: 'Chargement...',
+    noPhotoYet: 'Pas encore de photos',
+    ready: 'Prêt à rechercher',
+    staysReady: 'Prêt à réserver un séjour',
+    staysTitle: 'Recherche de séjours',
+    staysBody: 'Choisissez les dates, les voyageurs, le type de chambre, le type de lit et les services, puis consultez le détail du logement avant de demander une réservation.',
+    divisionCopy: {
+      stays: {
+        ready: 'Prêt à réserver un séjour',
+        title: 'Recherche de séjours',
+        body: 'Choisissez les dates, les voyageurs, le type de chambre, le type de lit et les services, puis consultez le détail du logement avant de demander une réservation.',
+        action: 'Voir le détail du logement',
+      },
+      rentals: {
+        ready: 'Prêt à chercher une location',
+        title: 'Recherche de locations au mois',
+        body: 'Choisissez le gouvernorat, la ville, le quartier, le type de bien, les pièces et les services, puis consultez le détail du bien avant d’envoyer une demande.',
+        action: 'Voir le détail du bien',
+      },
+      buy: {
+        ready: 'Prêt à acheter un bien',
+        title: 'Recherche de biens à vendre',
+        body: 'Choisissez le lieu, le type de bien, le prix et la superficie, puis consultez le détail du bien avant de prendre contact ou d’envoyer une demande.',
+        action: 'Voir le détail du bien',
+      },
+      newConstruction: {
+        ready: 'Prêt à découvrir les projets',
+        title: 'Recherche de projets neufs',
+        body: 'Choisissez la ville, le type de projet, le prix et le plan, puis consultez le détail du projet avant de réserver une visite ou de prendre contact.',
+        action: 'Voir le détail du projet',
+      },
+      cars: {
+        ready: 'Prêt à chercher un véhicule',
+        title: 'Recherche de véhicules',
+        body: 'Choisissez le lieu, le prix, le type et les caractéristiques, puis consultez le détail du véhicule avant de contacter le vendeur.',
+        action: 'Voir le détail du véhicule',
+      },
+      marketplace: {
+        ready: 'Prêt à explorer le marché',
+        title: 'Recherche sur le marché',
+        body: 'Choisissez la catégorie, le lieu, le prix et l’état de l’article, puis consultez le détail du produit avant d’envoyer une demande.',
+        action: 'Voir le détail du produit',
+      },
+    },
+  },
 }
 
 const DIVISION_IMAGES: Record<string, string> = {
@@ -252,15 +315,15 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
 
   return (
     <main dir={lang === 'ar' ? 'rtl' : 'ltr'} className="search-experience">
-      <section style={flowStyles.nav} aria-label={lang === 'ar' ? 'التنقل بين الخطوات' : 'Step navigation'}>
-        <button style={flowStyles.arrow} onClick={() => (window.location.hash = '/')} aria-label={lang === 'ar' ? 'السابق' : 'Back'}>
+      <section style={flowStyles.nav} aria-label={pick(lang, 'التنقل بين الخطوات', 'Step navigation', 'Navigation entre les étapes')}>
+        <button style={flowStyles.arrow} onClick={() => (window.location.hash = '/')} aria-label={pick(lang, 'السابق', 'Back', 'Retour')}>
           ‹
         </button>
         <button
           style={flowStyles.arrow}
           disabled={!listings[0]}
           onClick={() => listings[0] && openListing(listings[0])}
-          aria-label={lang === 'ar' ? 'التالي' : 'Next'}
+          aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}
         >
           ›
         </button>
@@ -269,7 +332,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
       <section className="search-hero">
         <div>
           <p>{divisionCopy?.ready || (isStaysEntry ? t.staysReady : t.ready)}</p>
-          <h1>{divisionCopy?.title || (isStaysEntry ? t.staysTitle : lang === 'ar' ? 'محرك بحث SYBNB' : 'SYBNB Search Engine')}</h1>
+          <h1>{divisionCopy?.title || (isStaysEntry ? t.staysTitle : pick(lang, 'محرك بحث SYBNB', 'SYBNB Search Engine', 'Moteur de recherche SYBNB'))}</h1>
           <span>{divisionCopy?.body || (isStaysEntry ? t.staysBody : t.body)}</span>
           {effectiveInitialDivision === 'stays' && (
             <button
@@ -277,11 +340,11 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               className="stays-host-cta"
               onClick={() => (window.location.hash = '/host')}
             >
-              {lang === 'ar' ? 'هل لديك مكان؟ أدرج مكانك واستضِف' : 'Have a place? List your place & host'}
+              {pick(lang, 'هل لديك مكان؟ أدرج مكانك واستضِف', 'Have a place? List your place & host', 'Vous avez un logement ? Publiez-le et devenez hôte')}
             </button>
           )}
         </div>
-        <div className="search-hero-metrics" aria-label={lang === 'ar' ? 'حالة البحث' : 'Search status'}>
+        <div className="search-hero-metrics" aria-label={pick(lang, 'حالة البحث', 'Search status', 'État de la recherche')}>
           <strong>{listings.length}</strong>
           <small>{isSampleMode ? t.sampleResults : t.liveResults}</small>
         </div>
@@ -380,12 +443,12 @@ function hasRealPhoto(listing: PlatformListing) {
 
 function searchSummary(value: UnifiedSearchValue, lang: Lang) {
   const divisionLabel: Record<UnifiedSearchValue['division'], Record<Lang, string>> = {
-    stays: { ar: 'إيجار يومي', en: 'Daily rental' },
-    rentals: { ar: 'إيجار شهري', en: 'Monthly rental' },
-    buy: { ar: 'شراء عقار', en: 'Buy property' },
-    newConstruction: { ar: 'مشاريع جديدة', en: 'New construction' },
-    cars: { ar: 'مركبات', en: 'Cars' },
-    marketplace: { ar: 'السوق', en: 'Marketplace' },
+    stays: { ar: 'إيجار يومي', en: 'Daily rental', fr: 'Séjour' },
+    rentals: { ar: 'إيجار شهري', en: 'Monthly rental', fr: 'Location au mois' },
+    buy: { ar: 'شراء عقار', en: 'Buy property', fr: 'Achat immobilier' },
+    newConstruction: { ar: 'مشاريع جديدة', en: 'New construction', fr: 'Projets neufs' },
+    cars: { ar: 'مركبات', en: 'Cars', fr: 'Voitures' },
+    marketplace: { ar: 'السوق', en: 'Marketplace', fr: 'Marché' },
   }
   return [
     divisionLabel[value.division][lang],

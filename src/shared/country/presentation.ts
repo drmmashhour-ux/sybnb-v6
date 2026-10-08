@@ -67,7 +67,11 @@ export function activeCountryPresentation(): CountryPresentationProfile {
 // Locale for a display language, from the active country presentation (was: lang==='ar'?'ar-SY':'en-US').
 export function localeForLang(lang: string | undefined): string {
   const p = activeCountryPresentation()
-  return lang === 'ar' ? p.locale : p.fallbackLocale
+  if (lang === 'ar') return p.locale
+  // French UI language: French number/date formatting. Language-level (not a country value), so
+  // the country profile stays the single source for currency, time zone and the Arabic locale.
+  if (lang === 'fr') return 'fr'
+  return p.fallbackLocale
 }
 
 export function phoneCallingCode(): string {

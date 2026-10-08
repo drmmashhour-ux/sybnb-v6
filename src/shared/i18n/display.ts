@@ -65,6 +65,37 @@ export const statusLabels: Record<Lang, Record<string, string>> = {
     REQUESTED: 'Requested',
     SENT: 'Sent',
   },
+  fr: {
+    ACTIVE: 'Actif',
+    APPROVED: 'Approuvé',
+    CANCELLED: 'Annulé',
+    CLAIM_PENDING: 'En attente de vérification',
+    CLAIMED: 'Réclamé',
+    COMPLETED: 'Terminé',
+    CONFIRMED: 'Confirmé',
+    CREDIT: 'Crédit',
+    CREATED: 'Créé',
+    DEBIT: 'Débit',
+    DRAFT: 'Brouillon',
+    DRIVER_ARRIVING: 'Chauffeur en route',
+    DRIVER_ASSIGNED: 'Chauffeur assigné',
+    DISPUTED: 'En litige',
+    EXPIRED: 'Expiré',
+    IN_PROGRESS: 'En cours',
+    LOCKED: 'Verrouillé',
+    MATCHING: 'Recherche en cours',
+    PAUSED: 'En pause',
+    PAYMENT_APPROVED: 'Paiement approuvé',
+    PAYMENT_PENDING: 'Preuve de paiement en attente',
+    PENDING_ADMIN_REVIEW: 'En attente de vérification par SYBNB',
+    PENDING_PROOF: 'Preuve en attente',
+    PENDING_REVIEW: 'En cours de vérification',
+    RELEASE: 'Déblocage',
+    REFUNDED: 'Remboursé',
+    REJECTED: 'Refusé',
+    REQUESTED: 'Demande envoyée',
+    SENT: 'Envoyé',
+  },
 }
 
 export const divisionLabels: Record<Lang, Record<string, string>> = {
@@ -84,32 +115,46 @@ export const divisionLabels: Record<Lang, Record<string, string>> = {
     MARKETPLACE: 'Marketplace',
     NEW_CONSTRUCTION: 'New construction',
   },
+  fr: {
+    STAYS: 'Séjours à la nuitée',
+    RENTALS: 'Locations au mois',
+    BUY: 'Achat immobilier',
+    CARS: 'Véhicules',
+    MARKETPLACE: 'Marché',
+    NEW_CONSTRUCTION: 'Projets neufs',
+  },
 }
 
 export const divisionDescriptions: Record<string, Record<Lang, string>> = {
   STAYS: {
     ar: 'ابحث بالتاريخ والضيوف ثم أرسل طلب الحجز.',
     en: 'Search by dates and guests, then request a stay.',
+    fr: 'Recherchez par dates et nombre de voyageurs, puis envoyez une demande de séjour.',
   },
   RENTALS: {
     ar: 'خيارات حسب المدينة، الميزانية، والغرف.',
     en: 'Filter by city, budget, and bedrooms.',
+    fr: 'Filtrez par ville, budget et nombre de chambres.',
   },
   BUY: {
     ar: 'شاهد العقارات، أرسل عرضاً، أو احجز زيارة.',
     en: 'View properties, make an offer, or request a visit.',
+    fr: 'Consultez des propriétés, faites une offre ou demandez une visite.',
   },
   CARS: {
     ar: 'ابحث عن السيارة، تحقق من التفاصيل، وتواصل مع البائع.',
     en: 'Find a car, inspect details, and contact the seller.',
+    fr: 'Trouvez un véhicule, vérifiez les détails et contactez le vendeur.',
   },
   MARKETPLACE: {
     ar: 'تصفح المنتجات وتواصل مع البائع بعد إنشاء حساب.',
     en: 'Browse items and contact sellers after account.',
+    fr: 'Parcourez les articles et contactez les vendeurs après avoir créé un compte.',
   },
   NEW_CONSTRUCTION: {
     ar: 'شاهد المشروع على أقسام: الأسلوب، المخططات، الطوابق، التشطيب، والدفع.',
     en: 'View projects by sections: style, plans, floors, finishing, and terms.',
+    fr: 'Consultez les projets par section : style, plans, étages, finitions et modalités.',
   },
 }
 
@@ -137,7 +182,7 @@ export function listingTitleText(
   listing: Pick<PlatformListing, 'id' | 'division' | 'titleAr' | 'titleEn'>,
   lang: Lang,
 ) {
-  if (lang === 'en') return listing.titleEn || listing.titleAr
+  if (lang !== 'ar') return listing.titleEn || listing.titleAr
   if (hasArabic(listing.titleAr)) return listing.titleAr
   // A non-empty title with no Arabic (e.g. a car "BMW 320i 2020", "Kia Rio 2019") is still the
   // real, meaningful name — show it instead of a generic "{division} {id}" placeholder that hides
@@ -151,7 +196,7 @@ export function listingDescriptionText(
   listing: Pick<PlatformListing, 'division' | 'description' | 'metadata'>,
   lang: Lang,
 ) {
-  if (lang === 'en') {
+  if (lang !== 'ar') {
     // Prefer an explicit English description carried in metadata (descriptionEn); the single
     // `description` column is Arabic-primary, so without this EN readers would see Arabic body text.
     const enDesc = (listing.metadata as { descriptionEn?: unknown } | null | undefined)?.descriptionEn

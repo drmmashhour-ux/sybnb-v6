@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, text, type Lang } from '../../engines/language/languageEngine'
 import {
   createPrototypeBooking,
   fetchListingAvailability,
@@ -208,6 +208,94 @@ const copy = {
     inquirySentTitle: 'Your request was sent',
     inquirySentCopy: "Your request reached the seller/host through SYBNB's inbox. No payment needed now — they'll follow up with you through the platform.",
     openInbox: 'Open inbox',
+  },
+  fr: {
+    back: 'Retour',
+    loading: 'Chargement',
+    error: 'Impossible de charger l’annonce',
+    notFoundHelp: 'Cette annonce a peut-être été supprimée ou a expiré. Parcourez d’autres annonces ou revenez à l’accueil.',
+    browseAll: 'Parcourir les annonces',
+    goHome: 'Accueil',
+    price: 'Prix',
+    owner: 'Propriétaire',
+    division: 'Catégorie',
+    status: 'Statut',
+    request: 'Envoyer la demande',
+    saving: 'Envoi',
+    requestStatus: 'Statut de la demande',
+    dashboard: 'Ouvrir un compte / se connecter',
+    payment: 'Poursuivre la réservation',
+    reference: 'Réf. de l’annonce',
+    syrianPound: 'SYP',
+    protected: 'Protégé par SYBNB',
+    trustScore: 'Indice de confiance',
+    verifiedOwner: 'Propriétaire vérifié',
+    fastResponse: 'Réponse rapide',
+    paymentProtected: 'Paiement protégé',
+    aiFit: 'Correspondance avec la recherche',
+    nextSteps: 'Étapes pour le client',
+    accountGate: 'Connectez-vous ou créez un compte pour continuer',
+    accountGateCopy: 'Comme sur Airbnb et Booking, vous pouvez d’abord parcourir les annonces ; un compte est nécessaire pour réserver et payer.',
+    signIn: 'Se connecter et continuer',
+    signUp: 'Créer un compte et continuer',
+    phone: 'Numéro de téléphone',
+    password: 'Mot de passe',
+    repeatPassword: 'Confirmer le mot de passe',
+    sendCode: 'Envoyer le code',
+    resendCode: 'Renvoyer le code',
+    code: 'Code de vérification',
+    securityError: 'Saisissez le téléphone, le mot de passe, sa confirmation et le code de vérification avant de continuer.',
+    accountReady: 'Compte voyageur prêt',
+    stepRows: ['Consultez le détail de la chambre', 'Connectez-vous ou créez un compte', 'Envoyez la réservation', 'Payez dans SYBNB', 'Recevez le numéro de confirmation'],
+    contact: 'Ouvrir la messagerie',
+    protectionChoice: 'Choix de la protection',
+    standardRate: 'Tarif standard',
+    standardCopy: 'Prix plus bas ; des frais d’annulation s’appliquent selon la politique.',
+    protectedRate: 'Tarif protégé',
+    protectedCopy: 'Ajoutez une protection contre l’annulation imprévue et récupérez le montant de la réservation sans frais d’annulation.',
+    protectionFee: 'Frais de protection',
+    totalDue: 'Total à payer',
+    stayAmount: 'Montant de la réservation',
+    cleaningFee: 'Frais de ménage',
+    taxes: 'Taxes et frais locaux',
+    serviceFee: 'Frais de service',
+    parkingFee: 'Frais de stationnement',
+    feesIncluded: 'Frais de ménage et taxes inclus',
+    agreementTitle: 'Contrat de location de courte durée',
+    agreementCopy: 'Je confirme que mes informations sont exactes, que les règles de réservation et d’annulation s’appliquent, que le paiement s’effectue uniquement dans SYBNB, qu’aucun accord hors plateforme n’est autorisé, que les règles du logement doivent être respectées et que tout litige est soumis à l’équipe SYBNB avant toute démarche externe. Je comprends que SYBNB prélève une commission de service (12 % du montant de la location) sur le versement à l’hôte pour la gestion de la réservation, du paiement et de la protection.',
+    agreementRequired: 'Vous devez accepter le contrat de location de courte durée avant d’envoyer la demande de réservation.',
+    datesTitle: 'Choisissez les dates de votre séjour',
+    datesRequired: 'Choisissez les dates d’arrivée et de départ avant d’envoyer la demande de réservation.',
+    editDates: 'Modifier les dates',
+    quoteLoading: 'Calcul du prix...',
+    agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
+    agreementVersionLabel: 'Version 1',
+    mapTitle: 'Emplacement du logement',
+    mapCopy: 'L’emplacement du logement sélectionné s’affiche ici. Ouvrez Google Maps pour repérer les lieux avant d’envoyer la demande de réservation.',
+    mapPin: 'Emplacement du logement',
+    mapApproximate: 'Emplacement approximatif d’après l’annonce',
+    openGoogleMaps: 'Ouvrir dans Google Maps',
+    saveOfflineMap: 'Enregistrer l’emplacement hors ligne',
+    offlineMapReady: 'Emplacement enregistré pour une utilisation hors ligne',
+    offlineMapCopy: 'Sans connexion Internet, l’adresse et les coordonnées restent enregistrées sur l’appareil du voyageur.',
+    mapRequiresInternet: 'La carte en direct nécessite Internet. L’adresse reste enregistrée dans la réservation.',
+    location: 'Emplacement',
+    host: 'Hôte',
+    terms: 'Conditions',
+    reviews: 'Commentaires',
+    noReviewsYet: 'Aucun commentaire pour le moment',
+    reviewsCount: (count: number) => `${count} ${count === 1 ? 'commentaire' : 'commentaires'}`,
+    protectedTitle: 'Protégé par SYBNB',
+    rating: 'Note de confiance',
+    howToBook: 'Comment réserver',
+    instantBookBadge: '⚡ Réservation instantanée',
+    instantBookExplain: 'Ce logement propose la réservation instantanée : votre réservation est confirmée automatiquement dès que le paiement aboutit, sans attendre l’accord de l’hôte.',
+    share: 'Partager',
+    requestOnlyAfterAccount: 'Ouvrez un compte ou connectez-vous d’abord, puis envoyez la demande de réservation.',
+    bottomContact: 'Contacter',
+    inquirySentTitle: 'Votre demande a été envoyée',
+    inquirySentCopy: 'Votre demande a été transmise au vendeur ou à l’hôte via la messagerie SYBNB. Aucun paiement n’est requis pour le moment : il vous répondra via la plateforme.',
+    openInbox: 'Ouvrir la messagerie',
   },
 }
 
@@ -422,9 +510,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     // used by Rentals/Buy instead (see sendListingInquiryMessage / RentalsPage.tsx).
     if (listing.division !== 'STAYS') {
       try {
-        const introBody = isAr
-          ? `طلب تواصل جديد بخصوص "${title}".`
-          : `New inquiry about "${title}".`
+        const introBody = pick(lang, `طلب تواصل جديد بخصوص "${title}".`, `New inquiry about "${title}".`, `Nouvelle demande au sujet de « ${title} ».`)
         await sendListingInquiryMessage(listing.id, introBody)
         setInquirySent(true)
         setStatus('ready')
@@ -485,16 +571,16 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       return
     }
     void navigator.clipboard?.writeText(url)
-    setMessage(isAr ? 'تم نسخ رابط الإعلان.' : 'Listing link copied.')
+    setMessage(pick(lang, 'تم نسخ رابط الإعلان.', 'Listing link copied.', 'Lien de l’annonce copié.'))
   }
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <section style={styles.flowNav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
-        <button style={styles.arrowButton} onClick={() => (window.location.hash = returnPath)} aria-label={isAr ? 'السابق' : 'Back'}>
+      <section style={styles.flowNav} aria-label={pick(lang, 'التنقل بين الخطوات', 'Step navigation', 'Navigation entre les étapes')}>
+        <button style={styles.arrowButton} onClick={() => (window.location.hash = returnPath)} aria-label={pick(lang, 'السابق', 'Back', 'Retour')}>
           ‹
         </button>
-        <button style={styles.arrowButton} disabled={!listing || status === 'saving'} onClick={() => void requestListing()} aria-label={isAr ? 'التالي' : 'Next'}>
+        <button style={styles.arrowButton} disabled={!listing || status === 'saving'} onClick={() => void requestListing()} aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}>
           ›
         </button>
       </section>
@@ -523,7 +609,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <button style={styles.heroIconButton} onClick={shareListing} aria-label={t.share}>
               ↗
             </button>
-            <button style={styles.heroNextButton} disabled={status === 'saving'} onClick={() => void requestListing()} aria-label={isAr ? 'التالي' : 'Next'}>
+            <button style={styles.heroNextButton} disabled={status === 'saving'} onClick={() => void requestListing()} aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}>
               →
             </button>
             <div style={styles.media}>
@@ -545,7 +631,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                       }}
                     />
                     {mediaUrls.length > 1 && (
-                      <div style={styles.thumbStrip} role="group" aria-label={lang === 'ar' ? 'صور الإعلان' : 'Listing photos'}>
+                      <div style={styles.thumbStrip} role="group" aria-label={pick(lang, 'صور الإعلان', 'Listing photos', 'Photos de l’annonce')}>
                         {mediaUrls.map((url, index) => (
                           <button
                             key={`${url}-${index}`}
@@ -574,7 +660,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               <span style={styles.locationLine}>⌖ {mapTarget?.label || divisionText(listing.division, lang)}</span>
             </div>
 
-            <div style={styles.tabRow} role="tablist" aria-label={isAr ? 'تفاصيل الإعلان' : 'Listing details'}>
+            <div style={styles.tabRow} role="tablist" aria-label={pick(lang, 'تفاصيل الإعلان', 'Listing details', 'Détails de l’annonce')}>
               <button style={activeTab === 'terms' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('terms')}>{t.terms}</button>
               <button style={activeTab === 'host' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('host')}>{t.host}</button>
               <button style={activeTab === 'location' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('location')}>{t.location}</button>
@@ -630,13 +716,13 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                       <div style={styles.dateFieldsRow}>
                         <DateField
                           lang={lang}
-                          label={isAr ? 'تاريخ الدخول' : 'Check-in'}
+                          label={pick(lang, 'تاريخ الدخول', 'Check-in', 'Arrivée')}
                           value={dateRange.checkIn}
                           onClick={() => setShowDatePicker(true)}
                         />
                         <DateField
                           lang={lang}
-                          label={isAr ? 'تاريخ الخروج' : 'Check-out'}
+                          label={pick(lang, 'تاريخ الخروج', 'Check-out', 'Départ')}
                           value={dateRange.checkOut}
                           onClick={() => setShowDatePicker(true)}
                         />
@@ -658,7 +744,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                           {quoteLoading
                             ? t.quoteLoading
                             : stayQuote
-                              ? `${moneyText(feesStandard.totalMinor, listing.currency, lang)} · ${stayQuote.nights} ${isAr ? 'ليالٍ' : 'nights'}`
+                              ? `${moneyText(feesStandard.totalMinor, listing.currency, lang)} · ${stayQuote.nights} ${pick(lang, 'ليالٍ', 'nights', 'nuits')}`
                               : moneyText(feesStandard.totalMinor, listing.currency, lang)}
                         </small>
                         {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
@@ -777,7 +863,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                 <section style={styles.grid}>
                   {reviewSummary.reviews.map((review) => (
                     <article key={review.id} style={styles.info}>
-                      <span dir={isAr ? 'rtl' : 'ltr'}>{review.guest?.displayName || (isAr ? 'ضيف' : 'Guest')} · {'★'.repeat(review.rating)}</span>
+                      <span dir={isAr ? 'rtl' : 'ltr'}>{review.guest?.displayName || (pick(lang, 'ضيف', 'Guest', 'Voyageur'))} · {'★'.repeat(review.rating)}</span>
                       <strong dir={isAr ? 'rtl' : 'ltr'}>{review.comment || ''}</strong>
                     </article>
                   ))}
@@ -869,12 +955,12 @@ function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir
 
 function actionForDivision(division: string, lang: Lang) {
   const actions: Record<string, Record<Lang, string>> = {
-    STAYS: { ar: 'إرسال طلب الحجز', en: 'Send booking request' },
-    RENTALS: { ar: 'طلب تواصل', en: 'Request contact' },
-    BUY: { ar: 'طلب زيارة', en: 'Request visit' },
-    CARS: { ar: 'تواصل مع البائع', en: 'Contact seller' },
-    MARKETPLACE: { ar: 'طلب المنتج', en: 'Request item' },
-    NEW_CONSTRUCTION: { ar: 'حجز زيارة', en: 'Book visit' },
+    STAYS: { ar: 'إرسال طلب الحجز', en: 'Send booking request', fr: 'Envoyer la demande de réservation' },
+    RENTALS: { ar: 'طلب تواصل', en: 'Request contact', fr: 'Demander un contact' },
+    BUY: { ar: 'طلب زيارة', en: 'Request visit', fr: 'Demander une visite' },
+    CARS: { ar: 'تواصل مع البائع', en: 'Contact seller', fr: 'Contacter le vendeur' },
+    MARKETPLACE: { ar: 'طلب المنتج', en: 'Request item', fr: 'Demander l’article' },
+    NEW_CONSTRUCTION: { ar: 'حجز زيارة', en: 'Book visit', fr: 'Réserver une visite' },
   }
   return actions[division]?.[lang] || actions.STAYS[lang]
 }
@@ -883,49 +969,64 @@ function detailCopyForDivision(division: string, lang: Lang, fallback: typeof co
   const detailCopy: Record<string, Partial<typeof copy.ar>> = {
     STAYS: {},
     RENTALS: {
-      mapTitle: lang === 'ar' ? 'موقع العقار' : 'Property location',
-      mapCopy: lang === 'ar' ? 'موقع العقار المختار يظهر هنا. افتح خرائط Google لمراجعة المنطقة قبل إرسال الطلب.' : 'The selected property location appears here. Open Google Maps to review the area before sending the request.',
-      mapPin: lang === 'ar' ? 'موقع العقار' : 'Property location',
-      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
-      stepRows: lang === 'ar'
-        ? ['راجع تفاصيل العقار', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب التواصل', 'تواصل مع المالك داخل SYBNB']
-        : ['Review property details', 'Sign in or create account', 'Send contact request', 'Coordinate with the owner inside SYBNB'],
+      mapTitle: pick(lang, 'موقع العقار', 'Property location', 'Emplacement du bien'),
+      mapCopy: pick(lang, 'موقع العقار المختار يظهر هنا. افتح خرائط Google لمراجعة المنطقة قبل إرسال الطلب.', 'The selected property location appears here. Open Google Maps to review the area before sending the request.', 'L’emplacement du bien sélectionné s’affiche ici. Ouvrez Google Maps pour repérer le quartier avant d’envoyer la demande.'),
+      mapPin: pick(lang, 'موقع العقار', 'Property location', 'Emplacement du bien'),
+      howToBook: pick(lang, 'كيف تسير العملية', 'How it works', 'Comment ça marche'),
+      stepRows: pick(
+        lang,
+        ['راجع تفاصيل العقار', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب التواصل', 'تواصل مع المالك داخل SYBNB'],
+        ['Review property details', 'Sign in or create account', 'Send contact request', 'Coordinate with the owner inside SYBNB'],
+        ['Consultez le détail du bien', 'Connectez-vous ou créez un compte', 'Envoyez la demande de contact', 'Échangez avec le propriétaire dans SYBNB'],
+      ),
     },
     BUY: {
-      mapTitle: lang === 'ar' ? 'موقع العقار' : 'Property location',
-      mapCopy: lang === 'ar' ? 'موقع العقار المختار يظهر هنا. راجع المنطقة قبل طلب الزيارة.' : 'The selected property location appears here. Review the area before requesting a visit.',
-      mapPin: lang === 'ar' ? 'موقع العقار' : 'Property location',
-      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
-      stepRows: lang === 'ar'
-        ? ['راجع تفاصيل العقار', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب الزيارة', 'نسّق موعد الزيارة داخل SYBNB']
-        : ['Review property details', 'Sign in or create account', 'Send visit request', 'Coordinate the visit inside SYBNB'],
+      mapTitle: pick(lang, 'موقع العقار', 'Property location', 'Emplacement du bien'),
+      mapCopy: pick(lang, 'موقع العقار المختار يظهر هنا. راجع المنطقة قبل طلب الزيارة.', 'The selected property location appears here. Review the area before requesting a visit.', 'L’emplacement du bien sélectionné s’affiche ici. Repérez le quartier avant de demander une visite.'),
+      mapPin: pick(lang, 'موقع العقار', 'Property location', 'Emplacement du bien'),
+      howToBook: pick(lang, 'كيف تسير العملية', 'How it works', 'Comment ça marche'),
+      stepRows: pick(
+        lang,
+        ['راجع تفاصيل العقار', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب الزيارة', 'نسّق موعد الزيارة داخل SYBNB'],
+        ['Review property details', 'Sign in or create account', 'Send visit request', 'Coordinate the visit inside SYBNB'],
+        ['Consultez le détail du bien', 'Connectez-vous ou créez un compte', 'Envoyez la demande de visite', 'Organisez la visite dans SYBNB'],
+      ),
     },
     CARS: {
-      mapTitle: lang === 'ar' ? 'موقع المركبة' : 'Vehicle location',
-      mapCopy: lang === 'ar' ? 'موقع المركبة أو المعرض يظهر هنا. افتح خرائط Google قبل التواصل مع البائع.' : 'The vehicle or showroom location appears here. Open Google Maps before contacting the seller.',
-      mapPin: lang === 'ar' ? 'موقع المركبة' : 'Vehicle location',
-      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
-      stepRows: lang === 'ar'
-        ? ['راجع تفاصيل المركبة', 'سجّل الدخول أو أنشئ حساباً', 'تواصل مع البائع', 'نسّق الفحص والمعاينة داخل SYBNB']
-        : ['Review vehicle details', 'Sign in or create account', 'Contact the seller', 'Coordinate inspection inside SYBNB'],
+      mapTitle: pick(lang, 'موقع المركبة', 'Vehicle location', 'Emplacement du véhicule'),
+      mapCopy: pick(lang, 'موقع المركبة أو المعرض يظهر هنا. افتح خرائط Google قبل التواصل مع البائع.', 'The vehicle or showroom location appears here. Open Google Maps before contacting the seller.', 'L’emplacement du véhicule ou du concessionnaire s’affiche ici. Ouvrez Google Maps avant de contacter le vendeur.'),
+      mapPin: pick(lang, 'موقع المركبة', 'Vehicle location', 'Emplacement du véhicule'),
+      howToBook: pick(lang, 'كيف تسير العملية', 'How it works', 'Comment ça marche'),
+      stepRows: pick(
+        lang,
+        ['راجع تفاصيل المركبة', 'سجّل الدخول أو أنشئ حساباً', 'تواصل مع البائع', 'نسّق الفحص والمعاينة داخل SYBNB'],
+        ['Review vehicle details', 'Sign in or create account', 'Contact the seller', 'Coordinate inspection inside SYBNB'],
+        ['Consultez le détail du véhicule', 'Connectez-vous ou créez un compte', 'Contactez le vendeur', 'Organisez l’inspection dans SYBNB'],
+      ),
     },
     MARKETPLACE: {
-      mapTitle: lang === 'ar' ? 'موقع العرض' : 'Offer location',
-      mapCopy: lang === 'ar' ? 'موقع العرض يظهر هنا. راجع المنطقة قبل إرسال طلب المنتج.' : 'The offer location appears here. Review the area before requesting the item.',
-      mapPin: lang === 'ar' ? 'موقع العرض' : 'Offer location',
-      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
-      stepRows: lang === 'ar'
-        ? ['راجع تفاصيل المنتج', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب المنتج', 'نسّق الاستلام مع البائع داخل SYBNB']
-        : ['Review item details', 'Sign in or create account', 'Send item request', 'Coordinate pickup with the seller inside SYBNB'],
+      mapTitle: pick(lang, 'موقع العرض', 'Offer location', 'Emplacement de l’offre'),
+      mapCopy: pick(lang, 'موقع العرض يظهر هنا. راجع المنطقة قبل إرسال طلب المنتج.', 'The offer location appears here. Review the area before requesting the item.', 'L’emplacement de l’offre s’affiche ici. Repérez le quartier avant de demander l’article.'),
+      mapPin: pick(lang, 'موقع العرض', 'Offer location', 'Emplacement de l’offre'),
+      howToBook: pick(lang, 'كيف تسير العملية', 'How it works', 'Comment ça marche'),
+      stepRows: pick(
+        lang,
+        ['راجع تفاصيل المنتج', 'سجّل الدخول أو أنشئ حساباً', 'أرسل طلب المنتج', 'نسّق الاستلام مع البائع داخل SYBNB'],
+        ['Review item details', 'Sign in or create account', 'Send item request', 'Coordinate pickup with the seller inside SYBNB'],
+        ['Consultez le détail de l’article', 'Connectez-vous ou créez un compte', 'Envoyez la demande d’article', 'Organisez le retrait avec le vendeur dans SYBNB'],
+      ),
     },
     NEW_CONSTRUCTION: {
-      mapTitle: lang === 'ar' ? 'موقع المشروع' : 'Project location',
-      mapCopy: lang === 'ar' ? 'موقع المشروع يظهر هنا. افتح خرائط Google قبل حجز الزيارة.' : 'The project location appears here. Open Google Maps before booking a visit.',
-      mapPin: lang === 'ar' ? 'موقع المشروع' : 'Project location',
-      howToBook: lang === 'ar' ? 'كيف تسير العملية' : 'How it works',
-      stepRows: lang === 'ar'
-        ? ['راجع تفاصيل المشروع', 'سجّل الدخول أو أنشئ حساباً', 'احجز موعد زيارة', 'نسّق الزيارة داخل SYBNB']
-        : ['Review project details', 'Sign in or create account', 'Book a visit', 'Coordinate the visit inside SYBNB'],
+      mapTitle: pick(lang, 'موقع المشروع', 'Project location', 'Emplacement du projet'),
+      mapCopy: pick(lang, 'موقع المشروع يظهر هنا. افتح خرائط Google قبل حجز الزيارة.', 'The project location appears here. Open Google Maps before booking a visit.', 'L’emplacement du projet s’affiche ici. Ouvrez Google Maps avant de réserver une visite.'),
+      mapPin: pick(lang, 'موقع المشروع', 'Project location', 'Emplacement du projet'),
+      howToBook: pick(lang, 'كيف تسير العملية', 'How it works', 'Comment ça marche'),
+      stepRows: pick(
+        lang,
+        ['راجع تفاصيل المشروع', 'سجّل الدخول أو أنشئ حساباً', 'احجز موعد زيارة', 'نسّق الزيارة داخل SYBNB'],
+        ['Review project details', 'Sign in or create account', 'Book a visit', 'Coordinate the visit inside SYBNB'],
+        ['Consultez le détail du projet', 'Connectez-vous ou créez un compte', 'Réservez une visite', 'Organisez la visite dans SYBNB'],
+      ),
     },
   }
   return { ...fallback, ...(detailCopy[division] || {}) }
@@ -985,16 +1086,16 @@ function VehicleSpecs({ metadata, lang }: { metadata: Record<string, unknown>; l
     if (!value || value === 'any') return null
     const group = groups.find((item) => item.id === key)
     const option = group?.options.find((opt) => opt.id === value)
-    const label = group ? group.title[lang] : key
-    const display = option ? option.label[lang] : value
+    const label = group ? text(group.title, lang) : key
+    const display = option ? text(option.label, lang) : value
     return { key, label, display }
   }).filter(Boolean) as Array<{ key: string; label: string; display: string }>
 
   if (rows.length === 0) return null
 
   return (
-    <section style={styles.specGrid} aria-label={lang === 'ar' ? 'مواصفات المركبة' : 'Vehicle specifications'}>
-      <strong>{lang === 'ar' ? 'مواصفات المركبة' : 'Vehicle specifications'}</strong>
+    <section style={styles.specGrid} aria-label={pick(lang, 'مواصفات المركبة', 'Vehicle specifications', 'Caractéristiques du véhicule')}>
+      <strong>{pick(lang, 'مواصفات المركبة', 'Vehicle specifications', 'Caractéristiques du véhicule')}</strong>
       <dl style={styles.specList}>
         {rows.map((row) => (
           <div key={row.key} style={styles.specRow}>
@@ -1012,18 +1113,18 @@ function VehicleSpecs({ metadata, lang }: { metadata: Record<string, unknown>; l
 function PropertySpecs({ metadata, lang, division = 'BUY' }: { metadata: Record<string, unknown>; lang: Lang; division?: string }) {
   const isAr = lang === 'ar'
   const md = metadata || {}
-  const heading = division === 'NEW_CONSTRUCTION' ? (isAr ? 'تفاصيل المشروع' : 'Project details') : isAr ? 'تفاصيل العقار' : 'Property details'
+  const heading = division === 'NEW_CONSTRUCTION' ? (pick(lang, 'تفاصيل المشروع', 'Project details', 'Détails du projet')) : pick(lang, 'تفاصيل العقار', 'Property details', 'Détails du bien')
   const vf = (md.visualFilters as Record<string, unknown> | undefined) || {}
   const typeValue = typeof vf.propertyType === 'string' ? vf.propertyType : typeof md.propertyType === 'string' ? md.propertyType : ''
   const typeOption = propertyFilterGroup.options.find((opt) => opt.id === typeValue)
   const locationLabel = [md.governorateLabel, md.cityLabel, md.areaLabel].filter((part) => typeof part === 'string' && part).join(isAr ? '، ' : ', ')
 
   const rows = [
-    typeValue && typeValue !== 'any' ? { key: 'type', label: isAr ? 'نوع العقار' : 'Property type', display: typeOption ? typeOption.label[lang] : typeValue } : null,
-    Number(md.bedrooms) > 0 ? { key: 'beds', label: isAr ? 'غرف النوم' : 'Bedrooms', display: String(md.bedrooms) } : null,
-    Number(md.bathrooms) > 0 ? { key: 'baths', label: isAr ? 'الحمامات' : 'Bathrooms', display: String(md.bathrooms) } : null,
-    Number(md.sizeSqm) > 0 ? { key: 'size', label: isAr ? 'المساحة (م²)' : 'Size (m²)', display: String(md.sizeSqm) } : null,
-    locationLabel ? { key: 'loc', label: isAr ? 'الموقع' : 'Location', display: locationLabel } : null,
+    typeValue && typeValue !== 'any' ? { key: 'type', label: pick(lang, 'نوع العقار', 'Property type', 'Type de bien'), display: typeOption ? text(typeOption.label, lang) : typeValue } : null,
+    Number(md.bedrooms) > 0 ? { key: 'beds', label: pick(lang, 'غرف النوم', 'Bedrooms', 'Chambres'), display: String(md.bedrooms) } : null,
+    Number(md.bathrooms) > 0 ? { key: 'baths', label: pick(lang, 'الحمامات', 'Bathrooms', 'Salles de bain'), display: String(md.bathrooms) } : null,
+    Number(md.sizeSqm) > 0 ? { key: 'size', label: pick(lang, 'المساحة (م²)', 'Size (m²)', 'Superficie (m²)'), display: String(md.sizeSqm) } : null,
+    locationLabel ? { key: 'loc', label: pick(lang, 'الموقع', 'Location', 'Emplacement'), display: locationLabel } : null,
   ].filter(Boolean) as Array<{ key: string; label: string; display: string }>
 
   if (rows.length === 0) return null
@@ -1150,7 +1251,7 @@ function HostCard({
   const name = profile?.displayName || fallbackName
   const meta = [
     profile?.city || '',
-    profile?.memberSince ? (isAr ? `على SYBNB منذ ${profile.memberSince}` : `On SYBNB since ${profile.memberSince}`) : '',
+    profile?.memberSince ? pick(lang, `على SYBNB منذ ${profile.memberSince}`, `On SYBNB since ${profile.memberSince}`, `Sur SYBNB depuis ${profile.memberSince}`) : '',
   ].filter(Boolean).join(' · ')
   return (
     <div style={{ display: 'grid', gap: 10 }}>
@@ -1165,8 +1266,8 @@ function HostCard({
       </div>
       {profile?.languages?.length ? (
         <span style={{ color: '#cfd6ea', fontSize: 14 }}>
-          {isAr ? 'يتحدث: ' : 'Speaks: '}
-          {profile.languages.map((code) => languageName(code, isAr)).join(isAr ? '، ' : ', ')}
+          {pick(lang, 'يتحدث: ', 'Speaks: ', 'Langues parlées : ')}
+          {profile.languages.map((code) => languageName(code, lang)).join(isAr ? '، ' : ', ')}
         </span>
       ) : null}
       {profile?.about ? <p style={{ margin: 0, color: '#cfd6ea', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{profile.about}</p> : null}
@@ -1174,12 +1275,12 @@ function HostCard({
   )
 }
 
-function languageName(code: string, isAr: boolean) {
-  const names: Record<string, [string, string]> = {
-    ar: ['العربية', 'Arabic'], en: ['الإنجليزية', 'English'], fr: ['الفرنسية', 'French'], ku: ['الكردية', 'Kurdish'],
-    tr: ['التركية', 'Turkish'], de: ['الألمانية', 'German'], es: ['الإسبانية', 'Spanish'], ru: ['الروسية', 'Russian'],
-    fa: ['الفارسية', 'Persian'], hy: ['الأرمنية', 'Armenian'], it: ['الإيطالية', 'Italian'], sv: ['السويدية', 'Swedish'],
+function languageName(code: string, lang: Lang) {
+  const names: Record<string, [string, string, string]> = {
+    ar: ['العربية', 'Arabic', 'Arabe'], en: ['الإنجليزية', 'English', 'Anglais'], fr: ['الفرنسية', 'French', 'Français'], ku: ['الكردية', 'Kurdish', 'Kurde'],
+    tr: ['التركية', 'Turkish', 'Turc'], de: ['الألمانية', 'German', 'Allemand'], es: ['الإسبانية', 'Spanish', 'Espagnol'], ru: ['الروسية', 'Russian', 'Russe'],
+    fa: ['الفارسية', 'Persian', 'Persan'], hy: ['الأرمنية', 'Armenian', 'Arménien'], it: ['الإيطالية', 'Italian', 'Italien'], sv: ['السويدية', 'Swedish', 'Suédois'],
   }
   const pair = names[code]
-  return pair ? (isAr ? pair[0] : pair[1]) : code
+  return pair ? pick(lang, pair[0], pair[1], pair[2]) : code
 }

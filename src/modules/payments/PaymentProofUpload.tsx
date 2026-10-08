@@ -28,6 +28,14 @@ const copy = {
     empty: 'No files uploaded yet. Payment cannot be sent to admin before proof is uploaded.',
     locked: 'Confirm the amount and open the payment route first, then upload becomes available here.',
   },
+  fr: {
+    title: 'Téléverser les preuves de paiement',
+    cta: 'Touchez pour téléverser le reçu ou la capture du virement',
+    help: 'PDF, PNG ou JPG. Vous pouvez téléverser plusieurs fichiers avant l’envoi à l’administration.',
+    files: 'Fichiers téléversés',
+    empty: 'Aucun fichier téléversé pour le moment. Le paiement ne peut pas être envoyé à l’administration sans preuve.',
+    locked: 'Confirmez d’abord le montant et ouvrez le parcours de paiement; le téléversement sera ensuite disponible ici.',
+  },
 }
 
 export function paymentProofReference(prefix: string, files: string[]) {

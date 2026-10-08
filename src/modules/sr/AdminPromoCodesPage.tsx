@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { createPromoCode, fetchPromoCodes, setPromoCodeActive, type PlatformPromoCode } from '../../shared/api/platformApi'
 import { moneyText } from '../../shared/i18n/display'
 
@@ -51,11 +51,32 @@ const copy = {
     loading: 'Loading...',
     error: 'Could not load promo codes',
   },
+  fr: {
+    back: 'Retour à l’accueil',
+    title: 'Codes promo — SR Ride',
+    subtitle: 'Gérez les codes de réduction pour les courses SR. Chaque code est utilisable une seule fois par passager.',
+    code: 'Code',
+    type: 'Type',
+    percent: 'Pourcentage',
+    flat: 'Montant fixe',
+    value: 'Valeur',
+    maxDiscount: 'Réduction maximale (facultatif, pourcentage uniquement)',
+    expiresAt: 'Date d’expiration (facultatif)',
+    create: 'Créer un code',
+    creating: 'Création...',
+    active: 'Actif',
+    inactive: 'Inactif',
+    deactivate: 'Désactiver',
+    activate: 'Activer',
+    empty: 'Aucun code promo pour l’instant.',
+    loading: 'Chargement...',
+    error: 'Impossible de charger les codes promo',
+  },
 }
 
 export function AdminPromoCodesPage({ lang }: Props) {
   const isAr = lang === 'ar'
-  const t = copy[isAr ? 'ar' : 'en']
+  const t = copy[lang]
   const [promoCodes, setPromoCodes] = useState<PlatformPromoCode[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
@@ -175,7 +196,7 @@ export function AdminPromoCodesPage({ lang }: Props) {
                 ? ` (max ${moneyText(promoCode.maxDiscountMinor, 'SYP', lang)})`
                 : ''}
             </span>
-            {promoCode.expiresAt && <span dir="ltr">{new Date(promoCode.expiresAt).toLocaleString(isAr ? 'ar-SY' : 'en-US')}</span>}
+            {promoCode.expiresAt && <span dir="ltr">{new Date(promoCode.expiresAt).toLocaleString(pick(lang, 'ar-SY', 'en-US', 'fr-CA'))}</span>}
             <span style={promoCode.active ? styles.activeBadge : styles.inactiveBadge}>
               {promoCode.active ? t.active : t.inactive}
             </span>

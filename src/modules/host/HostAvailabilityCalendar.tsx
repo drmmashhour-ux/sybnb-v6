@@ -15,11 +15,13 @@ type Props = {
 const MONTHS = {
   ar: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
   en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  fr: ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],
 }
 
 const DAYS = {
   ar: ['س', 'ح', 'ن', 'ث', 'ر', 'خ', 'ج'],
   en: ['S', 'M', 'T', 'W', 'T', 'F', 'S'],
+  fr: ['D', 'L', 'M', 'M', 'J', 'V', 'S'],
 }
 
 const T = {
@@ -68,6 +70,29 @@ const T = {
     basePrice: 'Base price per night',
     pricingSaved: 'Pricing saved.',
     pricingError: 'Could not save pricing. Check the numbers and dates.',
+  },
+  fr: {
+    title: 'Calendrier des disponibilités',
+    help: 'Touchez une date disponible pour la bloquer, touchez-la de nouveau pour la rendre disponible. Une seule touche suffit.',
+    legendAvailable: 'Disponible',
+    legendBlocked: 'Bloqué par l’hôte',
+    legendBooked: 'Réservé par un voyageur',
+    saving: 'Enregistrement...',
+    loadError: 'Impossible de charger le calendrier des disponibilités.',
+    saveError: 'Impossible d’enregistrer ce changement. Veuillez réessayer.',
+    todayBadge: 'Aujourd’hui',
+    pricingTitle: 'Tarifs variables (fin de semaine et haute saison)',
+    weekendLabel: 'Prix de fin de semaine (ven. et sam.)',
+    weekendApply: 'Appliquer aux fins de semaine de ce mois et du suivant',
+    seasonLabel: 'Prix haute saison pour une période',
+    seasonFrom: 'Du',
+    seasonTo: 'Au',
+    seasonPrice: 'Prix par nuit',
+    seasonApply: 'Appliquer comme prix haute saison',
+    clearRange: 'Rétablir le prix de base pour cette période',
+    basePrice: 'Prix de base par nuit',
+    pricingSaved: 'Tarifs enregistrés.',
+    pricingError: 'Impossible d’enregistrer les tarifs. Vérifiez les montants et les dates.',
   },
 }
 

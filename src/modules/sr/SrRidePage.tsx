@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { srRideFilterGroupsFromConfig, type VisualFilterSelection } from '../../engines/filters'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   cancelPrototypeSrRide,
   createPrototypeSrRide,
@@ -211,6 +211,91 @@ const copy = {
     newRide: 'Request a new ride',
     sos: 'SOS emergency',
   },
+  fr: {
+    back: 'Retour à l’accueil',
+    title: 'SR Ride',
+    subtitle: 'Une vraie demande de course, enregistrée et diffusée en direct aux chauffeurs disponibles, qui l’acceptent eux-mêmes.',
+    mode: 'Mode données réduites',
+    pickup: 'Point de départ',
+    dropoff: 'Destination',
+    category: 'Catégorie',
+    fare: 'Tarif estimé',
+    distance: 'Distance estimée',
+    distanceApprox: '(approximative, d’après l’adresse saisie)',
+    addressUnrecognized: 'Nous n’avons pas pu reconnaître cette adresse. Le prix et la distance sont une estimation par défaut, qui ne repose pas sur votre position réelle — vérifiez l’orthographe du nom du quartier.',
+    request: 'Demander une course',
+    refresh: 'Actualiser le statut',
+    status: 'Statut de la course',
+    rideId: 'N° de course',
+    driver: 'Chauffeur',
+    location: 'Position',
+    accuracy: 'Précision',
+    saved: 'Course enregistrée',
+    error: 'Impossible de finaliser la demande SR',
+    saving: 'Enregistrement',
+    gps: 'Utiliser ma position actuelle',
+    manualHint: 'La demande peut se poursuivre sans GPS grâce aux adresses saisies manuellement.',
+    locationNotConfirmed: 'Veuillez confirmer le point de départ et la destination (en les saisissant ou par GPS) avant de demander une course.',
+    driverNotAssigned: 'Pas encore attribué',
+    verifiedDriver: 'Identité vérifiée',
+    waitingForDriver: 'En attente qu’un chauffeur à proximité accepte la course...',
+    driverAssigned: 'Un chauffeur a été attribué à votre course.',
+    driverArriving: 'Votre chauffeur est en route vers vous.',
+    inProgress: 'Votre course est en cours.',
+    completed: 'Course terminée. Merci d’avoir voyagé avec SR.',
+    receiptFare: 'Montant facturé',
+    receiptDistance: 'Distance',
+    payTitle: 'Confirmer le paiement',
+    payCopy: 'Payez le tarif directement au chauffeur (en espèces ou par virement), puis saisissez ici la référence de la transaction afin que SYBNB puisse la vérifier.',
+    payReferencePlaceholder: 'Référence de la transaction',
+    paySubmit: 'Envoyer la preuve de paiement',
+    paySubmitting: 'Envoi...',
+    paymentPending: 'Preuve de paiement envoyée, en attente de vérification.',
+    paymentConfirmed: 'Paiement confirmé.',
+    paymentRejected: 'La preuve de paiement précédente n’a pas pu être acceptée. Veuillez envoyer une référence valide.',
+    cancellationFeeLabel: 'Frais d’annulation',
+    payFeeTitle: 'Confirmer le paiement des frais d’annulation',
+    payFeeCopy: 'Votre chauffeur avait déjà commencé à se diriger vers vous. Payez-lui directement les frais d’annulation (en espèces ou par virement), puis saisissez ici la référence de la transaction afin que SYBNB puisse la vérifier.',
+    cancellationFeeWarning: 'Annuler maintenant peut entraîner des frais d’annulation estimés à {amount}, car votre chauffeur a déjà commencé à se diriger vers vous.',
+    chatTitle: 'Écrire à votre chauffeur',
+    chatEmpty: 'Aucun message pour l’instant.',
+    chatPlaceholder: 'Écrivez un message...',
+    chatSend: 'Envoyer',
+    shareTrip: 'Partager mon trajet',
+    sharing: 'Partage...',
+    shareCopied: '✓ Lien de partage copié',
+    shareTitle: 'Ma course SR',
+    shareText: 'Suivez ma course en direct grâce à ce lien.',
+    scheduleForLater: 'Planifier pour plus tard',
+    scheduleRide: 'Planifier la course',
+    scheduledFor: 'Planifiée pour le',
+    accessibilityRequired: 'J’ai besoin d’un véhicule accessible en fauteuil roulant',
+    savePlaceLabelPlaceholder: 'Nom du lieu (ex. : Domicile)',
+    savePlaceButton: 'Enregistrer l’adresse de départ',
+    stop: 'Arrêt',
+    addStop: '+ Ajouter un arrêt',
+    removeStop: 'Retirer',
+    promoCodePlaceholder: 'Code promo (facultatif)',
+    promoDiscountApplied: 'Réduction promo',
+    enableNotifications: 'Activer les notifications',
+    enablingNotifications: 'Activation...',
+    notificationsEnabled: 'Notifications activées',
+    billToBusiness: 'Facturer cette course à {company}',
+    billedToBusiness: 'Facturée au compte de votre entreprise',
+    shareable: 'Partagez votre course — économisez 15 % si un chauffeur vous jumelle avec un autre passager sur le trajet',
+    sharedRide: 'Course partagée',
+    rateTitle: 'Évaluez votre course',
+    rateSubmit: 'Envoyer l’évaluation',
+    rateSubmitting: 'Envoi',
+    rateCommentPlaceholder: 'Remarque facultative sur la course',
+    rateThanks: 'Merci pour votre évaluation',
+    yourRating: 'Votre évaluation',
+    cancelled: 'Cette course a été annulée.',
+    cancel: 'Annuler la course',
+    cancelling: 'Annulation',
+    newRide: 'Demander une nouvelle course',
+    sos: 'Urgence SOS',
+  },
 }
 
 const categories = ['SR Economy', 'SR Comfort', 'SR SUV']
@@ -231,8 +316,8 @@ const filterKeyByCategory: Record<string, string> = {
 export function SrRidePage({ lang }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
-  const PICKUP_DEFAULT_TEXT = isAr ? 'دمشق، المالكي' : 'Damascus, Malki'
-  const DROPOFF_DEFAULT_TEXT = isAr ? 'دمشق، المزة' : 'Damascus, Mezzeh'
+  const PICKUP_DEFAULT_TEXT = pick(lang, 'دمشق، المالكي', 'Damascus, Malki', 'Damas, Malki')
+  const DROPOFF_DEFAULT_TEXT = pick(lang, 'دمشق، المزة', 'Damascus, Mezzeh', 'Damas, Mezzeh')
   const [pickup, setPickup] = useState(PICKUP_DEFAULT_TEXT)
   const [dropoff, setDropoff] = useState(DROPOFF_DEFAULT_TEXT)
   // SEC-F1-adjacent UX-4A fix (Priority A, refined twice after adversarial
@@ -442,7 +527,7 @@ export function SrRidePage({ lang }: Props) {
       (position) => {
         setAccuracyMeters(Math.round(position.coords.accuracy))
         setPickupCoords({ lat: position.coords.latitude, lng: position.coords.longitude })
-        setPickup(isAr ? 'موقعي الحالي' : 'Current location')
+        setPickup(pick(lang, 'موقعي الحالي', 'Current location', 'Position actuelle'))
         setPickupSource('gps')
       },
       () => {
@@ -909,7 +994,7 @@ export function SrRidePage({ lang }: Props) {
             <Info key={index} label={`${t.stop} ${index + 1}`} value={stop.address} />
           ))}
           <Info label={t.dropoff} value={String(ride?.metadata.dropoff || dropoff)} />
-          <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : isAr ? 'يدوي' : 'manual'} />
+          <Info label={t.accuracy} value={accuracyMeters ? `${accuracyMeters}m` : pick(lang, 'يدوي', 'manual', 'manuelle')} />
           {ride?.accessibilityRequired && <div style={styles.message}>♿ {t.accessibilityRequired}</div>}
           {ride?.businessAccountId && <div style={styles.message}>🏢 {t.billedToBusiness}</div>}
           {ride?.shareable && <div style={styles.message}>🤝 {t.sharedRide}</div>}
@@ -947,7 +1032,7 @@ export function SrRidePage({ lang }: Props) {
 
           {ride?.status === 'DRAFT' && ride.scheduledFor && (
             <div style={styles.message}>
-              {t.scheduledFor} {new Date(ride.scheduledFor).toLocaleString(isAr ? 'ar-SY' : 'en-US')}
+              {t.scheduledFor} {new Date(ride.scheduledFor).toLocaleString(pick(lang, 'ar-SY', 'en-US', 'fr-CA'))}
             </div>
           )}
           {ride && ['REQUESTED', 'MATCHING'].includes(ride.status) && (

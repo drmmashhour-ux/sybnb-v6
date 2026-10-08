@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 
-type Lang = 'ar' | 'en'
+import type { Lang } from '../../../engines/language/languageEngine'
 
 type GiftClaimFailure = { code?: string; message?: string }
 
@@ -33,6 +33,17 @@ const T = {
     security: 'SYBNB will never ask you for this code.',
     back: 'Back',
     verify: 'Verify code',
+  },
+  fr: {
+    title: 'Saisissez le code de réclamation',
+    subtitle: 'Demandez le code de réclamation à 6 chiffres à la personne qui vous a envoyé ce cadeau.',
+    codeLabel: 'Code de réclamation',
+    attempts: 'Tentatives restantes',
+    wrong: 'Le code est incorrect. Veuillez réessayer.',
+    locked: 'Les tentatives sont temporairement suspendues afin de protéger ce cadeau.',
+    security: 'SYBNB ne vous demandera jamais ce code.',
+    back: 'Retour',
+    verify: 'Vérifier le code',
   },
 }
 

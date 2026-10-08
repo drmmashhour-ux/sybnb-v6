@@ -37,6 +37,17 @@ const T = {
     cities: 'Cities / Districts',
     areas: 'Areas / Streets',
   },
+  fr: {
+    governorate: 'Gouvernorat / État',
+    city: 'Ville / District',
+    area: 'Quartier / Rue',
+    chooseGovernorate: 'Choisissez d’abord le gouvernorat',
+    chooseCity: 'Choisissez d’abord la ville',
+    chooseArea: 'Choisissez le quartier',
+    allGovernorates: 'Tous les gouvernorats',
+    cities: 'Villes / Districts',
+    areas: 'Quartiers / Rues',
+  },
 }
 
 const AR_LABEL_OVERRIDES: Record<string, string> = {

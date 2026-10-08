@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { confirmOtp, createStaffAccountSession, requestOtp } from '../../shared/api/platformApi'
 
 type StaffRole = 'ADMIN' | 'HOST' | 'DRIVER'
@@ -59,6 +59,28 @@ const labels = {
     error: 'Could not open internal session.',
     required: 'Enter email and password before requesting access.',
   },
+  fr: {
+    title: 'Portail d’accès interne',
+    subtitle: 'Cette page est réservée à l’équipe interne. Connectez-vous avec votre compte existant pour accéder au tableau de bord.',
+    signIn: 'Se connecter',
+    signUp: 'S’inscrire',
+    admin: 'Accès administration',
+    host: 'Accès hôte',
+    hostSignUp: 'Créer un compte hôte',
+    driver: 'Accès chauffeur',
+    email: 'Adresse courriel',
+    password: 'Mot de passe',
+    phone: 'Numéro de téléphone',
+    code: 'Code d’accès',
+    sendCode: 'M’envoyer le code par courriel',
+    codeSent: 'Code envoyé à votre adresse courriel. Saisissez le code, puis continuez.',
+    codeInvalid: 'Code d’accès incorrect. Envoyez le code et saisissez-le avant de continuer.',
+    demoCode: 'Code d’accès envoyé',
+    opening: 'Ouverture de la session...',
+    note: 'Les clients ne voient pas ces tableaux de bord pendant le parcours de réservation.',
+    error: 'Impossible d’ouvrir la session interne.',
+    required: 'Saisissez l’adresse courriel et le mot de passe avant de demander l’accès.',
+  },
 }
 
 export function StaffAccessPage({ lang, role, returnPath }: Props) {
@@ -94,16 +116,22 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const isHost = role === 'HOST'
   // A stay host is a customer, not internal staff — show host-oriented wording (no "internal team
   // only" framing). ADMIN/DRIVER keep the internal-gate copy.
-  const gateTitle = isHost ? (isAr ? 'دخول المضيفين' : 'Host sign in') : t.title
+  const gateTitle = isHost ? pick(lang, 'دخول المضيفين', 'Host sign in', 'Connexion hôte') : t.title
   const gateSubtitle = isHost
-    ? isAr
-      ? 'سجّل الدخول أو أنشئ حساب مضيف لإدراج مكانك وإدارة إقاماتك وطلبات الضيوف.'
-      : 'Sign in or create a host account to list your place and manage your stays and guest requests.'
+    ? pick(
+        lang,
+        'سجّل الدخول أو أنشئ حساب مضيف لإدراج مكانك وإدارة إقاماتك وطلبات الضيوف.',
+        'Sign in or create a host account to list your place and manage your stays and guest requests.',
+        'Connectez-vous ou créez un compte hôte pour publier votre logement et gérer vos séjours et les demandes des voyageurs.',
+      )
     : t.subtitle
   const gateNote = isHost
-    ? isAr
-      ? 'من هنا تدير إقاماتك، طلبات الضيوف، والدفع المحمي.'
-      : 'Manage your stays, guest requests, and protected payments here.'
+    ? pick(
+        lang,
+        'من هنا تدير إقاماتك، طلبات الضيوف، والدفع المحمي.',
+        'Manage your stays, guest requests, and protected payments here.',
+        'Gérez ici vos séjours, les demandes des voyageurs et les paiements protégés.',
+      )
     : t.note
   const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
   const requiredMsg = t.required
@@ -181,7 +209,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             />
           </label>
           <label style={styles.label}>
-            {isAr ? 'رقم الهاتف (اختياري)' : 'Phone number (optional)'}
+            {pick(lang, 'رقم الهاتف (اختياري)', 'Phone number (optional)', 'Numéro de téléphone (facultatif)')}
             <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
           </label>
           <label style={styles.label}>
@@ -189,7 +217,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
             <div style={styles.codeRow}>
               <input style={styles.input} value={code} onChange={(event) => setCode(event.target.value)} dir="ltr" />
               <button style={styles.codeButton} onClick={sendCode} disabled={!emailValid}>
-                {status === 'codeSent' ? (isAr ? 'إعادة إرسال الرمز' : 'Resend code') : t.sendCode}
+                {status === 'codeSent' ? pick(lang, 'إعادة إرسال الرمز', 'Resend code', 'Renvoyer le code') : t.sendCode}
               </button>
             </div>
           </label>

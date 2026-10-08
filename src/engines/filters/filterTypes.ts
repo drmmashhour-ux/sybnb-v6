@@ -1,4 +1,5 @@
-import type { Lang } from '../language/languageEngine'
+// Localized filter text. `fr` is optional: read it with text(...) so French falls back to English.
+export type VisualFilterText = { ar: string; en: string; fr?: string }
 
 export type VisualFilterArt =
   | 'any'
@@ -128,16 +129,16 @@ export type VisualFilterArt =
 
 export type VisualFilterOption = {
   id: string
-  label: Record<Lang, string>
+  label: VisualFilterText
   art: VisualFilterArt
   photoSrc?: string
-  photoAlt?: Record<Lang, string>
+  photoAlt?: VisualFilterText
   photoPosition?: string
 }
 
 export type VisualFilterGroup = {
   id: string
-  title: Record<Lang, string>
+  title: VisualFilterText
   mode: 'single' | 'multi'
   options: VisualFilterOption[]
 }

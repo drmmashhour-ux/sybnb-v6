@@ -1,6 +1,6 @@
 import React from 'react'
 
-type Lang = 'ar' | 'en'
+import type { Lang } from '../../../engines/language/languageEngine'
 
 type GiftRedeemedSuccessProps = {
   lang?: Lang
@@ -39,6 +39,19 @@ const T = {
     wallet: 'Use wallet',
     ride: 'Book SR ride',
     browse: 'Browse SYBNB',
+  },
+  fr: {
+    title: 'Cadeau ajouté à votre portefeuille',
+    subtitle: 'Votre crédit est prêt à être utilisé dans SYBNB et SR.',
+    amountAdded: 'Montant ajouté',
+    newBalance: 'Nouveau solde',
+    walletCreated: 'Votre portefeuille a été créé automatiquement',
+    ledger: 'Historique du portefeuille',
+    ref: 'Référence',
+    type: 'Crédit cadeau',
+    wallet: 'Utiliser le portefeuille',
+    ride: 'Réserver une course SR',
+    browse: 'Parcourir SYBNB',
   },
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   fetchPrototypeAdminMetrics,
   fetchPrototypeContracts,
@@ -79,6 +79,38 @@ const copy = {
     legalFinance: 'Legal and finance review',
     blockerRows: ['Final auth and permissions', 'Real file uploads', 'Real wallet ledger for holds/refunds/payouts', 'Refund and cancellation rules', 'API monitoring and security'],
     checklistRows: ['Confirm environment variables', 'Run migrations', 'Check images and QR', 'Review Arabic and English copy', 'Smoke test all routes', 'Deploy to staging before production'],
+  },
+  fr: {
+    back: 'Retour à l’accueil',
+    title: 'État de la plateforme',
+    subtitle: 'Vérification rapide du service, de la base de données, des contrats et des indicateurs d’exploitation.',
+    refresh: 'Actualiser',
+    loading: 'Chargement',
+    error: 'Impossible de charger l’état de la plateforme',
+    service: 'Service',
+    database: 'Base de données',
+    endpoints: 'Points de terminaison API',
+    security: 'Règles de sécurité',
+    users: 'Utilisateurs',
+    listings: 'Annonces',
+    bookings: 'Réservations',
+    rides: 'Courses SR',
+    payments: 'Paiements',
+    wallet: 'Portefeuille',
+    ok: 'Connecté',
+    issue: 'À vérifier',
+    readiness: 'Préparation au lancement',
+    demoReady: 'Prêt pour la revue finale',
+    productionBlocked: 'Production reportée',
+    deployChecklist: 'Liste de vérification du déploiement',
+    productionBlockers: 'Obstacles à la production',
+    securityControls: 'Contrôles de sécurité',
+    routeAudit: 'Audit des routes',
+    finalBuild: 'Build final',
+    staging: 'Staging d’abord',
+    legalFinance: 'Revue juridique et financière',
+    blockerRows: ['Authentification et autorisations finales', 'Téléversement réel des fichiers', 'Registre de portefeuille réel pour les retenues, remboursements et versements', 'Règles de remboursement et d’annulation', 'Surveillance et sécurité de l’API'],
+    checklistRows: ['Confirmer les variables d’environnement', 'Exécuter les migrations', 'Vérifier les images et les codes QR', 'Relire les textes en arabe et en anglais', 'Tester toutes les routes', 'Déployer en staging avant la production'],
   },
 }
 
@@ -162,12 +194,12 @@ export function PlatformStatusPage({ lang }: Props) {
         <article>
           <span>{t.readiness}</span>
           <strong>{t.demoReady}</strong>
-          <p>{isAr ? 'المنصة جاهزة للمراجعة النهائية وتجربة أصحاب المصلحة، مع فصل واضح لما يحتاج ربطاً إنتاجياً.' : 'The platform is ready for final stakeholder review, with production integrations clearly separated.'}</p>
+          <p>{pick(lang, 'المنصة جاهزة للمراجعة النهائية وتجربة أصحاب المصلحة، مع فصل واضح لما يحتاج ربطاً إنتاجياً.', 'The platform is ready for final stakeholder review, with production integrations clearly separated.', 'La plateforme est prête pour la revue finale par les parties prenantes, avec une séparation claire des intégrations de production.')}</p>
         </article>
         <article style={styles.blockedBox}>
           <span>{t.productionBlocked}</span>
-          <strong>{isAr ? 'ليس بعد للمال الحقيقي' : 'Not yet for real money'}</strong>
-          <p>{isAr ? 'الإطلاق المالي يحتاج دفتر محفظة، ملفات، KYC، واسترداد/صرف حقيقي.' : 'Real-money launch needs ledger, uploads, KYC, refunds, and payout release.'}</p>
+          <strong>{pick(lang, 'ليس بعد للمال الحقيقي', 'Not yet for real money', 'Pas encore pour de l’argent réel')}</strong>
+          <p>{pick(lang, 'الإطلاق المالي يحتاج دفتر محفظة، ملفات، KYC، واسترداد/صرف حقيقي.', 'Real-money launch needs ledger, uploads, KYC, refunds, and payout release.', 'Un lancement avec de l’argent réel nécessite un registre, le téléversement de fichiers, la vérification KYC, les remboursements et le déblocage des versements.')}</p>
         </article>
       </section>
 
@@ -192,8 +224,8 @@ export function PlatformStatusPage({ lang }: Props) {
           tone="blue"
           rows={[
             `${t.finalBuild}: ${status === 'error' ? t.issue : t.ok}`,
-            `${t.staging}: ${isAr ? 'مطلوب قبل الإنتاج' : 'Required before production'}`,
-            `${t.legalFinance}: ${isAr ? 'مطلوب للمال الحقيقي' : 'Required for real money'}`,
+            `${t.staging}: ${pick(lang, 'مطلوب قبل الإنتاج', 'Required before production', 'Requis avant la production')}`,
+            `${t.legalFinance}: ${pick(lang, 'مطلوب للمال الحقيقي', 'Required for real money', 'Requis pour l’argent réel')}`,
           ]}
         />
       </section>

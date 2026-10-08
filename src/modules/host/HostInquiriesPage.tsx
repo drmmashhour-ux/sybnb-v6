@@ -41,6 +41,19 @@ const copy = {
     sending: 'Sending...',
     noMessages: 'No messages in this conversation yet.',
   },
+  fr: {
+    back: 'Retour au tableau de bord hôte',
+    title: 'Messages des clients',
+    subtitle: 'Chaque conversation ici est liée à une annonce réelle et à un client réel, et enregistrée dans la base de données.',
+    loading: 'Chargement...',
+    error: 'Impossible de charger les messages.',
+    empty: 'Aucun message pour le moment.',
+    noSelection: 'Choisissez une conversation pour l’afficher.',
+    replyPlaceholder: 'Rédigez votre réponse...',
+    send: 'Envoyer',
+    sending: 'Envoi...',
+    noMessages: 'Aucun message dans cette conversation pour le moment.',
+  },
 }
 
 export function HostInquiriesPage({ lang, mode = 'host' }: Props) {

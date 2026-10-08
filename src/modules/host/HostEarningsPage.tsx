@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   fetchPrototypeHostEarnings,
   type HostDashboardMode,
@@ -58,6 +58,28 @@ const copy = {
     statusPENDING_HOLD: 'In hold window',
     statusELIGIBLE: 'Ready to release',
     statusRELEASED: 'Released',
+  },
+  fr: {
+    back: 'Retour au tableau de bord hôte',
+    title: 'Rapport des revenus',
+    subtitle: 'Chaque montant affiché ici est calculé directement à partir des réservations et paiements réels.',
+    loading: 'Chargement...',
+    error: 'Impossible de charger le rapport des revenus.',
+    forecasted: 'Prévisionnel (confirmé, pas encore terminé)',
+    earned: 'Gagné',
+    released: 'Versé',
+    pending: 'En attente de versement',
+    empty: 'Aucune réservation pour le moment.',
+    listing: 'Annonce',
+    dates: 'Dates',
+    status: 'Statut',
+    hostGross: 'Net pour l’hôte',
+    commission: 'Commission SYBNB',
+    payoutStatus: 'Statut du versement',
+    eligibleAt: 'Admissible le',
+    statusPENDING_HOLD: 'Période de retenue en cours',
+    statusELIGIBLE: 'Prêt à verser',
+    statusRELEASED: 'Versé',
   },
 }
 
@@ -133,9 +155,9 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
               <div key={row.bookingId} style={styles.tableRow}>
                 <span>{row.listingTitle}</span>
                 <span dir="ltr">
-                  {row.checkIn ? new Date(row.checkIn).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en'), { timeZone: 'UTC' }) : '-'}
+                  {row.checkIn ? new Date(row.checkIn).toLocaleDateString(pick(lang, localeForLang('ar'), localeForLang('en'), 'fr-CA'), { timeZone: 'UTC' }) : '-'}
                   {' → '}
-                  {row.checkOut ? new Date(row.checkOut).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en'), { timeZone: 'UTC' }) : '-'}
+                  {row.checkOut ? new Date(row.checkOut).toLocaleDateString(pick(lang, localeForLang('ar'), localeForLang('en'), 'fr-CA'), { timeZone: 'UTC' }) : '-'}
                 </span>
                 <span>{statusText(row.status, lang)}</span>
                 <b dir="ltr">{moneyText(row.hostGrossMinor, row.currency, lang)}</b>

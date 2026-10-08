@@ -27,11 +27,13 @@ type DateFieldProps = {
 const MONTHS = {
   ar: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
   en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+  fr: ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'],
 }
 
 const DAYS = {
   ar: ['س', 'ح', 'ن', 'ث', 'ر', 'خ', 'ج'],
   en: ['S', 'M', 'T', 'W', 'T', 'F', 'S'],
+  fr: ['D', 'L', 'M', 'M', 'J', 'V', 'S'],
 }
 
 const T = {
@@ -56,6 +58,17 @@ const T = {
     unset: 'Not set',
     datePlaceholder: 'yyyy-mm-dd',
     rangeHelp: 'Choose check-in, then check-out.',
+  },
+  fr: {
+    checkIn: 'Arrivée',
+    checkOut: 'Départ',
+    choose: 'Choisir une date',
+    clear: 'Effacer',
+    done: 'OK',
+    nights: 'Nuits',
+    unset: 'Non défini',
+    datePlaceholder: 'aaaa-mm-jj',
+    rangeHelp: 'Choisissez l’arrivée, puis le départ.',
   },
 }
 

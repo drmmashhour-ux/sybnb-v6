@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   createPrototypeWalletGift,
   fetchPrototypeWallet,
@@ -98,6 +98,48 @@ const copy = {
     empty: 'No entries yet.',
     marketNote: 'Like modern finance wallets: balance is clear, held money is separated, and every proof has a review lane.',
   },
+  fr: {
+    back: 'Retour à l’accueil',
+    title: 'Mon portefeuille financier',
+    titleEn: 'My Financial Wallet',
+    subtitle: 'Solde et cadeaux réels enregistrés dans la base de données.',
+    trusted: 'V6 VÉRIFIÉ',
+    accountId: 'Numéro de compte',
+    protected: 'Portefeuille protégé',
+    protectedCopy: 'Chaque mouvement est inscrit au registre comptable et peut être vérifié par l’administration.',
+    available: 'Disponible',
+    held: 'Fonds retenus',
+    refunds: 'Remboursements',
+    prepaid: 'Codes et cadeaux',
+    safety: 'Sécurité du portefeuille',
+    safetyRows: ['Historique des mouvements non modifiable', 'Preuve de paiement liée à la réservation', 'Avertissement contre les paiements hors SYBNB', 'Vérification par l’administration des mouvements sensibles'],
+    sendGiftQuick: 'Envoyer un cadeau',
+    paymentStatus: 'Statut du paiement',
+    trustCenter: 'Centre de confiance',
+    financeLanes: 'Circuits financiers',
+    protectedFunds: 'Fonds de réservation protégés',
+    protectedFundsShort: 'Fonds protégés',
+    refunded: 'Remboursés',
+    inReview: 'En vérification',
+    heldShort: 'Retenus',
+    refundLane: 'Remboursement / litige',
+    giftLane: 'Cadeaux et codes prépayés',
+    adminLane: 'Audit de l’administration',
+    balance: 'Solde',
+    entries: 'Mouvements du portefeuille',
+    recipientPhone: 'Téléphone du destinataire',
+    amount: 'Montant du cadeau',
+    message: 'Message du cadeau',
+    send: 'Envoyer le cadeau',
+    claimFlow: 'Ouvrir le lien de réception',
+    refresh: 'Actualiser',
+    status: 'Statut',
+    gift: 'Cadeau',
+    saving: 'Enregistrement',
+    error: 'L’opération du portefeuille a échoué',
+    empty: 'Aucun mouvement pour le moment.',
+    marketNote: 'Comme les portefeuilles financiers modernes : le solde est clair, les fonds retenus sont séparés et chaque preuve suit un circuit de vérification.',
+  },
 }
 
 export function WalletPage({ lang }: Props) {
@@ -108,7 +150,7 @@ export function WalletPage({ lang }: Props) {
   const [giftClaimCode, setGiftClaimCode] = useState('')
   const [recipientPhone, setRecipientPhone] = useState('+963900000001')
   const [amountMinor, setAmountMinor] = useState('50000')
-  const [message, setMessage] = useState(isAr ? 'هدية من محفظة SYBNB' : 'Gift from SYBNB Wallet')
+  const [message, setMessage] = useState(pick(lang, 'هدية من محفظة SYBNB', 'Gift from SYBNB Wallet', 'Cadeau du portefeuille SYBNB'))
   const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [notice, setNotice] = useState('')
   const entries = wallet?.entries || []
@@ -288,7 +330,7 @@ export function WalletPage({ lang }: Props) {
           )}
           {gift && giftClaimCode && (
             <div style={styles.meta}>
-              <span>{isAr ? 'رمز الاستلام — شاركه مع المستلم' : 'Claim code — share it with the recipient'}</span>
+              <span>{pick(lang, 'رمز الاستلام — شاركه مع المستلم', 'Claim code — share it with the recipient', 'Code de réception — partagez-le avec le destinataire')}</span>
               <strong dir="ltr" style={{ letterSpacing: 4, fontSize: 20 }}>{giftClaimCode}</strong>
             </div>
           )}

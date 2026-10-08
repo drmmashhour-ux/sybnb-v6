@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   fetchBookingThread,
   fetchListingInquiryThread,
@@ -143,6 +143,56 @@ const copy = {
     sendError: 'Could not send the message.',
     loadEarlier: 'Load earlier messages',
     loadingEarlier: 'Loading...',
+  },
+  fr: {
+    back: 'Retour à l’accueil',
+    previous: 'Précédent',
+    next: 'Suivant',
+    title: 'IMMOContact',
+    subtitle: 'Un centre de contact unique pour le suivi des réservations, des visites, des paiements, des cadeaux et des courses SR.',
+    refresh: 'Actualiser',
+    loading: 'Chargement',
+    error: 'Impossible de charger le centre de contact',
+    open: 'Ouvrir les détails',
+    support: 'Note pour le support',
+    supportCopy: 'Choisissez la demande concernée et ouvrez ses détails. Chaque décision, paiement et vérification est enregistré dans la base de données et le journal d’audit.',
+    status: 'Statut',
+    all: 'Tout',
+    unified: 'Boîte de réception unifiée',
+    conversation: 'Conversation',
+    context: 'Contexte',
+    quickTemplates: 'Modèles rapides',
+    assigned: 'Administrateur responsable',
+    linkedRecord: 'Dossier associé',
+    trust: 'Confiance',
+    noThread: 'Choisissez une conversation dans la liste.',
+    templates: ['Instructions d’arrivée', 'Rappel de paiement', 'Confirmation de visite', 'Chauffeur attribué', 'Informations supplémentaires requises'],
+    bookings: 'Demandes et réservations',
+    payments: 'Paiements',
+    rides: 'Courses SR',
+    gifts: 'Cadeaux',
+    inquiries: 'Demandes de renseignements',
+    empty: 'Aucune conversation ni demande pour l’instant.',
+    balance: 'Solde du portefeuille',
+    sla: 'SLA',
+    aiNext: 'Suggestion de l’IA',
+    aiNextCopy: 'Envoyez une réponse rapide, associez la tâche aux opérations, puis suivez le dossier financier au besoin.',
+    teamHandoff: 'Transfert à l’équipe',
+    financeLink: 'Ouvrir les finances',
+    operationsLink: 'Ouvrir les opérations',
+    trustSignal: 'Indicateur de confiance',
+    riskLevel: 'Niveau de risque',
+    lockedTitle: 'La messagerie n’est pas encore disponible',
+    lockedCopy: 'La messagerie avec l’hôte et l’équipe de support s’ouvre une fois votre réservation confirmée et payée dans SYBNB. Effectuez d’abord une réservation.',
+    noMessagingForType: 'La messagerie directe est disponible uniquement pour les demandes de réservation. Utilisez ce dossier pour consulter les détails.',
+    messagingNotEligible: 'La messagerie s’ouvre une fois la réservation confirmée.',
+    noMessagesYet: 'Aucun message pour l’instant. Commencez la conversation.',
+    messagePlaceholder: 'Écrivez votre message...',
+    send: 'Envoyer',
+    sending: 'Envoi...',
+    sendError: 'Impossible d’envoyer le message.',
+    loadEarlier: 'Charger les messages précédents',
+    loadingEarlier: 'Chargement...',
   },
 }
 
@@ -324,7 +374,7 @@ export function ImmocontactPage({ lang }: Props) {
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} className="immo-inbox-page">
-      <section style={navStyles.flowNav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
+      <section style={navStyles.flowNav} aria-label={pick(lang, 'التنقل بين الخطوات', 'Step navigation', 'Navigation entre les étapes')}>
         <button style={navStyles.arrowButton} onClick={() => (window.location.hash = '/stays')} aria-label={t.previous}>
           ‹
         </button>
@@ -406,15 +456,15 @@ export function ImmocontactPage({ lang }: Props) {
               <section className="immo-command-strip">
                 <article>
                   <span>{t.sla}</span>
-                  <strong>{activeThread.priority === 'urgent' ? (isAr ? '١٥ دقيقة' : '15 min') : (isAr ? '٤ ساعات' : '4 hours')}</strong>
+                  <strong>{activeThread.priority === 'urgent' ? (pick(lang, '١٥ دقيقة', '15 min', '15 min')) : (pick(lang, '٤ ساعات', '4 hours', '4 heures'))}</strong>
                 </article>
                 <article>
                   <span>{t.trustSignal}</span>
-                  <strong>{activeThread.type === 'payment' ? (isAr ? 'دفع محمي' : 'Protected payment') : (isAr ? 'سجل مرتبط' : 'Linked record')}</strong>
+                  <strong>{activeThread.type === 'payment' ? (pick(lang, 'دفع محمي', 'Protected payment', 'Paiement protégé')) : (pick(lang, 'سجل مرتبط', 'Linked record', 'Dossier associé'))}</strong>
                 </article>
                 <article>
                   <span>{t.riskLevel}</span>
-                  <strong>{activeThread.priority === 'urgent' ? (isAr ? 'مرتفع' : 'High') : (isAr ? 'طبيعي' : 'Normal')}</strong>
+                  <strong>{activeThread.priority === 'urgent' ? (pick(lang, 'مرتفع', 'High', 'Élevé')) : (pick(lang, 'طبيعي', 'Normal', 'Normal'))}</strong>
                 </article>
               </section>
               )}
@@ -497,15 +547,15 @@ export function ImmocontactPage({ lang }: Props) {
               <ContextRow label={t.linkedRecord} value={activeThread.id.slice(0, 12).toUpperCase()} />
               <ContextRow label={t.status} value={activeThread.status} />
               {isStaff && (
-                <ContextRow label={t.teamHandoff} value={activeThread.priority === 'urgent' ? (isAr ? 'الدعم + المالية' : 'Support + finance') : (isAr ? 'الدعم' : 'Support')} />
+                <ContextRow label={t.teamHandoff} value={activeThread.priority === 'urgent' ? (pick(lang, 'الدعم + المالية', 'Support + finance', 'Support + finances')) : (pick(lang, 'الدعم', 'Support', 'Support'))} />
               )}
-              <ContextRow label={t.trust} value={isAr ? 'محمي عبر SYBNB' : 'Protected by SYBNB'} />
+              <ContextRow label={t.trust} value={pick(lang, 'محمي عبر SYBNB', 'Protected by SYBNB', 'Protégé par SYBNB')} />
               <button className="immo-open-record" onClick={() => (window.location.hash = activeThread.href)}>
                 {t.open}
               </button>
               {activeThread.type === 'booking' && (
                 <button className="immo-open-record secondary" onClick={() => (window.location.hash = `/booking/protection/${activeThread.id}`)}>
-                  {isAr ? 'حماية الحجز' : 'Booking protection'}
+                  {pick(lang, 'حماية الحجز', 'Booking protection', 'Protection de la réservation')}
                 </button>
               )}
             </>
@@ -551,11 +601,11 @@ function ContextRow({ label, value }: { label: string; value: string }) {
 
 function threadTypeText(type: Thread['type'], lang: Lang) {
   const labels: Record<Thread['type'], Record<Lang, string>> = {
-    booking: { ar: 'حجز', en: 'Booking' },
-    payment: { ar: 'دفع', en: 'Payment' },
-    ride: { ar: 'رحلة', en: 'Ride' },
-    gift: { ar: 'هدية', en: 'Gift' },
-    inquiry: { ar: 'استفسار', en: 'Inquiry' },
+    booking: { ar: 'حجز', en: 'Booking', fr: 'Réservation' },
+    payment: { ar: 'دفع', en: 'Payment', fr: 'Paiement' },
+    ride: { ar: 'رحلة', en: 'Ride', fr: 'Course' },
+    gift: { ar: 'هدية', en: 'Gift', fr: 'Cadeau' },
+    inquiry: { ar: 'استفسار', en: 'Inquiry', fr: 'Demande de renseignements' },
   }
   return labels[type][lang]
 }
@@ -616,7 +666,7 @@ function inquiryThread(thread: PlatformMyInquiryThread, lang: Lang): Thread {
     listingId: thread.listingId || listing?.id,
     title: listing ? listingTitleText(listing, lang) : thread.id,
     subtitle: listing ? moneyText(listing.priceMinor, listing.currency, lang) : '',
-    status: lastMessage ? (lastMessage.senderRole === 'GUEST' ? (lang === 'ar' ? 'بانتظار الرد' : 'Awaiting reply') : (lang === 'ar' ? 'تم الرد' : 'Replied')) : (lang === 'ar' ? 'جديد' : 'New'),
+    status: lastMessage ? (lastMessage.senderRole === 'GUEST' ? (pick(lang, 'بانتظار الرد', 'Awaiting reply', 'En attente de réponse')) : (pick(lang, 'تم الرد', 'Replied', 'Répondu'))) : (pick(lang, 'جديد', 'New', 'Nouveau')),
     href: listing ? `/listing/${listing.id}` : '/',
     type: 'inquiry',
     priority: lastMessage?.senderRole === 'GUEST' ? 'waiting' : 'new',
@@ -626,7 +676,7 @@ function inquiryThread(thread: PlatformMyInquiryThread, lang: Lang): Thread {
 function giftThread(gift: Record<string, unknown>, direction: 'sent' | 'claimed', lang: Lang): Thread {
   return {
     id: `${direction}-${String(gift.id || Math.random())}`,
-    title: direction === 'sent' ? (lang === 'ar' ? 'هدية مرسلة' : 'Sent gift') : (lang === 'ar' ? 'هدية مستلمة' : 'Claimed gift'),
+    title: direction === 'sent' ? (pick(lang, 'هدية مرسلة', 'Sent gift', 'Cadeau envoyé')) : (pick(lang, 'هدية مستلمة', 'Claimed gift', 'Cadeau reçu')),
     subtitle: moneyText(Number(gift.amountMinor || 0), String(gift.currency || 'SYP'), lang),
     status: statusText(String(gift.status || '-'), lang),
     href: '/wallet',

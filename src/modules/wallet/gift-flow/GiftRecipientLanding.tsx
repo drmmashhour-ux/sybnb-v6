@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
-
-type Lang = 'ar' | 'en'
+import { pick, type Lang } from '../../../engines/language/languageEngine'
 
 type GiftRecipientLandingProps = {
   lang?: Lang
@@ -46,6 +45,24 @@ const T = {
     securityOne: 'Credit lands only in the wallet for the matching phone.',
     securityTwo: 'SYBNB only asks for the claim code on the next screen.',
     cta: 'Next — enter claim code',
+  },
+  fr: {
+    brand: 'SYBNB Wallet',
+    title: 'Réclamer un crédit cadeau',
+    subtitle: 'Ce cadeau est associé au numéro de téléphone qui a reçu le lien.',
+    locked: 'Réservé au destinataire',
+    amount: 'Montant du cadeau',
+    from: 'De',
+    last4: '4 derniers',
+    phone: 'Numéro de téléphone auquel le cadeau a été envoyé',
+    phonePlaceholder: '+963 9XX XXX XXX',
+    phoneNote: 'Utilisez le même numéro de téléphone que celui qui a reçu ce cadeau',
+    noSell: 'Ce cadeau ne peut être ni vendu ni transféré vers un autre numéro',
+    walletNote: 'Si vous n’avez pas de portefeuille, un portefeuille sera créé après la vérification.',
+    securityTitle: 'Protection du cadeau',
+    securityOne: 'Le crédit est versé uniquement dans le portefeuille du numéro correspondant.',
+    securityTwo: 'SYBNB vous demande le code de réclamation uniquement à l’écran suivant.',
+    cta: 'Suivant — saisir le code de réclamation',
   },
 }
 
@@ -132,7 +149,7 @@ export function GiftRecipientLanding({
   // No fabricated fallback: the caller is expected to always pass a real, fetched gift's amount —
   // a placeholder here would silently misrepresent a real gift's value.
   const amountText = amount || '—'
-  const senderText = senderName || (isAr ? 'مُرسل غير معروف' : 'Unknown sender')
+  const senderText = senderName || pick(lang, 'مُرسل غير معروف', 'Unknown sender', 'Expéditeur inconnu')
   const codeText = codeLast4 || '----'
   const canContinue = phone.trim().length >= 8
 

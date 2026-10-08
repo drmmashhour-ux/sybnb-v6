@@ -57,11 +57,31 @@ const copy = {
     loading: 'Loading...',
     error: 'Something went wrong',
   },
+  fr: {
+    back: 'Retour à l’accueil',
+    title: 'Gérer le compte entreprise',
+    subtitle: 'Ajoutez des employés et suivez leur utilisation des courses SR facturées à votre entreprise.',
+    notAdmin: 'Ce compte ne gère aucun compte entreprise.',
+    members: 'Membres',
+    addMemberPlaceholder: 'Courriel de l’employé',
+    addMember: 'Ajouter un membre',
+    adding: 'Ajout...',
+    remove: 'Retirer',
+    noMembers: 'Aucun membre pour l’instant.',
+    usage: 'Utilisation des courses',
+    totalCompleted: 'Total des courses terminées',
+    noRides: 'Aucune course facturée à votre entreprise pour l’instant.',
+    rider: 'Passager',
+    status: 'Statut',
+    fare: 'Tarif',
+    loading: 'Chargement...',
+    error: 'Une erreur s’est produite',
+  },
 }
 
 export function BusinessAccountPage({ lang }: Props) {
   const isAr = lang === 'ar'
-  const t = copy[isAr ? 'ar' : 'en']
+  const t = copy[lang]
   const [account, setAccount] = useState<PlatformBusinessAccount | null>(null)
   const [members, setMembers] = useState<PlatformBusinessAccountMember[]>([])
   const [rides, setRides] = useState<PlatformRideRequest[]>([])

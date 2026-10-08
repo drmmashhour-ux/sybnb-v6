@@ -1,6 +1,6 @@
 import QRCode from 'qrcode'
 import { useEffect, useMemo, useState } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   bookingPaymentStatusFromManualReview,
   createSyrianLocalWalletQrPayload,
@@ -141,6 +141,59 @@ const copy = {
     demoProof: 'Add quick proof for review',
     demoProofHelp: 'Adds a proof file to the request, while payment acceptance remains admin-only.',
   },
+  fr: {
+    back: 'Retour à l’accueil',
+    title: 'Paiement par portefeuille local syrien / QR',
+    subtitle: 'Envoyez la preuve de virement uniquement dans SYBNB pour que la réservation reste protégée.',
+    mode: 'Vérification manuelle / base de données en direct',
+    recipient: 'Destinataire',
+    maskedAccount: 'Compte',
+    amountDue: 'Montant dû',
+    currency: 'Devise',
+    qrValue: 'Numéro de paiement sous le QR',
+    qrPayload: 'Contenu du QR',
+    formTitle: 'Envoyer la preuve de virement',
+    transactionReference: 'Référence de transaction',
+    senderName: 'Nom de l’expéditeur',
+    senderPhone: 'Téléphone de l’expéditeur',
+    submit: 'Envoyer pour vérification',
+    adminTitle: 'Suivi de la preuve de paiement',
+    viewBooking: 'Voir la réservation',
+    submittedReference: 'Référence envoyée',
+    proof: 'Preuve de paiement',
+    hostTitle: 'Statut côté hôte',
+    hostUnderReview: 'Paiement en cours de vérification',
+    hostApproved: 'Paiement confirmé. La réservation peut se poursuivre.',
+    hostRejected: 'Paiement refusé. Le voyageur peut renvoyer une preuve.',
+    bookingStatus: 'Statut du paiement de la réservation',
+    manualOnly: 'Le virement s’effectue dans l’application externe de portefeuille syrien. SYBNB conserve la preuve dans la base de données pour vérification par l’équipe SYBNB.',
+    seed: 'Statut de la vérification',
+    security: 'Couche de sécurité',
+    validationPassed: 'Champs validés',
+    validationFailed: 'Les données de paiement contiennent une erreur',
+    duplicateBlocked: 'Doublon bloqué',
+    hash: 'Code de vérification',
+    riskFlags: 'Signalements de risque',
+    noRisk: 'Aucun signalement',
+    lockedDecision: 'Décision verrouillée',
+    dbStatus: 'Statut dans la base de données',
+    proofId: 'Numéro de preuve (base de données)',
+    receipt: 'Ouvrir le reçu',
+    dashboard: 'Ouvrir mon compte',
+    savePayment: 'Enregistrer les infos de paiement',
+    printPayment: 'Imprimer les infos de paiement',
+    apiError: 'La requête de paiement a échoué',
+    saving: 'Enregistrement',
+    adminConfirmedTitle: 'Paiement et réservation confirmés',
+    adminConfirmedBody: 'L’administration a confirmé la réception des fonds et la conformité de la preuve. La réservation est maintenant confirmée et le voyageur peut suivre son voyage depuis son compte.',
+    phoneMessageTitle: 'Suivre votre réservation',
+    phoneMessageBody: 'Votre réservation SYBNB est confirmée. Connectez-vous avec votre courriel pour suivre les détails de la réservation et du voyage jusqu’à la fin.',
+    reservationConfirmed: 'Réservation confirmée',
+    adminReviewApproved: 'Réception confirmée par l’administration',
+    continueTrip: 'Suivre le voyage depuis mon compte',
+    demoProof: 'Ajouter une preuve rapide pour vérification',
+    demoProofHelp: 'Ajoute un fichier de preuve à la demande; l’acceptation du paiement reste réservée à l’administration.',
+  },
 }
 
 const statusLabel: Record<Lang, Record<ManualPaymentStatus, string>> = {
@@ -154,6 +207,11 @@ const statusLabel: Record<Lang, Record<ManualPaymentStatus, string>> = {
     APPROVED: 'Approved',
     REJECTED: 'Rejected',
   },
+  fr: {
+    PENDING_REVIEW: 'En attente de vérification',
+    APPROVED: 'Approuvé',
+    REJECTED: 'Refusé',
+  },
 }
 
 export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042', amountMinor = 10, currency = 'SYP' }: Props) {
@@ -161,7 +219,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
   const isAr = lang === 'ar'
   const defaultTransactionReference = `SLW-${bookingId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`
   const [transactionReference, setTransactionReference] = useState(defaultTransactionReference)
-  const [senderName, setSenderName] = useState(isAr ? 'ضيف SYBNB' : 'SYBNB Guest')
+  const [senderName, setSenderName] = useState(pick(lang, 'ضيف SYBNB', 'SYBNB Guest', 'Voyageur SYBNB'))
   const [senderPhone, setSenderPhone] = useState('+963 900 000 001')
   const [uploadedProofFiles, setUploadedProofFiles] = useState<string[]>([])
   // Real uploaded proof URLs (payment-proof:// references), parallel to uploadedProofFiles' names —
@@ -175,7 +233,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
       userId: 'USR-LOCAL-WALLET-001',
       amount: Math.max(Number(amountMinor || 10), 1),
       transactionReference: defaultTransactionReference,
-      senderName: isAr ? 'ضيف SYBNB' : 'SYBNB Guest',
+      senderName: pick(lang, 'ضيف SYBNB', 'SYBNB Guest', 'Voyageur SYBNB'),
       senderPhone: '+963 900 000 001',
       proofUrl: undefined,
     }),
@@ -330,7 +388,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
     if (!files.length) return
     const session = getStoredGuestSession()
     if (!session) {
-      setProofUploadError(isAr ? 'سجّل الدخول أولاً لرفع إثبات الدفع.' : 'Sign in first to upload payment proof.')
+      setProofUploadError(pick(lang, 'سجّل الدخول أولاً لرفع إثبات الدفع.', 'Sign in first to upload payment proof.', 'Connectez-vous d’abord pour téléverser la preuve de paiement.'))
       return
     }
     setProofUploadError('')
@@ -380,8 +438,8 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
 
   return (
     <main className="wallet-page" dir={isAr ? 'rtl' : 'ltr'} style={{ '--accent': '#19d7ff' } as CSSVars}>
-      <section style={flowStyles.nav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
-        <button style={flowStyles.arrow} onClick={() => (window.location.hash = `/booking/${bookingId}`)} aria-label={isAr ? 'السابق' : 'Back'}>
+      <section style={flowStyles.nav} aria-label={pick(lang, 'التنقل بين الخطوات', 'Step navigation', 'Navigation entre les étapes')}>
+        <button style={flowStyles.arrow} onClick={() => (window.location.hash = `/booking/${bookingId}`)} aria-label={pick(lang, 'السابق', 'Back', 'Précédent')}>
           ‹
         </button>
         <button
@@ -398,7 +456,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
             }
             void submitProof()
           }}
-          aria-label={isAr ? 'التالي' : 'Next'}
+          aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}
         >
           ›
         </button>
@@ -416,7 +474,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
 
       <PaymentCapsule
         lang={lang}
-        methodLabel={isAr ? 'محفظة محلية / شام كاش' : 'Local wallet / Sham Cash'}
+        methodLabel={pick(lang, 'محفظة محلية / شام كاش', 'Local wallet / Sham Cash', 'Portefeuille local / Sham Cash')}
         amountLabel={moneyText(amountDue, currency, lang)}
         destinationCode={transactionReference}
         followCode={bookingId}
@@ -424,7 +482,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
         status={capsuleStatus}
       />
 
-      <section className="wallet-card wallet-actions" aria-label={isAr ? 'حفظ وطباعة معلومات الدفع' : 'Save and print payment information'}>
+      <section className="wallet-card wallet-actions" aria-label={pick(lang, 'حفظ وطباعة معلومات الدفع', 'Save and print payment information', 'Enregistrer et imprimer les informations de paiement')}>
         <button onClick={savePaymentInfo}>{t.savePayment}</button>
         <button onClick={printPaymentInfo}>{t.printPayment}</button>
       </section>

@@ -1,6 +1,6 @@
 import QRCode from 'qrcode'
 import { useEffect, useMemo, useState } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, text, type Lang } from '../../engines/language/languageEngine'
 import {
   canSendPaymentGateForReview,
   canStartPaymentGate,
@@ -73,7 +73,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
   const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'error'>('idle')
   const [submitError, setSubmitError] = useState('')
 
-  const title = method.label[lang]
+  const title = text(method.label, lang)
   const hasPaymentReference = paymentReference.trim().length >= 4
   const stripePublishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || ''
   const stripeConfigured = method.usesStripe ? stripePublishableKey.length > 0 : true
@@ -163,10 +163,10 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
   }, [methodKey, qrPayload])
 
   const paymentSteps = [
-    { label: isAr ? 'تأكيد المبلغ' : 'Confirm amount', done: amountConfirmed },
-    { label: isAr ? 'الدفع وإدخال المرجع' : 'Pay and enter reference', done: paymentStarted && hasPaymentReference },
-    { label: isAr ? 'رفع تأكيد الدفع والملفات' : 'Upload payment confirmation and files', done: proofUploaded },
-    { label: isAr ? 'مراجعة الإدارة قبل النشر' : 'Admin review before publishing', done: false },
+    { label: pick(lang, 'تأكيد المبلغ', 'Confirm amount', 'Confirmer le montant'), done: amountConfirmed },
+    { label: pick(lang, 'الدفع وإدخال المرجع', 'Pay and enter reference', 'Payer et saisir la référence'), done: paymentStarted && hasPaymentReference },
+    { label: pick(lang, 'رفع تأكيد الدفع والملفات', 'Upload payment confirmation and files', 'Téléverser la confirmation de paiement et les fichiers'), done: proofUploaded },
+    { label: pick(lang, 'مراجعة الإدارة قبل النشر', 'Admin review before publishing', 'Vérification par l’administration avant publication'), done: false },
   ]
 
   async function addPaymentFiles(fileList: FileList | null) {
@@ -179,7 +179,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
 
     const session = getStoredSellerSession()
     if (!session) {
-      setProofUploadError(isAr ? 'سجّل الدخول أولاً لرفع إثبات الدفع.' : 'Sign in first to upload payment proof.')
+      setProofUploadError(pick(lang, 'سجّل الدخول أولاً لرفع إثبات الدفع.', 'Sign in first to upload payment proof.', 'Connectez-vous d’abord pour téléverser la preuve de paiement.'))
       return
     }
     try {
@@ -193,7 +193,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
       })
       setProofUploadError('')
     } catch (error) {
-      setProofUploadError(error instanceof Error ? error.message : (isAr ? 'تعذر رفع الملف.' : 'Could not upload the file.'))
+      setProofUploadError(error instanceof Error ? error.message : (pick(lang, 'تعذر رفع الملف.', 'Could not upload the file.', 'Impossible de téléverser le fichier.')))
     }
   }
 
@@ -203,7 +203,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
     // a non-'payment-proof://' placeholder, which would create an admin review with no document.
     if (method.requiresExternalProof && paymentProofUrls.length === 0) {
       setSubmitState('error')
-      setSubmitError(isAr ? 'ارفع إثبات الدفع الحقيقي قبل الإرسال.' : 'Upload a real payment proof before submitting.')
+      setSubmitError(pick(lang, 'ارفع إثبات الدفع الحقيقي قبل الإرسال.', 'Upload a real payment proof before submitting.', 'Téléversez une véritable preuve de paiement avant l’envoi.'))
       return
     }
     setSubmitState('saving')
@@ -225,7 +225,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
       navigate('/sell/submitted')
     } catch (error) {
       setSubmitState('error')
-      setSubmitError(error instanceof Error ? error.message : isAr ? 'تعذر إرسال الطلب للمراجعة.' : 'Could not submit the request for review.')
+      setSubmitError(error instanceof Error ? error.message : pick(lang, 'تعذر إرسال الطلب للمراجعة.', 'Could not submit the request for review.', 'Impossible d’envoyer la demande pour vérification.'))
     }
   }
 
@@ -233,32 +233,32 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
     <main className="seller-page seller-payment-page" dir={isAr ? 'rtl' : 'ltr'}>
       <section className="seller-account-head">
         <button className="back-button seller-back" onClick={() => navigate('/advertising/account')}>
-          {isAr ? 'العودة للحساب' : 'Back to account'}
+          {pick(lang, 'العودة للحساب', 'Back to account', 'Retour au compte')}
         </button>
         <BrandLogo logo="plus" size="nav" />
       </section>
 
       <section className="seller-financial-panel">
-        <p className="eyebrow">{isAr ? 'صفحة الدفع المالية' : 'Financial payment page'}</p>
+        <p className="eyebrow">{pick(lang, 'صفحة الدفع المالية', 'Financial payment page', 'Page de paiement')}</p>
         <h1>{title}</h1>
-        <p>{isAr ? 'راجع المبلغ، أكّد الدفع، ثم ارفع إثبات العملية للإدارة.' : 'Review the amount, pay, then upload the proof for admin review.'}</p>
+        <p>{pick(lang, 'راجع المبلغ، أكّد الدفع، ثم ارفع إثبات العملية للإدارة.', 'Review the amount, pay, then upload the proof for admin review.', 'Vérifiez le montant, payez, puis téléversez la preuve pour vérification par l’administration.')}</p>
 
         <div className="seller-payment-amount-box">
           <div>
-            <span>{isAr ? 'المبلغ المطلوب' : 'Payment amount'}</span>
+            <span>{pick(lang, 'المبلغ المطلوب', 'Payment amount', 'Montant du paiement')}</span>
             <strong>{amountLabel}</strong>
           </div>
           <label>
             <input checked={amountConfirmed} type="checkbox" onChange={(event) => setAmountConfirmed(event.target.checked)} />
-            <span>{isAr ? 'أؤكد أن المبلغ صحيح قبل الدفع' : 'I confirm this amount before paying'}</span>
+            <span>{pick(lang, 'أؤكد أن المبلغ صحيح قبل الدفع', 'I confirm this amount before paying', 'Je confirme ce montant avant de payer')}</span>
           </label>
         </div>
 
         <div className="seller-payment-destination">
-          <span>{method.codeTitle[lang]}</span>
+          <span>{text(method.codeTitle, lang)}</span>
           <strong dir="ltr">{method.destinationCode}</strong>
           <small>
-            {isAr ? 'كود المتابعة:' : 'Follow-up code:'} <b dir="ltr">{followCode}</b>
+            {pick(lang, 'كود المتابعة:', 'Follow-up code:', 'Code de suivi :')} <b dir="ltr">{followCode}</b>
           </small>
         </div>
 
@@ -267,7 +267,7 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
           destinationCode={method.destinationCode}
           followCode={followCode}
           lang={lang}
-          methodLabel={method.label[lang]}
+          methodLabel={text(method.label, lang)}
           proofCount={paymentUploadedFiles.length}
           status={capsuleStatus}
         />
@@ -275,48 +275,42 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
         {methodKey === 'shamCash' && (
           <div className="seller-sham-qr-panel">
             {qrDataUrl ? (
-              <img className="seller-sham-qr" src={qrDataUrl} alt={isAr ? 'رمز QR شام كاش للدفع' : 'Sham Cash payment QR code'} />
+              <img className="seller-sham-qr" src={qrDataUrl} alt={pick(lang, 'رمز QR شام كاش للدفع', 'Sham Cash payment QR code', 'Code QR de paiement Sham Cash')} />
             ) : (
-              <div className="seller-sham-qr seller-sham-qr-loading" aria-label={isAr ? 'جار إنشاء QR شام كاش' : 'Generating Sham Cash QR'} />
+              <div className="seller-sham-qr seller-sham-qr-loading" aria-label={pick(lang, 'جار إنشاء QR شام كاش', 'Generating Sham Cash QR', 'Génération du code QR Sham Cash')} />
             )}
             <div>
-              <strong>{isAr ? 'امسح QR للدفع' : 'Scan QR to pay'}</strong>
+              <strong>{pick(lang, 'امسح QR للدفع', 'Scan QR to pay', 'Scannez le code QR pour payer')}</strong>
               <span dir="ltr">{method.destinationCode}</span>
-              <small>{isAr ? 'اكتب كود المتابعة في ملاحظة العملية.' : 'Write the follow-up code in the transaction note.'}</small>
+              <small>{pick(lang, 'اكتب كود المتابعة في ملاحظة العملية.', 'Write the follow-up code in the transaction note.', 'Inscrivez le code de suivi dans la note de la transaction.')}</small>
             </div>
           </div>
         )}
 
         {methodKey === 'creditCard' && (
           <div className="seller-stripe-panel">
-            <strong>{isAr ? 'بوابة Stripe الآمنة' : 'Secure Stripe gateway'}</strong>
+            <strong>{pick(lang, 'بوابة Stripe الآمنة', 'Secure Stripe gateway', 'Passerelle sécurisée Stripe')}</strong>
             <span>
-              {isAr
-                ? 'إدخال بيانات البطاقة يتم داخل Stripe فقط، وخدمة الإعلان لا تعمل قبل رفع تأكيد الدفع وموافقة الإدارة.'
-                : 'Card entry happens inside Stripe only, and the advertising service does not run before payment confirmation upload and admin approval.'}
+              {pick(lang, 'إدخال بيانات البطاقة يتم داخل Stripe فقط، وخدمة الإعلان لا تعمل قبل رفع تأكيد الدفع وموافقة الإدارة.', 'Card entry happens inside Stripe only, and the advertising service does not run before payment confirmation upload and admin approval.', 'La saisie de la carte se fait uniquement dans Stripe, et le service publicitaire ne démarre pas avant le téléversement de la confirmation de paiement et l’approbation de l’administration.')}
             </span>
-            <small>{isAr ? 'مفتاح التشغيل:' : 'Runtime key:'} <b dir="ltr">VITE_STRIPE_PUBLISHABLE_KEY</b></small>
+            <small>{pick(lang, 'مفتاح التشغيل:', 'Runtime key:', 'Clé d’exécution :')} <b dir="ltr">VITE_STRIPE_PUBLISHABLE_KEY</b></small>
             {!stripeConfigured && (
               <em>
-                {isAr
-                  ? 'Stripe غير متصل الآن. لا يتم تشغيل الإعلان قبل رفع تأكيد الدفع وموافقة الإدارة.'
-                  : 'Stripe is not connected yet. The ad will not run before payment confirmation upload and admin approval.'}
+                {pick(lang, 'Stripe غير متصل الآن. لا يتم تشغيل الإعلان قبل رفع تأكيد الدفع وموافقة الإدارة.', 'Stripe is not connected yet. The ad will not run before payment confirmation upload and admin approval.', 'Stripe n’est pas encore connecté. L’annonce ne sera pas diffusée avant le téléversement de la confirmation de paiement et l’approbation de l’administration.')}
               </em>
             )}
           </div>
         )}
 
         <label className="seller-payment-reference">
-          <small>{isAr ? 'رقم العملية / المرجع' : 'Transaction / reference number'}</small>
+          <small>{pick(lang, 'رقم العملية / المرجع', 'Transaction / reference number', 'Numéro de transaction / de référence')}</small>
           <input dir="ltr" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder={`${method.destinationCode}-${followCode}`} />
         </label>
 
         <div className="seller-payment-lock-note">
-          <strong>{isAr ? 'قفل أمان الدفع' : 'Payment safety lock'}</strong>
+          <strong>{pick(lang, 'قفل أمان الدفع', 'Payment safety lock', 'Verrou de sécurité du paiement')}</strong>
           <span>
-            {isAr
-              ? 'لا يتم تشغيل الإعلان أو نشر الخدمة قبل إدخال مرجع الدفع، رفع تأكيد الدفع، وتحقق الإدارة من استلام المال.'
-              : 'The ad/service will not run before a payment reference, uploaded payment confirmation, and admin verification that money was received.'}
+            {pick(lang, 'لا يتم تشغيل الإعلان أو نشر الخدمة قبل إدخال مرجع الدفع، رفع تأكيد الدفع، وتحقق الإدارة من استلام المال.', 'The ad/service will not run before a payment reference, uploaded payment confirmation, and admin verification that money was received.', 'L’annonce ou le service ne démarrera pas sans une référence de paiement, une confirmation de paiement téléversée et la vérification par l’administration de la réception des fonds.')}
           </span>
         </div>
 
@@ -335,42 +329,32 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
           }}
         >
           {paymentStarted
-            ? isAr
-              ? 'تم فتح مسار الدفع'
-              : 'Payment route opened'
+            ? pick(lang, 'تم فتح مسار الدفع', 'Payment route opened', 'Parcours de paiement ouvert')
             : methodKey === 'creditCard'
               ? stripeConfigured
-                ? isAr
-                  ? 'فتح Stripe Checkout'
-                  : 'Open Stripe Checkout'
-                : isAr
-                  ? 'تسجيل مرجع Stripe'
-                  : 'Record Stripe reference'
-              : isAr
-                ? 'ادفع الآن'
-                : 'Pay now'}
+                ? pick(lang, 'فتح Stripe Checkout', 'Open Stripe Checkout', 'Ouvrir Stripe Checkout')
+                : pick(lang, 'تسجيل مرجع Stripe', 'Record Stripe reference', 'Enregistrer la référence Stripe')
+              : pick(lang, 'ادفع الآن', 'Pay now', 'Payer maintenant')}
         </button>
 
         <div className="seller-payment-documents">
           {method.usesStripe && (
             <div className="seller-stripe-result">
-              <strong>{isAr ? 'بانتظار مراجعة الدفع' : 'Waiting for payment review'}</strong>
+              <strong>{pick(lang, 'بانتظار مراجعة الدفع', 'Waiting for payment review', 'En attente de vérification du paiement')}</strong>
               <span>
-                {isAr
-                  ? 'ارفع تأكيد Stripe أو إيصال الدفع، ثم أرسله للإدارة. الإدارة توافق فقط بعد التأكد من استلام المال.'
-                  : 'Upload the Stripe confirmation or payment receipt, then send it to admin. Admin approves only after confirming money was received.'}
+                {pick(lang, 'ارفع تأكيد Stripe أو إيصال الدفع، ثم أرسله للإدارة. الإدارة توافق فقط بعد التأكد من استلام المال.', 'Upload the Stripe confirmation or payment receipt, then send it to admin. Admin approves only after confirming money was received.', 'Téléversez la confirmation Stripe ou le reçu de paiement, puis envoyez-le à l’administration. L’administration n’approuve qu’après avoir confirmé la réception des fonds.')}
               </span>
             </div>
           )}
           <PaymentProofUpload
-            cta={isAr ? 'رفع تأكيد الدفع والمستندات' : 'Upload payment confirmation and documents'}
+            cta={pick(lang, 'رفع تأكيد الدفع والمستندات', 'Upload payment confirmation and documents', 'Téléverser la confirmation de paiement et les documents')}
             disabled={!canUploadProof}
-            emptyText={isAr ? 'لم يتم رفع أي ملف بعد. ارفع إثبات الدفع أو مستند الإعلان بصيغة PDF أو PNG أو JPG.' : 'No files uploaded yet. Upload payment proof or advertising documents as PDF, PNG, or JPG.'}
+            emptyText={pick(lang, 'لم يتم رفع أي ملف بعد. ارفع إثبات الدفع أو مستند الإعلان بصيغة PDF أو PNG أو JPG.', 'No files uploaded yet. Upload payment proof or advertising documents as PDF, PNG, or JPG.', 'Aucun fichier téléversé pour l’instant. Téléversez la preuve de paiement ou les documents publicitaires en PDF, PNG ou JPG.')}
             files={paymentUploadedFiles}
-            help={isAr ? 'ارفع إيصال الدفع، تأكيد Stripe، أو مستند الإعلان. يمكن رفع أكثر من ملف.' : 'Upload the receipt, Stripe confirmation, or advertising documents. Multiple files are allowed.'}
+            help={pick(lang, 'ارفع إيصال الدفع، تأكيد Stripe، أو مستند الإعلان. يمكن رفع أكثر من ملف.', 'Upload the receipt, Stripe confirmation, or advertising documents. Multiple files are allowed.', 'Téléversez le reçu, la confirmation Stripe ou les documents publicitaires. Plusieurs fichiers sont acceptés.')}
             lang={lang}
             onAddFiles={(files) => void addPaymentFiles(files)}
-            title={isAr ? 'مكان رفع المستندات' : 'Document upload place'}
+            title={pick(lang, 'مكان رفع المستندات', 'Document upload place', 'Zone de téléversement des documents')}
           />
           <div className="seller-payment-step-list">
             {paymentSteps.map((step) => (
@@ -384,23 +368,21 @@ export function SellerAdvertisingPaymentPage({ lang, methodId }: Props) {
         {submitState === 'error' && <small className="seller-plan-error">{submitError}</small>}
         {sellerProfileStatus === 'PENDING_REVIEW' ? (
           <div className="seller-admin-waiting-panel">
-            <strong>{isAr ? 'بانتظار مراجعة الإدارة' : 'Waiting for admin review'}</strong>
+            <strong>{pick(lang, 'بانتظار مراجعة الإدارة', 'Waiting for admin review', 'En attente de vérification par l’administration')}</strong>
             <span>
-              {isAr
-                ? 'تم إرسال الطلب لفريق SYBNB الحقيقي. الإدارة توافق فقط بعد التأكد من استلام المال.'
-                : 'The request was sent to the real SYBNB team. Admin approves only after confirming money was received.'}
+              {pick(lang, 'تم إرسال الطلب لفريق SYBNB الحقيقي. الإدارة توافق فقط بعد التأكد من استلام المال.', 'The request was sent to the real SYBNB team. Admin approves only after confirming money was received.', 'La demande a été envoyée à l’équipe SYBNB. L’administration n’approuve qu’après avoir confirmé la réception des fonds.')}
             </span>
             <button type="button" onClick={() => void refreshStatus()}>
-              {isAr ? 'تحديث حالة المراجعة' : 'Refresh review status'}
+              {pick(lang, 'تحديث حالة المراجعة', 'Refresh review status', 'Actualiser le statut de la vérification')}
             </button>
           </div>
         ) : sellerProfileStatus === 'APPROVED' ? (
           <div className="seller-admin-waiting-panel confirmed">
-            <strong>{isAr ? 'تم تأكيد الدفع من الإدارة' : 'Payment confirmed by admin'}</strong>
+            <strong>{pick(lang, 'تم تأكيد الدفع من الإدارة', 'Payment confirmed by admin', 'Paiement confirmé par l’administration')}</strong>
           </div>
         ) : (
           <button className="seller-primary-button" disabled={!canSendToAdmin || submitState === 'saving'} onClick={() => void submitForReview()}>
-            {submitState === 'saving' ? (isAr ? 'جارٍ الإرسال...' : 'Submitting...') : isAr ? 'إرسال للإدارة' : 'Send to admin'}
+            {submitState === 'saving' ? (pick(lang, 'جارٍ الإرسال...', 'Submitting...', 'Envoi...')) : pick(lang, 'إرسال للإدارة', 'Send to admin', 'Envoyer à l’administration')}
           </button>
         )}
       </section>

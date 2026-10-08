@@ -43,6 +43,21 @@ const copy = {
     confirmed: 'Payment confirmed',
     stages: ['Amount', 'Payment', 'Proof review', 'Admin review', 'Confirmed'],
   },
+  fr: {
+    title: 'Capsule de paiement',
+    method: 'Mode de paiement',
+    amount: 'Montant',
+    code: 'Code de paiement',
+    follow: 'Code de suivi',
+    proof: 'Preuves de paiement',
+    files: 'fichier(s)',
+    locked: 'En attente de la confirmation du montant',
+    ready: 'Prêt à payer',
+    proofReady: 'Envoi de la preuve...',
+    admin: 'En attente de la confirmation de l’administration',
+    confirmed: 'Paiement confirmé',
+    stages: ['Montant', 'Paiement', 'Vérification de la preuve', 'Vérification admin', 'Confirmé'],
+  },
 }
 
 export function PaymentCapsule({ lang, methodLabel, amountLabel, destinationCode, followCode, proofCount, status }: PaymentCapsuleProps) {

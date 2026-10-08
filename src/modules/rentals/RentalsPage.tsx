@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, text, type Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, governorateCityName, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
@@ -115,12 +115,12 @@ function saveDraft(key: string, draft: unknown) {
 }
 
 const mainGroupOptions = [
-  { id: 'apartment', ar: 'شقة', en: 'Apartment' },
-  { id: 'villa', ar: 'فيلا', en: 'Villa' },
-  { id: 'room', ar: 'غرفة', en: 'Room' },
-  { id: 'office', ar: 'مكتب', en: 'Office' },
-  { id: 'shop', ar: 'محل', en: 'Shop' },
-  { id: 'land', ar: 'أرض', en: 'Land' },
+  { id: 'apartment', ar: 'شقة', en: 'Apartment', fr: 'Appartement' },
+  { id: 'villa', ar: 'فيلا', en: 'Villa', fr: 'Villa' },
+  { id: 'room', ar: 'غرفة', en: 'Room', fr: 'Chambre' },
+  { id: 'office', ar: 'مكتب', en: 'Office', fr: 'Bureau' },
+  { id: 'shop', ar: 'محل', en: 'Shop', fr: 'Commerce' },
+  { id: 'land', ar: 'أرض', en: 'Land', fr: 'Terrain' },
 ]
 
 const copy = {
@@ -278,6 +278,83 @@ const copy = {
     error: 'Could not load monthly rentals',
     steps: ['Monthly search', 'Choose property', 'Open renter account', 'Upload documents', 'Send IMMOContact'],
   },
+  fr: {
+    previous: 'Retour',
+    next: 'Suivant',
+    logo: 'SYBNB',
+    navTitle: 'Locations',
+    login: 'Se connecter',
+    signup: 'Créer un compte',
+    search: 'Rechercher',
+    searchCapsule: 'Capsule de recherche',
+    searchCapsuleHint: 'Choisissez le lieu, puis ouvrez les options de recherche.',
+    rouletteHint: 'Faites glisser le bandeau pour choisir rapidement la zone.',
+    applied: 'Capsule de recherche appliquée.',
+    beforeSearch: 'Commencez par la capsule de recherche pour choisir le type de bien et le lieu. Après la recherche, les résultats et le détail des biens s’affichent.',
+    mainGroup: 'Type de bien',
+    chooseGovernorate: 'Choisissez le gouvernorat',
+    chooseCity: 'Choisissez la ville',
+    chooseStreet: 'Choisissez le quartier / la rue',
+    governorate: 'Gouvernorat',
+    city: 'Ville',
+    street: 'Quartier / rue',
+    newest: 'Plus récents',
+    lowestPrice: 'Prix le plus bas',
+    availableResults: 'Résultats disponibles',
+    loadMore: 'Afficher plus',
+    loadingMore: 'Chargement...',
+    sendRequest: 'Envoyer une demande',
+    viewDetails: 'Voir le détail',
+    chooseAfterAccount: 'Ouvrez d’abord un compte',
+    eyebrow: 'Locations au mois',
+    title: 'Parcours locataire',
+    subtitle: 'Un parcours dédié à la location au mois : choisissez un bien, ouvrez un compte, téléversez vos documents de locataire, puis envoyez votre demande de contact via IMMOContact.',
+    searchTitle: 'Biens au mois uniquement',
+    filterTitle: 'Options de recherche',
+    showFilters: 'Ouvrir les options de recherche',
+    hideFilters: 'Fermer les options de recherche',
+    selectedFilters: 'Options choisies',
+    noFilters: 'Choisissez vos options de recherche avec le même système que STR.',
+    renterTunnel: 'Parcours locataire',
+    live: 'Résultats en direct',
+    selected: 'Bien sélectionné',
+    detailTitle: 'Détails du bien sélectionné',
+    protected: 'Protégé par SYBNB',
+    trustedOwner: 'Propriétaire de confiance',
+    fastContact: 'Contact rapide',
+    detailSteps: ['Ouvrez un compte locataire', 'Téléversez les documents de la demande', 'Envoyez à IMMOContact', 'Attendez l’accord du propriétaire et de l’administration'],
+    noSelection: 'Choisissez un bien parmi les résultats avant d’envoyer la demande.',
+    choose: 'Choisir ce bien',
+    openAccount: 'Ouvrir un compte locataire',
+    accountGateTitle: 'Ouvrez un compte locataire pour continuer',
+    accountGateText: 'Vous pouvez consulter le détail d’abord, mais l’envoi de la demande et le téléversement des documents nécessitent de se connecter ou de créer un compte.',
+    accountReady: 'Compte locataire prêt',
+    docsTitle: 'Documents du locataire',
+    docsHint: 'Téléversez une pièce d’identité, un justificatif d’emploi ou de revenus et tout document appuyant votre demande de location au mois. PDF / PNG / JPG.',
+    docsUpload: 'Téléverser des documents',
+    docsReady: 'Documents téléversés',
+    uploading: 'Téléversement des fichiers...',
+    uploadFailed: 'Impossible de téléverser le fichier',
+    requestStatusTitle: 'Statut de la demande',
+    stepAccountOpened: 'Compte ouvert',
+    stepDocumentsUploaded: 'Documents téléversés',
+    stepSentToImmoContact: 'Envoyée à IMMOContact',
+    referenceLabel: 'Référence',
+    agreementTitle: 'Conditions de la demande de location au mois',
+    agreementCopy: 'Je confirme que mes informations sont exactes et que les échanges, le contrat et les documents restent dans SYBNB et IMMOContact. Tout litige ou changement de conditions doit être examiné via la plateforme avant tout accord externe.',
+    send: 'Envoyer la demande de contact',
+    sending: 'Envoi...',
+    sent: 'Demande du locataire envoyée à IMMOContact',
+    openInbox: 'Ouvrir IMMOContact',
+    required: 'Ouvrez un compte locataire, choisissez un bien, téléversez au moins un document et acceptez les conditions avant l’envoi.',
+    price: 'Loyer mensuel',
+    owner: 'Propriétaire',
+    status: 'Statut',
+    empty: 'Aucune location au mois publiée pour le moment.',
+    loading: 'Chargement',
+    error: 'Impossible de charger les locations au mois',
+    steps: ['Recherche au mois', 'Choix du bien', 'Compte locataire', 'Téléversement des documents', 'Envoi à IMMOContact'],
+  },
 }
 
 const buyerCopy = {
@@ -345,6 +422,38 @@ const buyerCopy = {
     error: 'Could not load sale properties',
     steps: ['Buyer search', 'Choose property', 'Open buyer account', 'Upload documents', 'Send IMMOContact'],
   },
+  fr: {
+    navTitle: 'Acheter un bien',
+    searchCapsuleHint: 'Choisissez le lieu et le type de bien, puis ouvrez les options de recherche avant de demander une visite.',
+    beforeSearch: 'Commencez par la capsule de recherche pour choisir le type de bien et le lieu. Après la recherche, les biens à vendre et leur détail s’affichent.',
+    availableResults: 'Biens à vendre disponibles',
+    sendRequest: 'Demander une visite',
+    eyebrow: 'Achat immobilier',
+    title: 'Parcours acheteur',
+    subtitle: 'Un parcours dédié à l’achat : choisissez un bien, ouvrez un compte, téléversez vos documents d’acheteur, puis envoyez une demande de visite ou de contact via IMMOContact.',
+    searchTitle: 'Biens à vendre uniquement',
+    renterTunnel: 'Parcours acheteur',
+    selected: 'Bien sélectionné',
+    detailTitle: 'Détails du bien sélectionné',
+    detailSteps: ['Ouvrez un compte acheteur', 'Téléversez les documents de la demande', 'Envoyez la demande de visite via IMMOContact', 'Attendez l’accord du propriétaire et de l’administration'],
+    choose: 'Choisir ce bien',
+    openAccount: 'Ouvrir un compte acheteur',
+    accountGateTitle: 'Ouvrez un compte acheteur pour continuer',
+    accountGateText: 'Vous pouvez consulter le détail d’abord, mais les demandes de visite et le téléversement des documents d’achat nécessitent de se connecter ou de créer un compte.',
+    accountReady: 'Compte acheteur prêt',
+    docsTitle: 'Documents de l’acheteur',
+    docsHint: 'Téléversez une pièce d’identité, une preuve de fonds ou de financement et tout document appuyant votre demande d’achat. PDF / PNG / JPG.',
+    agreementTitle: 'Conditions de la demande d’achat',
+    agreementCopy: 'Je confirme que mes informations sont exactes et que les échanges, les visites et les documents restent dans SYBNB et IMMOContact. Toute offre ou tout changement de conditions doit être examiné via la plateforme avant tout accord externe.',
+    send: 'Envoyer la demande de visite',
+    sending: 'Envoi...',
+    sent: 'Demande de l’acheteur envoyée à IMMOContact',
+    required: 'Ouvrez un compte acheteur, choisissez un bien, téléversez au moins un document et acceptez les conditions avant l’envoi.',
+    price: 'Prix du bien',
+    empty: 'Aucun bien à vendre publié pour le moment.',
+    error: 'Impossible de charger les biens à vendre',
+    steps: ['Recherche d’achat', 'Choix du bien', 'Compte acheteur', 'Téléversement des documents', 'Envoi à IMMOContact'],
+  },
 }
 
 export function RentalsPage({ lang, mode = 'rentals' }: Props) {
@@ -398,6 +507,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const selectedGovernorateLabel = labelFor(lang, selectedGovernorateData)
   const selectedCityLabel = labelFor(lang, selectedCityData)
   const selectedStreetLabel = labelFor(lang, selectedAreaData)
+  const selectedMainGroupOption = mainGroupOptions.find((option) => option.id === visualFilters.propertyType)
   const currentPanelOptions = (
     activeSearchPanel === 'governorate'
       ? SYRIA_GOVERNORATES.map((item) => ({ key: item.key, label: labelFor(lang, item) }))
@@ -633,9 +743,12 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     // Documents are now real, already-uploaded files (see uploadDocuments above) -- their URLs are
     // included directly, not a "send it separately" instruction the guest never saw.
     const docLines = documents.map((doc) => `${doc.name}: ${doc.url}`).join(isAr ? '، ' : ', ')
-    const introBody = isAr
-      ? `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nالمستندات المرفوعة: ${docLines}`
-      : `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nUploaded documents: ${docLines}`
+    const introBody = pick(
+      lang,
+      `طلب ${isBuyMode ? 'شراء' : 'استئجار'} جديد على "${listingTitleText(selectedListing, lang)}".\nالمستندات المرفوعة: ${docLines}`,
+      `New ${isBuyMode ? 'purchase' : 'rental'} request for "${listingTitleText(selectedListing, lang)}".\nUploaded documents: ${docLines}`,
+      `Nouvelle demande ${isBuyMode ? 'd’achat' : 'de location'} pour « ${listingTitleText(selectedListing, lang)} ».\nDocuments téléversés : ${docLines}`,
+    )
 
     try {
       // Use the real persisted message id as the reference -- not a client-fabricated
@@ -676,7 +789,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
                 style={visualFilters.propertyType === option.id ? styles.mainGroupActive : styles.mainGroupButton}
                 onClick={() => chooseMainGroup(option.id)}
               >
-                {isAr ? option.ar : option.en}
+                {text(option, lang)}
               </button>
             ))}
           </div>
@@ -751,7 +864,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
 
       {hasSearched ? <section style={styles.searchSummary}>
         <strong>{selectedGovernorateLabel} · {selectedCityLabel} · {selectedStreetLabel}</strong>
-        <span>{mainGroupOptions.find((option) => option.id === visualFilters.propertyType)?.[isAr ? 'ar' : 'en']}</span>
+        <span>{selectedMainGroupOption ? text(selectedMainGroupOption, lang) : null}</span>
       </section> : null}
 
       {hasSearched ? <section className="rentals-layout" style={styles.layout}>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { visualFilterGroupsForDivision, type VisualFilterSelection } from '../../engines/filters'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { labelFor, getCity, getGovernorate } from '../../engines/search'
@@ -213,6 +213,73 @@ const T = {
     resultPreview: 'Request preview',
     locationDepth: 'Governorate → City → Area',
   },
+  fr: {
+    title: 'Moteur de recherche unifié',
+    subtitle: 'Un seul système de recherche pour tout SYBNB.',
+    lockedStaysTitle: 'Recherche de séjours uniquement',
+    lockedStaysSubtitle: 'Cette page est dédiée aux séjours de courte durée : dates, voyageurs, chambre, lit et services.',
+    stays: 'Séjours',
+    rentals: 'Locations au mois',
+    buy: 'Acheter un bien',
+    newConstruction: 'Projets neufs',
+    cars: 'Voitures',
+    marketplace: 'Marché',
+    checkIn: 'Arrivée',
+    checkOut: 'Départ',
+    guests: 'Voyageurs',
+    guestCounter: 'Nombre de voyageurs',
+    bedroomCounter: 'Nombre de chambres',
+    bathroomCounter: 'Nombre de salles de bain',
+    counterHint: 'Indiquez le nombre adapté à votre demande',
+    bedroomsStepper: 'Chambres',
+    bathrooms: 'Salles de bain',
+    keyword: 'Mot-clé',
+    keywordPlaceholder: 'Nom, modèle, quartier ou service...',
+    filters: 'Filtres',
+    showFilters: 'Afficher les filtres',
+    hideFilters: 'Masquer les filtres',
+    dailyCalendar: 'Calendrier des séjours',
+    dailyCalendarHint: 'Choisissez l’arrivée et le départ avant d’afficher les séjours.',
+    minPrice: 'Prix min.',
+    maxPrice: 'Prix max.',
+    bedrooms: 'Chambres',
+    any: 'Tous',
+    studio: 'Studio',
+    oneBedroom: '1 chambre',
+    twoBedrooms: '2 chambres',
+    threeBedrooms: '3 chambres',
+    fourPlusBedrooms: '4 chambres et +',
+    propertyType: 'Type de logement',
+    apartment: 'Appartement',
+    villa: 'Villa',
+    office: 'Bureau',
+    shop: 'Commerce',
+    land: 'Terrain',
+    furnishing: 'Ameublement',
+    furnished: 'Meublé',
+    unfurnished: 'Non meublé',
+    semiFurnished: 'Semi-meublé',
+    carBrand: 'Marque',
+    carYear: 'Année du modèle',
+    marketCategory: 'Catégorie',
+    furniture: 'Meubles',
+    electronics: 'Électronique',
+    appliances: 'Électroménager',
+    services: 'Services',
+    condition: 'État',
+    new: 'Neuf',
+    used: 'Occasion',
+    sort: 'Trier les résultats',
+    newest: 'Plus récents',
+    priceLow: 'Prix le plus bas',
+    priceHigh: 'Prix le plus élevé',
+    customPlace: 'Nouveau quartier ou nouvelle rue',
+    customPlacePlaceholder: 'Saisissez-le ici s’il ne figure pas dans la liste...',
+    customPlaceHint: 'Ce nom n’est utilisé que pour la recherche en cours.',
+    search: 'Rechercher',
+    resultPreview: 'Aperçu de la demande',
+    locationDepth: 'Gouvernorat → Ville → Quartier',
+  },
 }
 
 const DIVISIONS: SearchDivision[] = ['stays', 'rentals', 'buy', 'newConstruction', 'cars', 'marketplace']
@@ -319,7 +386,6 @@ const conditionOptions: FilterOption[] = [
 ]
 export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivision = false, onSearch }: UnifiedSearchBarProps) {
   const t = T[lang]
-  const isAr = lang === 'ar'
   const [openCalendar, setOpenCalendar] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
   const [value, setValue] = useState<UnifiedSearchValue>(() => ({
@@ -471,7 +537,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     <section dir={lang === 'ar' ? 'rtl' : 'ltr'} style={styles.shell}>
       <div style={styles.header}>
         <div>
-          <p style={styles.eyebrow}>{isAr ? 'محرك البحث' : 'SEARCH ENGINE'}</p>
+          <p style={styles.eyebrow}>{pick(lang, 'محرك البحث', 'SEARCH ENGINE', 'MOTEUR DE RECHERCHE')}</p>
           <h2 style={styles.title}>{lockedDivision && initialDivision === 'stays' ? t.lockedStaysTitle : t.title}</h2>
           <p style={styles.subtitle}>{lockedDivision && initialDivision === 'stays' ? t.lockedStaysSubtitle : t.subtitle}</p>
         </div>
@@ -511,7 +577,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
                 <strong>{t.dailyCalendar}</strong>
                 <p>{t.dailyCalendarHint}</p>
               </div>
-              <span>{nightsBetween(value.checkIn, value.checkOut)} {lang === 'ar' ? 'ليالي' : 'nights'}</span>
+              <span>{nightsBetween(value.checkIn, value.checkOut)} {pick(lang, 'ليالي', 'nights', 'nuits')}</span>
             </div>
             <div style={styles.dateGrid}>
               <DateField lang={lang} label={t.checkIn} value={value.checkIn} active={openCalendar} onClick={() => setOpenCalendar(true)} />
@@ -547,7 +613,7 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
         </section>
 
         {isStay ? (
-          <section style={styles.counterPhotoGrid} aria-label={lang === 'ar' ? 'عدادات الطلب' : 'Request counters'}>
+          <section style={styles.counterPhotoGrid} aria-label={pick(lang, 'عدادات الطلب', 'Request counters', 'Compteurs de la demande')}>
             <CounterPhotoCard
               lang={lang}
               label={t.guestCounter}
@@ -671,11 +737,11 @@ function CounterPhotoCard({
         <small>{hint}</small>
       </span>
       <span style={styles.counterStepper} dir="ltr">
-        <button type="button" style={styles.counterButton} onClick={onDecrease} aria-label={lang === 'ar' ? `إنقاص ${label}` : `Decrease ${label}`}>
+        <button type="button" style={styles.counterButton} onClick={onDecrease} aria-label={pick(lang, `إنقاص ${label}`, `Decrease ${label}`, `Diminuer : ${label}`)}>
           −
         </button>
         <strong style={styles.counterValue}>{value}</strong>
-        <button type="button" style={styles.counterButton} onClick={onIncrease} aria-label={lang === 'ar' ? `زيادة ${label}` : `Increase ${label}`}>
+        <button type="button" style={styles.counterButton} onClick={onIncrease} aria-label={pick(lang, `زيادة ${label}`, `Increase ${label}`, `Augmenter : ${label}`)}>
           +
         </button>
       </span>

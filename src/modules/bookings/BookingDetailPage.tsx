@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   confirmStripePayment,
   createStripeCheckoutSession,
@@ -150,6 +150,66 @@ const copy = {
     yourReview: 'Your review',
     reviewPlaceholder: 'How was your stay? (optional)',
     submitReview: 'Submit review',
+  },
+  fr: {
+    back: 'Retour au tableau de bord',
+    title: 'Mode de paiement sécurisé',
+    subtitle: 'Payez uniquement dans SYBNB pour que votre réservation et votre argent restent protégés.',
+    loading: 'Chargement',
+    error: 'Impossible de charger la réservation',
+    booking: 'Numéro de réservation',
+    listing: 'Annonce',
+    guest: 'Voyageur',
+    host: 'Hôte',
+    status: 'Statut',
+    amount: 'Montant',
+    payment: 'Paiement',
+    protected: 'Protégé',
+    protectionTitle: 'Votre réservation est protégée',
+    protectionCopy: 'Votre argent est conservé en sécurité jusqu’à la vérification et la confirmation.',
+    aiBrainInstantTitle: 'Votre réservation est prête pour le paiement',
+    aiBrainInstantCopy: 'Vous pouvez procéder au paiement dès maintenant. SYBNB vérifie la preuve de paiement avant la confirmation finale.',
+    payByCard: 'Carte de crédit',
+    payByWallet: 'Portefeuille local / Sham Cash',
+    payingByCard: 'Redirection vers le paiement sécurisé...',
+    stripeConfirming: 'Confirmation de votre paiement par carte...',
+    stripeConfirmError: 'Impossible de confirmer le paiement par carte. Contactez le soutien si vous avez été débité.',
+    stripeCardNote: 'Paiement instantané et sécurisé via Stripe. Confirmé automatiquement, sans attente de l’administration.',
+    stripeWalletNote: 'Virement manuel Sham Cash, vérifié par l’administration après le téléversement de la preuve.',
+    idGateTitle: 'Vérification d’identité requise avant le paiement',
+    idGateCopy: 'Téléversez une photo nette de votre carte d’identité ou de votre passeport pour finaliser le paiement. Requis une seule fois.',
+    idGateUpload: 'Touchez pour téléverser votre pièce d’identité',
+    idGateEmpty: 'Aucune pièce d’identité téléversée pour le moment.',
+    idGateSubmit: 'Envoyer la pièce d’identité et passer au paiement',
+    idGateError: 'Impossible de téléverser la pièce d’identité. Veuillez réessayer.',
+    draftTimeline: ['Séjour choisi', 'Preuve de paiement', 'Vérification SYBNB', 'Approbation de l’hôte', 'Réservation confirmée'],
+    paidTimeline: ['Preuve envoyée', 'Vérification SYBNB', 'Approbation de l’hôte', 'Réservation confirmée', 'Fonds versés'],
+    feeBreakdown: 'Récapitulatif du paiement',
+    stayAmount: 'Montant de la réservation',
+    cleaningFee: 'Frais de ménage',
+    taxes: 'Taxes et frais locaux',
+    extraFees: 'Frais supplémentaires',
+    cancellationProtection: 'Protection en cas d’annulation',
+    totalDue: 'Total à payer',
+    protectedFunds: 'Vos fonds sont entièrement protégés',
+    guaranteeRows: ['Les fonds ne sont pas versés avant la confirmation', 'Toutes les preuves sont conservées dans le système', 'Soutien en cas de litige disponible sous 48 heures'],
+    noOutsidePay: 'Avertissement : les paiements effectués hors de SYBNB ne sont pas protégés. Payez uniquement via SYBNB.',
+    refund: 'Demande de remboursement / litige',
+    pay: 'Payer maintenant',
+    receipt: 'Ouvrir le reçu',
+    protection: 'Protection de la réservation',
+    paymentStatus: 'Statut du paiement',
+    dispute: 'Signaler un problème',
+    saving: 'Enregistrement',
+    openListing: 'Ouvrir l’annonce',
+    noPayment: 'Aucune preuve de paiement pour le moment.',
+    saveBooking: 'Enregistrer la réservation',
+    printBooking: 'Imprimer la réservation',
+    retention: 'Vous pouvez enregistrer ou imprimer cette réservation. Les données sensibles du voyage sont supprimées chaque semaine de Mon compte et Voyage.',
+    leaveReview: 'Laisser un commentaire',
+    yourReview: 'Votre commentaire',
+    reviewPlaceholder: 'Comment s’est passé votre séjour ? (facultatif)',
+    submitReview: 'Envoyer le commentaire',
   },
 }
 
@@ -321,13 +381,16 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
           </button>
           {booking?.guest?.email && (
             <small style={{ color: '#9aa6ba', lineHeight: 1.6 }}>
-              {isAr
-                ? `تفضل واتساب أو إيميل؟ أرسل صورة إثبات هويتك مع بريدك الإلكتروني (${booking.guest.email}) إلى `
-                : `Prefer WhatsApp or email? Send your ID photo with your account email (${booking.guest.email}) to `}
+              {pick(
+                lang,
+                `تفضل واتساب أو إيميل؟ أرسل صورة إثبات هويتك مع بريدك الإلكتروني (${booking.guest.email}) إلى `,
+                `Prefer WhatsApp or email? Send your ID photo with your account email (${booking.guest.email}) to `,
+                `Vous préférez WhatsApp ou le courriel ? Envoyez la photo de votre pièce d’identité avec le courriel de votre compte (${booking.guest.email}) à `,
+              )}
               <a href={whatsappIdSubmissionLink(booking.guest.email, lang)} target="_blank" rel="noreferrer" style={{ color: '#dce3ff' }}>
-                {isAr ? 'واتساب' : 'WhatsApp'} ({SUPPORT_WHATSAPP_LOCAL})
+                {pick(lang, 'واتساب', 'WhatsApp', 'WhatsApp')} ({SUPPORT_WHATSAPP_LOCAL})
               </a>
-              {isAr ? ' أو ' : ' or '}
+              {pick(lang, ' أو ', ' or ', ' ou ')}
               <a href={emailIdSubmissionLink(booking.guest.email, lang)} style={{ color: '#dce3ff' }}>
                 {SUPPORT_EMAIL}
               </a>
@@ -362,11 +425,11 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <section style={styles.flowNav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
+      <section style={styles.flowNav} aria-label={pick(lang, 'التنقل بين الخطوات', 'Step navigation', 'Navigation entre les étapes')}>
         <button
           style={styles.arrowButton}
           onClick={() => (window.location.hash = booking?.listing ? `/listing/${booking.listing.id}` : '/dashboard')}
-          aria-label={isAr ? 'السابق' : 'Back'}
+          aria-label={pick(lang, 'السابق', 'Back', 'Précédent')}
         >
           ‹
         </button>
@@ -374,7 +437,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
           style={styles.arrowButton}
           disabled={!booking}
           onClick={() => (window.location.hash = approvedPayment ? `/payment/receipt/${approvedPayment.id}` : paymentRoute)}
-          aria-label={isAr ? 'التالي' : 'Next'}
+          aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}
         >
           ›
         </button>

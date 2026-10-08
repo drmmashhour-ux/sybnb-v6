@@ -31,6 +31,18 @@ const copy = {
     },
     contact: (email: string, whatsapp: string) => `For any question about this page, reach us by email at ${email} or WhatsApp ${whatsapp}.`,
   },
+  fr: {
+    draftBadge: 'BROUILLON — VERSION NON DÉFINITIVE',
+    terms: {
+      title: 'Conditions d’utilisation',
+      body: 'La version complète des Conditions d’utilisation est en cours de préparation. Les conditions de réservation et de paiement qui s’appliquent réellement à chaque réservation de location de courte durée sont affichées sur la page de l’annonce elle-même avant l’envoi de votre demande de réservation.',
+    },
+    privacy: {
+      title: 'Politique de confidentialité',
+      body: 'La version complète de la Politique de confidentialité est en cours de préparation.',
+    },
+    contact: (email: string, whatsapp: string) => `Pour toute question concernant cette page, écrivez-nous par courriel à ${email} ou sur WhatsApp au ${whatsapp}.`,
+  },
 }
 
 export function LegalPlaceholderPage({ lang, page }: Props) {

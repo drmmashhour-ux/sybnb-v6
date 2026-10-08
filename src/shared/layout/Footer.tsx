@@ -1,4 +1,4 @@
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { SUPPORT_EMAIL, SUPPORT_WHATSAPP_INTL, SUPPORT_WHATSAPP_LOCAL } from '../support/contactChannels'
 
@@ -21,6 +21,13 @@ const copy = {
     privacy: 'Privacy Policy',
     rights: (year: number) => `© ${year} SYBNB. All rights reserved.`,
   },
+  fr: {
+    about: 'À propos de SYBNB',
+    contact: 'Nous joindre',
+    terms: "Conditions d'utilisation",
+    privacy: 'Politique de confidentialité',
+    rights: (year: number) => `© ${year} SYBNB. Tous droits réservés.`,
+  },
 }
 
 function goToAbout() {
@@ -37,7 +44,7 @@ export function Footer({ lang }: Props) {
 
   return (
     <footer className="app-footer" dir={isAr ? 'rtl' : 'ltr'}>
-      <nav className="app-footer-links" aria-label={isAr ? 'روابط أساسية' : 'Site links'}>
+      <nav className="app-footer-links" aria-label={pick(lang, 'روابط أساسية', 'Site links', 'Liens du site')}>
         <button type="button" onClick={goToAbout}>{t.about}</button>
         <a href={`mailto:${SUPPORT_EMAIL}`}>{t.contact}</a>
         <a href={`https://wa.me/${SUPPORT_WHATSAPP_INTL}`} target="_blank" rel="noreferrer">

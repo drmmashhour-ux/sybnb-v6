@@ -83,6 +83,31 @@ const copy = {
     search: 'Search',
     all: 'All',
   },
+  fr: {
+    back: 'Retour à l’accueil',
+    title: 'Révision administrative',
+    subtitle: 'File PostgreSQL en direct des annonces, paiements, cadeaux et réservations en attente de décision.',
+    listings: 'Annonces',
+    payments: 'Paiements',
+    gifts: 'Cadeaux',
+    bookings: 'Réservations et demandes',
+    audit: 'Journal d’audit administratif',
+    empty: 'Aucun élément en attente de révision.',
+    auditEmpty: 'Aucune décision administrative enregistrée pour le moment.',
+    approve: 'Approuver',
+    reject: 'Refuser',
+    refresh: 'Actualiser',
+    loading: 'Chargement',
+    error: 'Impossible de charger la file de révision',
+    price: 'Prix',
+    provider: 'Fournisseur',
+    listing: 'Annonce',
+    actor: 'Intervenant',
+    entity: 'Élément',
+    details: 'Ouvrir les détails',
+    search: 'Rechercher',
+    all: 'Tous',
+  },
 }
 
 type AdminFilter = 'all' | 'listings' | 'payments' | 'gifts' | 'bookings' | 'audit'
@@ -895,7 +920,7 @@ function ShortRentAdminCommandDashboard({
                 <small>
                   {payout.eligibleNow
                     ? (isAr ? 'جاهز للصرف الآن' : 'Eligible now')
-                    : (isAr ? `يفتح في ${payout.eligibleAt ? new Date(payout.eligibleAt).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en')) : ''}` : `Opens ${payout.eligibleAt ? new Date(payout.eligibleAt).toLocaleDateString('en-US') : ''}`)}
+                    : (isAr ? `يفتح في ${payout.eligibleAt ? new Date(payout.eligibleAt).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en')) : ''}` : lang === 'fr' ? `Disponible le ${payout.eligibleAt ? new Date(payout.eligibleAt).toLocaleDateString('fr-CA') : ''}` : `Opens ${payout.eligibleAt ? new Date(payout.eligibleAt).toLocaleDateString('en-US') : ''}`)}
                 </small>
                 <button
                   disabled={!payout.eligibleNow || releasingPayoutId === payout.bookingId}

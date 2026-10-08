@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type ReactNode } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, text, type Lang } from '../../engines/language/languageEngine'
 import type { VisualFilterArt, VisualFilterGroup, VisualFilterOption, VisualFilterSelection } from '../../engines/filters'
 
 type Props = {
@@ -12,10 +12,10 @@ type Props = {
 
 export function VisualFilterPanel({ compact = false, groups, lang, onChange, selection }: Props) {
   return (
-    <section style={compact ? styles.compactPanel : styles.panel} aria-label={lang === 'ar' ? 'خيارات لمس' : 'Touch options'}>
+    <section style={compact ? styles.compactPanel : styles.panel} aria-label={pick(lang, 'خيارات لمس', 'Touch options', 'Options tactiles')}>
       {groups.map((group) => (
         <fieldset key={group.id} style={compact ? styles.compactGroup : styles.group}>
-          <legend style={styles.legend}>{group.title[lang]}</legend>
+          <legend style={styles.legend}>{text(group.title, lang)}</legend>
           <div style={compact ? styles.compactGrid : styles.grid}>
             {group.options.map((option) => {
               const selected = isSelected(selection[group.id], option.id)
@@ -24,14 +24,14 @@ export function VisualFilterPanel({ compact = false, groups, lang, onChange, sel
                   key={option.id}
                   type="button"
                   aria-pressed={selected}
-                  title={option.label[lang]}
+                  title={text(option.label, lang)}
                   onClick={() => onChange(nextSelection(selection, group, option))}
                   style={{ ...(selected ? styles.tileActive : styles.tile), ...(compact ? styles.compactTile : {}) }}
                 >
                   <span style={styles.picture}>
                     <FilterPicture lang={lang} option={option} />
                   </span>
-                  <span style={styles.label}>{option.label[lang]}</span>
+                  <span style={styles.label}>{text(option.label, lang)}</span>
                   {selected ? <span style={styles.check}>✓</span> : null}
                 </button>
               )
@@ -48,7 +48,8 @@ export function selectedFilterLabels(groups: VisualFilterGroup[], selection: Vis
     const current = selection[group.id]
     const values = Array.isArray(current) ? current : current && current !== 'any' ? [current] : []
     return values
-      .map((value) => group.options.find((option) => option.id === value)?.label[lang])
+      .map((value) => group.options.find((option) => option.id === value)?.label)
+      .map((label) => (label ? text(label, lang) : undefined))
       .filter(Boolean) as string[]
   })
 }
@@ -75,7 +76,7 @@ function FilterPicture({ lang, option }: { lang: Lang; option: VisualFilterOptio
       <span style={styles.photoFrame}>
         <img
           src={option.photoSrc}
-          alt={option.photoAlt?.[lang] || option.label[lang]}
+          alt={(option.photoAlt ? text(option.photoAlt, lang) : '') || text(option.label, lang)}
           loading="lazy"
           onError={() => setPhotoFailed(true)}
           style={{ ...styles.photo, objectPosition: option.photoPosition || '50% 50%' }}

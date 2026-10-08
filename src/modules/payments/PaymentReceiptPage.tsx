@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { fetchPrototypePaymentProof, type PlatformPaymentProof } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText, providerText, statusText } from '../../shared/i18n/display'
 
@@ -80,6 +80,41 @@ const copy = {
     timeline: ['Submitted', 'Under review', 'Host approved', 'Released'],
     pending: 'Waiting for SYBNB review',
   },
+  fr: {
+    back: 'Retour au tableau de bord',
+    title: 'Reçu officiel',
+    subtitle: 'Preuve de paiement enregistrée et liée à sa réservation dans la base de données.',
+    letterhead: 'SYBNB PLATFORM',
+    invoice: 'Numéro de facture',
+    paidTotal: 'Total payé',
+    share: 'Partager',
+    download: 'Enregistrer le reçu',
+    print: 'Imprimer le reçu',
+    held: 'Retenu',
+    loading: 'Chargement',
+    error: 'Impossible de charger le reçu',
+    proof: 'Numéro de preuve',
+    booking: 'Numéro de réservation',
+    listing: 'Annonce',
+    payer: 'Payeur',
+    host: 'Hôte',
+    provider: 'Mode de paiement',
+    reference: 'Référence de transaction',
+    amount: 'Montant',
+    status: 'Statut',
+    reviewed: 'Vérifié le',
+    openBooking: 'Ouvrir l’annonce',
+    trustCenter: 'Centre de confiance',
+    paymentStatus: 'Statut du paiement',
+    protection: 'Protection de la réservation',
+    protectedFunds: 'Votre argent est protégé',
+    protectedCopy: 'Les fonds ne sont versés à l’hôte qu’après la confirmation de la réservation et la vérification par l’équipe SYBNB.',
+    warning: 'Les paiements effectués hors de SYBNB ne sont pas couverts par la protection.',
+    rejectedTitle: 'Ce paiement n’a pas été approuvé',
+    rejectedCopy: 'Notre équipe a vérifié ce paiement et ne l’a pas approuvé. Contactez le soutien ou envoyez une preuve de paiement valide.',
+    timeline: ['Envoyé', 'En vérification', 'Approuvé par l’hôte', 'Versé'],
+    pending: 'En attente de la vérification SYBNB',
+  },
 }
 
 export function PaymentReceiptPage({ lang, proofId }: Props) {
@@ -141,15 +176,15 @@ export function PaymentReceiptPage({ lang, proofId }: Props) {
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <section style={styles.flowNav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
+      <section style={styles.flowNav} aria-label={pick(lang, 'التنقل بين الخطوات', 'Step navigation', 'Navigation entre les étapes')}>
         <button
           style={styles.arrowButton}
           onClick={() => (window.location.hash = proof?.bookingId ? `/booking/${proof.bookingId}` : '/dashboard')}
-          aria-label={isAr ? 'السابق' : 'Back'}
+          aria-label={pick(lang, 'السابق', 'Back', 'Précédent')}
         >
           ‹
         </button>
-        <button style={styles.arrowButton} onClick={() => (window.location.hash = '/dashboard')} aria-label={isAr ? 'التالي' : 'Next'}>
+        <button style={styles.arrowButton} onClick={() => (window.location.hash = '/dashboard')} aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}>
           ›
         </button>
       </section>

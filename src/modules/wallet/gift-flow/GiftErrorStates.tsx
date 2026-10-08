@@ -1,6 +1,6 @@
 import React from 'react'
 
-type Lang = 'ar' | 'en'
+import type { Lang } from '../../../engines/language/languageEngine'
 type GiftErrorState = 'wrong_phone' | 'already_redeemed' | 'expired' | 'blocked_admin' | 'security_review' | 'not_found'
 
 type GiftErrorStatesProps = {
@@ -118,6 +118,61 @@ const COPY = {
         title: 'This gift could not be found',
         body: 'The gift link is invalid or expired. Check the link or contact whoever sent the gift.',
         primary: 'Try again',
+      },
+    },
+  },
+  fr: {
+    support: 'Contacter le support',
+    stateLabels: {
+      wrong_phone: 'Mauvais numéro',
+      already_redeemed: 'Utilisé',
+      expired: 'Expiré',
+      blocked_admin: 'Bloqué',
+      security_review: 'Vérification de sécurité',
+      not_found: 'Introuvable',
+    },
+    states: {
+      wrong_phone: {
+        icon: '!',
+        tone: '#ff5f76',
+        title: 'Ce cadeau est associé à un autre numéro de téléphone',
+        body: 'Utilisez le numéro de téléphone qui a reçu le cadeau, ou connectez-vous avec le bon numéro.',
+        primary: 'Se connecter avec un autre numéro',
+      },
+      already_redeemed: {
+        icon: '✓',
+        tone: '#8b95a7',
+        title: 'Cadeau déjà utilisé',
+        body: 'Ce code a déjà été ajouté à un portefeuille admissible et ne peut pas être réutilisé.',
+        primary: 'Ouvrir le portefeuille',
+      },
+      expired: {
+        icon: '⏱',
+        tone: '#8b95a7',
+        title: 'Cadeau expiré',
+        body: 'La période de réclamation de ce cadeau est terminée. Contactez l’expéditeur ou le support.',
+        primary: 'Obtenir de l’aide',
+      },
+      blocked_admin: {
+        icon: '×',
+        tone: '#ff5f76',
+        title: 'Cadeau bloqué',
+        body: 'L’administration a bloqué ce cadeau afin de protéger les comptes et les portefeuilles.',
+        primary: 'Vérifier le statut',
+      },
+      security_review: {
+        icon: '?',
+        tone: '#d5a915',
+        title: 'Cadeau en cours de vérification de sécurité',
+        body: 'L’administration doit effectuer une courte vérification avant d’ajouter le crédit.',
+        primary: 'Suivre le statut',
+      },
+      not_found: {
+        icon: '?',
+        tone: '#8b95a7',
+        title: 'Ce cadeau est introuvable',
+        body: 'Le lien du cadeau est invalide ou expiré. Vérifiez le lien ou contactez la personne qui vous a envoyé le cadeau.',
+        primary: 'Réessayer',
       },
     },
   },

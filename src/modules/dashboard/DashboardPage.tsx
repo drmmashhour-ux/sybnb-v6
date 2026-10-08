@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   fetchPrototypeOverview,
   type PlatformOverview,
@@ -139,6 +139,69 @@ const copy = {
     reviewStatus: 'Review status',
     bookingRef: 'Booking ref',
   },
+  fr: {
+    back: 'Retour à l’accueil',
+    previous: 'Précédent',
+    next: 'Suivant',
+    title: 'Mon compte et mon voyage',
+    subtitle: 'Uniquement mes réservations, preuves de paiement, portefeuille et trajets SR.',
+    refresh: 'Actualiser',
+    loading: 'Chargement',
+    error: 'Impossible de charger le tableau de bord',
+    bookings: 'Réservations et demandes',
+    listings: 'Annonces',
+    rides: 'Trajets SR',
+    payments: 'Paiements',
+    wallet: 'Portefeuille',
+    nextStep: 'Étape suivante',
+    status: 'Statut',
+    amount: 'Montant',
+    listing: 'Annonce',
+    provider: 'Fournisseur',
+    balance: 'Solde',
+    pay: 'Payer',
+    details: 'Détails',
+    receipt: 'Reçu',
+    paymentStatus: 'Statut du paiement',
+    empty: 'Aucun élément pour le moment.',
+    tripTimeline: 'Déroulement du voyage',
+    tripTimelineCopy: 'Suivez ce qui se passe après le paiement et ouvrez un litige en cas de problème.',
+    dispute: 'Ouvrir un litige',
+    support: 'Soutien',
+    protected: 'Protégé',
+    disputeOpen: 'Litige ouvert',
+    disputeCopy: 'En cas de litige, les fonds restent protégés et le dossier est transmis à l’équipe SYBNB avec la réservation et la preuve de paiement.',
+    timelineSteps: ['Séjour choisi', 'Preuve de paiement', 'Vérification SYBNB', 'Réservation confirmée', 'Instructions d’arrivée', 'Voyage terminé'],
+    privacyTitle: 'Confidentialité du voyage',
+    privacyCopy: 'Les informations sensibles du voyage sont supprimées chaque semaine. Vous pouvez en enregistrer une copie personnelle ou l’imprimer avant la suppression.',
+    saveTrip: 'Enregistrer une copie personnelle',
+    printTrip: 'Imprimer le voyage',
+    member: 'Membre vérifié',
+    pendingVerification: 'Vérification en cours',
+    verifyNow: 'Vérifiez votre identité',
+    inTrip: 'En voyage',
+    upcomingTrip: 'Voyage à venir',
+    noActiveTrip: 'Aucun voyage en cours',
+    noActiveTripCopy: 'Recherchez et réservez un séjour pour voir les détails de votre voyage ici.',
+    invoice: 'Facture',
+    contact: 'Contact',
+    sos: 'SOS',
+    trustCopy: 'Votre réservation est entièrement protégée par SYBNB Trust',
+    trustScore: 'Centre de confiance',
+    currentTrip: 'Voyage en cours',
+    previousTrips: 'Voyages précédents',
+    tripDates: '12 - 15 févr.',
+    progressSteps: ['Réservé', 'Payé', 'Arrivée', 'Départ'],
+    walletTitle: 'Mon portefeuille et mes paiements',
+    walletSubtitle: 'Les montants protégés, payés et vérifiés, au même endroit.',
+    availableBalance: 'Solde disponible',
+    protectedFunds: 'Fonds protégés',
+    walletTransactions: 'Transactions du portefeuille',
+    noTransactions: 'Aucun mouvement de paiement pour le moment.',
+    method: 'Mode',
+    reviewStatus: 'Statut de la vérification',
+    bookingRef: 'Réf. de réservation',
+  },
 }
 
 export function DashboardPage({ lang }: Props) {
@@ -197,8 +260,8 @@ export function DashboardPage({ lang }: Props) {
   const activeTitle = activeListing ? labelForListing(activeListing, lang) : ''
   const activeReference = activeBooking?.id ? `BK-${activeBooking.id.slice(0, 4).toUpperCase()}-${activeBooking.id.slice(4, 8).toUpperCase()}` : ''
   const activeTripDates = activeBooking?.checkIn && activeBooking?.checkOut ? tripDateRange(activeBooking.checkIn, activeBooking.checkOut, lang) : ''
-  const displayName = overview?.user?.displayName || (isAr ? 'ضيف' : 'Guest')
-  const avatarLetter = displayName.trim().charAt(0).toUpperCase() || (isAr ? 'ض' : 'G')
+  const displayName = overview?.user?.displayName || pick(lang, 'ضيف', 'Guest', 'Voyageur')
+  const avatarLetter = displayName.trim().charAt(0).toUpperCase() || pick(lang, 'ض', 'G', 'V')
   // CAPSULE_RULES.noFakeTrustSignal: mirrors the same real idDocumentStatus-driven pattern
   // HostDashboardPage already uses for its own verification badge -- never a static claim.
   const isMembershipVerified = overview?.user?.idDocumentStatus === 'APPROVED'
@@ -290,7 +353,7 @@ export function DashboardPage({ lang }: Props) {
             </button>
             <button style={styles.trustTile} onClick={() => (window.location.hash = '/trust-center')}>
               <span>{t.trustScore}</span>
-              <small>{isAr ? 'مركز الثقة' : 'Trust Center'}</small>
+              <small>{pick(lang, 'مركز الثقة', 'Trust Center', 'Centre de confiance')}</small>
             </button>
           </section>
         </div>
@@ -374,14 +437,14 @@ function normalizePastTrip(booking: PlatformOverview['bookings'][number], lang: 
   return {
     id: booking.id,
     title: booking.listing ? labelForListing(booking.listing, lang) : booking.id.slice(0, 8).toUpperCase(),
-    dates: booking.checkIn && booking.checkOut ? tripDateRange(booking.checkIn, booking.checkOut, lang) : lang === 'ar' ? 'رحلة محفوظة' : 'Saved trip',
+    dates: booking.checkIn && booking.checkOut ? tripDateRange(booking.checkIn, booking.checkOut, lang) : pick(lang, 'رحلة محفوظة', 'Saved trip', 'Voyage enregistré'),
     image: bookingImage(booking),
     statusLabel: statusText(booking.status, lang),
   }
 }
 
 function tripDateRange(checkIn: string, checkOut: string, lang: Lang) {
-  const locale = localeForLang(lang)
+  const locale = pick(lang, localeForLang('ar'), localeForLang('en'), 'fr-CA')
   // Check-in/check-out are stored/returned as midnight-UTC dates -- formatting without an
   // explicit UTC timeZone rolls the date back a day for any viewer west of UTC (found by an
   // independent re-audit: a real Aug 30 booking rendered as "Aug 29" in EDT).
@@ -411,7 +474,7 @@ function normalizeWalletRows(overview: PlatformOverview | null, lang: Lang) {
   if (!overview) return []
   const paymentRows = overview.payments.slice(0, 5).map((payment) => ({
     id: payment.id,
-    title: payment.booking?.listing ? labelForListing(payment.booking.listing, lang) : lang === 'ar' ? 'دفعة حجز' : 'Booking payment',
+    title: payment.booking?.listing ? labelForListing(payment.booking.listing, lang) : pick(lang, 'دفعة حجز', 'Booking payment', 'Paiement de réservation'),
     ref: payment.bookingId ? `BK-${payment.bookingId.slice(0, 8).toUpperCase()}` : payment.providerRef || payment.id.slice(0, 8).toUpperCase(),
     amount: moneyText(payment.amountMinor, payment.currency, lang),
     method: payment.provider,
@@ -424,14 +487,14 @@ function normalizeWalletRows(overview: PlatformOverview | null, lang: Lang) {
   return (overview.wallet?.entries || []).slice(0, 5).map((entry, index) => {
     const amountMinor = typeof entry.amountMinor === 'number' ? entry.amountMinor : 0
     const currency = typeof entry.currency === 'string' ? entry.currency : overview.wallet?.currency || 'SYP'
-    const type = typeof entry.type === 'string' ? entry.type : lang === 'ar' ? 'حركة محفظة' : 'Wallet movement'
+    const type = typeof entry.type === 'string' ? entry.type : pick(lang, 'حركة محفظة', 'Wallet movement', 'Mouvement de portefeuille')
     const status = typeof entry.status === 'string' ? entry.status : 'RECORDED'
     return {
       id: String(entry.id || index),
       title: type,
       ref: String(entry.bookingId || entry.reference || entry.id || `WALLET-${index + 1}`),
       amount: moneyText(amountMinor, currency, lang),
-      method: lang === 'ar' ? 'محفظة SYBNB' : 'SYBNB Wallet',
+      method: pick(lang, 'محفظة SYBNB', 'SYBNB Wallet', 'Portefeuille SYBNB'),
       status: paymentStatusLabel(status, lang),
       statusTone: status === 'APPROVED' || status === 'RECORDED' ? 'green' : 'gold',
     }
@@ -455,7 +518,15 @@ function paymentStatusLabel(status: string, lang: Lang) {
     REJECTED: 'Rejected',
     RECORDED: 'Recorded',
   }
-  return (lang === 'ar' ? ar : en)[status] || status
+  const fr: Record<string, string> = {
+    APPROVED: 'Confirmé',
+    PENDING: 'En vérification',
+    SUBMITTED: 'Envoyé',
+    UNDER_REVIEW: 'En cours de vérification',
+    REJECTED: 'Refusé',
+    RECORDED: 'Enregistré',
+  }
+  return pick(lang, ar, en, fr)[status] || status
 }
 
 const styles: Record<string, CSSProperties> = {

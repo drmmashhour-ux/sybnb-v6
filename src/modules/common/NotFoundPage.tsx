@@ -18,6 +18,13 @@ const copy = {
     home: 'Home',
     browse: 'Browse stays',
   },
+  fr: {
+    code: '404',
+    title: 'Page introuvable',
+    body: "Le lien que vous avez ouvert est incorrect ou a été déplacé. Revenez à l'accueil ou parcourez les séjours.",
+    home: 'Accueil',
+    browse: 'Parcourir les séjours',
+  },
 }
 
 // Proper not-found experience for unmatched routes — replaces silently rendering Home under a wrong

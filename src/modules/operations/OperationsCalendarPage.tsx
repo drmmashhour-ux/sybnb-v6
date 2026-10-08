@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   fetchPrototypeAdminAuditLog,
   fetchPrototypeAdminMetrics,
@@ -117,6 +117,51 @@ const copy = {
       low: 'Low',
     },
   },
+  fr: {
+    eyebrow: 'Guesty gap #1',
+    title: 'Calendrier des opérations SYBNB',
+    body: 'Une vue unique sur les opérations quotidiennes : réservations, paiements, révisions, courses, entretien et messages.',
+    refresh: 'Actualiser',
+    loading: 'Chargement',
+    calendar: 'Calendrier',
+    tasks: 'Tableau des tâches',
+    board: 'Tableau des tâches',
+    detail: 'Détail de la tâche',
+    assignee: 'Responsable',
+    priority: 'Priorité',
+    related: 'Lié à',
+    due: 'Échéance',
+    signals: 'Signaux opérationnels',
+    automation: 'Automatisation des opérations',
+    automationRows: ['Rappel de paiement avant l’expiration du délai', 'Créer une tâche de ménage après le départ', 'Alerter les finances en cas de litige', 'Assigner un chauffeur lorsque la course est confirmée'],
+    conflicts: 'Conflits',
+    nextAction: 'Prochaine action recommandée',
+    nextActionText: 'Révisez d’abord les paiements urgents, puis associez les conversations ouvertes à une tâche opérationnelle.',
+    openFinance: 'Ouvrir les finances',
+    openInbox: 'Ouvrir IMMOContact',
+    pendingReviews: 'Révisions en attente',
+    payments: 'Paiements',
+    bookings: 'Réservations',
+    rides: 'Courses',
+    maintenance: 'Entretien',
+    messages: 'Messages',
+    ai: 'AI Brain',
+    aiText: 'Ce calendrier surveillera ensuite les conflits, les retards, les pics de demande et les prix par secteur.',
+    empty: 'Aucune tâche pour cette journée.',
+    open: 'Ouvrir',
+    taskColumns: {
+      new: 'Nouveau',
+      assigned: 'Assigné',
+      progress: 'En cours',
+      waiting: 'En attente',
+      done: 'Terminé',
+    },
+    priorityLabels: {
+      high: 'Élevée',
+      medium: 'Moyenne',
+      low: 'Faible',
+    },
+  },
 }
 
 const taskStages: OperationEvent['stage'][] = ['new', 'assigned', 'progress', 'waiting', 'done']
@@ -124,6 +169,7 @@ const taskStages: OperationEvent['stage'][] = ['new', 'assigned', 'progress', 'w
 const statusLabel = {
   ar: { urgent: 'عاجل', pending: 'بانتظار', ready: 'جاهز', planned: 'مخطط' },
   en: { urgent: 'Urgent', pending: 'Pending', ready: 'Ready', planned: 'Planned' },
+  fr: { urgent: 'Urgent', pending: 'En attente', ready: 'Prêt', planned: 'Planifié' },
 }
 
 export function OperationsCalendarPage({ lang }: Props) {
@@ -292,9 +338,9 @@ export function OperationsCalendarPage({ lang }: Props) {
           <span>{t.aiText}</span>
         </div>
         <div>
-          <Signal label={t.maintenance} value={lang === 'ar' ? 'تنظيف بعد كل خروج' : 'Clean after checkout'} />
-          <Signal label={t.messages} value={lang === 'ar' ? 'توحيد IMMOContact' : 'Unify IMMOContact'} />
-          <Signal label={t.payments} value={lang === 'ar' ? 'تذكير إثبات الدفع' : 'Payment proof reminder'} />
+          <Signal label={t.maintenance} value={pick(lang, 'تنظيف بعد كل خروج', 'Clean after checkout', 'Ménage après chaque départ')} />
+          <Signal label={t.messages} value={pick(lang, 'توحيد IMMOContact', 'Unify IMMOContact', 'Unifier IMMOContact')} />
+          <Signal label={t.payments} value={pick(lang, 'تذكير إثبات الدفع', 'Payment proof reminder', 'Rappel de preuve de paiement')} />
         </div>
       </section>
 
@@ -313,7 +359,7 @@ export function OperationsCalendarPage({ lang }: Props) {
             <section key={row}>
               <strong>{index + 1}</strong>
               <span>{row}</span>
-              <b>{index === 0 ? (lang === 'ar' ? 'نشط' : 'Active') : (lang === 'ar' ? 'جاهز' : 'Ready')}</b>
+              <b>{index === 0 ? (pick(lang, 'نشط', 'Active', 'Actif')) : (pick(lang, 'جاهز', 'Ready', 'Prêt'))}</b>
             </section>
           ))}
         </div>
@@ -364,11 +410,11 @@ function buildOperationEvents(
       id: `payment-${payment.id}`,
       day: clampDay(today + index),
       type: 'payment',
-      title: lang === 'ar' ? 'مراجعة إثبات دفع' : 'Review payment proof',
+      title: pick(lang, 'مراجعة إثبات دفع', 'Review payment proof', 'Réviser la preuve de paiement'),
       meta: `${payment.amountMinor.toLocaleString()} ${payment.currency}`,
       status: 'urgent',
       stage: 'new',
-      assignee: lang === 'ar' ? 'فريق الدفع' : 'Payment team',
+      assignee: pick(lang, 'فريق الدفع', 'Payment team', 'Équipe des paiements'),
       priority: 'high',
       href: `/payment/receipt/${payment.id}`,
     })
@@ -378,11 +424,11 @@ function buildOperationEvents(
       id: `booking-${booking.id}`,
       day: dayFromISO(booking.checkIn) || clampDay(today + index + 1),
       type: 'booking',
-      title: booking.listing ? (lang === 'ar' ? booking.listing.titleAr : booking.listing.titleEn || booking.listing.titleAr) : (lang === 'ar' ? 'حجز جديد' : 'New booking'),
+      title: booking.listing ? (lang === 'ar' ? booking.listing.titleAr : booking.listing.titleEn || booking.listing.titleAr) : (pick(lang, 'حجز جديد', 'New booking', 'Nouvelle réservation')),
       meta: `${booking.amountMinor.toLocaleString()} ${booking.currency}`,
       status: 'pending',
       stage: 'assigned',
-      assignee: lang === 'ar' ? 'مشرف الحجوزات' : 'Booking lead',
+      assignee: pick(lang, 'مشرف الحجوزات', 'Booking lead', 'Responsable des réservations'),
       priority: 'high',
       href: `/booking/${booking.id}`,
     })
@@ -392,11 +438,11 @@ function buildOperationEvents(
       id: `listing-${listing.id}`,
       day: clampDay(today + index + 2),
       type: 'review',
-      title: lang === 'ar' ? 'مراجعة إعلان' : 'Review listing',
+      title: pick(lang, 'مراجعة إعلان', 'Review listing', 'Réviser l’annonce'),
       meta: lang === 'ar' ? listing.titleAr : listing.titleEn || listing.titleAr,
       status: 'pending',
       stage: 'waiting',
-      assignee: lang === 'ar' ? 'مراجعة الإعلانات' : 'Listing review',
+      assignee: pick(lang, 'مراجعة الإعلانات', 'Listing review', 'Révision des annonces'),
       priority: 'medium',
       href: `/listing/${listing.id}`,
     })
@@ -406,11 +452,11 @@ function buildOperationEvents(
       id: `gift-${gift.id}`,
       day: clampDay(today + index + 3),
       type: 'payment',
-      title: lang === 'ar' ? 'مراجعة هدية محفظة' : 'Review wallet gift',
+      title: pick(lang, 'مراجعة هدية محفظة', 'Review wallet gift', 'Réviser le cadeau du portefeuille'),
       meta: `${gift.amountMinor.toLocaleString()} ${gift.currency}`,
       status: 'pending',
       stage: 'waiting',
-      assignee: lang === 'ar' ? 'فريق المحفظة' : 'Wallet team',
+      assignee: pick(lang, 'فريق المحفظة', 'Wallet team', 'Équipe du portefeuille'),
       priority: 'medium',
       href: `/wallet/gift/claim/${gift.id}`,
     })
@@ -420,11 +466,11 @@ function buildOperationEvents(
       id: `audit-${entry.id}`,
       day: clampDay(today - index),
       type: 'message',
-      title: lang === 'ar' ? 'تدقيق قرار إداري' : 'Audit admin decision',
+      title: pick(lang, 'تدقيق قرار إداري', 'Audit admin decision', 'Auditer la décision administrative'),
       meta: entry.action.replace(/_/g, ' '),
       status: 'ready',
       stage: 'done',
-      assignee: entry.actor?.displayName || (lang === 'ar' ? 'الإدارة' : 'Admin'),
+      assignee: entry.actor?.displayName || (pick(lang, 'الإدارة', 'Admin', 'Administration')),
       priority: 'low',
     })
   })
@@ -433,22 +479,22 @@ function buildOperationEvents(
       id: 'maintenance-cleaning',
       day: clampDay(today + 1),
       type: 'maintenance',
-      title: lang === 'ar' ? 'تنظيف بعد خروج ضيف' : 'Post-checkout cleaning',
-      meta: lang === 'ar' ? 'مهمة تشغيلية من نوع Guesty' : 'Guesty-style operations task',
+      title: pick(lang, 'تنظيف بعد خروج ضيف', 'Post-checkout cleaning', 'Ménage après le départ'),
+      meta: pick(lang, 'مهمة تشغيلية من نوع Guesty', 'Guesty-style operations task', 'Tâche opérationnelle de type Guesty'),
       status: 'planned',
       stage: 'progress',
-      assignee: lang === 'ar' ? 'فريق التنظيف' : 'Cleaning team',
+      assignee: pick(lang, 'فريق التنظيف', 'Cleaning team', 'Équipe de ménage'),
       priority: 'medium',
     },
     {
       id: 'ride-dispatch',
       day: clampDay(today),
       type: 'ride',
-      title: lang === 'ar' ? 'متابعة تعيين سائق' : 'Follow driver assignment',
-      meta: `${totalRecord(metrics?.ridesByStatus)} ${lang === 'ar' ? 'رحلات' : 'rides'}`,
+      title: pick(lang, 'متابعة تعيين سائق', 'Follow driver assignment', 'Suivre l’assignation du chauffeur'),
+      meta: `${totalRecord(metrics?.ridesByStatus)} ${pick(lang, 'رحلات', 'rides', 'courses')}`,
       status: 'ready',
       stage: 'assigned',
-      assignee: lang === 'ar' ? 'مشرف السائقين' : 'Driver dispatcher',
+      assignee: pick(lang, 'مشرف السائقين', 'Driver dispatcher', 'Répartiteur des chauffeurs'),
       priority: 'medium',
       href: '/driver',
     },

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { fetchMyHostProfile, saveHostProfile, uploadHostPhoto, type HostProfile } from '../../shared/api/platformApi'
 
 // Host profile -- shown right after "Start hosting" and any time from the host dashboard.
@@ -11,19 +11,19 @@ type Props = { lang: Lang }
 
 export const HOST_PROFILE_NEXT_KEY = 'sybnb.v6.hostProfileNext'
 
-const LANGUAGE_OPTIONS: Array<{ code: string; ar: string; en: string }> = [
-  { code: 'ar', ar: 'العربية', en: 'Arabic' },
-  { code: 'en', ar: 'الإنجليزية', en: 'English' },
-  { code: 'fr', ar: 'الفرنسية', en: 'French' },
-  { code: 'ku', ar: 'الكردية', en: 'Kurdish' },
-  { code: 'tr', ar: 'التركية', en: 'Turkish' },
-  { code: 'de', ar: 'الألمانية', en: 'German' },
-  { code: 'es', ar: 'الإسبانية', en: 'Spanish' },
-  { code: 'ru', ar: 'الروسية', en: 'Russian' },
-  { code: 'fa', ar: 'الفارسية', en: 'Persian' },
-  { code: 'hy', ar: 'الأرمنية', en: 'Armenian' },
-  { code: 'it', ar: 'الإيطالية', en: 'Italian' },
-  { code: 'sv', ar: 'السويدية', en: 'Swedish' },
+const LANGUAGE_OPTIONS: Array<{ code: string; ar: string; en: string; fr: string }> = [
+  { code: 'ar', ar: 'العربية', en: 'Arabic', fr: 'Arabe' },
+  { code: 'en', ar: 'الإنجليزية', en: 'English', fr: 'Anglais' },
+  { code: 'fr', ar: 'الفرنسية', en: 'French', fr: 'Français' },
+  { code: 'ku', ar: 'الكردية', en: 'Kurdish', fr: 'Kurde' },
+  { code: 'tr', ar: 'التركية', en: 'Turkish', fr: 'Turc' },
+  { code: 'de', ar: 'الألمانية', en: 'German', fr: 'Allemand' },
+  { code: 'es', ar: 'الإسبانية', en: 'Spanish', fr: 'Espagnol' },
+  { code: 'ru', ar: 'الروسية', en: 'Russian', fr: 'Russe' },
+  { code: 'fa', ar: 'الفارسية', en: 'Persian', fr: 'Persan' },
+  { code: 'hy', ar: 'الأرمنية', en: 'Armenian', fr: 'Arménien' },
+  { code: 'it', ar: 'الإيطالية', en: 'Italian', fr: 'Italien' },
+  { code: 'sv', ar: 'السويدية', en: 'Swedish', fr: 'Suédois' },
 ]
 
 const copy = {
@@ -68,6 +68,27 @@ const copy = {
     hostedBy: 'Hosted by',
     memberSince: (y: number) => `On SYBNB since ${y}`,
     speaks: 'Speaks',
+  },
+  fr: {
+    title: 'Votre profil d’hôte',
+    intro: 'Les voyageurs réservent chez des personnes, pas seulement des lieux. Présentez-vous pour qu’ils réservent en toute confiance.',
+    addPhoto: 'Ajouter une photo',
+    changePhoto: 'Changer la photo',
+    photoHint: 'Une photo claire de votre visage, sans logo ni texte.',
+    about: 'À propos de vous',
+    aboutPlaceholder: 'Exemple : Bonjour, je suis Mohamed de Lattaquié. J’adore accueillir des voyageurs et je connais les plus beaux endroits au bord de la mer…',
+    city: 'Où habitez-vous?',
+    cityPlaceholder: 'Ville',
+    languages: 'Langues parlées',
+    save: 'Enregistrer et continuer',
+    skip: 'Plus tard',
+    saved: 'Votre profil a été enregistré.',
+    uploading: 'Téléversement de la photo…',
+    loadError: 'Impossible de charger votre profil. Veuillez réessayer.',
+    preview: 'Ce que voient les voyageurs',
+    hostedBy: 'Hôte :',
+    memberSince: (y: number) => `Sur SYBNB depuis ${y}`,
+    speaks: 'Parle',
   },
 }
 
@@ -153,7 +174,7 @@ export function HostProfilePage({ lang }: Props) {
   const name = profile?.displayName || ''
   const languageLabel = (code: string) => {
     const option = LANGUAGE_OPTIONS.find((o) => o.code === code)
-    return option ? (isAr ? option.ar : option.en) : code
+    return option ? pick(lang, option.ar, option.en, option.fr) : code
   }
 
   return (
@@ -193,7 +214,7 @@ export function HostProfilePage({ lang }: Props) {
               const on = languages.includes(option.code)
               return (
                 <button key={option.code} type="button" onClick={() => toggleLanguage(option.code)} style={on ? styles.chipOn : styles.chip} aria-pressed={on}>
-                  {isAr ? option.ar : option.en}
+                  {pick(lang, option.ar, option.en, option.fr)}
                 </button>
               )
             })}

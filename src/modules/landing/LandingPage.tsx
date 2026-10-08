@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { text } from '../../engines/language/languageEngine'
+import { pick, text } from '../../engines/language/languageEngine'
 import { DIVISIONS } from '../../engines/navigation/divisions'
 import type { DivisionId } from '../../engines/navigation/divisions'
 import { navigate } from '../../app/routes'
@@ -83,6 +83,25 @@ const ABOUT_COPY = {
     adBody: 'A premium banner for companies, property projects, cars, and services that want to reach platform clients.',
     adCta: 'Book advertising space',
   },
+  fr: {
+    eyebrow: 'SYBNB V6',
+    title: 'Une seule plateforme pour protéger votre temps et vos droits en Syrie.',
+    body: 'SYBNB réunit la recherche, la réservation, le paiement sécurisé, la confiance et le soutien après réservation dans une expérience claire pour les voyageurs, les hôtes et l’équipe d’exploitation.',
+    missionTitle: 'Mission',
+    missionBody: 'Rendre la location, l’achat, les véhicules, le marché et les services du quotidien plus simples, plus rapides et plus fiables.',
+    visionTitle: 'Vision',
+    visionBody: 'Devenir la première porte d’entrée numérique de la Syrie pour les réservations et services protégés.',
+    sloganTitle: 'Slogan',
+    sloganBody: 'Cherchez en confiance. Réservez en sécurité. Suivez tout au même endroit.',
+    movieTitle: 'Film de la plateforme',
+    movieBody: 'Une courte histoire qui présente la mission de la plateforme, l’importance du paiement protégé et le parcours du client, de la recherche à la confirmation.',
+    movieCta: 'Voir le film',
+    moviePause: 'Mettre le film en pause',
+    adEyebrow: 'Espace publicitaire',
+    adTitle: 'Faites la promotion de votre marque sur SYBNB',
+    adBody: 'Une bannière premium pour les entreprises, projets immobiliers, véhicules et services qui veulent rejoindre la clientèle de la plateforme.',
+    adCta: 'Réserver un espace publicitaire',
+  },
 }
 
 export function LandingPage({ lang }: Props) {
@@ -122,18 +141,21 @@ export function LandingPage({ lang }: Props) {
       <section className="landing-hero">
         <div className="landing-hero-copy">
           <span className="landing-hero-mark" aria-hidden="true">×</span>
-          <h1>{isAr ? 'منصة سوريا الكاملة' : 'Syria Complete Platform'}</h1>
+          <h1>{pick(lang, 'منصة سوريا الكاملة', 'Syria Complete Platform', 'La plateforme complète de la Syrie')}</h1>
           <p>
-            {isAr
-              ? 'كل ما تحتاجه في مكان واحد - عقارات، سيارات، خدمات، وسير.'
-              : 'Everything you need in one place: property, cars, services, and SR.'}
+            {pick(
+              lang,
+              'كل ما تحتاجه في مكان واحد - عقارات، سيارات، خدمات، وسير.',
+              'Everything you need in one place: property, cars, services, and SR.',
+              'Tout ce dont vous avez besoin au même endroit : immobilier, véhicules, services et SR.',
+            )}
           </p>
           <div className="landing-actions">
             <button className="landing-primary" onClick={() => navigate('/search-preview')}>
-              {isAr ? 'ابدأ الآن' : 'Start now'}
+              {pick(lang, 'ابدأ الآن', 'Start now', 'Commencer')}
             </button>
             <button className="landing-secondary" onClick={showAbout}>
-              {isAr ? 'تعرف علينا' : 'Know us'}
+              {pick(lang, 'تعرف علينا', 'Know us', 'Découvrez-nous')}
             </button>
           </div>
         </div>
@@ -192,11 +214,11 @@ export function LandingPage({ lang }: Props) {
       </section>
 
       {activeAds.length > 0 && (
-        <section className="landing-sponsored" aria-label={isAr ? 'إعلانات ممولة' : 'Sponsored'}>
+        <section className="landing-sponsored" aria-label={pick(lang, 'إعلانات ممولة', 'Sponsored', 'Commandité')}>
           <div className="landing-sponsored-track">
             {activeAds.map((ad) => (
               <figure className="landing-sponsored-card" key={ad.id}>
-                <span className="landing-sponsored-tag">{isAr ? 'إعلان ممول' : 'Sponsored'}</span>
+                <span className="landing-sponsored-tag">{pick(lang, 'إعلان ممول', 'Sponsored', 'Commandité')}</span>
                 <img alt={isAr ? ad.titleAr : ad.titleEn || ad.titleAr} loading="lazy" src={adBannerUrl(ad)} />
               </figure>
             ))}
@@ -204,8 +226,8 @@ export function LandingPage({ lang }: Props) {
         </section>
       )}
 
-      <h2 className="landing-section-title">{isAr ? 'استكشف الفئات' : 'Explore categories'}</h2>
-      <section className="division-grid" aria-label={isAr ? 'أقسام المنصة' : 'Platform divisions'}>
+      <h2 className="landing-section-title">{pick(lang, 'استكشف الفئات', 'Explore categories', 'Explorer les catégories')}</h2>
+      <section className="division-grid" aria-label={pick(lang, 'أقسام المنصة', 'Platform divisions', 'Sections de la plateforme')}>
         {DIVISIONS.map((division, index) => {
           const disabled = division.status === 'soon'
           return (
@@ -229,7 +251,7 @@ export function LandingPage({ lang }: Props) {
                   <h2>{text(division.title, lang)}</h2>
                 </div>
                 <small>{lang === 'ar' ? division.title.en : division.title.ar}</small>
-                <span className="division-open">{disabled ? (isAr ? 'قريباً' : 'Soon') : (isAr ? 'افتح' : 'Open')}</span>
+                <span className="division-open">{disabled ? (pick(lang, 'قريباً', 'Soon', 'Bientôt')) : (pick(lang, 'افتح', 'Open', 'Ouvrir'))}</span>
               </div>
             </article>
           )

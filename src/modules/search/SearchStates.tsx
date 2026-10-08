@@ -32,6 +32,17 @@ const T = {
     allSyria: 'Show all Syria',
     retry: 'Try again',
   },
+  fr: {
+    loadingTitle: 'Recherche en cours',
+    loadingBody: 'Nous vérifions les résultats correspondants partout en Syrie.',
+    emptyTitle: 'Aucun résultat correspondant',
+    emptyBody: 'Essayez de changer de zone ou de retirer certains filtres.',
+    errorTitle: 'La recherche n’a pas pu aboutir',
+    errorBody: 'La connexion est instable. Réessayez ou consultez les résultats enregistrés.',
+    reset: 'Réinitialiser',
+    allSyria: 'Afficher toute la Syrie',
+    retry: 'Réessayer',
+  },
 }
 
 export function SearchStateCard({ lang, state, onReset, onShowAll, onRetry }: SearchStatesProps) {

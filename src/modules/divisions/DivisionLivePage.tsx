@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Division, DivisionId } from '../../engines/navigation/divisions'
 import type { Lang } from '../../engines/language/languageEngine'
-import { text } from '../../engines/language/languageEngine'
+import { pick, text } from '../../engines/language/languageEngine'
 import {
   fetchApprovedListings,
   isSampleListing,
@@ -58,6 +58,23 @@ const pageCopy = {
     database: 'PostgreSQL',
     error: 'Could not load division',
     untitled: 'Listing',
+  },
+  fr: {
+    back: 'Retour à l’accueil',
+    liveInventory: 'Annonces en direct',
+    sampleInventory: 'Annonces de démonstration',
+    search: 'Rechercher des annonces',
+    hostPortal: 'Ajouter une annonce',
+    loading: 'Chargement',
+    empty: 'Aucune annonce publiée pour le moment.',
+    price: 'Prix',
+    details: 'Détails de l’annonce',
+    openDetails: 'Voir le détail de l’annonce',
+    requestStatus: 'Statut de la demande',
+    saving: 'Enregistrement',
+    database: 'PostgreSQL',
+    error: 'Impossible de charger la catégorie',
+    untitled: 'Annonce',
   },
 }
 
@@ -150,6 +167,51 @@ const divisionCopy: Record<Lang, Partial<Record<DivisionId, Partial<typeof pageC
       details: 'Project details',
       openDetails: 'Open project details',
       untitled: 'New project',
+    },
+  },
+  fr: {
+    stays: {
+      search: 'Rechercher des séjours',
+      hostPortal: 'Devenir hôte',
+      empty: 'Aucun séjour publié pour le moment.',
+      details: 'Détails du séjour',
+      openDetails: 'Voir le détail du séjour',
+      untitled: 'Séjour',
+    },
+    rentals: {
+      search: 'Rechercher des locations au mois',
+      empty: 'Aucune location au mois publiée pour le moment.',
+      details: 'Détails de la location',
+      openDetails: 'Voir le détail de la location',
+      untitled: 'Bien à louer',
+    },
+    buy: {
+      search: 'Rechercher des biens à vendre',
+      empty: 'Aucun bien à vendre publié pour le moment.',
+      details: 'Détails du bien',
+      openDetails: 'Voir le détail du bien',
+      untitled: 'Bien à vendre',
+    },
+    cars: {
+      search: 'Rechercher des véhicules',
+      empty: 'Aucun véhicule publié pour le moment.',
+      details: 'Détails du véhicule',
+      openDetails: 'Voir le détail du véhicule',
+      untitled: 'Véhicule',
+    },
+    marketplace: {
+      search: 'Rechercher sur le marché',
+      empty: 'Aucun article publié pour le moment.',
+      details: 'Détails de l’article',
+      openDetails: 'Voir le détail de l’article',
+      untitled: 'Article',
+    },
+    'new-construction': {
+      search: 'Rechercher des projets neufs',
+      empty: 'Aucun projet neuf publié pour le moment.',
+      details: 'Détails du projet',
+      openDetails: 'Voir le détail du projet',
+      untitled: 'Projet neuf',
     },
   },
 }
@@ -307,12 +369,11 @@ function providerPortalRoute(divisionId: DivisionId) {
 }
 
 function providerPortalLabel(divisionId: DivisionId, lang: Lang) {
-  const isAr = lang === 'ar'
-  if (divisionId === 'stays') return isAr ? 'أصبح مضيفاً' : 'Become a host'
-  if (divisionId === 'cars') return isAr ? 'لوحة بائع المركبات' : 'Vehicle seller dashboard'
-  if (divisionId === 'new-construction') return isAr ? 'لوحة المطور العقاري' : 'Developer dashboard'
-  if (divisionId === 'marketplace') return isAr ? 'لوحة بائع السوق' : 'Marketplace seller dashboard'
-  return isAr ? 'لوحة البائع' : 'Seller dashboard'
+  if (divisionId === 'stays') return pick(lang, 'أصبح مضيفاً', 'Become a host', 'Devenir hôte')
+  if (divisionId === 'cars') return pick(lang, 'لوحة بائع المركبات', 'Vehicle seller dashboard', 'Tableau de bord vendeur de véhicules')
+  if (divisionId === 'new-construction') return pick(lang, 'لوحة المطور العقاري', 'Developer dashboard', 'Tableau de bord promoteur')
+  if (divisionId === 'marketplace') return pick(lang, 'لوحة بائع السوق', 'Marketplace seller dashboard', 'Tableau de bord vendeur du marché')
+  return pick(lang, 'لوحة البائع', 'Seller dashboard', 'Tableau de bord vendeur')
 }
 
 function useCompactCards() {

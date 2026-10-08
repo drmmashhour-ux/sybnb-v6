@@ -367,7 +367,8 @@ export function getCity(governorateKey: string, cityKey: string) {
   return getGovernorate(governorateKey)?.cities.find((city) => city.key === cityKey)
 }
 
-export function labelFor(lang: 'ar' | 'en', item?: { ar: string; en: string }) {
+// French (and any other LTR UI language) uses the English place names.
+export function labelFor(lang: 'ar' | 'en' | 'fr', item?: { ar: string; en: string }) {
   if (!item) return ''
   return lang === 'ar' ? item.ar : item.en
 }

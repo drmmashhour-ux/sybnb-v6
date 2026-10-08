@@ -31,11 +31,20 @@ const copy = {
     invalid: 'This tracking link is invalid or has expired.',
     verifiedDriver: 'Verified identity',
   },
+  fr: {
+    title: 'Suivre une course SR',
+    subtitle: 'Un lien de suivi en direct — aucun compte requis.',
+    status: 'Statut de la course',
+    driver: 'Chauffeur',
+    loading: 'Chargement...',
+    invalid: 'Ce lien de suivi est invalide ou a expiré.',
+    verifiedDriver: 'Identité vérifiée',
+  },
 }
 
 export function SharedRidePage({ lang, rideId, exp, sig }: Props) {
   const isAr = lang === 'ar'
-  const t = copy[isAr ? 'ar' : 'en']
+  const t = copy[lang]
   const [ride, setRide] = useState<PlatformSharedRide | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 

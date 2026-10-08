@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
 import { currentAccountIsHost, getStoredGuestSession, signOutGuest as revokeGuestSession } from '../api/platformApi'
@@ -18,7 +18,7 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   const isLanding = path === '/'
   const isAdvertisingTunnel = path.startsWith('/sell') || path.startsWith('/advertising')
   const isAdminControlRoom = path.startsWith('/admin')
-  const routeContext = getRouteContext(path, isAr)
+  const routeContext = getRouteContext(path, lang)
   const showFlowNav = !isLanding && !isAdminControlRoom
   const guestSession = typeof window !== 'undefined' ? getStoredGuestSession() : null
   const isHost = typeof window !== 'undefined' && currentAccountIsHost()
@@ -26,10 +26,10 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   // Airbnb-style host switch: one account; the same button turns into "Switch to traveling" inside
   // the host area. A non-host is taken to /host/stays, which shows the one-tap "Become a host" page.
   const hostSwitchLabel = inHostArea
-    ? (isAr ? 'التبديل إلى السفر' : 'Switch to traveling')
+    ? (pick(lang, 'التبديل إلى السفر', 'Switch to traveling', 'Passer en mode voyage'))
     : isHost
-      ? (isAr ? 'التبديل إلى الاستضافة' : 'Switch to hosting')
-      : (isAr ? 'استضف على SYBNB' : 'Become a host')
+      ? (pick(lang, 'التبديل إلى الاستضافة', 'Switch to hosting', 'Passer en mode hôte'))
+      : (pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'))
   const hostSwitchPath = inHostArea ? '/stays' : '/host/stays'
 
   function goBack() {
@@ -48,9 +48,12 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
     const { serverRevoked } = await revokeGuestSession()
     if (!serverRevoked) {
       window.alert(
-        isAr
-          ? 'تم تسجيل الخروج من هذا الجهاز، لكن تعذّر الوصول إلى الخادم لإنهاء الجلسة. قد تظل الجلسة نشطة في مكان آخر — أعد المحاولة عند عودة الاتصال.'
-          : 'Signed out on this device, but the server could not be reached to end the session. It may still be active elsewhere — try again once you are back online.',
+        pick(
+          lang,
+          'تم تسجيل الخروج من هذا الجهاز، لكن تعذّر الوصول إلى الخادم لإنهاء الجلسة. قد تظل الجلسة نشطة في مكان آخر — أعد المحاولة عند عودة الاتصال.',
+          'Signed out on this device, but the server could not be reached to end the session. It may still be active elsewhere — try again once you are back online.',
+          'Vous êtes déconnecté sur cet appareil, mais le serveur est injoignable pour fermer la session. Elle pourrait rester active ailleurs — réessayez une fois de retour en ligne.',
+        ),
       )
     }
     navigate('/')
@@ -64,41 +67,44 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
             <BrandLogo logo="platform" size="nav" className="top-nav-logo" />
           </button>
 
-          <nav className="nav-actions" aria-label={isAr ? 'إجراءات الحساب' : 'Account actions'}>
+          <nav className="nav-actions" aria-label={pick(lang, 'إجراءات الحساب', 'Account actions', 'Actions du compte')}>
             {!isLanding && (
-              <div className="route-context" aria-label={isAr ? 'مكانك داخل المنصة' : 'Current platform location'}>
+              <div className="route-context" aria-label={pick(lang, 'مكانك داخل المنصة', 'Current platform location', 'Votre position sur la plateforme')}>
                 <span className="route-main">{routeContext.section}</span>
                 <span className="route-separator">/</span>
                 <strong className="route-page">{routeContext.page}</strong>
               </div>
             )}
-            <div className="language-switch" role="group" aria-label={isAr ? 'اختيار اللغة' : 'Choose language'}>
+            <div className="language-switch" role="group" aria-label={pick(lang, 'اختيار اللغة', 'Choose language', 'Choisir la langue')}>
               <button className={isAr ? 'active' : ''} onClick={() => onLanguageChange('ar')}>
                 AR
               </button>
-              <button className={!isAr ? 'active' : ''} onClick={() => onLanguageChange('en')}>
+              <button className={lang === 'en' ? 'active' : ''} onClick={() => onLanguageChange('en')}>
                 EN
+              </button>
+              <button className={lang === 'fr' ? 'active' : ''} onClick={() => onLanguageChange('fr')}>
+                FR
               </button>
             </div>
             {guestSession ? (
-              <div className="public-auth-actions" aria-label={isAr ? 'حسابي' : 'My account'}>
+              <div className="public-auth-actions" aria-label={pick(lang, 'حسابي', 'My account', 'Mon compte')}>
                 <button className="menu-action" onClick={() => navigate(hostSwitchPath)}>
                   {hostSwitchLabel}
                 </button>
                 <button className="menu-action" onClick={() => navigate('/dashboard')}>
-                  {isAr ? `مرحباً، ${guestSession.user.displayName}` : `Hi, ${guestSession.user.displayName}`}
+                  {pick(lang, `مرحباً، ${guestSession.user.displayName}`, `Hi, ${guestSession.user.displayName}`, `Bonjour, ${guestSession.user.displayName}`)}
                 </button>
                 <button className="primary-action" onClick={signOutGuest}>
-                  {isAr ? 'تسجيل الخروج' : 'Sign out'}
+                  {pick(lang, 'تسجيل الخروج', 'Sign out', 'Se déconnecter')}
                 </button>
               </div>
             ) : (
               <div className="public-auth-actions">
                 <button className="menu-action" onClick={() => navigate('/host/stays')}>
-                  {isAr ? 'استضف على SYBNB' : 'Become a host'}
+                  {pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte')}
                 </button>
                 <button className="primary-action" onClick={() => navigate('/account/open')}>
-                  {isAr ? 'تسجيل الدخول أو إنشاء حساب' : 'Log in or sign up'}
+                  {pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription')}
                 </button>
               </div>
             )}
@@ -106,17 +112,17 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
         </header>
       )}
       {showFlowNav && (
-        <div className="flow-step-nav" aria-label={isAr ? 'التنقل داخل المسار' : 'Flow navigation'}>
+        <div className="flow-step-nav" aria-label={pick(lang, 'التنقل داخل المسار', 'Flow navigation', 'Navigation du parcours')}>
           <button className="flow-nav-button" onClick={goBack}>
-            {isAr ? 'السابق' : 'Back'}
+            {pick(lang, 'السابق', 'Back', 'Retour')}
           </button>
           <button className="flow-nav-button flow-home-button" onClick={() => navigate('/')}>
-            {isAr ? 'الرئيسية' : 'Home'}
+            {pick(lang, 'الرئيسية', 'Home', 'Accueil')}
           </button>
           <span>{routeContext.section} · {routeContext.page}</span>
           {routeContext.nextPath ? (
             <button className="flow-nav-button" onClick={goNext}>
-              {isAr ? 'التالي' : 'Next'}
+              {pick(lang, 'التالي', 'Next', 'Suivant')}
             </button>
           ) : (
             <span className="flow-nav-placeholder" aria-hidden="true" />
@@ -129,52 +135,52 @@ export function AppShell({ lang, onLanguageChange, path, children }: Props) {
   )
 }
 
-function getRouteContext(path: string, isAr: boolean) {
+function getRouteContext(path: string, lang: Lang) {
   const home = '/'
   if (path === '/stays') {
     return {
-      section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
-      page: isAr ? 'بحث الإيجار اليومي' : 'Stay search',
+      section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'),
+      page: pick(lang, 'بحث الإيجار اليومي', 'Stay search', 'Recherche de séjours'),
       backPath: home,
       nextPath: '',
     }
   }
   if (path === '/search-preview') {
     return {
-      section: isAr ? 'البحث' : 'Search',
-      page: isAr ? 'محرك البحث العام' : 'Search engine',
+      section: pick(lang, 'البحث', 'Search', 'Recherche'),
+      page: pick(lang, 'محرك البحث العام', 'Search engine', 'Moteur de recherche'),
       backPath: home,
       nextPath: '/stays',
     }
   }
   if (path.startsWith('/rentals')) {
     return {
-      section: isAr ? 'الإيجار الشهري' : 'Monthly rental',
-      page: isAr ? 'بحث العقارات' : 'Property search',
+      section: pick(lang, 'الإيجار الشهري', 'Monthly rental', 'Location au mois'),
+      page: pick(lang, 'بحث العقارات', 'Property search', 'Recherche de propriétés'),
       backPath: home,
       nextPath: '/account/open',
     }
   }
   if (path.startsWith('/cars')) {
     return {
-      section: isAr ? 'المركبات' : 'Cars',
-      page: isAr ? 'بحث المركبات' : 'Vehicle search',
+      section: pick(lang, 'المركبات', 'Cars', 'Véhicules'),
+      page: pick(lang, 'بحث المركبات', 'Vehicle search', 'Recherche de véhicules'),
       backPath: home,
       nextPath: '',
     }
   }
   if (path.startsWith('/new-construction')) {
     return {
-      section: isAr ? 'مشاريع جديدة' : 'New construction',
-      page: isAr ? 'المشاريع' : 'Projects',
+      section: pick(lang, 'مشاريع جديدة', 'New construction', 'Projets neufs'),
+      page: pick(lang, 'المشاريع', 'Projects', 'Projets'),
       backPath: home,
       nextPath: '',
     }
   }
   if (path.startsWith('/marketplace')) {
     return {
-      section: isAr ? 'السوق' : 'Marketplace',
-      page: isAr ? 'العروض' : 'Offers',
+      section: pick(lang, 'السوق', 'Marketplace', 'Marché'),
+      page: pick(lang, 'العروض', 'Offers', 'Offres'),
       backPath: home,
       nextPath: '',
     }
@@ -182,15 +188,15 @@ function getRouteContext(path: string, isAr: boolean) {
   if (path.startsWith('/sell') || path.startsWith('/advertising')) {
     const isPaymentTunnel = path.includes('/payment')
     return {
-      section: isAr ? 'الإعلان معنا' : 'Advertise with us',
-      page: isPaymentTunnel ? (isAr ? 'الدفع' : 'Payment') : (isAr ? 'طلب الإعلان' : 'Advertising request'),
+      section: pick(lang, 'الإعلان معنا', 'Advertise with us', 'Annoncez avec nous'),
+      page: isPaymentTunnel ? (pick(lang, 'الدفع', 'Payment', 'Paiement')) : (pick(lang, 'طلب الإعلان', 'Advertising request', 'Demande d\'annonce')),
       backPath: isPaymentTunnel ? '/advertising/account' : home,
       nextPath: '',
     }
   }
   if (path.startsWith('/listing/')) {
     const id = path.split('/')[2] || ''
-    const listingContext = routeContextFromReturnPath(readListingReturnPath(), isAr)
+    const listingContext = routeContextFromReturnPath(readListingReturnPath(), lang)
     return {
       section: listingContext.section,
       page: listingContext.detailsPage,
@@ -203,15 +209,15 @@ function getRouteContext(path: string, isAr: boolean) {
     const returnPath = readGuestReturnPath()
     if (!id && returnPath.startsWith('/rentals')) {
       return {
-        section: isAr ? 'الإيجار الشهري' : 'Monthly rental',
-        page: isAr ? 'فتح حساب المستأجر' : 'Open renter account',
+        section: pick(lang, 'الإيجار الشهري', 'Monthly rental', 'Location au mois'),
+        page: pick(lang, 'فتح حساب المستأجر', 'Open renter account', 'Ouvrir un compte locataire'),
         backPath: '/rentals',
         nextPath: '',
       }
     }
     return {
-      section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
-      page: isAr ? 'فتح الحساب' : 'Open account',
+      section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'),
+      page: pick(lang, 'فتح الحساب', 'Open account', 'Ouvrir un compte'),
       backPath: id ? `/listing/${id}` : '/stays',
       // No "Next" on the sign-in screen: it skipped past the form and bounced straight back to it.
       nextPath: '',
@@ -219,32 +225,32 @@ function getRouteContext(path: string, isAr: boolean) {
   }
   if (path.startsWith('/booking/')) {
     return {
-      section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
-      page: isAr ? 'الحجز' : 'Booking',
+      section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'),
+      page: pick(lang, 'الحجز', 'Booking', 'Réservation'),
       backPath: '/dashboard',
       nextPath: '',
     }
   }
   if (path.startsWith('/payment/')) {
     return {
-      section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
-      page: isAr ? 'الدفع الآمن' : 'Secure payment',
+      section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'),
+      page: pick(lang, 'الدفع الآمن', 'Secure payment', 'Paiement sécurisé'),
       backPath: '/dashboard',
       nextPath: '',
     }
   }
   if (path === '/dashboard' || path === '/account') {
     return {
-      section: isAr ? 'حساب العميل' : 'Guest account',
-      page: isAr ? 'رحلتي' : 'My trip',
+      section: pick(lang, 'حساب العميل', 'Guest account', 'Compte voyageur'),
+      page: pick(lang, 'رحلتي', 'My trip', 'Mon voyage'),
       backPath: '/stays',
       nextPath: '/wallet',
     }
   }
   if (path === '/wallet') {
     return {
-      section: isAr ? 'حساب العميل' : 'Guest account',
-      page: isAr ? 'المحفظة' : 'Wallet',
+      section: pick(lang, 'حساب العميل', 'Guest account', 'Compte voyageur'),
+      page: pick(lang, 'المحفظة', 'Wallet', 'Portefeuille'),
       backPath: '/dashboard',
       nextPath: '/dashboard',
     }
@@ -252,110 +258,110 @@ function getRouteContext(path: string, isAr: boolean) {
   if (path.startsWith('/host')) {
     if (path === '/host/profile') {
       return {
-        section: isAr ? 'المضيف' : 'Host',
-        page: isAr ? 'ملفك كمضيف' : 'Host profile',
+        section: pick(lang, 'المضيف', 'Host', 'Hôte'),
+        page: pick(lang, 'ملفك كمضيف', 'Host profile', 'Profil d\'hôte'),
         backPath: '/host/stays',
         nextPath: '',
       }
     }
     if (path.startsWith('/host/cars')) {
       return {
-        section: isAr ? 'المركبات' : 'Cars',
-        page: isAr ? 'لوحة بائع المركبات' : 'Vehicle seller dashboard',
+        section: pick(lang, 'المركبات', 'Cars', 'Véhicules'),
+        page: pick(lang, 'لوحة بائع المركبات', 'Vehicle seller dashboard', 'Tableau de bord vendeur de véhicules'),
         backPath: '/cars',
         nextPath: '',
       }
     }
     if (path.startsWith('/host/new-construction')) {
       return {
-        section: isAr ? 'مشاريع جديدة' : 'New construction',
-        page: isAr ? 'لوحة المطور العقاري' : 'Developer dashboard',
+        section: pick(lang, 'مشاريع جديدة', 'New construction', 'Projets neufs'),
+        page: pick(lang, 'لوحة المطور العقاري', 'Developer dashboard', 'Tableau de bord promoteur'),
         backPath: '/new-construction',
         nextPath: '',
       }
     }
     if (path.startsWith('/host/marketplace')) {
       return {
-        section: isAr ? 'السوق' : 'Marketplace',
-        page: isAr ? 'لوحة بائع السوق' : 'Marketplace seller dashboard',
+        section: pick(lang, 'السوق', 'Marketplace', 'Marché'),
+        page: pick(lang, 'لوحة بائع السوق', 'Marketplace seller dashboard', 'Tableau de bord vendeur du marché'),
         backPath: '/marketplace',
         nextPath: '',
       }
     }
     if (path.startsWith('/host/stays')) {
       return {
-        section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
-        page: isAr ? 'لوحة الاستضافة' : 'Hosting dashboard',
+        section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'),
+        page: pick(lang, 'لوحة الاستضافة', 'Hosting dashboard', 'Tableau de bord d\'hôte'),
         backPath: '/stays',
         nextPath: '',
       }
     }
     return {
-      section: isAr ? 'المضيف' : 'Host',
-      page: isAr ? 'لوحة الاستضافة' : 'Hosting dashboard',
+      section: pick(lang, 'المضيف', 'Host', 'Hôte'),
+      page: pick(lang, 'لوحة الاستضافة', 'Hosting dashboard', 'Tableau de bord d\'hôte'),
       backPath: home,
       nextPath: '',
     }
   }
   if (path.startsWith('/driver')) {
     return {
-      section: isAr ? 'السائق' : 'Driver',
-      page: isAr ? 'لوحة SR' : 'SR dashboard',
+      section: pick(lang, 'السائق', 'Driver', 'Chauffeur'),
+      page: pick(lang, 'لوحة SR', 'SR dashboard', 'Tableau de bord SR'),
       backPath: home,
       nextPath: '',
     }
   }
   if (path.startsWith('/admin')) {
     return {
-      section: isAr ? 'الإدارة' : 'Admin',
-      page: isAr ? 'المراجعة' : 'Review',
+      section: pick(lang, 'الإدارة', 'Admin', 'Administration'),
+      page: pick(lang, 'المراجعة', 'Review', 'Vérification'),
       backPath: home,
       nextPath: '/operations',
     }
   }
   if (path.startsWith('/finance')) {
     return {
-      section: isAr ? 'المالية' : 'Finance',
-      page: isAr ? 'المطابقة' : 'Reconciliation',
+      section: pick(lang, 'المالية', 'Finance', 'Finances'),
+      page: pick(lang, 'المطابقة', 'Reconciliation', 'Rapprochement'),
       backPath: '/admin/review',
       nextPath: '/operations',
     }
   }
   if (path.startsWith('/operations')) {
     return {
-      section: isAr ? 'العمليات' : 'Operations',
-      page: isAr ? 'المتابعة' : 'Tracking',
+      section: pick(lang, 'العمليات', 'Operations', 'Opérations'),
+      page: pick(lang, 'المتابعة', 'Tracking', 'Suivi'),
       backPath: '/finance',
       nextPath: '/ai-brain',
     }
   }
   if (path.startsWith('/ai-brain')) {
     return {
-      section: isAr ? 'AI Brain' : 'AI Brain',
-      page: isAr ? 'ذكاء السوق' : 'Market intelligence',
+      section: pick(lang, 'AI Brain', 'AI Brain', 'AI Brain'),
+      page: pick(lang, 'ذكاء السوق', 'Market intelligence', 'Veille du marché'),
       backPath: '/operations',
       nextPath: '/competitors',
     }
   }
   if (path.startsWith('/competitors')) {
     return {
-      section: isAr ? 'المنافسين' : 'Competitors',
-      page: isAr ? 'المقارنة' : 'Comparison',
+      section: pick(lang, 'المنافسين', 'Competitors', 'Concurrents'),
+      page: pick(lang, 'المقارنة', 'Comparison', 'Comparaison'),
       backPath: '/ai-brain',
       nextPath: '/status',
     }
   }
   if (path.startsWith('/immocontact')) {
     return {
-      section: isAr ? 'تواصل' : 'Contact',
-      page: isAr ? 'صندوق الرسائل' : 'Inbox',
+      section: pick(lang, 'تواصل', 'Contact', 'Contact'),
+      page: pick(lang, 'صندوق الرسائل', 'Inbox', 'Boîte de réception'),
       backPath: home,
       nextPath: '',
     }
   }
   return {
-    section: isAr ? 'المنصة' : 'Platform',
-    page: isAr ? 'الصفحة الحالية' : 'Current page',
+    section: pick(lang, 'المنصة', 'Platform', 'Plateforme'),
+    page: pick(lang, 'الصفحة الحالية', 'Current page', 'Page actuelle'),
     backPath: home,
     nextPath: '',
   }
@@ -379,45 +385,45 @@ function readListingReturnPath() {
   }
 }
 
-function routeContextFromReturnPath(returnPath: string, isAr: boolean) {
+function routeContextFromReturnPath(returnPath: string, lang: Lang) {
   if (returnPath.startsWith('/rentals')) {
     return {
-      section: isAr ? 'الإيجار الشهري' : 'Monthly rental',
-      detailsPage: isAr ? 'تفاصيل الإيجار' : 'Rental details',
+      section: pick(lang, 'الإيجار الشهري', 'Monthly rental', 'Location au mois'),
+      detailsPage: pick(lang, 'تفاصيل الإيجار', 'Rental details', 'Détails de la location'),
       backPath: '/rentals',
     }
   }
   if (returnPath.startsWith('/cars')) {
     return {
-      section: isAr ? 'المركبات' : 'Cars',
-      detailsPage: isAr ? 'تفاصيل المركبة' : 'Vehicle details',
+      section: pick(lang, 'المركبات', 'Cars', 'Véhicules'),
+      detailsPage: pick(lang, 'تفاصيل المركبة', 'Vehicle details', 'Détails du véhicule'),
       backPath: '/cars',
     }
   }
   if (returnPath.startsWith('/marketplace')) {
     return {
-      section: isAr ? 'السوق' : 'Marketplace',
-      detailsPage: isAr ? 'تفاصيل المنتج' : 'Product details',
+      section: pick(lang, 'السوق', 'Marketplace', 'Marché'),
+      detailsPage: pick(lang, 'تفاصيل المنتج', 'Product details', 'Détails du produit'),
       backPath: '/marketplace',
     }
   }
   if (returnPath.startsWith('/buy')) {
     return {
-      section: isAr ? 'شراء عقار' : 'Buy property',
-      detailsPage: isAr ? 'تفاصيل العقار' : 'Property details',
+      section: pick(lang, 'شراء عقار', 'Buy property', 'Achat immobilier'),
+      detailsPage: pick(lang, 'تفاصيل العقار', 'Property details', 'Détails de la propriété'),
       backPath: '/buy',
     }
   }
   if (returnPath.startsWith('/new-construction')) {
     return {
-      section: isAr ? 'مشاريع جديدة' : 'New construction',
-      detailsPage: isAr ? 'تفاصيل المشروع' : 'Project details',
+      section: pick(lang, 'مشاريع جديدة', 'New construction', 'Projets neufs'),
+      detailsPage: pick(lang, 'تفاصيل المشروع', 'Project details', 'Détails du projet'),
       backPath: '/new-construction',
     }
   }
   return {
-    section: isAr ? 'الإيجار اليومي' : 'Short-term rental',
-    detailsPage: isAr ? 'تفاصيل الإقامة' : 'Stay details',
+    section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'),
+    detailsPage: pick(lang, 'تفاصيل الإقامة', 'Stay details', 'Détails du séjour'),
     backPath: '/stays',
   }
 }

@@ -28,6 +28,15 @@ const copy = {
     back: 'Back to booking',
     error: 'Could not turn on hosting. Please try again.',
   },
+  fr: {
+    title: 'Devenez hôte sur SYBNB',
+    body: 'Le même compte vous permet de réserver et d’accueillir. Activez l’accueil pour publier votre annonce et recevoir des demandes de réservation.',
+    points: ['Ajoutez votre annonce avec photos et prix', 'Recevez des demandes et acceptez-les ou refusez-les', 'Suivez vos revenus dans le tableau de bord d’hôte'],
+    signedInAs: 'Connecté en tant que',
+    cta: 'Commencer à accueillir',
+    back: 'Retour à la réservation',
+    error: 'Impossible d’activer l’accueil. Veuillez réessayer.',
+  },
 }
 
 export function BecomeHostPage({ lang, returnPath }: Props) {

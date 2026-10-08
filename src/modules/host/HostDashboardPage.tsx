@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties, ReactNode } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   decidePrototypeHostRequest,
   deletePrototypeHostListing,
@@ -245,13 +245,120 @@ const copy = {
     replyFaster: 'Reply faster to keep SLA healthy',
     apply: 'Apply',
   },
+  fr: {
+    back: 'Retour à l’accueil',
+    title: 'Tableau de bord vendeur / hôte',
+    staysTitle: 'Tableau de bord des séjours',
+    staysSubtitle: 'Vos séjours, demandes des voyageurs, photos, filtres et paiements protégés.',
+    carsTitle: 'Tableau de bord vendeur de véhicules',
+    carsSubtitle: 'Vos véhicules, demandes des clients, dossiers des véhicules, photos et paiements protégés.',
+    newConstructionTitle: 'Tableau de bord promoteur',
+    newConstructionSubtitle: 'Vos nouveaux projets, demandes de visite, documents du projet et plan de publication.',
+    marketplaceTitle: 'Tableau de bord vendeur Marketplace',
+    marketplaceSubtitle: 'Vos produits, demandes des clients, photos et livraison protégée.',
+    subtitle: 'Vos annonces et demandes des clients, directement depuis la base de données.',
+    refresh: 'Actualiser',
+    loading: 'Chargement',
+    error: 'Impossible de charger le tableau de bord vendeur',
+    listings: 'Annonces',
+    hosting: 'Hébergement',
+    approved: 'Approuvée',
+    pending: 'En cours de vérification',
+    requests: 'Demandes',
+    requested: 'En attente de décision',
+    confirmed: 'Confirmée',
+    revenue: 'Revenus confirmés',
+    inventory: 'Inventaire des annonces',
+    hostingInventory: 'Inventaire des logements',
+    inbox: 'Demandes des clients',
+    empty: 'Aucun élément pour le moment.',
+    price: 'Prix',
+    status: 'Statut',
+    guest: 'Voyageur',
+    division: 'Catégorie',
+    view: 'Voir l’annonce',
+    details: 'Détails de la demande',
+    pause: 'Suspendre',
+    resume: 'Republier',
+    manageCalendar: 'Calendrier des disponibilités',
+    hideCalendar: 'Masquer le calendrier',
+    instantBookOn: '⚡ Réservation instantanée : activée',
+    instantBookOff: 'Activer la réservation instantanée',
+    expiresOn: 'L’annonce expire le',
+    confirm: 'Confirmer',
+    cancel: 'Annuler',
+    saving: 'Enregistrement',
+    filters: 'Filtres de l’inventaire',
+    filtersHint: 'Mêmes symboles de recherche pour le vendeur et l’hôte.',
+    staysFiltersHint: 'Ces symboles s’affichent aux voyageurs lorsqu’ils recherchent un séjour.',
+    carsFiltersHint: 'Ces symboles s’affichent aux clients uniquement lorsqu’ils recherchent des véhicules.',
+    newConstructionFiltersHint: 'Ces symboles s’affichent aux clients uniquement lorsqu’ils recherchent de nouveaux projets.',
+    marketplaceFiltersHint: 'Ces symboles s’affichent aux clients uniquement lorsqu’ils recherchent sur la Marketplace.',
+    providerHealth: 'Santé du fournisseur',
+    hostDashboard: 'Tableau de bord hôte',
+    carSellerDashboard: 'Tableau de bord vendeur de véhicules',
+    builderDashboard: 'Tableau de bord promoteur',
+    marketplaceSellerDashboard: 'Tableau de bord vendeur Marketplace',
+    verifiedHost: 'Hôte vérifié',
+    verifiedCarSeller: 'Vendeur de véhicules vérifié',
+    verifiedBuilder: 'Promoteur vérifié',
+    verifiedMarketplaceSeller: 'Vendeur vérifié',
+    pendingVerification: 'Vérification en cours',
+    notVerifiedYet: 'Pas encore vérifié',
+    healthDegree: 'Indice de santé',
+    viewEarningsReport: 'Voir le rapport des revenus',
+    views: 'Visibilité de l’annonce',
+    bookingsImpact: 'Plus de réservations',
+    slaMaintenance: 'Maintien du délai de réponse',
+    activeListings: 'Annonces actives',
+    createNewListing: 'Créer une annonce',
+    activeCars: 'Véhicules actifs',
+    activeProjects: 'Projets actifs',
+    activeProducts: 'Produits actifs',
+    inquiries: 'Demandes',
+    listingViews: 'Vues',
+    quality: 'Qualité',
+    action: 'Action',
+    paymentState: 'Statut du paiement',
+    profitLog: 'Journal des revenus',
+    trustCenter: 'Centre de confiance',
+    opsSupport: 'Soutien aux opérations',
+    clientMessages: 'Messages des clients',
+    qualityScore: 'Qualité des annonces',
+    payoutReady: 'Prêt pour le versement',
+    responseSla: 'Délai de réponse',
+    aiImprove: 'Améliorations IA',
+    aiImproveCopy: 'Ajoutez de meilleures photos, un badge de confiance et une politique d’annulation claire pour augmenter vos conversions.',
+    openFinance: 'Ouvrir les finances',
+    openOperations: 'Ouvrir les opérations',
+    trustBadge: 'Badge de confiance',
+    protection: 'Protection des demandes',
+    termsTitle: 'Règles de protection SYBNB',
+    termsCopy: 'Je confirme que l’annonce est exacte, que le logement est prêt, que le prix et la réservation seront respectés, qu’aucun paiement externe ne sera demandé et que les règles d’annulation et de litige s’appliquent.',
+    termsRequired: 'Vous devez accepter les règles SYBNB avant de confirmer la réservation.',
+    markCheckedIn: 'Confirmer l’arrivée du voyageur',
+    markCheckedOut: 'Confirmer le départ du voyageur',
+    checkedInAt: 'Arrivée du voyageur',
+    checkedOutAt: 'Départ du voyageur',
+    finalStamp: 'FINAL · PARCOURS D’HÉBERGEMENT VÉRIFIÉ · RÉSERVATION, PAIEMENT ET VERSEMENT PROTÉGÉS',
+    finalLock: 'La page hôte est verrouillée en version finale : hôte vérifié, demandes protégées et versement uniquement après confirmation de l’administration.',
+    bookingVerified: 'Réservation confirmée',
+    paymentVerified: 'Paiement approuvé',
+    rulesVerified: 'Règles de l’hôte acceptées',
+    payoutProtected: 'Versement protégé',
+    currentListings: '3 annonces actives',
+    addPhotos: 'Ajoutez 4 photos de plus pour améliorer la visibilité de votre annonce',
+    updatePolicy: 'Mettez à jour la politique d’annulation pour renforcer la confiance',
+    replyFaster: 'Répondez plus vite aux demandes pour maintenir votre délai de réponse',
+    apply: 'Appliquer',
+  },
 }
 
 export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const isStaysHost = focus === 'stays'
-  const providerCopy = getProviderCopy(t, isAr, focus, mode)
+  const providerCopy = getProviderCopy(t, lang, focus, mode)
   const [overview, setOverview] = useState<PlatformHostOverview | null>(null)
   const [earnings, setEarnings] = useState<PlatformHostEarnings | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'saving'>('loading')
@@ -312,23 +419,31 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     ? `${visibleListings.length} ${providerCopy.activeUnit}`
     : `${visibleListings.length} ${providerCopy.activeUnit}`
 
-  const hostDocumentsCopy = getHostDocumentsCopy(isAr, focus)
-    || (isAr
-      ? {
+  const hostDocumentsCopy = getHostDocumentsCopy(lang, focus)
+    || pick(lang,
+      {
         title: 'مستندات المضيف والاستضافة',
         help: 'ارفع الهوية، إثبات الملكية أو التفويض، صور العقار، وأي ترخيص مطلوب. الإدارة تراجعها قبل تفعيل الثقة والصرف.',
         cta: 'رفع مستندات المضيف',
         empty: 'لم يتم رفع مستندات بعد. أضف PDF أو PNG أو JPG.',
         send: 'إرسال المستندات للإدارة',
         sent: 'تم إرسال مستندات المضيف للإدارة',
-      }
-      : {
+      },
+      {
         title: 'Host and hosting documents',
         help: 'Upload ID, ownership proof or authorization, property photos, and any required license. Admin reviews them before trust and payout are enabled.',
         cta: 'Upload host documents',
         empty: 'No host documents uploaded yet. Add PDF, PNG, or JPG.',
         send: 'Send documents to admin',
         sent: 'Host documents sent to admin',
+      },
+      {
+        title: 'Documents de l’hôte et du logement',
+        help: 'Téléversez votre pièce d’identité, une preuve de propriété ou une autorisation, des photos du logement et tout permis requis. L’administration les vérifie avant d’activer la confiance et les versements.',
+        cta: 'Téléverser les documents de l’hôte',
+        empty: 'Aucun document téléversé pour le moment. Ajoutez un PDF, PNG ou JPG.',
+        send: 'Envoyer les documents à l’administration',
+        sent: 'Documents de l’hôte envoyés à l’administration',
       })
 
   function addHostDocumentFiles(fileList: FileList | null) {
@@ -446,7 +561,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   }
 
   async function deleteListing(listingId: string) {
-    if (!window.confirm(isAr ? 'حذف هذا الإعلان نهائياً؟ لا يمكن التراجع.' : 'Permanently delete this listing? This cannot be undone.')) return
+    if (!window.confirm(pick(lang, 'حذف هذا الإعلان نهائياً؟ لا يمكن التراجع.', 'Permanently delete this listing? This cannot be undone.', 'Supprimer définitivement cette annonce ? Cette action est irréversible.'))) return
     setStatus('saving')
     setActiveListingId(listingId)
     setMessage('')
@@ -484,8 +599,8 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <section style={styles.topBar}>
         <div style={styles.topIcons}>
-          <button aria-label={isAr ? 'التنبيهات' : 'Notifications'} style={styles.iconCircle} onClick={() => (window.location.hash = '/immocontact')}>⌁</button>
-          <button aria-label={isAr ? 'الإعدادات' : 'Settings'} style={styles.iconCircle} onClick={() => (window.location.hash = '/status')}>⚙</button>
+          <button aria-label={pick(lang, 'التنبيهات', 'Notifications', 'Notifications')} style={styles.iconCircle} onClick={() => (window.location.hash = '/immocontact')}>⌁</button>
+          <button aria-label={pick(lang, 'الإعدادات', 'Settings', 'Paramètres')} style={styles.iconCircle} onClick={() => (window.location.hash = '/status')}>⚙</button>
         </div>
         <div style={styles.hostIdentity}>
           <strong>{providerCopy.dashboardTitle}</strong>
@@ -495,8 +610,8 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           type="button"
           style={{ ...styles.avatar, border: '1px solid #5268ff', color: '#fff', cursor: 'pointer' }}
           onClick={() => (window.location.hash = '/host/profile')}
-          aria-label={lang === 'ar' ? 'ملفك كمضيف' : 'Your host profile'}
-          title={lang === 'ar' ? 'ملفك كمضيف' : 'Your host profile'}
+          aria-label={pick(lang, 'ملفك كمضيف', 'Your host profile', 'Votre profil d’hôte')}
+          title={pick(lang, 'ملفك كمضيف', 'Your host profile', 'Votre profil d’hôte')}
         >
           {(overview?.host.displayName || 'A').slice(0, 1)}
         </button>
@@ -506,7 +621,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         <article style={styles.healthHero}>
           <span>SYBNB · {verificationStatusText}</span>
           <strong>{trustScore}%</strong>
-          <small>{responseScore}% {isAr ? 'معدل الاستجابة' : 'response score'}</small>
+          <small>{responseScore}% {pick(lang, 'معدل الاستجابة', 'response score', 'taux de réponse')}</small>
         </article>
         <div style={styles.hostMetric}>
           <span>{t.payoutReady}</span>
@@ -526,10 +641,10 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <small>/100</small>
           <em>
             {healthScore >= 80
-              ? (isAr ? 'أداء ممتاز' : 'Excellent performance')
+              ? pick(lang, 'أداء ممتاز', 'Excellent performance', 'Excellente performance')
               : healthScore >= 50
-                ? (isAr ? 'أداء جيد' : 'Good performance')
-                : (isAr ? 'يحتاج تحسين' : 'Needs improvement')}
+                ? pick(lang, 'أداء جيد', 'Good performance', 'Bonne performance')
+                : pick(lang, 'يحتاج تحسين', 'Needs improvement', 'À améliorer')}
           </em>
         </div>
       </section>
@@ -538,15 +653,15 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
 
       <section style={styles.aiPanel}>
         <div style={styles.aiTitle}>
-          <strong>AI Brain / {isAr ? 'يقترح' : 'Suggests'}</strong>
+          <strong>AI Brain / {pick(lang, 'يقترح', 'Suggests', 'Suggère')}</strong>
           <span>✣</span>
         </div>
         <small style={{ color: '#9aa6ba' }}>
-          {isAr ? 'نصائح عامة، وليست تحليلاً مخصصاً لبيانات إعلانك.' : 'Generic tips, not a personalized analysis of your listing data.'}
+          {pick(lang, 'نصائح عامة، وليست تحليلاً مخصصاً لبيانات إعلانك.', 'Generic tips, not a personalized analysis of your listing data.', 'Conseils généraux, et non une analyse personnalisée des données de votre annonce.')}
         </small>
         {[
-          [t.addPhotos, isAr ? 'مثال' : 'EXAMPLE'],
-          [t.updatePolicy, isAr ? 'مثال' : 'EXAMPLE'],
+          [t.addPhotos, pick(lang, 'مثال', 'EXAMPLE', 'EXEMPLE')],
+          [t.updatePolicy, pick(lang, 'مثال', 'EXAMPLE', 'EXEMPLE')],
           [t.replyFaster, t.slaMaintenance],
         ].map(([title, impact]) => (
           <article key={title} style={styles.aiSuggestion}>
@@ -572,7 +687,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         </div>
         <div style={styles.hostTable}>
           <div style={styles.hostTableHead}>
-            <span>{isAr ? 'العنوان' : 'Title'}</span>
+            <span>{pick(lang, 'العنوان', 'Title', 'Titre')}</span>
             <span>{t.quality}</span>
             <span>{t.status}</span>
             <span>{t.listingViews}</span>
@@ -583,10 +698,10 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           {visibleListings.slice(0, 3).map((listing) => {
             const quality = listingQualityScore(listing)
             const statusLabel = quality >= 75
-              ? (isAr ? 'نشط' : 'Active')
+              ? pick(lang, 'نشط', 'Active', 'Active')
               : quality >= 50
-                ? (isAr ? 'تحسين مطلوب' : 'Needs improvement')
-                : (isAr ? 'غير مكتمل' : 'Incomplete')
+                ? pick(lang, 'تحسين مطلوب', 'Needs improvement', 'À améliorer')
+                : pick(lang, 'غير مكتمل', 'Incomplete', 'Incomplète')
             const statusTone = quality >= 75 ? styles.statusGreen : quality >= 50 ? styles.statusGold : styles.statusRed
             return (
               <article key={listing.id} style={styles.hostTableRow}>
@@ -630,7 +745,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
             : isDocumentPendingReview
               ? t.pendingVerification
               : hostDocumentUploadStatus === 'uploading'
-                ? (isAr ? 'جارٍ الإرسال...' : 'Sending...')
+                ? pick(lang, 'جارٍ الإرسال...', 'Sending...', 'Envoi...')
                 : hostDocumentsCopy.send}
         </button>
       </section>
@@ -663,7 +778,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
               {listing.expiresAt && (
                 <Info
                   label={t.expiresOn}
-                  value={new Date(listing.expiresAt).toLocaleDateString(localeForLang(isAr ? 'ar' : 'en'), { timeZone: 'UTC' })}
+                  value={new Date(listing.expiresAt).toLocaleDateString(pick(lang, localeForLang('ar'), localeForLang('en'), 'fr-CA'), { timeZone: 'UTC' })}
                   dir={isAr ? 'rtl' : 'ltr'}
                 />
               )}
@@ -735,7 +850,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
               {['CONFIRMED', 'COMPLETED'].includes(request.status) && (
                 <div style={styles.actions}>
                   {request.guestCheckedInAt ? (
-                    <Info label={t.checkedInAt} value={new Date(request.guestCheckedInAt).toLocaleString(localeForLang(isAr ? 'ar' : 'en'))} dir={isAr ? 'rtl' : 'ltr'} />
+                    <Info label={t.checkedInAt} value={new Date(request.guestCheckedInAt).toLocaleString(pick(lang, localeForLang('ar'), localeForLang('en'), 'fr-CA'))} dir={isAr ? 'rtl' : 'ltr'} />
                   ) : (
                     <button
                       disabled={activeRequestId === request.id}
@@ -746,7 +861,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                     </button>
                   )}
                   {request.guestCheckedOutAt ? (
-                    <Info label={t.checkedOutAt} value={new Date(request.guestCheckedOutAt).toLocaleString(localeForLang(isAr ? 'ar' : 'en'))} dir={isAr ? 'rtl' : 'ltr'} />
+                    <Info label={t.checkedOutAt} value={new Date(request.guestCheckedOutAt).toLocaleString(pick(lang, localeForLang('ar'), localeForLang('en'), 'fr-CA'))} dir={isAr ? 'rtl' : 'ltr'} />
                   ) : (
                     <button
                       disabled={activeRequestId === request.id || !request.guestCheckedInAt}
@@ -856,7 +971,7 @@ function matchesProviderFocus(listing: Pick<PlatformListing, 'division'>, focus?
   return true
 }
 
-function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focus?: ProviderFocus, mode?: HostDashboardMode) {
+function getProviderCopy(t: typeof copy.ar | typeof copy.en | typeof copy.fr, lang: Lang, focus?: ProviderFocus, mode?: HostDashboardMode) {
   if (focus === 'cars') {
     return {
       dashboardTitle: t.carSellerDashboard,
@@ -864,7 +979,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
       verifiedLabel: t.verifiedCarSeller,
       filtersHint: t.carsFiltersHint,
       inventoryTitle: t.activeCars,
-      activeUnit: isAr ? 'مركبات حاليا' : 'active cars',
+      activeUnit: pick(lang, 'مركبات حاليا', 'active cars', 'véhicules actifs'),
       verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
     }
   }
@@ -875,7 +990,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
       verifiedLabel: t.verifiedBuilder,
       filtersHint: t.newConstructionFiltersHint,
       inventoryTitle: t.activeProjects,
-      activeUnit: isAr ? 'مشاريع حاليا' : 'active projects',
+      activeUnit: pick(lang, 'مشاريع حاليا', 'active projects', 'projets actifs'),
       verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
     }
   }
@@ -886,7 +1001,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
       verifiedLabel: t.verifiedMarketplaceSeller,
       filtersHint: t.marketplaceFiltersHint,
       inventoryTitle: t.activeProducts,
-      activeUnit: isAr ? 'منتجات حاليا' : 'active products',
+      activeUnit: pick(lang, 'منتجات حاليا', 'active products', 'produits actifs'),
       verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
     }
   }
@@ -897,7 +1012,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
       verifiedLabel: t.verifiedHost,
       filtersHint: t.staysFiltersHint,
       inventoryTitle: t.hostingInventory,
-      activeUnit: isAr ? 'استضافات حاليا' : 'active stays',
+      activeUnit: pick(lang, 'استضافات حاليا', 'active stays', 'séjours actifs'),
       verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
     }
   }
@@ -910,7 +1025,7 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
       verifiedLabel: t.verifiedHost,
       filtersHint: t.staysFiltersHint,
       inventoryTitle: t.hostingInventory,
-      activeUnit: isAr ? 'استضافات حاليا' : 'active stays',
+      activeUnit: pick(lang, 'استضافات حاليا', 'active stays', 'séjours actifs'),
       verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
     }
   }
@@ -920,68 +1035,92 @@ function getProviderCopy(t: typeof copy.ar | typeof copy.en, isAr: boolean, focu
     verifiedLabel: t.verifiedHost,
     filtersHint: t.filtersHint,
     inventoryTitle: t.inventory,
-    activeUnit: isAr ? 'إعلانات حاليا' : 'active listings',
+    activeUnit: pick(lang, 'إعلانات حاليا', 'active listings', 'annonces actives'),
     verifiedLine: (name: string | undefined, statusText: string) => (name ? `${name} · ${statusText}` : statusText),
   }
 }
 
-function getHostDocumentsCopy(isAr: boolean, focus?: ProviderFocus) {
+function getHostDocumentsCopy(lang: Lang, focus?: ProviderFocus) {
   if (focus === 'cars') {
-    return isAr
-      ? {
+    return pick(lang,
+      {
           title: 'مستندات بائع المركبات',
           help: 'ارفع رخصة المعرض أو الوكيل، ملكية المركبة، صور السيارة، الفحص الفني، وأي تفويض مطلوب قبل نشر المركبة.',
           cta: 'رفع مستندات المركبة',
           empty: 'لم يتم رفع مستندات المركبة بعد. أضف PDF أو PNG أو JPG.',
           send: 'إرسال مستندات المركبة للإدارة',
           sent: 'تم إرسال مستندات المركبة للإدارة',
-        }
-      : {
+        },
+      {
           title: 'Vehicle seller documents',
           help: 'Upload dealer/agent license, vehicle ownership, car photos, inspection files, and any required authorization before publishing.',
           cta: 'Upload vehicle documents',
           empty: 'No vehicle documents uploaded yet. Add PDF, PNG, or JPG.',
           send: 'Send vehicle documents to admin',
           sent: 'Vehicle documents sent to admin',
-        }
+        },
+      {
+          title: 'Documents du vendeur de véhicules',
+          help: 'Téléversez le permis de concessionnaire ou d’agent, la preuve de propriété du véhicule, les photos, les rapports d’inspection et toute autorisation requise avant la publication.',
+          cta: 'Téléverser les documents du véhicule',
+          empty: 'Aucun document de véhicule téléversé pour le moment. Ajoutez un PDF, PNG ou JPG.',
+          send: 'Envoyer les documents du véhicule à l’administration',
+          sent: 'Documents du véhicule envoyés à l’administration',
+        })
   }
   if (focus === 'newConstruction') {
-    return isAr
-      ? {
+    return pick(lang,
+      {
           title: 'مستندات المطور والمشروع',
           help: 'ارفع رخصة المطور، سند الأرض أو الملكية، رخص البناء، المخططات، صور المشروع، وجدول الوحدات قبل نشر المشروع.',
           cta: 'رفع مستندات المشروع',
           empty: 'لم يتم رفع مستندات المشروع بعد. أضف PDF أو PNG أو JPG.',
           send: 'إرسال مستندات المشروع للإدارة',
           sent: 'تم إرسال مستندات المشروع للإدارة',
-        }
-      : {
+        },
+      {
           title: 'Developer and project documents',
           help: 'Upload developer license, land/ownership deed, building permits, plans, project photos, and unit schedule before publishing.',
           cta: 'Upload project documents',
           empty: 'No project documents uploaded yet. Add PDF, PNG, or JPG.',
           send: 'Send project documents to admin',
           sent: 'Project documents sent to admin',
-        }
+        },
+      {
+          title: 'Documents du promoteur et du projet',
+          help: 'Téléversez le permis de promoteur, le titre foncier ou de propriété, les permis de construire, les plans, les photos du projet et le tableau des unités avant la publication.',
+          cta: 'Téléverser les documents du projet',
+          empty: 'Aucun document de projet téléversé pour le moment. Ajoutez un PDF, PNG ou JPG.',
+          send: 'Envoyer les documents du projet à l’administration',
+          sent: 'Documents du projet envoyés à l’administration',
+        })
   }
   if (focus === 'marketplace') {
-    return isAr
-      ? {
+    return pick(lang,
+      {
           title: 'مستندات بائع السوق',
           help: 'ارفع هوية البائع، صور المنتج، فاتورة أو إثبات الملكية، وأي تفويض مطلوب قبل نشر المنتج.',
           cta: 'رفع مستندات المنتج',
           empty: 'لم يتم رفع مستندات المنتج بعد. أضف PDF أو PNG أو JPG.',
           send: 'إرسال مستندات المنتج للإدارة',
           sent: 'تم إرسال مستندات المنتج للإدارة',
-        }
-      : {
+        },
+      {
           title: 'Marketplace seller documents',
           help: 'Upload seller ID, product photos, invoice/ownership proof, and any required authorization before publishing.',
           cta: 'Upload product documents',
           empty: 'No product documents uploaded yet. Add PDF, PNG, or JPG.',
           send: 'Send product documents to admin',
           sent: 'Product documents sent to admin',
-        }
+        },
+      {
+          title: 'Documents du vendeur Marketplace',
+          help: 'Téléversez la pièce d’identité du vendeur, les photos du produit, une facture ou preuve de propriété et toute autorisation requise avant la publication.',
+          cta: 'Téléverser les documents du produit',
+          empty: 'Aucun document de produit téléversé pour le moment. Ajoutez un PDF, PNG ou JPG.',
+          send: 'Envoyer les documents du produit à l’administration',
+          sent: 'Documents du produit envoyés à l’administration',
+        })
   }
   return null
 }

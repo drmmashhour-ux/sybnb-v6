@@ -1,11 +1,16 @@
-export type Lang = 'ar' | 'en'
+// Three interface languages: Arabic (RTL), English and French (LTR).
+export type Lang = 'ar' | 'en' | 'fr'
 
 const STORAGE_KEY = 'sybnb_v6_language'
+
+export function isLang(value: unknown): value is Lang {
+  return value === 'ar' || value === 'en' || value === 'fr'
+}
 
 export function getInitialLanguage(): Lang {
   if (typeof window === 'undefined') return 'ar'
   const stored = window.localStorage.getItem(STORAGE_KEY)
-  return stored === 'en' || stored === 'ar' ? stored : 'ar'
+  return isLang(stored) ? stored : 'ar'
 }
 
 export function persistLanguage(lang: Lang) {
@@ -16,6 +21,16 @@ export function persistLanguage(lang: Lang) {
   }
 }
 
-export function text(pair: { ar: string; en: string }, lang: Lang) {
-  return lang === 'ar' ? pair.ar : pair.en
+// Bilingual pairs keep working: French falls back to English when no `fr` is given.
+export function text(pair: { ar: string; en: string; fr?: string }, lang: Lang) {
+  if (lang === 'ar') return pair.ar
+  if (lang === 'fr') return pair.fr ?? pair.en
+  return pair.en
+}
+
+// Inline three-way choice: pick(lang, 'عربي', 'English', 'Français'). French falls back to English.
+export function pick<T>(lang: Lang, ar: T, en: T, fr?: T): T {
+  if (lang === 'ar') return ar
+  if (lang === 'fr') return fr ?? en
+  return en
 }

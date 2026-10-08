@@ -1,9 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
-import { confirmOtp, createGuestAccountSession, requestOtp, submitGuestIdDocument } from '../../shared/api/platformApi'
-import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
-import { PaymentProofUpload } from '../payments/PaymentProofUpload'
+import { confirmOtp, createGuestAccountSession, requestOtp, signInGuestAccount } from '../../shared/api/platformApi'
+
+// Airbnb-style account flow, one question per screen:
+//   1. email            -> "Log in or sign up"
+//   2. password         -> returning users are signed in right here (email + password only)
+//   3. finish sign-up   -> only when no account matched: name + the 6-digit code we just emailed
+// The server still requires a verified email OTP for every registration (auth.mjs) -- that rule is
+// unchanged; we simply only ask for it from people who are actually creating an account.
+// ID upload is no longer asked at sign-up: it stays required once, before the first booking is
+// confirmed (BookingDetailPage / TrustProtectionRoutes), exactly as before.
 
 type Props = {
   lang: Lang
@@ -12,360 +19,295 @@ type Props = {
   returnPath?: string
 }
 
+type Step = 'email' | 'password' | 'finish'
+
 const CUSTOMER_GATE_KEY = 'sybnb-v6-customer-account-ready'
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 
 const copy = {
   ar: {
-    back: 'رجوع',
-    next: 'التالي',
-    title: 'حساب الإيجار اليومي',
-    rentalsTitle: 'حساب الإيجار الشهري',
-    rideTitle: 'حساب SR Ride',
-    genericTitle: 'إنشاء حساب SYBNB',
-    gateTitle: 'يرجى تسجيل الدخول للمتابعة',
-    gateChip: 'طلب إيجار',
-    rideGateChip: 'طلب رحلة',
-    subtitle: 'أنشئ الحساب أو سجّل الدخول قبل إرسال طلب الحجز. الدفع لا يبدأ من هذه الخطوة.',
-    rentalsSubtitle: 'أنشئ الحساب أو سجّل الدخول قبل متابعة طلب الإيجار الشهري. الدفع لا يبدأ قبل فتح الطلب الصحيح.',
-    rideSubtitle: 'أنشئ الحساب أو سجّل الدخول قبل إرسال طلب الرحلة. يلزم حساب مؤكد قبل إرسال الطلب.',
-    genericSubtitle: 'أنشئ حسابك بالبريد الإلكتروني للاستفادة من كل خدمات SYBNB. الدفع لا يبدأ من هذه الخطوة.',
-    signup: 'تسجيل حساب جديد',
-    signin: 'تسجيل الدخول',
+    emailTitle: 'تسجيل الدخول أو إنشاء حساب',
+    welcome: 'أهلاً بك في SYBNB',
+    email: 'البريد الإلكتروني',
+    continue: 'متابعة',
+    passwordTitle: 'أدخل كلمة المرور',
+    password: 'كلمة المرور',
+    passwordHint: 'جديد في SYBNB؟ اختر كلمة مرور من 8 أحرف على الأقل.',
+    show: 'إظهار',
+    hide: 'إخفاء',
+    finishTitle: 'إكمال التسجيل',
+    finishBody: (masked: string) => `لا يوجد حساب بهذا البريد بعد. أرسلنا رمزاً من 6 أرقام إلى ${masked}.`,
     firstName: 'الاسم الأول',
     lastName: 'اسم العائلة',
-    email: 'البريد الإلكتروني',
-    phone: 'رقم الهاتف (اختياري)',
-    password: 'كلمة المرور',
-    repeatPassword: 'تأكيد كلمة المرور',
-    sendCode: 'إرسال الرمز إلى البريد',
-    sending: 'جارٍ الإرسال…',
-    resendCode: 'إعادة إرسال الرمز',
     code: 'رمز التحقق',
-    confirmCode: 'تأكيد الرمز',
-    openAccount: 'فتح الحساب والمتابعة',
-    signInAccount: 'تسجيل الدخول والمتابعة',
-    error: 'أكمل البيانات المطلوبة، تأكد من كلمة المرور، ثم اطلب رمز البريد الإلكتروني وأكّده قبل فتح الحساب.',
-    invalidEmail: 'أدخل بريداً إلكترونياً صحيحاً لإرسال الرمز.',
+    resend: 'إعادة إرسال الرمز',
+    resent: 'تم إرسال رمز جديد.',
+    agree: 'موافقة ومتابعة',
+    back: 'رجوع',
+    edit: 'تعديل',
+    invalidEmail: 'أدخل بريداً إلكترونياً صحيحاً.',
+    shortPassword: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل.',
+    missingName: 'أدخل الاسم الأول واسم العائلة.',
+    missingCode: 'أدخل الرمز المكوّن من 6 أرقام.',
+    wrongPassword: 'هذا البريد لديه حساب، لكن كلمة المرور غير صحيحة. حاول مرة أخرى.',
     networkError: 'تعذّر الاتصال بالخادم. تحقق من الاتصال وحاول مرة أخرى.',
-    codeSentPrefix: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني',
-    idDocumentTitle: 'إثبات الهوية (اختياري الآن)',
-    idDocumentHelp: 'ارفع صورة واضحة عن هويتك الشخصية أو جواز السفر الآن، أو لاحقاً قبل الدفع. مطلوب مرة واحدة فقط قبل تأكيد أول حجز.',
-    idDocumentCta: 'اضغط لرفع صورة الهوية',
-    idDocumentEmpty: 'لم يتم رفع الهوية بعد. يمكنك رفعها لاحقاً قبل الدفع.',
-    idDocumentRequired: 'ارفع صورة عن هويتك قبل الدفع.',
-    codeSent: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني.',
-    verified: 'تم تأكيد البريد. اضغط الزر بالأسفل لإنشاء حسابك والمتابعة.',
-    ready: 'تم تجهيز حساب العميل. يمكنك الآن إرسال طلب الحجز.',
-    rentalsReady: 'تم تجهيز حساب العميل. يمكنك الآن متابعة طلب الإيجار.',
-    rideReady: 'تم تجهيز حساب العميل. يمكنك الآن متابعة طلب الرحلة.',
-    genericReady: 'تم إنشاء حسابك بنجاح.',
-    policy: 'بعد فتح الحساب يعود العميل إلى تفاصيل الإعلان لإرسال الطلب. الدفع يأتي بعد إنشاء الطلب فقط.',
-    rentalsPolicy: 'بعد فتح الحساب يعود العميل إلى صفحة الإيجار الشهري لمراجعة الاختيارات ومتابعة الطلب. الدفع يأتي بعد إنشاء الطلب فقط.',
-    ridePolicy: 'بعد فتح الحساب يعود العميل إلى SR Ride لإدخال نقطة الانطلاق والوجهة وطلب السائق.',
-    genericPolicy: 'حساب واحد لكل خدمات SYBNB داخل سوريا. الدفع لا يبدأ من هذه الخطوة.',
+    terms: 'بالضغط على «موافقة ومتابعة» أوافق على شروط استخدام SYBNB. الدفع لا يبدأ من هذه الخطوة.',
+    ready: 'تم. حسابك جاهز.',
   },
   en: {
-    back: 'Back',
-    next: 'Next',
-    title: 'Short-Term Rental Account',
-    rentalsTitle: 'Monthly Rental Account',
-    rideTitle: 'SR Ride Account',
-    genericTitle: 'Create your SYBNB account',
-    gateTitle: 'Please sign in to continue',
-    gateChip: 'Rental request',
-    rideGateChip: 'Ride request',
-    subtitle: 'Create an account or sign in before sending the booking request. Payment does not start from this step.',
-    rentalsSubtitle: 'Create an account or sign in before continuing the monthly rental request. Payment starts only after the correct request is opened.',
-    rideSubtitle: 'Create an account or sign in before requesting a ride. A verified account is required before dispatch.',
-    genericSubtitle: 'Create your account with your email to use all SYBNB services. Payment does not start from this step.',
-    signup: 'Create new account',
-    signin: 'Sign in',
+    emailTitle: 'Log in or sign up',
+    welcome: 'Welcome to SYBNB',
+    email: 'Email',
+    continue: 'Continue',
+    passwordTitle: 'Enter your password',
+    password: 'Password',
+    passwordHint: 'New to SYBNB? Choose a password with at least 8 characters.',
+    show: 'Show',
+    hide: 'Hide',
+    finishTitle: 'Finish signing up',
+    finishBody: (masked: string) => `No account uses this email yet. We sent a 6-digit code to ${masked}.`,
     firstName: 'First name',
     lastName: 'Last name',
-    email: 'Email address',
-    phone: 'Phone number (optional)',
-    password: 'Password',
-    repeatPassword: 'Repeat password',
-    sendCode: 'Email me the code',
-    sending: 'Sending…',
-    resendCode: 'Resend code',
     code: 'Verification code',
-    confirmCode: 'Confirm code',
-    openAccount: 'Open account and continue',
-    signInAccount: 'Sign in and continue',
-    error: 'Complete the required details, confirm the password, then request and confirm the email code before opening the account.',
-    invalidEmail: 'Enter a valid email address to receive the code.',
+    resend: 'Resend code',
+    resent: 'A new code is on its way.',
+    agree: 'Agree and continue',
+    back: 'Back',
+    edit: 'Edit',
+    invalidEmail: 'Enter a valid email address.',
+    shortPassword: 'Your password needs at least 8 characters.',
+    missingName: 'Enter your first and last name.',
+    missingCode: 'Enter the 6-digit code.',
+    wrongPassword: 'This email already has an account, but the password is incorrect. Try again.',
     networkError: 'Could not reach the server. Check your connection and try again.',
-    codeSentPrefix: 'Verification code sent to your email',
-    idDocumentTitle: 'ID verification (optional for now)',
-    idDocumentHelp: 'Upload a clear photo of your national ID or passport now, or later before payment. Required once, before your first booking is confirmed.',
-    idDocumentCta: 'Tap to upload your ID photo',
-    idDocumentEmpty: 'No ID uploaded yet. You can add it later before payment.',
-    idDocumentRequired: 'Upload a photo of your ID before payment.',
-    codeSent: 'Verification code sent to your email.',
-    verified: 'Email verified. Tap the button below to create your account and continue.',
-    ready: 'Guest account is ready. You can now send the booking request.',
-    rentalsReady: 'Guest account is ready. You can now continue the rental request.',
-    rideReady: 'Guest account is ready. You can now continue the ride request.',
-    genericReady: 'Your account is ready.',
-    policy: 'After opening the account, the guest returns to the stay details to send the booking request. Payment comes only after the booking request is created.',
-    rentalsPolicy: 'After opening the account, the renter returns to the monthly rental page to review choices and continue the request. Payment comes only after the request is created.',
-    ridePolicy: 'After opening the account, the client returns to SR Ride to enter pickup, destination, and request a driver.',
-    genericPolicy: 'One account for all SYBNB services in Syria. Payment does not start from this step.',
+    terms: 'By selecting Agree and continue, I agree to the SYBNB Terms of Service. Payment does not start from this step.',
+    ready: 'Done. Your account is ready.',
   },
 }
 
-export function GuestAccountPage({ lang, listingId, flow = 'stays', returnPath: explicitReturnPath }: Props) {
+export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPath }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
-  const [mode, setMode] = useState<'signup' | 'signin'>('signup')
+  const [step, setStep] = useState<Step>('email')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [password, setPassword] = useState('')
-  const [repeatPassword, setRepeatPassword] = useState('')
-  const [codeSent, setCodeSent] = useState(false)
   const [code, setCode] = useState('')
-  const [codeConfirmed, setCodeConfirmed] = useState(false)
-  const [idDocumentFiles, setIdDocumentFiles] = useState<string[]>([])
-  // The real File object (the one that actually gets uploaded) — kept separate from the
-  // display-only name list above, which feeds the shared PaymentProofUpload component.
-  const [idDocumentFile, setIdDocumentFile] = useState<File | null>(null)
+  const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [tone, setTone] = useState<'error' | 'success' | 'info'>('info')
-  const [sending, setSending] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const focusRef = useRef<HTMLInputElement>(null)
 
-  // Always surface a status; never swallow an OTP/API error silently.
-  function setStatus(text: string, nextTone: 'error' | 'success' | 'info') {
+  const returnPath = listingId ? `/listing/${listingId}` : sanitizeReturnPath(explicitReturnPath) || readStoredReturnPath()
+  const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
+
+  useEffect(() => {
+    focusRef.current?.focus()
+  }, [step])
+
+  function say(text: string, nextTone: 'error' | 'success' | 'info' = 'error') {
     setMessage(text)
     setTone(nextTone)
   }
 
-  function addIdDocumentFiles(fileList: FileList | null) {
-    const selected = Array.from(fileList || [])
-    const file = selected[selected.length - 1]
-    if (!file) return
-    setIdDocumentFile(file)
-    setIdDocumentFiles([file.name])
-  }
-  const returnPath = listingId ? `/listing/${listingId}` : sanitizeReturnPath(explicitReturnPath) || readStoredReturnPath()
-  const isGenericFlow = flow === 'generic'
-  const isRentalsFlow = flow === 'rentals' || returnPath.startsWith('/rentals')
-  const isRideFlow = flow === 'ride' || returnPath.startsWith('/ride')
-  const title = isRideFlow ? t.rideTitle : isRentalsFlow ? t.rentalsTitle : isGenericFlow ? t.genericTitle : t.title
-  const subtitle = isRideFlow ? t.rideSubtitle : isRentalsFlow ? t.rentalsSubtitle : isGenericFlow ? t.genericSubtitle : t.subtitle
-  const gateTitle = isRentalsFlow || isRideFlow ? t.gateTitle : title
-  const readyMessage = isRideFlow ? t.rideReady : isRentalsFlow ? t.rentalsReady : isGenericFlow ? t.genericReady : t.ready
-  const policy = isRideFlow ? t.ridePolicy : isRentalsFlow ? t.rentalsPolicy : isGenericFlow ? t.genericPolicy : t.policy
-  const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
-  const codeInstruction = isAr
-    ? `رسالة من المنصة: أرسلنا رمز التحقق إلى بريدك الإلكتروني ${maskEmail(email)}. أدخل الرمز ثم اضغط تأكيد.`
-    : `Platform message: we sent the verification code to your email ${maskEmail(email)}. Enter it, then press confirm.`
-
-  // Surface the server's exact message (e.g. "code has expired" / "code is not correct") so invalid
-  // and expired states are distinct; fall back to a clear network message. Never swallow the error.
   function errText(err: unknown) {
     return err instanceof Error && err.message ? err.message : t.networkError
   }
 
-  async function complete() {
-    const signupMissing =
-      mode === 'signup' &&
-      (firstName.trim().length < 2 ||
-        lastName.trim().length < 2 ||
-        password !== repeatPassword)
-    if (
-      signupMissing ||
-      !emailValid ||
-      password.length < 8 ||
-      !codeSent ||
-      code.trim().length < 4 ||
-      !codeConfirmed
-    ) {
-      setStatus(t.error, 'error')
-      return
-    }
+  function finishAndReturn() {
+    sessionStorage.setItem(CUSTOMER_GATE_KEY, '1')
+    if (listingId) sessionStorage.setItem(`${CUSTOMER_GATE_KEY}:${listingId}`, '1')
+    if (!listingId) sessionStorage.removeItem(GUEST_RETURN_PATH_KEY)
+    say(t.ready, 'success')
+    // Dispatch the session event so App re-evaluates its route gate even when the hash is unchanged.
+    window.dispatchEvent(new Event('sybnb-session-changed'))
+    window.location.hash = returnPath
+  }
 
-    setSaving(true)
+  function submitEmail() {
+    if (!emailValid) return say(t.invalidEmail)
+    say('')
+    setStep('password')
+  }
+
+  async function submitPassword() {
+    if (password.length < 8) return say(t.shortPassword)
+    setBusy(true)
+    say('')
     try {
-      await createGuestAccountSession({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        password,
-      })
-      if (mode === 'signup' && idDocumentFile) {
-        // ID upload is OPTIONAL at this stage (see idDocumentHelp). A failure here (large file,
-        // transient 5xx, network) must never strand an already-created account on this screen --
-        // the user can re-upload later before payment. Swallow and continue to the gate/navigation.
-        try {
-          await submitGuestIdDocument(idDocumentFile)
-        } catch {
-          // non-fatal: account exists; ID can be added later before the first booking is confirmed.
-        }
-      }
-      sessionStorage.setItem(CUSTOMER_GATE_KEY, '1')
-      if (listingId) sessionStorage.setItem(`${CUSTOMER_GATE_KEY}:${listingId}`, '1')
-      if (!listingId) sessionStorage.removeItem(GUEST_RETURN_PATH_KEY)
-      setStatus(readyMessage, 'success')
-      // A real bug caught by an independent re-audit: `window.location.hash = returnPath` is a
-      // no-op (fires no `hashchange` event) whenever returnPath already equals the current hash --
-      // exactly the case for a gated route like /ride, whose own gate redirect set returnPath to
-      // itself. Without this, App's route-gate state never re-evaluates and a first-time signup
-      // strands the user on this screen after a successful account creation. Fixed the same way
-      // StaffAccessPage.tsx already does for staff login: dispatch the session-changed event App
-      // already listens for, so the re-render happens regardless of whether the hash itself changes.
-      window.dispatchEvent(new Event('sybnb-session-changed'))
-      window.location.hash = returnPath
-    } catch (error) {
-      setStatus(errText(error), 'error')
+      // Returning user: email + password is all the server needs.
+      await signInGuestAccount(email, password)
+      finishAndReturn()
+      return
+    } catch {
+      // No match -> treat as a new account and email the verification code.
+    }
+    try {
+      await requestOtp({ email: email.trim(), purpose: 'account-verify' })
+      setCode('')
+      setStep('finish')
+    } catch (err) {
+      say(errText(err))
     } finally {
-      setSaving(false)
+      setBusy(false)
     }
   }
 
+  async function resendCode() {
+    setBusy(true)
+    try {
+      await requestOtp({ email: email.trim(), purpose: 'account-verify' })
+      say(t.resent, 'info')
+    } catch (err) {
+      say(errText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function submitFinish() {
+    if (firstName.trim().length < 2 || lastName.trim().length < 2) return say(t.missingName)
+    if (code.trim().length !== 6) return say(t.missingCode)
+    setBusy(true)
+    say('')
+    try {
+      const ok = await confirmOtp({ email: email.trim(), purpose: 'account-verify', code: code.trim() })
+      if (!ok) {
+        say(t.missingCode)
+        return
+      }
+      await createGuestAccountSession({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), password })
+      finishAndReturn()
+    } catch (err) {
+      const text = errText(err)
+      // The email already had an account and the password typed on step 2 was wrong.
+      if (/invalid login credentials/i.test(text)) {
+        setPassword('')
+        setStep('password')
+        say(t.wrongPassword)
+      } else {
+        say(text)
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const title = step === 'email' ? t.emailTitle : step === 'password' ? t.passwordTitle : t.finishTitle
+
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <section style={styles.flowNav} aria-label={isAr ? 'التنقل بين الخطوات' : 'Step navigation'}>
-        <button style={styles.arrowButton} onClick={() => (window.location.hash = returnPath)} aria-label={t.back}>
-          ×
-        </button>
-        <button style={styles.arrowButton} onClick={() => void complete()} aria-label={t.next} disabled={saving}>
-          →
-        </button>
-      </section>
+      <section style={styles.card}>
+        <header style={styles.header}>
+          {step === 'email' ? (
+            <button style={styles.iconButton} onClick={() => (window.location.hash = returnPath)} aria-label={t.back}>
+              ×
+            </button>
+          ) : (
+            <button style={styles.iconButton} onClick={() => { say(''); setStep(step === 'finish' ? 'password' : 'email') }} aria-label={t.back}>
+              {isAr ? '›' : '‹'}
+            </button>
+          )}
+          <h1 style={styles.headerTitle}>{title}</h1>
+          <span style={styles.iconSpacer} />
+        </header>
 
-      <section style={styles.panel}>
-        <p style={styles.logo}>SYBNB</p>
-        <p style={styles.eyebrow}>{isRideFlow ? `${t.rideGateChip} — ${title}` : isRentalsFlow ? `${t.gateChip} — ${title}` : 'SYBNB V6'}</p>
-        <h1 style={styles.title}>{gateTitle}</h1>
-        <p style={styles.body}>{subtitle}</p>
-        <div style={styles.modeSwitch} role="tablist" aria-label={isAr ? 'نوع الحساب' : 'Account mode'}>
-          <button style={mode === 'signup' ? styles.modeButtonActive : styles.modeButton} onClick={() => setMode('signup')}>
-            {t.signup}
-          </button>
-          <button style={mode === 'signin' ? styles.modeButtonActive : styles.modeButton} onClick={() => setMode('signin')}>
-            {t.signin}
-          </button>
-        </div>
-        <div style={styles.formGrid}>
-          {mode === 'signup' ? (
+        <form
+          style={styles.body}
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (busy) return
+            if (step === 'email') submitEmail()
+            else if (step === 'password') void submitPassword()
+            else void submitFinish()
+          }}
+        >
+          {step === 'email' ? (
             <>
-              <input style={styles.input} value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder={t.firstName} aria-label={t.firstName} />
-              <input style={styles.input} value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder={t.lastName} aria-label={t.lastName} />
+              <h2 style={styles.welcome}>{t.welcome}</h2>
+              <input
+                ref={focusRef}
+                dir="ltr"
+                type="email"
+                autoComplete="email"
+                style={styles.input}
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder={t.email}
+                aria-label={t.email}
+              />
             </>
           ) : null}
-          <input dir="ltr" type="email" autoComplete="email" style={styles.input} value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t.email} aria-label={t.email} aria-invalid={email.trim().length > 0 && !emailValid} />
-          {email.trim().length > 0 && !emailValid ? (
-            <small role="alert" style={styles.fieldHint}>{t.invalidEmail}</small>
+
+          {step !== 'email' ? (
+            <div style={styles.emailChip}>
+              <span dir="ltr">{email.trim()}</span>
+              <button type="button" style={styles.linkButton} onClick={() => { say(''); setStep('email') }}>
+                {t.edit}
+              </button>
+            </div>
           ) : null}
-          <input dir="ltr" inputMode="tel" style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder={t.phone} aria-label={t.phone} />
-          <input style={styles.input} type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t.password} aria-label={t.password} />
-          {mode === 'signup' ? <input style={styles.input} type="password" value={repeatPassword} onChange={(event) => setRepeatPassword(event.target.value)} placeholder={t.repeatPassword} aria-label={t.repeatPassword} /> : null}
-        </div>
-        <div style={styles.codeRow}>
-          <button
-            style={styles.secondaryButton}
-            onClick={async () => {
-              if (!emailValid) {
-                setStatus(t.invalidEmail, 'error')
-                return
-              }
-              setSending(true)
-              try {
-                const res = await requestOtp({ email: email.trim(), purpose: 'account-verify' })
-                setCodeSent(true)
-                setCodeConfirmed(false)
-                setStatus(`${t.codeSentPrefix} (${res.maskedEmail || maskEmail(email)}).`, 'info')
-              } catch (err) {
-                setStatus(errText(err), 'error')
-              } finally {
-                setSending(false)
-              }
-            }}
-            disabled={sending || !emailValid}
-          >
-            {sending ? t.sending : codeSent ? t.resendCode : t.sendCode}
+
+          {step === 'password' ? (
+            <>
+              <div style={styles.passwordWrap}>
+                <input
+                  ref={focusRef}
+                  dir="ltr"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  style={{ ...styles.input, width: '100%' }}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={t.password}
+                  aria-label={t.password}
+                />
+                <button type="button" style={styles.showButton} onClick={() => setShowPassword((v) => !v)}>
+                  {showPassword ? t.hide : t.show}
+                </button>
+              </div>
+              <p style={styles.hint}>{t.passwordHint}</p>
+            </>
+          ) : null}
+
+          {step === 'finish' ? (
+            <>
+              <p style={styles.hint}>{t.finishBody(maskEmail(email))}</p>
+              <input
+                ref={focusRef}
+                dir="ltr"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                style={{ ...styles.input, ...styles.codeInput }}
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="••••••"
+                aria-label={t.code}
+              />
+              <button type="button" style={styles.linkButton} onClick={() => void resendCode()} disabled={busy}>
+                {t.resend}
+              </button>
+              <div style={styles.nameRow}>
+                <input style={styles.input} autoComplete="given-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder={t.firstName} aria-label={t.firstName} />
+                <input style={styles.input} autoComplete="family-name" value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder={t.lastName} aria-label={t.lastName} />
+              </div>
+              <p style={styles.terms}>{t.terms}</p>
+            </>
+          ) : null}
+
+          {message ? (
+            <strong role="status" aria-live="polite" style={tone === 'error' ? styles.error : tone === 'success' ? styles.success : styles.info}>
+              {message}
+            </strong>
+          ) : null}
+
+          <button type="submit" style={{ ...styles.primaryButton, opacity: busy ? 0.7 : 1 }} disabled={busy}>
+            {busy ? '…' : step === 'finish' ? t.agree : t.continue}
           </button>
-          <input
-            dir="ltr"
-            inputMode="numeric"
-            style={styles.input}
-            value={code}
-            onChange={(event) => {
-              setCode(event.target.value)
-              setCodeConfirmed(false)
-            }}
-            placeholder={t.code}
-            aria-label={t.code}
-          />
-          <button
-            style={styles.secondaryButton}
-            disabled={!codeSent || code.trim().length < 4}
-            onClick={async () => {
-              try {
-                const ok = await confirmOtp({ email: email.trim(), purpose: 'account-verify', code: code.trim() })
-                setCodeConfirmed(ok)
-                // The OTP is verified, but the account is NOT created until complete() runs. Show a
-                // "verified — now create the account" message, not the post-creation "account ready,
-                // send your booking request" message (which would be a false success here).
-                setStatus(ok ? t.verified : t.error, ok ? 'success' : 'error')
-              } catch (err) {
-                setCodeConfirmed(false)
-                setStatus(errText(err), 'error')
-              }
-            }}
-          >
-            {codeConfirmed ? '✓' : t.confirmCode}
-          </button>
-        </div>
-        {codeSent ? (
-          <div style={styles.codeBoxes} dir="ltr" aria-label={t.code}>
-            {Array.from({ length: 6 }).map((_, index) => (
-              <span key={index} style={styles.codeBox}>{code[index] || ''}</span>
-            ))}
-          </div>
-        ) : null}
-        {codeSent ? <p style={styles.notice}>{codeInstruction}</p> : null}
-        {mode === 'signup' && (
-          <PaymentProofUpload
-            lang={lang}
-            files={idDocumentFiles}
-            onAddFiles={addIdDocumentFiles}
-            title={t.idDocumentTitle}
-            cta={t.idDocumentCta}
-            help={t.idDocumentHelp}
-            emptyText={t.idDocumentEmpty}
-          />
-        )}
-        {mode === 'signup' && email.trim() && (
-          <p style={styles.notice}>
-            {isAr
-              ? `تفضل واتساب أو إيميل؟ أرسل صورة إثبات هويتك مع بريدك الإلكتروني (${email.trim()}) إلى `
-              : `Prefer WhatsApp or email? Send your ID photo with your account email (${email.trim()}) to `}
-            <a href={whatsappIdSubmissionLink(email.trim(), lang)} target="_blank" rel="noreferrer" style={{ color: '#dce3ff' }}>
-              {isAr ? 'واتساب' : 'WhatsApp'} ({SUPPORT_WHATSAPP_LOCAL})
-            </a>
-            {isAr ? ' أو ' : ' or '}
-            <a href={emailIdSubmissionLink(email.trim(), lang)} style={{ color: '#dce3ff' }}>
-              {SUPPORT_EMAIL}
-            </a>
-            .
-          </p>
-        )}
-        <p style={styles.policy}>{policy}</p>
-        {message ? (
-          <strong role="status" aria-live="polite" style={tone === 'error' ? styles.error : tone === 'success' ? styles.success : styles.infoText}>
-            {message}
-          </strong>
-        ) : null}
-        <button style={styles.primaryButton} onClick={() => void complete()} disabled={saving}>
-          {saving ? '...' : mode === 'signup' ? t.openAccount : t.signInAccount}
-        </button>
+        </form>
       </section>
     </main>
   )
@@ -376,13 +318,6 @@ function maskEmail(value: string) {
   if (!domain) return value.trim() || 'you@email'
   const maskedUser = user.length <= 2 ? `${user[0] || ''}•` : `${user.slice(0, 2)}••${user.slice(-1)}`
   return `${maskedUser}@${domain}`
-}
-
-function maskPhone(value: string) {
-  const digits = value.replace(/\D/g, '')
-  if (!digits) return 'xxxxxxxxxxxx'
-  if (digits.length <= 4) return `${'x'.repeat(8)}${digits}`
-  return `${'x'.repeat(Math.max(4, digits.length - 4))}${digits.slice(-4)}`
 }
 
 function readStoredReturnPath() {
@@ -400,28 +335,25 @@ function sanitizeReturnPath(value?: string | null) {
 }
 
 const styles: Record<string, CSSProperties> = {
-  page: { minHeight: 'calc(100vh - 160px)', background: '#08090e', color: '#fff', padding: '24px 16px 90px', display: 'grid', gap: 16, alignContent: 'center', maxWidth: 430, margin: '0 auto', width: '100%' },
-  flowNav: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', alignSelf: 'end' },
-  arrowButton: { width: 46, height: 46, borderRadius: 999, border: 0, background: 'transparent', color: '#fff', fontSize: 30, fontWeight: 800, display: 'grid', placeItems: 'center' },
-  panel: { border: 0, borderRadius: 0, background: 'transparent', padding: 0, display: 'grid', gap: 22, textAlign: 'center' },
-  logo: { justifySelf: 'center', borderRadius: 8, background: '#12131b', color: '#fff', fontSize: 28, fontWeight: 950, letterSpacing: 1, margin: 0, padding: '10px 28px' },
-  eyebrow: { justifySelf: 'center', color: '#9fb0ff', borderRadius: 999, background: '#111429', fontWeight: 900, fontSize: 13, margin: 0, padding: '8px 18px' },
-  title: { margin: 0, fontSize: 30, lineHeight: 1.12 },
-  body: { color: '#9aa6ba', lineHeight: 1.65, margin: 0 },
-  formGrid: { display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', textAlign: 'start' },
-  modeSwitch: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 4, border: '1px solid #202334', borderRadius: 14, padding: 5, background: '#111118' },
-  modeButton: { minHeight: 50, border: '1px solid transparent', borderRadius: 12, background: 'transparent', color: '#6f7485', fontWeight: 950, padding: '0 12px' },
-  modeButtonActive: { minHeight: 50, border: '1px solid rgba(82,104,255,.12)', borderRadius: 12, background: '#20212b', color: '#fff', fontWeight: 950, padding: '0 12px' },
-  codeRow: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
-  input: { minHeight: 54, border: '1px solid #232638', borderRadius: 13, background: '#111118', color: '#fff', padding: '0 14px', fontWeight: 800 },
-  codeBoxes: { display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 8 },
-  codeBox: { minHeight: 52, border: '1px solid #232638', borderRadius: 10, background: '#111118', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 20, fontWeight: 950 },
-  primaryButton: { minHeight: 58, border: 0, borderRadius: 12, background: '#5268ff', color: '#fff', fontWeight: 950, padding: '0 16px', fontSize: 16 },
-  secondaryButton: { minHeight: 54, border: '1px solid #30384d', borderRadius: 12, background: '#111118', color: '#fff', fontWeight: 900, padding: '0 14px' },
-  policy: { border: '1px solid rgba(213,169,21,.35)', borderRadius: 8, background: 'rgba(213,169,21,.08)', color: '#d5a915', padding: 12, margin: 0, lineHeight: 1.6 },
-  notice: { border: '1px solid rgba(82,104,255,.45)', borderRadius: 8, background: 'rgba(82,104,255,.1)', color: '#dce3ff', padding: 12, margin: 0, lineHeight: 1.6, fontWeight: 850 },
+  page: { minHeight: 'calc(100vh - 160px)', background: '#08090e', color: '#fff', padding: '24px 16px 90px', display: 'grid', alignContent: 'start', justifyItems: 'center' },
+  card: { width: '100%', maxWidth: 520, border: '1px solid #232638', borderRadius: 16, background: '#0e0f16', overflow: 'hidden' },
+  header: { display: 'grid', gridTemplateColumns: '44px 1fr 44px', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid #232638' },
+  headerTitle: { margin: 0, fontSize: 16, fontWeight: 900, textAlign: 'center' },
+  iconButton: { width: 36, height: 36, borderRadius: 999, border: 0, background: 'transparent', color: '#fff', fontSize: 24, fontWeight: 700, cursor: 'pointer' },
+  iconSpacer: { width: 36 },
+  body: { display: 'grid', gap: 14, padding: 24 },
+  welcome: { margin: '0 0 4px', fontSize: 22, fontWeight: 900 },
+  input: { minHeight: 56, border: '1px solid #2c3046', borderRadius: 10, background: '#111118', color: '#fff', padding: '0 14px', fontWeight: 700, fontSize: 16, boxSizing: 'border-box' },
+  codeInput: { textAlign: 'center', letterSpacing: 10, fontSize: 24 },
+  nameRow: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' },
+  passwordWrap: { position: 'relative', display: 'grid' },
+  showButton: { position: 'absolute', insetInlineEnd: 10, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'transparent', color: '#9fb0ff', fontWeight: 800, textDecoration: 'underline', cursor: 'pointer' },
+  emailChip: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, border: '1px solid #232638', borderRadius: 10, padding: '10px 14px', color: '#cfd6ea', fontWeight: 700 },
+  linkButton: { justifySelf: 'start', border: 0, background: 'transparent', color: '#9fb0ff', fontWeight: 800, textDecoration: 'underline', cursor: 'pointer', padding: 0 },
+  hint: { margin: 0, color: '#9aa6ba', lineHeight: 1.6, fontSize: 14 },
+  terms: { margin: 0, color: '#7f879a', lineHeight: 1.6, fontSize: 12 },
+  primaryButton: { minHeight: 54, border: 0, borderRadius: 10, background: '#5268ff', color: '#fff', fontWeight: 900, fontSize: 16, cursor: 'pointer' },
   success: { color: '#20d29b' },
   error: { color: '#ff8f9f' },
-  infoText: { color: '#9fb0ff' },
-  fieldHint: { color: '#ff8f9f', fontWeight: 700, marginTop: -6 },
+  info: { color: '#9fb0ff' },
 }

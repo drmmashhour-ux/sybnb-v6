@@ -492,6 +492,15 @@ export async function createGuestAccountSession(input: {
   return session
 }
 
+// Sign an EXISTING account in with email + password only (no OTP — the server's /api/auth/login
+// never required one). Stores the session exactly like createGuestAccountSession does.
+export async function signInGuestAccount(email: string, password: string) {
+  const session = await login(email.trim(), password)
+  sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+  sessionStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  return session
+}
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

@@ -9,7 +9,23 @@ export function isLang(value: unknown): value is Lang {
 
 export function getInitialLanguage(): Lang {
   if (typeof window === 'undefined') return 'ar'
-  const stored = window.localStorage.getItem(STORAGE_KEY)
+  // A shared link can choose the language: ?lang=fr (before or after the #).
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get('lang') ||
+      new URLSearchParams(window.location.hash.split('?')[1] || '').get('lang')
+    if (isLang(fromUrl)) {
+      window.localStorage.setItem(STORAGE_KEY, fromUrl)
+      return fromUrl
+    }
+  } catch {
+    /* ignore */
+  }
+  let stored: string | null = null
+  try {
+    stored = window.localStorage.getItem(STORAGE_KEY)
+  } catch {
+    /* storage blocked */
+  }
   return isLang(stored) ? stored : 'ar'
 }
 

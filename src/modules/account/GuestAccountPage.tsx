@@ -258,7 +258,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
                   dir="ltr"
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
-                  style={{ ...styles.input, width: '100%' }}
+                  style={{ ...styles.input, ...styles.passwordInput }}
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder={t.password}
@@ -347,7 +347,10 @@ const styles: Record<string, CSSProperties> = {
   codeInput: { textAlign: 'center', letterSpacing: 10, fontSize: 24 },
   nameRow: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' },
   passwordWrap: { position: 'relative', display: 'grid' },
-  showButton: { position: 'absolute', insetInlineEnd: 10, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'transparent', color: '#9fb0ff', fontWeight: 800, textDecoration: 'underline', cursor: 'pointer' },
+  passwordInput: { width: '100%', paddingRight: 84 },
+  // The password box is always left-to-right, so the Show/Hide toggle sits on its physical right in
+  // both Arabic and English and never covers the typed characters.
+  showButton: { position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'transparent', color: '#9fb0ff', fontWeight: 800, textDecoration: 'underline', cursor: 'pointer' },
   emailChip: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, border: '1px solid #232638', borderRadius: 10, padding: '10px 14px', color: '#cfd6ea', fontWeight: 700 },
   linkButton: { justifySelf: 'start', border: 0, background: 'transparent', color: '#9fb0ff', fontWeight: 800, textDecoration: 'underline', cursor: 'pointer', padding: 0 },
   hint: { margin: 0, color: '#9aa6ba', lineHeight: 1.6, fontSize: 14 },

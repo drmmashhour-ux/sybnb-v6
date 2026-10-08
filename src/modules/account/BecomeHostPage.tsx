@@ -42,8 +42,13 @@ export function BecomeHostPage({ lang, returnPath }: Props) {
     setError('')
     try {
       await becomeHost()
-      // becomeHost() fires 'sybnb-session-changed'; App re-renders into the host area at returnPath.
-      window.location.hash = returnPath
+      // Airbnb-style next step: build the host profile first, then land where they were heading.
+      try {
+        sessionStorage.setItem('sybnb.v6.hostProfileNext', returnPath)
+      } catch {
+        /* ignore */
+      }
+      window.location.hash = '/host/profile'
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : t.error)
     } finally {

@@ -7,7 +7,9 @@ import {
   fetchListingQuote,
   fetchListingReviews,
   fetchPrototypeListing,
+  fetchPublicHostProfile,
   sendListingInquiryMessage,
+  type HostProfile,
   type PlatformBooking,
   type PlatformListing,
   type PlatformListingReview,
@@ -236,6 +238,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const [offlineMapReady, setOfflineMapReady] = useState(false)
   const [activeMedia, setActiveMedia] = useState(0)
   const [activeTab, setActiveTab] = useState<'terms' | 'host' | 'location' | 'reviews'>('terms')
+  const [hostProfile, setHostProfile] = useState<HostProfile | null>(null)
   const [dateRange, setDateRange] = useState<DateRange>(
     bookingDraft.dateRange || loadSearchDatesDraft() || { checkIn: '', checkOut: '' },
   )
@@ -739,7 +742,13 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <section style={styles.trustGrid}>
               <article style={styles.trustCard}>
                 <strong>{t.host}</strong>
-                <span>{listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}</span>
+                <HostCard
+                  lang={lang}
+                  ownerId={listing.ownerId}
+                  fallbackName={listing.owner?.displayName || listing.ownerId.slice(0, 8).toUpperCase()}
+                  profile={hostProfile}
+                  onLoad={setHostProfile}
+                />
               </article>
               {/* Payment protection only applies to the division that actually transacts (Stays);
                   showing it on contact-only divisions (Rentals/Buy/Cars/Marketplace) would overclaim. */}
@@ -1109,4 +1118,68 @@ const styles: Record<string, CSSProperties> = {
   recoverSecondary: { minHeight: 46, border: '1px solid #30384d', borderRadius: 8, background: 'transparent', color: '#fff', fontWeight: 800, padding: '0 18px', cursor: 'pointer' },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
   bottomActionBar: { position: 'sticky', bottom: 12, zIndex: 20, border: '1px solid #242a3b', borderRadius: 8, background: 'rgba(13,15,24,.94)', boxShadow: '0 -16px 40px rgba(0,0,0,.35)', backdropFilter: 'blur(16px)', padding: 12, display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
+}
+
+// Airbnb-style "Hosted by" card: photo, name, city, member-since, languages, about. Loads the
+// host's public profile once (GET /api/host-profiles/:id); falls back to the plain name.
+function HostCard({
+  lang,
+  ownerId,
+  fallbackName,
+  profile,
+  onLoad,
+}: {
+  lang: Lang
+  ownerId: string
+  fallbackName: string
+  profile: HostProfile | null
+  onLoad: (profile: HostProfile | null) => void
+}) {
+  const isAr = lang === 'ar'
+  useEffect(() => {
+    if (profile) return
+    let alive = true
+    fetchPublicHostProfile(ownerId)
+      .then((p) => alive && onLoad(p))
+      .catch(() => alive && onLoad(null))
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerId])
+  const name = profile?.displayName || fallbackName
+  const meta = [
+    profile?.city || '',
+    profile?.memberSince ? (isAr ? `على SYBNB منذ ${profile.memberSince}` : `On SYBNB since ${profile.memberSince}`) : '',
+  ].filter(Boolean).join(' · ')
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ width: 56, height: 56, borderRadius: 999, background: '#1d2332', display: 'grid', placeItems: 'center', overflow: 'hidden', fontWeight: 900, flexShrink: 0 }}>
+          {profile?.photoUrl ? <img src={profile.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : name.slice(0, 1).toUpperCase()}
+        </div>
+        <div>
+          <strong>{name}</strong>
+          {meta ? <div style={{ color: '#9aa6ba', fontSize: 13 }}>{meta}</div> : null}
+        </div>
+      </div>
+      {profile?.languages?.length ? (
+        <span style={{ color: '#cfd6ea', fontSize: 14 }}>
+          {isAr ? 'يتحدث: ' : 'Speaks: '}
+          {profile.languages.map((code) => languageName(code, isAr)).join(isAr ? '، ' : ', ')}
+        </span>
+      ) : null}
+      {profile?.about ? <p style={{ margin: 0, color: '#cfd6ea', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{profile.about}</p> : null}
+    </div>
+  )
+}
+
+function languageName(code: string, isAr: boolean) {
+  const names: Record<string, [string, string]> = {
+    ar: ['العربية', 'Arabic'], en: ['الإنجليزية', 'English'], fr: ['الفرنسية', 'French'], ku: ['الكردية', 'Kurdish'],
+    tr: ['التركية', 'Turkish'], de: ['الألمانية', 'German'], es: ['الإسبانية', 'Spanish'], ru: ['الروسية', 'Russian'],
+    fa: ['الفارسية', 'Persian'], hy: ['الأرمنية', 'Armenian'], it: ['الإيطالية', 'Italian'], sv: ['السويدية', 'Swedish'],
+  }
+  const pair = names[code]
+  return pair ? (isAr ? pair[0] : pair[1]) : code
 }

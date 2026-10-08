@@ -491,7 +491,15 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <strong>{providerCopy.dashboardTitle}</strong>
           <span>{providerCopy.verifiedLine(overview?.host.displayName, verificationStatusText)}</span>
         </div>
-        <div style={styles.avatar}>{(overview?.host.displayName || 'A').slice(0, 1)}</div>
+        <button
+          type="button"
+          style={{ ...styles.avatar, border: '1px solid #5268ff', color: '#fff', cursor: 'pointer' }}
+          onClick={() => (window.location.hash = '/host/profile')}
+          aria-label={lang === 'ar' ? 'ملفك كمضيف' : 'Your host profile'}
+          title={lang === 'ar' ? 'ملفك كمضيف' : 'Your host profile'}
+        >
+          {(overview?.host.displayName || 'A').slice(0, 1)}
+        </button>
       </section>
 
       <section style={styles.providerHealth}>

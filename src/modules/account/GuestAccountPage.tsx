@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
+import { getKeepSignedIn, setKeepSignedIn } from '../../shared/api/authStorage'
 import { confirmOtp, createGuestAccountSession, getStoredGuestSession, requestOtp, signInGuestAccount } from '../../shared/api/platformApi'
 
 // Airbnb-style account flow, one question per screen:
@@ -34,6 +35,8 @@ const copy = {
     password: 'كلمة المرور',
     passwordHint: 'جديد في SYBNB؟ اختر كلمة مرور من 8 أحرف على الأقل.',
     show: 'إظهار',
+    keepSignedIn: 'إبقائي مسجّلاً على هذا الجهاز',
+    keepSignedInHint: 'لا تفعّلها على جهاز مشترك أو عام.',
     hide: 'إخفاء',
     finishTitle: 'إكمال التسجيل',
     finishBody: (masked: string) => `لا يوجد حساب بهذا البريد بعد. أرسلنا رمزاً من 6 أرقام إلى ${masked}.`,
@@ -63,6 +66,8 @@ const copy = {
     password: 'Password',
     passwordHint: 'New to SYBNB? Choose a password with at least 8 characters.',
     show: 'Show',
+    keepSignedIn: 'Keep me signed in on this device',
+    keepSignedInHint: "Don't tick this on a shared or public computer.",
     hide: 'Hide',
     finishTitle: 'Finish signing up',
     finishBody: (masked: string) => `No account uses this email yet. We sent a 6-digit code to ${masked}.`,
@@ -92,6 +97,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [remember, setRemember] = useState(() => getKeepSignedIn())
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [code, setCode] = useState('')
@@ -142,6 +148,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
     if (password.length < 8) return say(t.shortPassword)
     setBusy(true)
     say('')
+    setKeepSignedIn(remember)
     try {
       // Returning user: email + password is all the server needs.
       await signInGuestAccount(email, password)
@@ -275,6 +282,13 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
                 </button>
               </div>
               <p style={styles.hint}>{t.passwordHint}</p>
+              <label style={styles.rememberRow}>
+                <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
+                <span>
+                  {t.keepSignedIn}
+                  <small style={styles.rememberHint}>{t.keepSignedInHint}</small>
+                </span>
+              </label>
             </>
           ) : null}
 
@@ -360,6 +374,8 @@ const styles: Record<string, CSSProperties> = {
   emailChip: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, border: '1px solid #232638', borderRadius: 10, padding: '10px 14px', color: '#cfd6ea', fontWeight: 700 },
   linkButton: { justifySelf: 'start', border: 0, background: 'transparent', color: '#9fb0ff', fontWeight: 800, textDecoration: 'underline', cursor: 'pointer', padding: 0 },
   hint: { margin: 0, color: '#9aa6ba', lineHeight: 1.6, fontSize: 14 },
+  rememberRow: { display: 'flex', gap: 10, alignItems: 'flex-start', color: '#cfd6ea', fontWeight: 700, cursor: 'pointer' },
+  rememberHint: { display: 'block', color: '#7f879a', fontWeight: 500, fontSize: 12, marginTop: 2 },
   terms: { margin: 0, color: '#7f879a', lineHeight: 1.6, fontSize: 12 },
   primaryButton: { minHeight: 54, border: 0, borderRadius: 10, background: '#5268ff', color: '#fff', fontWeight: 900, fontSize: 16, cursor: 'pointer' },
   success: { color: '#20d29b' },

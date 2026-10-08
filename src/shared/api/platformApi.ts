@@ -621,6 +621,52 @@ export async function becomeHost() {
   return updated
 }
 
+// ---- Host profile (Airbnb-style): photo, about, languages, city --------------------------------
+export type HostProfile = {
+  displayName: string | null
+  about: string | null
+  city: string | null
+  languages: string[]
+  photoUrl: string | null
+  memberSince: number | null
+  complete: boolean
+}
+
+function hostToken() {
+  const token = getStoredStaffSession('HOST')?.token || getStoredStaffSession('SELLER')?.token || getStoredGuestSession()?.token
+  if (!token) throw new Error('Sign in first.')
+  return token
+}
+
+export async function fetchMyHostProfile() {
+  const result = await apiRequest<{ ok: true; profile: HostProfile }>('/api/host/profile', { token: hostToken() })
+  return result.profile
+}
+
+export async function saveHostProfile(input: { about: string; city: string; languages: string[] }) {
+  const result = await apiRequest<{ ok: true; profile: HostProfile }>('/api/host/profile', {
+    method: 'PUT',
+    token: hostToken(),
+    body: input,
+  })
+  return result.profile
+}
+
+export async function uploadHostPhoto(file: File) {
+  const fileBase64 = await readFileAsBase64(file)
+  const result = await apiRequest<{ ok: true; profile: HostProfile }>('/api/host/profile/photo', {
+    method: 'PATCH',
+    token: hostToken(),
+    body: { fileBase64, mimeType: file.type },
+  })
+  return result.profile
+}
+
+export async function fetchPublicHostProfile(userId: string) {
+  const result = await apiRequest<{ ok: true; profile: HostProfile }>(`/api/host-profiles/${encodeURIComponent(userId)}`)
+  return result.profile
+}
+
 export async function signOutGuest(): Promise<{ serverRevoked: boolean }> {
   const session = getStoredGuestSession()
   const serverRevoked = await revokeSessionOnServer(session?.token)

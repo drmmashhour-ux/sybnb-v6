@@ -16,6 +16,7 @@ import { handleDriver } from './routes/driver.mjs'
 import { handleHost } from './routes/host.mjs'
 import { handleListings } from './routes/listings.mjs'
 import { handleMe } from './routes/me.mjs'
+import { handleHostProfile } from './routes/host-profile.mjs'
 import { handleMessages } from './routes/messages.mjs'
 import { handlePush } from './routes/push.mjs'
 import { handleBusiness } from './routes/business.mjs'
@@ -210,6 +211,7 @@ async function dispatch(req, res, url, context) {
     handlePayments,
     handleWallet,
     handleMe,
+    handleHostProfile,
     handleHost,
     handleDriver,
     handleAdmin,

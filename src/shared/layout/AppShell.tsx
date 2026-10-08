@@ -250,6 +250,14 @@ function getRouteContext(path: string, isAr: boolean) {
     }
   }
   if (path.startsWith('/host')) {
+    if (path === '/host/profile') {
+      return {
+        section: isAr ? 'المضيف' : 'Host',
+        page: isAr ? 'ملفك كمضيف' : 'Host profile',
+        backPath: '/host/stays',
+        nextPath: '',
+      }
+    }
     if (path.startsWith('/host/cars')) {
       return {
         section: isAr ? 'المركبات' : 'Cars',

@@ -22,6 +22,7 @@ const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'
 const GuestAccountPage = lazyNamed(() => import('../modules/account/GuestAccountPage'), 'GuestAccountPage')
 const BecomeHostPage = lazyNamed(() => import('../modules/account/BecomeHostPage'), 'BecomeHostPage')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
+const HostProfilePage = lazyNamed(() => import('../modules/host/HostProfilePage'), 'HostProfilePage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
 const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesPage'), 'HostInquiriesPage')
 const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/ImmocontactPage'), 'ImmocontactPage')
@@ -149,6 +150,8 @@ export function App() {
           <GuestAccountPage lang={lang} listingId={guestAccountMatch[1]} flow={guestAccountMatch[1] ? 'stays' : 'generic'} returnPath={guestAccountMatch[1] ? `/listing/${guestAccountMatch[1]}` : undefined} />
         ) : path === '/dashboard' || path === '/account' ? (
           <DashboardPage lang={lang} />
+        ) : path === '/host/profile' ? (
+          <HostProfilePage lang={lang} />
         ) : path === '/host' ||
           path === '/host/seller' ||
           path === '/host/stays' ||

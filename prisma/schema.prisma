@@ -155,6 +155,7 @@ model User {
   roles             UserRole[]
   sessions          UserSession[]
   sellerProfile     SellerProfile?
+  hostProfile       HostProfile?
   driverProfile     DriverProfile?
   listings          Listing[]         @relation("ListingOwner")
   bookings          Booking[]         @relation("BookingGuest")
@@ -227,6 +228,22 @@ model SellerProfile {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("seller_profiles")
+}
+
+model HostProfile {
+  id            String   @id @default(uuid())
+  userId        String   @unique @map("user_id")
+  about         String?
+  city          String?
+  languages     String[] @default([])
+  photoRef      String?  @map("photo_ref")
+  photoMimeType String?  @map("photo_mime_type")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("host_profiles")
 }
 
 model DriverProfile {

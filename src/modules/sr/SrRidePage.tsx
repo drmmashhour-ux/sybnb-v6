@@ -69,6 +69,9 @@ const copy = {
     driverNotAssigned: 'لم يُعيّن سائق بعد',
     verifiedDriver: 'هوية موثقة',
     waitingForDriver: 'بانتظار قبول أحد السائقين القريبين للرحلة...',
+    stillLooking: 'ما زلنا نبحث عن سائق. يمكنك متابعة الانتظار أو إلغاء الطلب.',
+    etaPrefix: 'على بُعد ~',
+    etaSuffix: ' دقيقة',
     driverAssigned: 'تم تعيين سائق لرحلتك.',
     driverArriving: 'السائق في طريقه إليك الآن.',
     inProgress: 'الرحلة جارية الآن.',
@@ -154,6 +157,9 @@ const copy = {
     driverNotAssigned: 'Not assigned yet',
     verifiedDriver: 'Verified identity',
     waitingForDriver: 'Waiting for a nearby driver to accept the ride...',
+    stillLooking: 'Still finding you a driver. You can keep waiting or cancel the request.',
+    etaPrefix: '~',
+    etaSuffix: ' min away',
     driverAssigned: 'A driver has been assigned to your ride.',
     driverArriving: 'Your driver is on the way to you.',
     inProgress: 'Your ride is now in progress.',
@@ -239,6 +245,9 @@ const copy = {
     driverNotAssigned: 'Pas encore attribué',
     verifiedDriver: 'Identité vérifiée',
     waitingForDriver: 'En attente qu’un chauffeur à proximité accepte la course...',
+    stillLooking: 'Recherche d’un chauffeur en cours. Vous pouvez patienter ou annuler la demande.',
+    etaPrefix: '~',
+    etaSuffix: ' min',
     driverAssigned: 'Un chauffeur a été attribué à votre course.',
     driverArriving: 'Votre chauffeur est en route vers vous.',
     inProgress: 'Votre course est en cours.',
@@ -1036,13 +1045,13 @@ export function SrRidePage({ lang }: Props) {
             </div>
           )}
           {ride && ['REQUESTED', 'MATCHING'].includes(ride.status) && (
-            <div style={styles.message}>{t.waitingForDriver}</div>
+            <div style={styles.message}>{ride.matchTimedOut ? t.stillLooking : t.waitingForDriver}</div>
           )}
           {ride?.status === 'DRIVER_ASSIGNED' && (
-            <div style={styles.message}>{t.driverAssigned}</div>
+            <div style={styles.message}>{t.driverAssigned}{typeof ride.etaToPickupMinutes === 'number' ? ` · ${t.etaPrefix}${ride.etaToPickupMinutes}${t.etaSuffix}` : ''}</div>
           )}
           {ride?.status === 'DRIVER_ARRIVING' && (
-            <div style={styles.message}>{t.driverArriving}</div>
+            <div style={styles.message}>{t.driverArriving}{typeof ride.etaToPickupMinutes === 'number' ? ` · ${t.etaPrefix}${ride.etaToPickupMinutes}${t.etaSuffix}` : ''}</div>
           )}
           {ride?.status === 'IN_PROGRESS' && (
             <div style={styles.message}>{t.inProgress}</div>

@@ -3,7 +3,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
-import { updateDriverLocation } from '../lib/live-map.mjs'
+import { updateDriverLocation, getDriverLocation, getRideCoords, haversineKm, etaMinutesForKm } from '../lib/live-map.mjs'
 import { activateScheduledRides } from '../lib/ride-schedule.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
@@ -158,7 +158,28 @@ export async function handleDriver(req, res, url, context) {
       orderBy: { requestedAt: 'asc' },
       take: 20,
     })
-    return json(res, 200, { ok: true, rides })
+    // Proximity dispatch (2026-10-09): rank open requests nearest-first from the driver's own live
+    // location, and attach a straight-line distance + rough ETA to each pickup so a driver picks the
+    // closest ride instead of scanning a flat FIFO list. Falls back to FIFO (unchanged) when the
+    // driver has no fresh location or a ride has no geocoded pickup. Pure UX/estimate, never billing.
+    const driverLoc = await getDriverLocation(context.user.id)
+    const withProximity = await Promise.all(rides.map(async (ride) => {
+      let pickupDistanceKm = null
+      if (driverLoc) {
+        const coords = await getRideCoords(ride.id)
+        pickupDistanceKm = coords.pickup ? haversineKm(driverLoc, coords.pickup) : null
+      }
+      return { ...ride, pickupDistanceKm, etaToPickupMinutes: etaMinutesForKm(pickupDistanceKm) }
+    }))
+    if (driverLoc) {
+      withProximity.sort((a, b) => {
+        if (a.pickupDistanceKm == null && b.pickupDistanceKm == null) return 0
+        if (a.pickupDistanceKm == null) return 1
+        if (b.pickupDistanceKm == null) return -1
+        return a.pickupDistanceKm - b.pickupDistanceKm
+      })
+    }
+    return json(res, 200, { ok: true, rides: withProximity, driverLocated: Boolean(driverLoc) })
   }
 
   if (url.pathname === '/api/driver/rides') {

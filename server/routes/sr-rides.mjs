@@ -6,7 +6,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
-import { getDriverLocation, getRideCoords } from '../lib/live-map.mjs'
+import { getDriverLocation, getRideCoords, etaMinutesBetween } from '../lib/live-map.mjs'
 import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
 import { defaultCurrency } from '../lib/country.mjs'
 import { activateScheduledRides, MIN_SCHEDULE_LEAD_MS } from '../lib/ride-schedule.mjs'
@@ -32,6 +32,15 @@ import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mj
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
 // stale/misleading rather than genuinely live.
 const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+
+// No-driver-found signal (2026-10-09): a still-unclaimed request older than this is flagged
+// matchTimedOut in the ride payload so the rider UI can offer to keep waiting or cancel/retry,
+// instead of an open-ended "waiting for driver" with no feedback. Non-destructive (never auto-
+// cancels); env-tunable.
+const RIDE_MATCH_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.SR_MATCH_TIMEOUT_SECONDS)
+  return (Number.isFinite(raw) && raw > 0 ? raw : 300) * 1000
+})()
 
 // SR cancellation policy (owner decision 2026-10-09, Uber-aligned). The fee percentage and the
 // free-cancel grace window are both env-tunable for operational tuning; the defaults below are the
@@ -285,11 +294,25 @@ export async function handleSrRides(req, res, url, context) {
     // (unreported-in-2-minutes) position even for a ride that is still active.
     const driverLocation =
       ride.driverId && LIVE_TRACKING_STATUSES.includes(ride.status) ? await getDriverLocation(ride.driverId) : null
+    // ETA for the rider: minutes from the driver's live position to the pickup while the driver is
+    // assigned/arriving (null once the trip is IN_PROGRESS or if there's no live position/coords).
+    const etaToPickupMinutes =
+      driverLocation && rideCoords.pickup && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status)
+        ? etaMinutesBetween(driverLocation, rideCoords.pickup)
+        : null
+    // No-driver-found feedback: flag a long-unclaimed request so the UI isn't an open-ended wait.
+    const matchTimedOut =
+      ['REQUESTED', 'MATCHING'].includes(ride.status)
+      && !ride.driverId
+      && ride.requestedAt
+      && (Date.now() - new Date(ride.requestedAt).getTime() > RIDE_MATCH_TIMEOUT_MS)
     const ridePayload = ride.driver
       ? {
           ...ride,
           pickupCoords: rideCoords.pickup,
           dropoffCoords: rideCoords.dropoff,
+          etaToPickupMinutes,
+          matchTimedOut: Boolean(matchTimedOut),
           driver: {
             id: ride.driver.id,
             displayName: ride.driver.displayName,
@@ -309,7 +332,7 @@ export async function handleSrRides(req, res, url, context) {
             location: driverLocation,
           },
         }
-      : { ...ride, pickupCoords: rideCoords.pickup, dropoffCoords: rideCoords.dropoff }
+      : { ...ride, pickupCoords: rideCoords.pickup, dropoffCoords: rideCoords.dropoff, etaToPickupMinutes, matchTimedOut: Boolean(matchTimedOut) }
     return json(res, 200, { ok: true, ride: ridePayload })
   }
 

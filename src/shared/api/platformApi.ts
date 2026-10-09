@@ -132,6 +132,10 @@ export type PlatformRideRequest = {
   currency: string
   metadata: Record<string, unknown>
   updatedAt: string
+  // Dispatch/ETA fields (2026-10-09), present on the single-ride GET and driver pending list.
+  etaToPickupMinutes?: number | null
+  matchTimedOut?: boolean
+  pickupDistanceKm?: number | null
   rider?: {
     id: string
     displayName: string

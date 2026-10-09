@@ -9,6 +9,28 @@ import { bookingPolicySettings, defaultCurrency } from '../lib/country.mjs'
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
 export async function handleMe(req, res, url, context) {
+  // The signed-in account with its LIVE roles (getAuthContext reads user_roles on every request).
+  // The browser keeps a copy of the user in its stored session; when a role is granted without
+  // revoking the session (become-host on another device, seller-plan approval) that copy goes
+  // stale, so the app calls this on load and when the account menu opens to refresh it. Cheap:
+  // no queries beyond the authentication lookup itself.
+  if (url.pathname === '/api/me') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    return json(res, 200, {
+      ok: true,
+      user: {
+        id: context.user.id,
+        email: context.user.email,
+        displayName: context.user.displayName,
+        locale: context.user.locale,
+        status: context.user.status,
+        roles: context.roles,
+        hostVerifiedAt: context.user.hostVerifiedAt || null,
+      },
+    })
+  }
+
   // Airbnb-style "Become a host": one account for everything. A signed-in customer adds the HOST
   // role to the SAME account instead of opening a separate host account. HOST is already publicly
   // self-registerable (auth.mjs PUBLIC_REGISTER_ROLES), so this grants nothing a stranger cannot

@@ -8726,3 +8726,24 @@ a {
   .checkout-summary-card { padding: 16px; }
   .checkout-listing img { height: 76px; width: 92px; }
 }
+
+/* Host entrance (/host/join, HostJoinPage.tsx): intro + steps beside the sign-in panel on wide
+   screens; on phones the panel comes right after the headline so the form is above the fold. */
+.host-join-grid {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: grid;
+  gap: 20px 32px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: 'head panel' 'steps panel';
+  align-items: start;
+}
+.host-join-head { grid-area: head; }
+.host-join-steps { grid-area: steps; }
+.host-join-panel { grid-area: panel; }
+@media (max-width: 860px) {
+  .host-join-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'head' 'panel' 'steps';
+  }
+}

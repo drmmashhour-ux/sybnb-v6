@@ -21,6 +21,7 @@ import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/Vi
 import { divisionText, listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { HostAvailabilityCalendar } from './HostAvailabilityCalendar'
+import { HostVerificationCard } from './HostVerificationCard'
 
 type Props = {
   lang: Lang
@@ -616,6 +617,10 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           {(overview?.host.displayName || 'A').slice(0, 1)}
         </button>
       </section>
+
+      {/* Host verification (2026-10-08): until the SYBNB activation code is entered, this host's
+          stays are hidden from guests and cannot be booked. Renders nothing once verified. */}
+      {mode === 'host' && <HostVerificationCard lang={lang} />}
 
       <section style={styles.providerHealth}>
         <article style={styles.healthHero}>

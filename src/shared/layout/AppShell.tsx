@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
-import { currentAccountIsHost, getStoredGuestSession, getStoredStaffSession, signOutGuest as revokeGuestSession } from '../api/platformApi'
+import { currentAccountIsHost, getStoredGuestSession, getStoredStaffSession, refreshStoredSessionRoles, signOutGuest as revokeGuestSession } from '../api/platformApi'
 import { Footer } from './Footer'
 
 type Props = {
@@ -34,8 +34,8 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
   const staffSession = typeof window !== 'undefined' ? getStoredStaffSession() : null
   // Admin entry: the account's own roles, or an admin staff session signed in on this browser.
   const isAdmin = Boolean(guestSession?.user.roles?.includes('ADMIN') || staffSession?.user.roles?.includes('ADMIN'))
-  // /host/why is the public host landing page, not the host area.
-  const inHostArea = path.startsWith('/host') && path !== '/host/why'
+  // /host/why (public landing) and /host/join (host entrance) are not the host area.
+  const inHostArea = path.startsWith('/host') && path !== '/host/why' && path !== '/host/join'
 
   function goBack() {
     navigate(routeContext.backPath)
@@ -91,8 +91,8 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
                 FR
               </button>
             </div>
-            {!guestSession && (
-              <button type="button" className="host-text-link" onClick={() => navigate('/host/why')}>
+            {!guestSession && path !== '/host/join' && (
+              <button type="button" className="host-text-link" onClick={() => navigate('/host/join')}>
                 {pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte')}
               </button>
             )}
@@ -158,6 +158,12 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, inHos
     setOpen(false)
   }, [path, signedIn])
 
+  // Stale-role fix: re-read the live roles whenever the menu opens (throttled inside), so a role
+  // granted since sign-in shows its entry; App re-renders on 'sybnb-session-changed'.
+  useEffect(() => {
+    if (open && signedIn) void refreshStoredSessionRoles()
+  }, [open, signedIn])
+
   useEffect(() => {
     if (!open) return
     function onPointer(event: MouseEvent | TouchEvent) {
@@ -195,9 +201,12 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, inHos
           ? { key: 'host', label: pick(lang, 'التبديل إلى السفر', 'Switch to traveling', 'Passer en mode voyage'), onSelect: () => go('/stays') }
           : isHost
             ? { key: 'host', label: pick(lang, 'التبديل إلى الاستضافة', 'Switch to hosting', 'Passer en mode hôte'), onSelect: () => go('/host') }
-            : { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/why') },
+            : { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/join') },
         ...(isAdmin
-          ? [{ key: 'admin', label: pick(lang, 'لوحة الإدارة', 'Admin panel', 'Administration'), onSelect: () => go('/admin/review') }]
+          ? [
+              { key: 'admin', label: pick(lang, 'لوحة الإدارة', 'Admin panel', 'Administration'), onSelect: () => go('/admin/review') },
+              { key: 'admin-hosts', label: pick(lang, 'التحقق من المضيفين', 'Verify hosts', 'Vérifier les hôtes'), onSelect: () => go('/admin/hosts') },
+            ]
           : []),
         { key: 'sep2', separator: true },
         {
@@ -212,7 +221,7 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, inHos
     : [
         { key: 'login', label: pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription'), onSelect: () => go('/account/open'), strong: true },
         { key: 'sep1', separator: true },
-        { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/why') },
+        { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/join') },
       ]
 
   function onPanelKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
@@ -425,6 +434,14 @@ function getRouteContext(path: string, lang: Lang) {
         nextPath: '',
       }
     }
+    if (path === '/host/join') {
+      return {
+        section: pick(lang, 'المضيف', 'Host', 'Hôte'),
+        page: pick(lang, 'ابدأ الاستضافة', 'Start hosting', 'Devenir hôte'),
+        backPath: '/host/why',
+        nextPath: '',
+      }
+    }
     if (path === '/host/profile') {
       return {
         section: pick(lang, 'المضيف', 'Host', 'Hôte'),
@@ -478,6 +495,14 @@ function getRouteContext(path: string, lang: Lang) {
       page: pick(lang, 'لوحة SR', 'SR dashboard', 'Tableau de bord SR'),
       backPath: home,
       nextPath: '',
+    }
+  }
+  if (path === '/admin/hosts') {
+    return {
+      section: pick(lang, 'الإدارة', 'Admin', 'Administration'),
+      page: pick(lang, 'التحقق من المضيفين', 'Host verification', 'Vérification des hôtes'),
+      backPath: '/admin/review',
+      nextPath: '/admin/money',
     }
   }
   if (path === '/admin/money') {

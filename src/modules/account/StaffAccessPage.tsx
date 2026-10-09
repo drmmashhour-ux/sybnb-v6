@@ -135,6 +135,11 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
     : t.note
   const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
   const requiredMsg = t.required
+  // Owner decision 2026-10-08: EVERY admin sign-in needs the password AND a fresh code emailed for
+  // that sign-in. The server enforces it (POST /api/auth/login refuses an ADMIN account without a
+  // recently verified 'admin-login' code, consumed single-use); this screen just asks for it.
+  const isAdmin = role === 'ADMIN'
+  const otpPurpose = isAdmin ? 'admin-login' : 'staff-login'
 
   async function openSession() {
     const identityMissing = !emailValid || !password.trim()
@@ -142,7 +147,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       setCodeError(requiredMsg)
       return
     }
-    const verified = await confirmOtp({ email: email.trim(), purpose: 'staff-login', code: code.trim() }).catch(() => false)
+    const verified = await confirmOtp({ email: email.trim(), purpose: otpPurpose, code: code.trim() }).catch(() => false)
     if (!verified) {
       setCodeError(t.codeInvalid)
       return
@@ -158,8 +163,17 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       })
       window.dispatchEvent(new Event('sybnb-session-changed'))
       window.location.hash = returnPath
-    } catch {
-      setStatus('error')
+    } catch (err) {
+      // The code was consumed by this attempt (or was never valid for an admin login): a new one is
+      // needed for the next try.
+      const codeRequired = (err as { code?: string } | null)?.code === 'ADMIN_LOGIN_CODE_REQUIRED'
+      if (codeRequired) {
+        setCode('')
+        setCodeError(pick(lang, 'رمز الدخول غير صالح لهذا الدخول. اطلب رمزاً جديداً.', 'That code is not valid for this sign-in. Request a new code.', 'Ce code n’est pas valable pour cette connexion. Demandez un nouveau code.'))
+        setStatus('idle')
+      } else {
+        setStatus('error')
+      }
     }
   }
 
@@ -169,7 +183,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
       return
     }
     try {
-      await requestOtp({ email: email.trim(), purpose: 'staff-login' })
+      await requestOtp({ email: email.trim(), purpose: otpPurpose })
       setCodeError('')
       setStatus('codeSent')
     } catch (err) {
@@ -183,6 +197,16 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
         <span style={styles.badge}>{role}</span>
         <h1 style={styles.title}>{gateTitle}</h1>
         <p style={styles.body}>{gateSubtitle}</p>
+        {isAdmin && (
+          <p style={styles.adminNotice}>
+            {pick(
+              lang,
+              'لحماية لوحة الإدارة: كل دخول يحتاج كلمة المرور ورمزاً جديداً من 6 أرقام يُرسل إلى بريدك. تنتهي جلسة الإدارة بعد 12 ساعة.',
+              'To protect the admin panel, every sign-in needs your password and a new 6-digit code sent to your email. Admin sessions end after 12 hours.',
+              'Pour protéger l’administration, chaque connexion exige votre mot de passe et un nouveau code à 6 chiffres envoyé par courriel. La session admin expire après 12 heures.',
+            )}
+          </p>
+        )}
         {canSelfRegister && (
           <div style={styles.segmented}>
             <button style={mode === 'signIn' ? styles.segmentActive : styles.segment} onClick={() => setMode('signIn')}>
@@ -208,10 +232,12 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               dir="ltr"
             />
           </label>
-          <label style={styles.label}>
-            {pick(lang, 'رقم الهاتف (اختياري)', 'Phone number (optional)', 'Numéro de téléphone (facultatif)')}
-            <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
-          </label>
+          {!isAdmin && (
+            <label style={styles.label}>
+              {pick(lang, 'رقم الهاتف (اختياري)', 'Phone number (optional)', 'Numéro de téléphone (facultatif)')}
+              <input style={styles.input} value={phone} onChange={(event) => setPhone(event.target.value)} dir="ltr" />
+            </label>
+          )}
           <label style={styles.label}>
             {t.code}
             <div style={styles.codeRow}>
@@ -243,16 +269,18 @@ const styles: Record<string, CSSProperties> = {
     minHeight: '70vh',
     display: 'grid',
     placeItems: 'center',
-    padding: 24,
+    padding: '24px 16px',
     background: '#080a10',
     color: '#fff',
   },
   card: {
     width: 'min(620px, 100%)',
+    boxSizing: 'border-box',
+    minWidth: 0,
     border: '1px solid #27324d',
     borderRadius: 18,
     background: '#101522',
-    padding: 32,
+    padding: 'clamp(18px, 5vw, 32px)',
     boxShadow: '0 24px 80px rgba(0,0,0,.35)',
   },
   badge: {
@@ -267,7 +295,7 @@ const styles: Record<string, CSSProperties> = {
   },
   title: {
     margin: 0,
-    fontSize: 34,
+    fontSize: 'clamp(26px, 6vw, 34px)',
   },
   body: {
     color: '#aab4ca',
@@ -322,6 +350,9 @@ const styles: Record<string, CSSProperties> = {
   },
   input: {
     minHeight: 48,
+    minWidth: 0,
+    width: '100%',
+    boxSizing: 'border-box',
     border: '1px solid #27324d',
     borderRadius: 12,
     background: '#0b1220',
@@ -331,7 +362,7 @@ const styles: Record<string, CSSProperties> = {
   },
   codeRow: {
     display: 'grid',
-    gridTemplateColumns: '1fr auto',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
     gap: 8,
   },
   codeButton: {
@@ -341,8 +372,20 @@ const styles: Record<string, CSSProperties> = {
     background: '#08251c',
     color: '#22d28f',
     fontWeight: 900,
-    padding: '0 16px',
+    padding: '0 12px',
+    maxWidth: 180,
+    lineHeight: 1.3,
     cursor: 'pointer',
+  },
+  adminNotice: {
+    margin: '0 0 20px',
+    border: '1px solid rgba(225,182,15,.45)',
+    borderRadius: 12,
+    background: 'rgba(225,182,15,.08)',
+    color: '#f3dc8a',
+    padding: '12px 14px',
+    lineHeight: 1.7,
+    fontWeight: 700,
   },
   note: {
     marginTop: 18,

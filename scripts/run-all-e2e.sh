@@ -91,6 +91,14 @@ psql_reset() { psql -d sybnb_v6 -tAc "DELETE FROM seller_profiles WHERE user_id 
 # create call had failed for insufficient funds. Observed for real: after three full-suite runs in
 # one afternoon the balance had fallen to 123,000, below what section 6 needs. Nothing to do with
 # any product code; the suite simply assumes a funded sender and had no step that guaranteed one.
+# Host verification (migration 049): the shared HOST/SELLER fixtures own the stays most suites book,
+# and stays of an unverified owner are hidden + unbookable. Make sure the fixtures are verified even
+# on a database where the migration's backfill found no APPROVED listing for them.
+verify_host_fixtures() {
+  psql -d sybnb_v6 -tAc "UPDATE users SET host_verified_at = now() WHERE host_verified_at IS NULL AND id IN ('$HOST','$SELLER1','$SELLER2');" >/dev/null 2>&1
+}
+verify_host_fixtures
+
 fund_gift_fixture() {
   psql -d sybnb_v6 -tAc "UPDATE wallets SET cached_balance_minor = 50000000 WHERE user_id='$SELLER1' AND currency='SYP';" >/dev/null 2>&1
 }
@@ -199,6 +207,8 @@ run "payment-refund-execute" refund-execution-wallet-credit.e2e.mjs
 # Owner money-flow decisions of 2026-10-08 (quote, demo/own-listing refusal, cancellation rules +
 # retained split, unpaid expiry, host withdrawals). Self-contained: seeds its own users/listings.
 run "booking-money-flow" booking-money-flow.e2e.mjs
+# Host verification + admin login code (owner decisions of 2026-10-08). Self-contained.
+run "host-verification" host-verification.e2e.mjs
 run_full "marketplace"      marketplace.e2e.mjs      reset
 run_full "cars"             cars.e2e.mjs             reset
 run_full "buy"              buy.e2e.mjs              reset

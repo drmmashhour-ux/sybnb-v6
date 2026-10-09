@@ -1,0 +1,18 @@
+{
+  "id": "/admin.html",
+  "name": "SYBNB Admin",
+  "short_name": "SYBNB Admin",
+  "description": "SYBNB admin portal — sign in with your password and an email code every time.",
+  "start_url": "/admin.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#080a10",
+  "theme_color": "#080a10",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    { "src": "/assets/logos/sybnb-arch-monogram.png", "sizes": "380x380", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/logos/sybnb-platform.png", "sizes": "380x380", "type": "image/png", "purpose": "any" }
+  ]
+}

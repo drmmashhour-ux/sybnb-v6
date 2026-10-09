@@ -5,6 +5,7 @@ import { issueUserSession, listActiveSessions, revokeSession, revokeUserAccess, 
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { channelEnabled, defaultCurrency } from '../lib/country.mjs'
 import { isRateLimited, clientIp } from '../lib/rateLimit.mjs'
+import { ADMIN_LOGIN_OTP_PURPOSE, ADMIN_LOGIN_OTP_WINDOW_MS, requiresAdminLoginCode } from '../lib/admin-login.mjs'
 
 // DRIVER is intentionally NOT self-registerable: an unvetted self-registered driver could claim
 // live rides and harvest rider pickup/dropoff + identity. Drivers (like ADMIN/SUPPORT) are
@@ -269,6 +270,40 @@ export async function handleAuth(req, res, url, context) {
       error.code = 'INVALID_CREDENTIALS'
       error.expose = true
       throw error
+    }
+
+    // Owner decision 2026-10-08: an account holding ADMIN signs in with password AND a fresh email
+    // code, every time. The code must be an 'admin-login' OTP for THIS account's email, verified in
+    // the last ADMIN_LOGIN_OTP_WINDOW_MS (POST /api/otp/send + /api/otp/verify), and is consumed
+    // single-use here -- so one verified code yields exactly one admin session. Checked only after
+    // the password matched, so it reveals nothing about which accounts are admins to a stranger.
+    // Roles are read live on every request, so any session for this account carries ADMIN: there
+    // is no "sign in as a guest, then act as admin" path around this check.
+    if (requiresAdminLoginCode(user.roles)) {
+      const codeRequired = () => {
+        const error = new Error('Admin sign-in needs a fresh email code. Use the admin portal: request the code, enter it, then sign in.')
+        error.statusCode = 403
+        error.code = 'ADMIN_LOGIN_CODE_REQUIRED'
+        error.expose = true
+        return error
+      }
+      if (!user.email) throw codeRequired()
+      const verified = await db().verificationCode.findFirst({
+        where: {
+          identifierHash: hashEmail(user.email),
+          purpose: ADMIN_LOGIN_OTP_PURPOSE,
+          status: 'VERIFIED',
+          verifiedAt: { gt: new Date(Date.now() - ADMIN_LOGIN_OTP_WINDOW_MS) },
+        },
+        orderBy: { verifiedAt: 'desc' },
+      })
+      if (!verified) throw codeRequired()
+      // Single-use: only a still-VERIFIED row flips, so two concurrent logins cannot share one code.
+      const consumed = await db().verificationCode.updateMany({
+        where: { id: verified.id, status: 'VERIFIED' },
+        data: { status: 'CANCELLED' },
+      })
+      if (consumed.count === 0) throw codeRequired()
     }
 
     // Each login issues its OWN session row, so two devices signing into the same account get two

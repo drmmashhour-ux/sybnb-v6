@@ -234,7 +234,21 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
       await signInGuestAccount(email, password)
       finishAndReturn()
       return
-    } catch {
+    } catch (err) {
+      // An admin account cannot sign in here (owner decision 2026-10-08): admin sign-in always
+      // needs a fresh email code, through the admin portal. Say so instead of treating it as a new
+      // account.
+      if ((err as { code?: string } | null)?.code === 'ADMIN_LOGIN_CODE_REQUIRED') {
+        say(
+          isAr
+            ? 'هذا حساب إدارة. سجّل الدخول من بوابة الإدارة (/admin) برمز يُرسل إلى بريدك.'
+            : lang === 'fr'
+              ? 'Ceci est un compte administrateur. Connectez-vous via le portail admin (/admin) avec le code envoyé par courriel.'
+              : 'This is an admin account. Sign in through the admin portal (/admin) with the code sent to your email.',
+        )
+        setBusy(false)
+        return
+      }
       // No match -> treat as a new account and email the verification code.
     }
     try {

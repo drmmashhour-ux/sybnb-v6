@@ -149,6 +149,11 @@ model User {
   idDocumentStatus IdDocumentStatus? @map("id_document_status")
   idDocumentReviewedById String? @map("id_document_reviewed_by_id")
   idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
+  // Host verification (migration 049): set when the host redeems an admin-issued activation code.
+  // Stays owned by an account with this NULL are hidden from public listing endpoints and refused
+  // by POST /api/bookings (server/lib/host-verification.mjs).
+  hostVerifiedAt   DateTime? @map("host_verified_at")
+  hostVerifiedById String?   @map("host_verified_by_id")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
@@ -180,6 +185,10 @@ model User {
   payoutMethod                 HostPayoutMethod?
   payoutRequests               PayoutRequest[] @relation("PayoutRequestHost")
   payoutRequestsDecided        PayoutRequest[] @relation("PayoutRequestDecidedBy")
+  hostVerifiedBy               User?           @relation("HostVerifiedBy", fields: [hostVerifiedById], references: [id], onDelete: SetNull)
+  hostsVerified                User[]          @relation("HostVerifiedBy")
+  hostActivationCodes          HostActivationCode[] @relation("HostActivationCodeHost")
+  hostActivationCodesIssued    HostActivationCode[] @relation("HostActivationCodeIssuedBy")
 
   @@map("users")
 }
@@ -300,6 +309,27 @@ model PayoutRequest {
   @@index([hostId, status])
   @@index([status, createdAt])
   @@map("payout_requests")
+}
+
+// Admin-issued host activation code (migration 049). Only an HMAC of the 6-digit code is stored
+// (same scheme as verification_codes, bound to host_id). At most one is live per host: issuing a new
+// one retires the previous unused ones by moving their expires_at to the re-issue time. `attempts`
+// counts wrong guesses; at HOST_ACTIVATION_MAX_ATTEMPTS the code is locked until re-issued.
+model HostActivationCode {
+  id         String    @id @default(uuid())
+  hostId     String    @map("host_id")
+  codeHash   String    @map("code_hash")
+  issuedById String?   @map("issued_by_id")
+  issuedAt   DateTime  @default(now()) @map("issued_at")
+  expiresAt  DateTime  @map("expires_at")
+  usedAt     DateTime? @map("used_at")
+  attempts   Int       @default(0)
+
+  host     User  @relation("HostActivationCodeHost", fields: [hostId], references: [id], onDelete: Cascade)
+  issuedBy User? @relation("HostActivationCodeIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
+
+  @@index([hostId])
+  @@map("host_activation_codes")
 }
 
 model DriverProfile {

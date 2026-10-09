@@ -105,6 +105,13 @@ const TEMPLATES = {
     en: (d) => ({ subject: 'SYBNB: your withdrawal request was rejected', body: `Your withdrawal request for ${d.amount} was rejected. Reason: ${d.note}` }),
     fr: (d) => ({ subject: 'SYBNB : votre demande de retrait a été refusée', body: `Votre demande de retrait de ${d.amount} a été refusée. Motif : ${d.note}` }),
   },
+  // Host verification (2026-10-08). The plaintext code is in the email by design -- that is the
+  // delivery channel the admin chose (sendEmail: true); it is never stored or logged.
+  host_activation_code: {
+    ar: (d) => ({ subject: 'SYBNB: رمز تفعيل حساب المضيف', body: `رمز تفعيل حسابك كمضيف على SYBNB هو: ${d.code}\nأدخله في لوحة المضيف (قسم التحقق). صالح حتى ${d.expiresAt}. لا تشاركه مع أحد.` }),
+    en: (d) => ({ subject: 'SYBNB: your host activation code', body: `Your SYBNB host activation code is: ${d.code}\nEnter it in your host dashboard (verification). Valid until ${d.expiresAt}. Do not share it.` }),
+    fr: (d) => ({ subject: "SYBNB : votre code d'activation hôte", body: `Votre code d'activation hôte SYBNB : ${d.code}\nSaisissez-le dans votre tableau de bord hôte (vérification). Valable jusqu'au ${d.expiresAt}. Ne le partagez pas.` }),
+  },
   admin_payment_proof: {
     ar: (d) => ({ subject: 'SYBNB: إثبات دفع جديد للمراجعة', body: `إثبات دفع ${d.amount} للحجز ${d.bookingId}.` }),
     en: (d) => ({ subject: 'SYBNB admin: new payment proof to review', body: `Payment proof of ${d.amount} for booking ${d.bookingId}.` }),

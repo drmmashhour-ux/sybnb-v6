@@ -203,6 +203,8 @@ async function makeUser(id, roles) {
       passwordHash: hashPassword(PASSWORD),
       displayName: `sec002r-${id.slice(0, 8)}`,
       status: 'ACTIVE',
+      // Host verification (migration 049): seeded hosts are pre-verified so their stays are public/bookable.
+      hostVerifiedAt: roles.includes('HOST') ? new Date() : undefined,
       roles: { create: roles.map((role) => ({ role })) },
     },
   })

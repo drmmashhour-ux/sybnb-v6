@@ -9,6 +9,7 @@ import { isTrustProtectionRoute } from '../modules/trust/trustRoutes'
 import { isGiftFlowRoute } from '../modules/wallet/giftRoutes'
 import { getCurrentPath } from './routes'
 import { authStorage } from '../shared/api/authStorage'
+import { refreshStoredSessionRoles } from '../shared/api/platformApi'
 
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
 const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrainPage')
@@ -23,6 +24,8 @@ const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'
 const GuestAccountPage = lazyNamed(() => import('../modules/account/GuestAccountPage'), 'GuestAccountPage')
 const BecomeHostPage = lazyNamed(() => import('../modules/account/BecomeHostPage'), 'BecomeHostPage')
 const HostWhyPage = lazyNamed(() => import('../modules/account/HostWhyPage'), 'HostWhyPage')
+const HostJoinPage = lazyNamed(() => import('../modules/account/HostJoinPage'), 'HostJoinPage')
+const AdminHostsPage = lazyNamed(() => import('../modules/admin/AdminHostsPage'), 'AdminHostsPage')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
 const HostProfilePage = lazyNamed(() => import('../modules/host/HostProfilePage'), 'HostProfilePage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
@@ -79,6 +82,31 @@ export function App() {
       main.focus({ preventScroll: true })
     }
   }, [path])
+
+  // Stale-role fix: the stored session's roles are a copy taken at sign-in. Refresh them from the
+  // server once per app load (the account menu refreshes again when it opens), so a role granted
+  // meanwhile shows up ("Switch to hosting", "Admin panel") without signing in again.
+  useEffect(() => {
+    void refreshStoredSessionRoles({ minIntervalMs: 0 })
+  }, [])
+
+  // Installable "SYBNB Admin" app: while an admin route is open, point the page's web manifest at
+  // public/manifest-admin.webmanifest (installing from here installs the admin app, start_url
+  // /admin.html). Removed again outside /admin -- the main site declares no manifest of its own.
+  const isAdminRoute = path.startsWith('/admin')
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const existing = document.querySelector<HTMLLinkElement>('link[rel="manifest"][data-sybnb-admin]')
+    if (isAdminRoute && !existing) {
+      const link = document.createElement('link')
+      link.rel = 'manifest'
+      link.href = '/manifest-admin.webmanifest'
+      link.setAttribute('data-sybnb-admin', '1')
+      document.head.appendChild(link)
+    } else if (!isAdminRoute && existing) {
+      existing.remove()
+    }
+  }, [isAdminRoute])
 
   useEffect(() => {
     const sync = () => setPath(getCurrentPath())
@@ -158,6 +186,9 @@ export function App() {
         ) : path === '/host/why' ? (
           // Public "Why host on SYBNB" landing (exempt from the HOST gate in getStaffRequiredRole).
           <HostWhyPage lang={lang} />
+        ) : path === '/host/join' ? (
+          // Host entrance: inline sign-in/up -> hosting on -> profile -> listing wizard (also exempt).
+          <HostJoinPage lang={lang} />
         ) : isGiftFlowRoute(path) ? (
           <GiftFlowRoutes lang={lang} path={path} />
         ) : isTrustProtectionRoute(path) ? (
@@ -201,6 +232,8 @@ export function App() {
           <AdminBusinessAccountsPage lang={lang} />
         ) : path === '/business/account' ? (
           <BusinessAccountPage lang={lang} />
+        ) : path === '/admin/hosts' ? (
+          <AdminHostsPage lang={lang} />
         ) : path === '/admin/money' ? (
           <AdminMoneyPage lang={lang} />
         ) : path === '/admin/review' ? (
@@ -284,6 +317,7 @@ function hostFocusFromPath(path: string): 'stays' | 'cars' | 'newConstruction' |
 
 function getStaffRequiredRole(path: string): 'ADMIN' | 'HOST' | 'DRIVER' | null {
   if (path === '/host/why') return null // public host landing page
+  if (path === '/host/join') return null // host entrance: handles signed-out / non-host itself
   if (path.startsWith('/host')) return 'HOST'
   if (path.startsWith('/driver')) return 'DRIVER'
   if (

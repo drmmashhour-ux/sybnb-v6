@@ -22,6 +22,7 @@ import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { formatMoney, notifyBooking } from '../lib/notifications.mjs'
 import { clientIp, isRateLimited } from '../lib/rateLimit.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
+import { isListingPubliclyVisible, requiresHostVerification } from '../lib/host-verification.mjs'
 // SEC-002R round 2. The fresh, from-scratch mutation sweep this round required classified guest
 // cancellation as Class A: it marks real payment proofs REFUNDED and calls createRefundRequest(),
 // which RESERVES refund capacity against the payment proof's own ledger counters -- an irreversible
@@ -46,7 +47,11 @@ export async function handleBookings(req, res, url, context) {
     const listingId = String(url.searchParams.get('listingId') || '')
     const { checkIn, checkOut } = parseStayDates(url.searchParams.get('checkIn'), url.searchParams.get('checkOut'))
     const protection = ['1', 'true'].includes(String(url.searchParams.get('protection') || '0').toLowerCase())
-    const listing = listingId ? await db().listing.findFirst({ where: { id: listingId, status: 'APPROVED' } }) : null
+    const found = listingId
+      ? await db().listing.findFirst({ where: { id: listingId, status: 'APPROVED' }, include: { owner: { select: { hostVerifiedAt: true } } } })
+      : null
+    // Host verification: an unverified host's stay is not public -> same 404 as a missing listing.
+    const listing = isListingPubliclyVisible(found, found?.owner) ? found : null
     if (!listing) {
       const error = new Error('Listing is not available for booking.')
       error.statusCode = 404
@@ -478,6 +483,7 @@ export async function handleBookings(req, res, url, context) {
       id: body.listingId,
       status: 'APPROVED',
     },
+    include: { owner: { select: { hostVerifiedAt: true } } },
   })
 
   if (!listing) {
@@ -493,6 +499,15 @@ export async function handleBookings(req, res, url, context) {
     const error = new Error('This is a demo listing and cannot be booked.')
     error.statusCode = 409
     error.code = 'LISTING_NOT_BOOKABLE'
+    error.expose = true
+    throw error
+  }
+  // Host verification (2026-10-08): a stay is bookable only once its host redeemed the SYBNB
+  // activation code. Checked server-side here, independent of what any page showed.
+  if (requiresHostVerification(listing.division) && !listing.owner?.hostVerifiedAt) {
+    const error = new Error('This host is not verified yet, so this listing cannot be booked.')
+    error.statusCode = 409
+    error.code = 'HOST_NOT_VERIFIED'
     error.expose = true
     throw error
   }

@@ -625,6 +625,153 @@ export async function becomeHost() {
   return updated
 }
 
+// ---- Stale-role refresh ------------------------------------------------------------------------
+// The browser keeps a copy of the signed-in user (incl. roles) in its stored session. A role granted
+// WITHOUT revoking the session (become-host on another device, seller-plan approval) left that copy
+// stale until the next sign-in, so the menu kept hiding "Switch to hosting"/"Admin panel". GET
+// /api/me reads the roles live; this refreshes every stored session from it. Called on app load and
+// whenever the account menu opens. A revoked session answers 401 and apiRequest() already drops it.
+export type MeResponse = { ok: true; user: ApiUser & { locale?: string; status?: string; hostVerifiedAt?: string | null } }
+
+let lastRoleRefreshAt = 0
+let roleRefreshInFlight: Promise<boolean> | null = null
+
+function sameRoles(a: string[] = [], b: string[] = []) {
+  return a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',')
+}
+
+export async function refreshStoredSessionRoles(options: { minIntervalMs?: number } = {}): Promise<boolean> {
+  const minIntervalMs = options.minIntervalMs ?? 10_000
+  if (roleRefreshInFlight) return roleRefreshInFlight
+  if (Date.now() - lastRoleRefreshAt < minIntervalMs) return false
+  lastRoleRefreshAt = Date.now()
+  roleRefreshInFlight = (async () => {
+    let changed = false
+    const guest = getStoredGuestSession()
+    const staff = getStoredStaffSession()
+    const fetchUser = async (token: string) => {
+      try {
+        return (await apiRequest<MeResponse>('/api/me', { token })).user
+      } catch {
+        return null // offline / revoked (a 401 already purged that token) -- keep what we have
+      }
+    }
+    const guestUser = guest?.token ? await fetchUser(guest.token) : null
+    if (guest && guestUser && guestUser.id === guest.user.id) {
+      if (!sameRoles(guest.user.roles, guestUser.roles) || guest.user.displayName !== guestUser.displayName) {
+        const updated = { ...guest, user: { ...guest.user, roles: guestUser.roles, displayName: guestUser.displayName } } as PlatformAuthSession
+        authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(updated))
+        changed = true
+      }
+    }
+    // The staff slot: same token as the guest session -> same answer; otherwise ask with its own token
+    // (e.g. an admin signed in on this browser through the admin portal).
+    const currentStaff = getStoredStaffSession()
+    if (currentStaff?.token && staff?.token === currentStaff.token) {
+      const staffUser = currentStaff.token === guest?.token ? guestUser : await fetchUser(currentStaff.token)
+      const stillStored = getStoredStaffSession()
+      if (staffUser && stillStored?.token === currentStaff.token && staffUser.id === stillStored.user.id && !sameRoles(stillStored.user.roles, staffUser.roles)) {
+        const roles = staffUser.roles
+        if (stillStored.token === guest?.token && !(roles.includes('HOST') || roles.includes('SELLER'))) {
+          // The mirrored host slot no longer has a host role: drop the mirror (the guest session stays).
+          clearStoredStaffSession()
+        } else {
+          authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify({ ...stillStored, user: { ...stillStored.user, roles } }))
+        }
+        changed = true
+      }
+    }
+    // Same rule as sign-in: a guest account that now carries HOST/SELLER opens the host area with
+    // the same session (never overwriting a different user's staff session).
+    const refreshedGuest = getStoredGuestSession()
+    if (refreshedGuest) {
+      const before = authStorage.getItem(STAFF_SESSION_KEY)
+      mirrorHostAccess(refreshedGuest)
+      if (authStorage.getItem(STAFF_SESSION_KEY) !== before) changed = true
+    }
+    if (changed) window.dispatchEvent(new Event('sybnb-session-changed'))
+    return changed
+  })()
+  try {
+    return await roleRefreshInFlight
+  } finally {
+    roleRefreshInFlight = null
+  }
+}
+
+// ---- Host verification (activation code, owner decision 2026-10-08) -----------------------------
+export type HostVerificationStatus = {
+  verified: boolean
+  verifiedAt: string | null
+  hasPendingCode: boolean
+  codeExpiresAt: string | null
+  codeLocked: boolean
+  attemptsRemaining: number
+}
+
+export async function fetchHostVerification(): Promise<HostVerificationStatus> {
+  const result = await apiRequest<{ ok: true } & HostVerificationStatus>('/api/host/verification', { token: hostToken() })
+  return {
+    verified: result.verified,
+    verifiedAt: result.verifiedAt,
+    hasPendingCode: result.hasPendingCode,
+    codeExpiresAt: result.codeExpiresAt,
+    codeLocked: result.codeLocked,
+    attemptsRemaining: result.attemptsRemaining,
+  }
+}
+
+export async function activateHostAccount(code: string) {
+  return apiRequest<{ ok: true; verifiedAt: string; alreadyVerified?: boolean }>('/api/host/activate', {
+    method: 'POST',
+    token: hostToken(),
+    body: { code },
+  })
+}
+
+export type AdminHostCodeState = 'ACTIVE' | 'EXPIRED' | 'LOCKED' | 'USED' | 'NONE'
+export type AdminHost = {
+  id: string
+  displayName: string
+  email: string | null
+  status: string
+  createdAt: string
+  verifiedAt: string | null
+  verifiedBy: { id: string; displayName: string } | null
+  listingsCount: number
+  latestCode: { issuedAt: string; expiresAt: string; used: boolean; usedAt: string | null; attempts: number; state: AdminHostCodeState } | null
+}
+export type AdminHostFilter = 'unverified' | 'verified' | 'all'
+
+export async function fetchAdminHosts(status: AdminHostFilter = 'unverified', q = '') {
+  const params = new URLSearchParams({ status })
+  if (q.trim()) params.set('q', q.trim())
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; hosts: AdminHost[] }>(`/api/admin/hosts?${params.toString()}`, { token }),
+  )
+  return response.hosts || []
+}
+
+export type IssuedHostActivationCode = { code: string; codeId: string; issuedAt: string; expiresAt: string; maxAttempts: number; emailQueued: boolean }
+
+export async function issueHostActivationCode(userId: string, sendEmail: boolean) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true } & IssuedHostActivationCode>(`/api/admin/hosts/${encodeURIComponent(userId)}/activation-code`, {
+      method: 'POST',
+      token,
+      body: { sendEmail },
+    }),
+  )
+  return {
+    code: response.code,
+    codeId: response.codeId,
+    issuedAt: response.issuedAt,
+    expiresAt: response.expiresAt,
+    maxAttempts: response.maxAttempts,
+    emailQueued: response.emailQueued,
+  } satisfies IssuedHostActivationCode
+}
+
 // Forgot password: after the 'password-reset' email code is verified, set the new password. The server
 // signs the account out on every device; the caller then signs in with the new password.
 export async function resetPassword(email: string, newPassword: string) {
@@ -807,7 +954,15 @@ export async function createStaffAccountSession(
     password,
     ...(phone ? { phone } : { phone: '' }),
   }
-  const session = input?.mode === 'signUp' ? await createStaffAccount(account) : await ensurePrototypeSession(account)
+  // ADMIN is never self-registered and (owner decision 2026-10-08) needs a fresh 'admin-login'
+  // email code verified just before this call -- so a failed admin login must surface its real
+  // error (e.g. ADMIN_LOGIN_CODE_REQUIRED), never fall through to a register() that cannot succeed.
+  const session =
+    role === 'ADMIN'
+      ? await login(account.email, account.password)
+      : input?.mode === 'signUp'
+        ? await createStaffAccount(account)
+        : await ensurePrototypeSession(account)
   authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
   authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
   return session
@@ -2182,7 +2337,7 @@ async function register(body: {
 
 // Server-authoritative OTP. The browser never generates or trusts the code — it asks the backend to
 // send it (by email; phone optional) and to verify it. The plaintext code is not returned in production.
-export type OtpPurpose = 'guest-login' | 'staff-login' | 'seller-login' | 'host-login' | 'account-verify' | 'payment-proof' | 'wallet-claim' | 'password-reset'
+export type OtpPurpose = 'guest-login' | 'staff-login' | 'seller-login' | 'host-login' | 'account-verify' | 'payment-proof' | 'wallet-claim' | 'password-reset' | 'admin-login'
 
 export async function requestOtp(input: { email?: string; phone?: string; purpose: OtpPurpose; channel?: 'email' | 'sms' | 'whatsapp' }) {
   return apiRequest<{ ok: true; sent: boolean; channel: string; masked: string; maskedEmail?: string; maskedPhone?: string; expiresAt: string; provider: string; devCode?: string }>(

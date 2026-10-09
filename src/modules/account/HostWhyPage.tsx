@@ -13,8 +13,8 @@ import { currentAccountIsHost, getStoredGuestSession } from '../../shared/api/pl
 //    statuses PENDING_HOLD / ELIGIBLE / RELEASED). Live payments are NOT enabled (AGENTS.md §5),
 //    so the copy says so plainly and makes no promise about payout methods or timing.
 //  - Terms are a DRAFT; we only point to /terms, never state legal/tax conclusions.
-// "Start hosting" reuses the existing flow: /host/stays -> sign-in (App gate, returns here via
-// returnPath) -> one-tap BecomeHostPage -> host profile -> dashboard.
+// "Start hosting" opens /host/join (HostJoinPage): inline sign-in/up -> hosting turned on -> host
+// profile -> listing wizard.
 
 type Props = { lang: Lang }
 
@@ -193,9 +193,9 @@ export function HostWhyPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const session = typeof window !== 'undefined' ? getStoredGuestSession() : null
   const isHost = typeof window !== 'undefined' && currentAccountIsHost()
-  // Existing flow: signed-out -> App shows the sign-in gate with returnPath /host/stays;
-  // signed-in non-host -> one-tap BecomeHostPage; host -> dashboard.
-  const start = () => navigate('/host/stays')
+  // Host entrance (2026-10-08): /host/join signs in / signs up inline, turns hosting on, and leads
+  // to the host profile then the listing wizard. Hosts go straight to their dashboard.
+  const start = () => navigate(isHost ? '/host' : '/host/join')
   const ctaLabel = isHost ? t.ctaHost : t.cta
 
   return (

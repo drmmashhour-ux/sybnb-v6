@@ -18,6 +18,8 @@ const ALLOWED_PURPOSES = new Set([
   'account-verify', 'payment-proof', 'wallet-claim',
   // Forgot password: the code proves control of the account's email before a new password is set.
   'password-reset',
+  // Admin portal: every admin sign-in needs a fresh code under this purpose (server/routes/auth.mjs).
+  'admin-login',
 ])
 
 // The plaintext code is exposed back to the caller ONLY in explicit test mode. In production this

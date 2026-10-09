@@ -6,6 +6,8 @@ import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
 import { normalizeBrowseCity, resolveListingCityName } from '../lib/listing-location.mjs'
 import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
+// Host verification (2026-10-08): stays of an owner without users.host_verified_at are not public.
+import { isListingPubliclyVisible, publicListingVisibilityWhere } from '../lib/host-verification.mjs'
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
 // Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
@@ -169,7 +171,12 @@ export async function handleListings(req, res, url, context) {
       error.expose = true
       throw error
     }
-    const listing = await db().listing.findFirst({ where: { id: quoteMatch[1], status: 'APPROVED' } })
+    const found = await db().listing.findFirst({
+      where: { id: quoteMatch[1], status: 'APPROVED' },
+      include: { owner: { select: { hostVerifiedAt: true } } },
+    })
+    // An unverified host's stay is not public: same 404 as a listing that does not exist.
+    const listing = isListingPubliclyVisible(found, found?.owner) ? found : null
     if (!listing) {
       const error = new Error('Listing not found.')
       error.statusCode = 404
@@ -307,8 +314,12 @@ export async function handleListings(req, res, url, context) {
       let scanCursor = cursor
       const listings = []
       let hasMore = false
+      // Host verification: stays whose owner is not verified never appear. A to-one relation
+      // filter on listings.owner_id -> users (primary key), so no extra round trip per page.
+      const visibility = publicListingVisibilityWhere(division)
       for (let batchNum = 0; batchNum < MAX_SCAN_BATCHES; batchNum++) {
         const andConditions = [...attributeConditions]
+        if (Object.keys(visibility).length) andConditions.push(visibility)
         if (scanCursor) {
           andConditions.push({
             OR: [
@@ -542,7 +553,7 @@ export async function handleListings(req, res, url, context) {
   if (detailMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     await expireOldListings({ id: detailMatch[1] })
-    const listing = await db().listing.findFirst({
+    const found = await db().listing.findFirst({
       where: { id: detailMatch[1], status: 'APPROVED' },
       include: {
         location: true,
@@ -551,10 +562,15 @@ export async function handleListings(req, res, url, context) {
           select: {
             id: true,
             displayName: true,
+            hostVerifiedAt: true,
           },
         },
       },
     })
+    // Host verification: an unverified owner's stay is a plain 404 publicly (the owner still sees
+    // it through /api/host/*, admins through /api/admin/*). toPublicListing() exposes only the
+    // owner's id + displayName, never hostVerifiedAt.
+    const listing = isListingPubliclyVisible(found, found?.owner) ? found : null
     if (!listing) {
       const error = new Error('Listing not found.')
       error.statusCode = 404
@@ -569,6 +585,21 @@ export async function handleListings(req, res, url, context) {
   if (availabilityMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     const listingId = availabilityMatch[1]
+    // Host verification: the calendar of a stay that is not public (not APPROVED, or its owner is
+    // not verified) is only readable by its owner and staff -- everyone else gets the same 404 as
+    // GET /api/listings/:id. Previously this endpoint answered for any id at all.
+    const target = await db().listing.findFirst({
+      where: { id: listingId },
+      select: { id: true, ownerId: true, status: true, division: true, owner: { select: { hostVerifiedAt: true } } },
+    }).catch(() => null)
+    const privileged = Boolean(target && context?.user && (target.ownerId === context.user.id || context.roles?.includes('ADMIN') || context.roles?.includes('SUPPORT')))
+    if (!target || (!privileged && !isListingPubliclyVisible(target, target.owner))) {
+      const error = new Error('Listing not found.')
+      error.statusCode = 404
+      error.code = 'LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
     const from = parseDateOnly(url.searchParams.get('from')) || new Date()
     const toRaw = parseDateOnly(url.searchParams.get('to'))
     const to = toRaw || new Date(from.getTime() + 1000 * 60 * 60 * 24 * 90)

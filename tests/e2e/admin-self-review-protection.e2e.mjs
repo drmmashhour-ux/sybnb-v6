@@ -45,7 +45,8 @@ const hostId = process.env.HOST || '480b860e-f32f-4089-a34b-5bbeec33952f'
 async function upsertUser(id, email, roles) {
   await db().user.upsert({
     where: { id },
-    create: { id, email, displayName: email, passwordHash: 'unused-test-fixture', status: 'ACTIVE' },
+    // Host verification (migration 049): every actor here may own a stay that gets booked.
+    create: { id, email, displayName: email, passwordHash: 'unused-test-fixture', status: 'ACTIVE', hostVerifiedAt: new Date() },
     update: {},
   })
   for (const role of roles) {

@@ -62,6 +62,8 @@ async function seedUser(label, roles) {
       email: `money-flow-${label}-${RUN}@example.test`,
       displayName: `MF ${label} ${RUN}`,
       locale: 'en',
+      // Host verification (migration 049): this suite's host is pre-verified so its stays are bookable.
+      hostVerifiedAt: roles.includes('HOST') ? new Date() : undefined,
       roles: { create: roles.map((role) => ({ role })) },
     },
   })

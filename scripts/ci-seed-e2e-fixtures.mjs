@@ -35,6 +35,12 @@ try {
         update: {},
       })
     }
+    // Host verification (migration 049): fixture hosts/sellers are verified so the stays the
+    // suites create for them are public and bookable (a fresh CI DB has no APPROVED listings for
+    // the migration's backfill to find).
+    if (roles.includes('HOST') || roles.includes('SELLER')) {
+      await db().user.updateMany({ where: { id, hostVerifiedAt: null }, data: { hostVerifiedAt: new Date() } })
+    }
     console.log(`seeded ${name} ${id} [${roles.join(', ')}]`)
   }
 } finally {

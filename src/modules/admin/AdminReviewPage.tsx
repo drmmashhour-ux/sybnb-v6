@@ -624,6 +624,15 @@ function ShortRentAdminCommandDashboard({
         </div>
       </header>
 
+      <nav style={commandStyles.quickLinks} aria-label={pick(lang, 'صفحات الإدارة', 'Admin pages', 'Pages d’administration')}>
+        <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/hosts')}>
+          {pick(lang, 'التحقق من المضيفين', 'Host verification', 'Vérification des hôtes')}
+        </button>
+        <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/money')}>
+          {pick(lang, 'الصرف والاسترداد', 'Payouts & refunds', 'Versements et remboursements')}
+        </button>
+      </nav>
+
       <section style={commandStyles.departmentGroups} aria-label={isAr ? 'أقسام الإدارة' : 'Admin departments'}>
         {commandCategories.map((category) => {
           const items = commandViews.filter((view) => category.viewIds.includes(view.id))
@@ -908,6 +917,9 @@ function ShortRentAdminCommandDashboard({
               <strong>{isAr ? 'صرف المضيفين (حقيقي)' : 'Host payouts (real)'}</strong>
               <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/money')}>
                 {pick(lang, 'طلبات السحب والاستردادات ←', 'Payout requests & refunds →', 'Demandes de versement et remboursements →')}
+              </button>
+              <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/hosts')}>
+                {pick(lang, 'التحقق من المضيفين ←', 'Host verification →', 'Vérification des hôtes →')}
               </button>
               <small>
                 {isAr ? `يبقى الصرف معلقا حتى ${payoutHoldDays} يوما بعد انتهاء الإقامة، ولا يظهر هنا إلا بعد اكتمال الحجز وعدم وجود نزاع مفتوح.` : `Payout stays held for ${payoutHoldDays} days after the stay ends, and only appears here once the booking is completed with no open dispute.`}
@@ -1789,6 +1801,7 @@ function currentFlowStepIndex(booking: PlatformReviewBooking | undefined, paymen
 
 
 const commandStyles: Record<string, CSSProperties> = {
+  quickLinks: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   page: { minHeight: '100vh', background: '#07080d', color: '#f7f7fb', padding: '18px 24px 88px', display: 'grid', gap: 18, fontFamily: 'inherit' },
   header: { alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,.08)', display: 'grid', gap: 16, gridTemplateColumns: 'auto 1fr auto', margin: '0 -24px', padding: '0 24px 18px' },
   strBrandLockup: { alignItems: 'center', display: 'flex', gap: 12, minWidth: 0 },

@@ -20,7 +20,8 @@
 
 import { randomUUID } from 'node:crypto'
 import { db } from './prisma.mjs'
-import { createSessionToken, SESSION_TTL_SECONDS } from './security.mjs'
+import { createSessionToken } from './security.mjs'
+import { sessionTtlSecondsForRoles } from './admin-login.mjs'
 import { runBoundedRevocation } from './revocation-contention.mjs'
 
 export const REVOCATION_REASONS = {
@@ -48,9 +49,18 @@ function safeUserAgent(req) {
 // UPDATE, or reads the post-bump epoch and is issued against an account that is already
 // SUSPENDED and therefore fails the status check on its first request. Neither ordering yields a
 // usable credential.
+//
+// Lifetime: 7 days, except an account holding ADMIN gets ADMIN_SESSION_TTL_HOURS (default 12h) --
+// owner decision of 2026-10-08 (server/lib/admin-login.mjs). Decided from the roles the CALLER
+// loaded for this account; when none were loaded they are read here, so a caller can never mint a
+// 7-day admin session by forgetting to include roles.
 export async function issueUserSession(user, req = null) {
   const sessionId = randomUUID()
-  const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000)
+  const roles = Array.isArray(user.roles)
+    ? user.roles
+    : await db().userRole.findMany({ where: { userId: user.id }, select: { role: true } })
+  const ttlSeconds = sessionTtlSecondsForRoles(roles)
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000)
 
   const epoch = await db().$transaction(async (tx) => {
     const current = await tx.user.findUnique({ where: { id: user.id }, select: { sessionEpoch: true } })
@@ -70,7 +80,7 @@ export async function issueUserSession(user, req = null) {
   return {
     sessionId,
     expiresAt,
-    token: createSessionToken(user, { sessionId, epoch }),
+    token: createSessionToken(user, { sessionId, epoch, ttlSeconds }),
   }
 }
 

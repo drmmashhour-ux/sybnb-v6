@@ -78,10 +78,20 @@ await makeUser(ids.bystander, emails.bystander, ['ADMIN', 'GUEST'])
 async function clearAuthRateLimit() {
   await db().rateLimitBucket.deleteMany({ where: { bucketKey: { startsWith: 'auth:' } } })
 }
+// Owner decision 2026-10-08: an ADMIN account signs in with password AND a fresh 'admin-login'
+// email code (server/routes/auth.mjs). This suite's real logins therefore obtain one first, through
+// the real OTP endpoints (the API runs with OTP_EXPOSE_FOR_TEST, so the code comes back as devCode).
+// Harmless for the non-admin accounts: their login simply never consumes it.
+async function adminLoginCode(email) {
+  const sent = await call('POST', '/api/otp/send', null, { email, purpose: 'admin-login' })
+  if (sent.j?.devCode) await call('POST', '/api/otp/verify', null, { email, purpose: 'admin-login', code: sent.j.devCode })
+}
 async function login(email) {
+  await adminLoginCode(email)
   let res = await call('POST', '/api/auth/login', null, { email, password: PASSWORD })
   if (res.status === 429) {
     await clearAuthRateLimit()
+    await adminLoginCode(email)
     res = await call('POST', '/api/auth/login', null, { email, password: PASSWORD })
   }
   if (res.status !== 200 || !res.j?.token) throw new Error(`login failed for ${email}: ${res.status} ${JSON.stringify(res.j)}`)

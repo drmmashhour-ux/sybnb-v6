@@ -8,9 +8,10 @@
 // version can require re-consent. Keep version + effectiveDate in sync with legalContent.ts
 // (LEGAL_VERSION / LEGAL_EFFECTIVE_DATE).
 //
-// v1.0.0 (2026-10-09): initial published content drafted to fit how SYBNB actually operates. This
-// text is a strong starting point and should still be reviewed by a lawyer licensed in the Syrian
-// Arab Republic; a review changes nothing here until the version is bumped on a content change.
+// v1.0.0 (2026-10-09): initial published content drafted to fit how SYBNB actually operates, then
+// reviewed and ACCEPTED by a lawyer on 2026-10-09 with no changes required — so the text stands at
+// v1.0.0 and no re-consent is needed. (A future review changes nothing here until the version is
+// bumped on a content change.)
 const LEGAL_VERSION = '1.0.0'
 const LEGAL_EFFECTIVE_DATE = '2026-10-09'
 

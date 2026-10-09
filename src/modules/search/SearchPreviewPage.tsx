@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
-import { getCity, getGovernorate, governorateCityName, labelFor, listingMatchesKeyword } from '../../engines/search'
+import { getCity, getGovernorate, GOVERNORATE_CITY_NAME, governorateCityName, labelFor, listingMatchesKeyword, SYRIA_GOVERNORATES } from '../../engines/search'
 import { fetchApprovedListings, isSampleListing, type PlatformListing } from '../../shared/api/platformApi'
 import { listingDescriptionText, statusText } from '../../shared/i18n/display'
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
@@ -207,15 +207,6 @@ const T = {
   },
 }
 
-const DIVISION_IMAGES: Record<string, string> = {
-  STAYS: '/assets/divisions/daily-rental.webp',
-  RENTALS: '/assets/divisions/monthly-rental.webp',
-  BUY: '/assets/divisions/buy-property.webp',
-  NEW_CONSTRUCTION: '/assets/divisions/new-construction.webp',
-  CARS: '/assets/divisions/cars.webp',
-  MARKETPLACE: '/assets/divisions/marketplace.webp',
-}
-
 export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'general' }: SearchPreviewPageProps) {
   const t = T[lang]
   const [effectiveInitialDivision, setEffectiveInitialDivision] = useState<SearchDivision>(() => readInitialSearchDivision(initialDivision))
@@ -357,20 +348,6 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
 
   return (
     <main dir={lang === 'ar' ? 'rtl' : 'ltr'} className="search-experience">
-      <section style={flowStyles.nav} aria-label={pick(lang, 'التنقل بين الخطوات', 'Step navigation', 'Navigation entre les étapes')}>
-        <button style={flowStyles.arrow} onClick={() => (window.location.hash = '/')} aria-label={pick(lang, 'السابق', 'Back', 'Retour')}>
-          ‹
-        </button>
-        <button
-          style={flowStyles.arrow}
-          disabled={!visibleListings[0]}
-          onClick={() => visibleListings[0] && openListing(visibleListings[0])}
-          aria-label={pick(lang, 'التالي', 'Next', 'Suivant')}
-        >
-          ›
-        </button>
-      </section>
-
       <section className="search-hero">
         <div>
           <p>{divisionCopy?.ready || (isStaysEntry ? t.staysReady : t.ready)}</p>
@@ -400,50 +377,65 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
         onSearch={(value) => void runLiveSearch(value)}
       />
 
-      {(state !== 'empty' || visibleListings.length === 0) && (
-        <SearchStateCard
-          lang={lang}
-          state={state}
-          onReset={resetSearch}
-          onShowAll={resetSearch}
-          onRetry={() => void runLiveSearch(lastSearch || undefined)}
-        />
-      )}
-
-      <section className="search-results">
+      <section className="search-results" aria-busy={state === 'loading'}>
         <div className="search-results-head">
           <span>{t.resultTitle}</span>
-          {hasSearched ? <strong>{countText}</strong> : null}
+          {state === 'loading' ? (
+            <small className="search-results-loading">{pick(lang, 'جارٍ البحث…', 'Searching…', 'Recherche en cours…')}</small>
+          ) : hasSearched ? (
+            <strong>{countText}</strong>
+          ) : null}
         </div>
+        {(state === 'error' || (state === 'empty' && visibleListings.length === 0)) && (
+          <SearchStateCard
+            lang={lang}
+            state={state}
+            onReset={resetSearch}
+            onShowAll={resetSearch}
+            onRetry={() => void runLiveSearch(lastSearch || undefined)}
+          />
+        )}
         {visibleListings.length ? (
           <div className="search-result-grid">
-            {visibleListings.map((listing) => (
-              <article key={listing.id} className="search-result-card">
-                <div className="search-result-media">
-                  <img src={listingImage(listing)} alt={listingDisplayTitle(listing, lang)} loading="lazy" />
-                  {!hasRealPhoto(listing) && <span className="search-result-no-photo">{t.noPhotoYet}</span>}
-                </div>
-                <div className="search-result-body">
-                  {listing.status !== 'APPROVED' && (
-                    <span className="search-result-status">{statusText(listing.status, lang)}</span>
-                  )}
-                  <h2>{listingDisplayTitle(listing, lang)}</h2>
-                  <p>{listingDescriptionText(listing, lang)}</p>
-                  <div className="search-result-meta">
-                    <span>{t.price}</span>
-                    <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{listingPriceText(listing, lang)}</strong>
+            {visibleListings.map((listing) => {
+              const card = cardText(listing, lang)
+              const photo = listingPhoto(listing)
+              return (
+                <article key={listing.id} className="search-result-card">
+                  <button type="button" className="search-result-media" onClick={() => openListing(listing)} aria-label={card.title}>
+                    {photo ? (
+                      <img src={photo} alt={card.title} loading="lazy" />
+                    ) : (
+                      <span className="search-result-placeholder">
+                        <DivisionIcon division={listing.division} />
+                        <small>{t.noPhotoYet}</small>
+                      </span>
+                    )}
+                    {card.demo ? <span className="search-result-demo">{pick(lang, 'تجريبي', 'Demo', 'Démo')}</span> : null}
+                  </button>
+                  <div className="search-result-body">
+                    {listing.status !== 'APPROVED' && (
+                      <span className="search-result-status">{statusText(listing.status, lang)}</span>
+                    )}
+                    <h2>{card.title}</h2>
+                    {card.place ? <span className="search-result-place">{card.place}</span> : null}
+                    {card.description ? <p>{card.description}</p> : null}
+                    <div className="search-result-meta">
+                      <span>{t.price}</span>
+                      <strong dir={lang === 'ar' ? 'rtl' : 'ltr'}>{listingPriceText(listing, lang)}</strong>
+                    </div>
+                    <div className="search-result-actions">
+                      <button
+                        type="button"
+                        onClick={() => openListing(listing)}
+                      >
+                        {divisionCopy?.action || t.book}
+                      </button>
+                    </div>
                   </div>
-                  <div className="search-result-actions">
-                    <button
-                      type="button"
-                      onClick={() => openListing(listing)}
-                    >
-                      {divisionCopy?.action || t.book}
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              )
+            })}
           </div>
         ) : null}
         {nextCursor && (
@@ -463,25 +455,84 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   )
 }
 
-const flowStyles = {
-  nav: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
-  arrow: { width: 54, height: 54, borderRadius: 999, border: '1px solid #30384d', background: '#111827', color: '#fff', fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
-} as const
-
-function listingImage(listing: PlatformListing) {
-  // Always prefer the listing's own uploaded photo; fall back to a generic division image only when
-  // no media exists — never force the generic over a real photo (cars/marketplace/new-construction).
+// The listing's own uploaded photo, or nothing: a generic division photo repeated on every card
+// made every result look like the same real apartment, so photo-less cards get a neutral placeholder.
+function listingPhoto(listing: PlatformListing) {
   const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
-  if (typeof mediaUrl === 'string') return mediaUrl
-  return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+  return typeof mediaUrl === 'string' ? mediaUrl : ''
 }
 
-// CAPSULE_RULES.noFakeTrustSignal: the fallback image looks like a real, professional listing photo
-// -- without this flag, a guest has no way to tell a real uploaded photo from a generic placeholder,
-// making every result look equally "real" (the audit's exact complaint). Mirrors listingImage()'s own
-// real-media check rather than re-deriving it separately.
-function hasRealPhoto(listing: PlatformListing) {
-  return Boolean(listing.media?.some((item) => typeof (item.url || item.src || item.assetUrl) === 'string'))
+const DEMO_TITLE_PREFIX = /^\s*(?:تجريبي|Demo|Démo)\s*[—–-]\s*/
+// Trailing "(إعلان تجريبي للعرض فقط — غير متاح للحجز.)" / "(Demo listing for display only — ...)".
+const DEMO_DESCRIPTION_NOTE = /\s*\((?:[^()]*تجريبي[^()]*|[^()]*\bd[ée]mo\b[^()]*)\)\s*$/i
+const ARABIC_SCRIPT = /[\u0600-\u06FF]/
+
+function textValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+// Card copy for the current language: the demo prefix becomes a badge, the demo note is dropped
+// from the description, and the place line never mixes Arabic and Latin script.
+function cardText(listing: PlatformListing, lang: Lang) {
+  const rawTitle = listingDisplayTitle(listing, lang)
+  const metadata = (listing.metadata || {}) as Record<string, unknown>
+  const demo = metadata.demo === true || DEMO_TITLE_PREFIX.test(rawTitle)
+  const title = rawTitle.replace(DEMO_TITLE_PREFIX, '').trim() || rawTitle
+  const description = listingDescriptionText(listing, lang).replace(DEMO_DESCRIPTION_NOTE, '').trim()
+  return { demo, title, description, place: placeLine(listing, lang) }
+}
+
+function placeLine(listing: PlatformListing, lang: Lang) {
+  const location = (listing.location || {}) as Record<string, unknown>
+  const metadata = (listing.metadata || {}) as Record<string, unknown>
+  const cityEn = textValue(location.city)
+  const governorateRaw = textValue(location.governorate)
+  // Match the stored governorate (Arabic or English) or the English city to the geo data.
+  const govKey = Object.keys(GOVERNORATE_CITY_NAME).find(
+    (key) => GOVERNORATE_CITY_NAME[key].toLowerCase() === (cityEn || governorateRaw).toLowerCase(),
+  )
+  const governorate = SYRIA_GOVERNORATES.find(
+    (item) => item.key === govKey || item.ar === governorateRaw || item.en.toLowerCase() === governorateRaw.toLowerCase(),
+  )
+  let parts: string[]
+  if (lang === 'ar') {
+    const gov = governorate?.ar || governorateRaw
+    const area = [textValue(location.area), textValue(metadata.area)].find((item) => ARABIC_SCRIPT.test(item)) || ''
+    parts = [gov, area].filter((item) => item && ARABIC_SCRIPT.test(item))
+  } else {
+    const cityName = cityEn || governorate?.en || ''
+    const area = textValue(metadata.areaEn) || textValue(location.area)
+    parts = [cityName, area].filter((item) => item && !ARABIC_SCRIPT.test(item))
+  }
+  return Array.from(new Set(parts)).join(' · ')
+}
+
+function DivisionIcon({ division }: { division: string }) {
+  if (division === 'CARS') {
+    return (
+      <svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round">
+        <path d="M8 30v-6l4-9a3 3 0 0 1 2.8-2h18.4a3 3 0 0 1 2.8 2l4 9v6a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2z" />
+        <path d="M8 24h32" />
+        <circle cx="15" cy="32" r="3.5" />
+        <circle cx="33" cy="32" r="3.5" />
+      </svg>
+    )
+  }
+  if (division === 'MARKETPLACE') {
+    return (
+      <svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round">
+        <path d="M10 16h28l-2 24H12z" />
+        <path d="M18 16v-3a6 6 0 0 1 12 0v3" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 48 48" width="44" height="44" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M8 22 24 9l16 13" />
+      <path d="M12 19v20h24V19" />
+      <path d="M20 39V28h8v11" />
+    </svg>
+  )
 }
 
 function searchSummary(value: UnifiedSearchValue, lang: Lang) {

@@ -15,6 +15,7 @@ type Props = {
   children: ReactNode
 }
 
+const DIVISION_SEARCH_PATHS = new Set(['/stays', '/cars', '/marketplace', '/new-construction', '/search-preview'])
 
 export function AppShell({ lang, onLanguageChange, path, gate, children }: Props) {
   const isAr = lang === 'ar'
@@ -22,7 +23,10 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
   const isAdvertisingTunnel = path.startsWith('/sell') || path.startsWith('/advertising')
   const isAdminControlRoom = path.startsWith('/admin')
   const routeContext = gate ? getGateRouteContext(path, gate, lang) : getRouteContext(path, lang)
-  const showFlowNav = !isLanding && !isAdminControlRoom
+  // Division search pages already carry the breadcrumb in the header; a second Back/Home bar only
+  // pushed the search and its results further down (Airbnb-style: one bar, search, results).
+  const isDivisionSearch = DIVISION_SEARCH_PATHS.has(path)
+  const showFlowNav = !isLanding && !isAdminControlRoom && !isDivisionSearch
   const guestSession = typeof window !== 'undefined' ? getStoredGuestSession() : null
   const isHost = typeof window !== 'undefined' && currentAccountIsHost()
   // /host/why is the public host landing page, not the host area.
@@ -108,7 +112,8 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
                   {pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte')}
                 </button>
                 <button className="primary-action" onClick={() => navigate('/account/open')}>
-                  {pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription')}
+                  <span className="label-long">{pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription')}</span>
+                  <span className="label-short">{pick(lang, 'دخول', 'Log in', 'Connexion')}</span>
                 </button>
               </div>
             )}

@@ -4,7 +4,7 @@ import { pick, type Lang } from '../../engines/language/languageEngine'
 import { visualFilterGroupsForDivision, type VisualFilterSelection } from '../../engines/filters'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { labelFor, getCity, getGovernorate } from '../../engines/search'
-import { DateField, DateRangePicker, nightsBetween } from './DateRangePicker'
+import { DateRangePicker, formatDateForLang } from './DateRangePicker'
 import { LocationCascade } from './LocationCascade'
 
 export type SearchDivision = 'stays' | 'rentals' | 'buy' | 'newConstruction' | 'cars' | 'marketplace'
@@ -144,6 +144,11 @@ const T = {
     customPlaceHint: 'سيُستخدم هذا الاسم في طلب البحث الحالي فقط.',
     search: 'بحث',
     resultPreview: 'معاينة الطلب',
+    dates: 'التواريخ',
+    anyDates: 'أي تاريخ',
+    filtersButton: 'الفلاتر',
+    applyFilters: 'تطبيق الفلاتر',
+    done: 'تم',
     locationDepth: 'المحافظة ← المدينة ← المنطقة',
   },
   en: {
@@ -211,6 +216,11 @@ const T = {
     customPlaceHint: 'This name is used for the current search request only.',
     search: 'Search',
     resultPreview: 'Request preview',
+    dates: 'Dates',
+    anyDates: 'Any dates',
+    filtersButton: 'Filters',
+    applyFilters: 'Apply filters',
+    done: 'Done',
     locationDepth: 'Governorate → City → Area',
   },
   fr: {
@@ -278,6 +288,11 @@ const T = {
     customPlaceHint: 'Ce nom n’est utilisé que pour la recherche en cours.',
     search: 'Rechercher',
     resultPreview: 'Aperçu de la demande',
+    dates: 'Dates',
+    anyDates: 'Dates flexibles',
+    filtersButton: 'Filtres',
+    applyFilters: 'Appliquer les filtres',
+    done: 'OK',
     locationDepth: 'Gouvernorat → Ville → Quartier',
   },
 }
@@ -453,11 +468,16 @@ export function restoredSearchValue(initialDivision: SearchDivision): UnifiedSea
   return restored.locationTouched ? restored : { ...restored, governorate: '', city: '', area: '' }
 }
 
+type Popover = 'where' | 'dates' | 'guests'
+
 export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivision = false, onSearch }: UnifiedSearchBarProps) {
   const t = T[lang]
-  const [openCalendar, setOpenCalendar] = useState(false)
+  // Airbnb-style: every secondary control (calendar, guests, location steps) is a popover that
+  // starts closed; only one is open at a time. The filters drawer is closed by default too.
+  const [openPop, setOpenPop] = useState<Popover | null>(null)
   const [showFilters, setShowFilters] = useState(false)
   const [value, setValue] = useState<UnifiedSearchValue>(() => restoredSearchValue(initialDivision))
+  const shellRef = useRef<HTMLElement | null>(null)
 
   // Same reset for the route-change path where this component stays mounted and only the
   // initialDivision prop changes. Guarded on an actual prop change, so a guest's own in-page tab
@@ -473,6 +493,26 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     if (typeof window === 'undefined') return
     sessionStorage.setItem(SEARCH_DRAFT_KEY, JSON.stringify(value))
   }, [value])
+
+  // Close the open popover on an outside click or Escape.
+  useEffect(() => {
+    if (!openPop || typeof document === 'undefined') return
+    const onPointer = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null
+      if (shellRef.current && target && !shellRef.current.contains(target)) setOpenPop(null)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenPop(null)
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('touchstart', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('touchstart', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [openPop])
 
   const governorate = getGovernorate(value.governorate)
   const city = getCity(value.governorate, value.city)
@@ -499,6 +539,10 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
     condition: value.condition,
     marketCategory: value.marketCategory,
   }
+  const selectedLabels = selectedFilterLabels(filterGroups, filterSelection, lang)
+  // The badge counts only what the guest changed: the default "newest" sort is not a filter.
+  const changedFilters = selectedFilterLabels(filterGroups, { ...filterSelection, sort: value.sort === 'newest' ? 'any' : value.sort }, lang)
+  const filterCount = changedFilters.length + (value.customPlaceName.trim() ? 1 : 0)
 
   const preview = useMemo(() => {
     const parts = [
@@ -514,14 +558,10 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
       isStay ? `${value.bathrooms} ${t.bathrooms}` : '',
       value.carBrand.trim() && value.carBrand !== 'any' ? value.carBrand.trim() : '',
       value.carYear.trim(),
-      ...selectedFilterLabels(filterGroups, filterSelection, lang),
+      ...selectedLabels,
     ].filter(Boolean)
     return parts.join(' · ')
-  }, [area, city, filterGroups, filterSelection, governorate, isStay, lang, t, value])
-
-  useEffect(() => {
-    setOpenCalendar(value.division === 'stays')
-  }, [value.division])
+  }, [area, city, governorate, isStay, lang, selectedLabels, t, value])
 
   useEffect(() => {
     if (lockedDivision && value.division !== initialDivision) switchDivision(initialDivision)
@@ -554,41 +594,42 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
   }
 
   const handleSearch = () => {
+    setOpenPop(null)
     onSearch?.(value)
   }
 
-  return (
-    <section dir={lang === 'ar' ? 'rtl' : 'ltr'} style={styles.shell}>
-      <div style={styles.header}>
-        <div>
-          <p style={styles.eyebrow}>{pick(lang, 'محرك البحث', 'SEARCH ENGINE', 'MOTEUR DE RECHERCHE')}</p>
-          <h2 style={styles.title}>{lockedDivision && initialDivision === 'stays' ? t.lockedStaysTitle : t.title}</h2>
-          <p style={styles.subtitle}>{lockedDivision && initialDivision === 'stays' ? t.lockedStaysSubtitle : t.subtitle}</p>
-        </div>
-      </div>
+  const togglePop = (pop: Popover) => setOpenPop((current) => (current === pop ? null : pop))
+  const datesSummary = value.checkIn
+    ? `${shortDate(value.checkIn, lang)} – ${value.checkOut ? shortDate(value.checkOut, lang) : '…'}`
+    : t.anyDates
+  const guestsSummary = [
+    guestsText(value.guests, lang),
+    value.bedroomsCount > 1 ? `${value.bedroomsCount} ${t.bedroomsStepper}` : '',
+    value.bathrooms > 1 ? `${value.bathrooms} ${t.bathrooms}` : '',
+  ].filter(Boolean).join(' · ')
 
-      {lockedDivision ? (
-        <div style={styles.lockedDivision}>
-          <span>{t[initialDivision]}</span>
-        </div>
-      ) : (
-        <div style={styles.tabs}>
+  return (
+    <section ref={shellRef} dir={lang === 'ar' ? 'rtl' : 'ltr'} className="usb" aria-label={t.search}>
+      {!lockedDivision ? (
+        <div className="usb-tabs">
           {DIVISIONS.map((division) => (
             <button
               key={division}
               type="button"
               onClick={() => switchDivision(division)}
-              style={{ ...styles.tab, ...(value.division === division ? styles.tabActive : {}) }}
+              className={`usb-tab${value.division === division ? ' is-active' : ''}`}
             >
               {t[division]}
             </button>
           ))}
         </div>
-      )}
+      ) : null}
 
-      <div style={styles.form}>
+      <div className="usb-row">
         <LocationCascade
           lang={lang}
+          open={openPop === 'where'}
+          onOpenChange={(open) => setOpenPop(open ? 'where' : null)}
           value={{ governorate: value.governorate, city: value.city, area: value.area }}
           onChange={(next) => {
             // Choosing a governorate narrows the results right away (the server filters by the
@@ -603,121 +644,159 @@ export function UnifiedSearchBar({ lang, initialDivision = 'stays', lockedDivisi
             onSearch?.(nextValue)
           }}
         />
-        <div style={styles.depthNote}>{t.locationDepth}</div>
 
         {isStay ? (
-          <section style={styles.calendarEngine}>
-            <div style={styles.calendarEngineHead}>
-              <div>
-                <strong>{t.dailyCalendar}</strong>
-                <p>{t.dailyCalendarHint}</p>
+          <div className="usb-slot usb-slot-dates">
+            <button type="button" className={`usb-pill${openPop === 'dates' ? ' is-open' : ''}`} onClick={() => togglePop('dates')} aria-expanded={openPop === 'dates'}>
+              <span className="usb-pill-label">{t.dates}</span>
+              <strong className="usb-pill-value">{datesSummary}</strong>
+            </button>
+            {openPop === 'dates' ? (
+              <div className="usb-pop usb-pop-dates" role="dialog" aria-label={t.dates}>
+                <DateRangePicker
+                  lang={lang}
+                  value={{ checkIn: value.checkIn, checkOut: value.checkOut }}
+                  onChange={(range) => update(range)}
+                  onClose={() => setOpenPop(null)}
+                />
               </div>
-              <span>{nightsBetween(value.checkIn, value.checkOut)} {pick(lang, 'ليالي', 'nights', 'nuits')}</span>
-            </div>
-            <div style={styles.dateGrid}>
-              <DateField lang={lang} label={t.checkIn} value={value.checkIn} active={openCalendar} onClick={() => setOpenCalendar(true)} />
-              <DateField lang={lang} label={t.checkOut} value={value.checkOut} active={openCalendar} onClick={() => setOpenCalendar(true)} />
-            </div>
-            {openCalendar ? (
-              <DateRangePicker
-                lang={lang}
-                value={{ checkIn: value.checkIn, checkOut: value.checkOut }}
-                onChange={(range) => update(range)}
-                onClose={() => setOpenCalendar(false)}
-              />
-            ) : (
-              <button type="button" style={styles.openCalendarButton} onClick={() => setOpenCalendar(true)}>
-                {t.dailyCalendar}
-              </button>
-            )}
-          </section>
-        ) : null}
-
-        <section style={styles.filtersPanel}>
-          <button type="button" style={styles.filtersHead} onClick={() => setShowFilters((current) => !current)} aria-expanded={showFilters}>
-            <strong>{t.filters}</strong>
-            <span style={styles.filtersHeadRight}>
-              <span style={styles.filtersCount}>{selectedFilterLabels(filterGroups, filterSelection, lang).length}</span>
-              <span aria-hidden="true">{showFilters ? '▴' : '▾'}</span>
-              {showFilters ? t.hideFilters : t.showFilters}
-            </span>
-          </button>
-          {showFilters ? (
-            <VisualFilterPanel groups={filterGroups} lang={lang} selection={filterSelection} onChange={updateFilters} compact />
-          ) : null}
-        </section>
-
-        {isStay ? (
-          <section style={styles.counterPhotoGrid} aria-label={pick(lang, 'عدادات الطلب', 'Request counters', 'Compteurs de la demande')}>
-            <CounterPhotoCard
-              lang={lang}
-              label={t.guestCounter}
-              hint={t.counterHint}
-              value={value.guests}
-              photoSrc="/assets/filter-photos/counters/guests.webp"
-              fallbackSrc="/assets/filter-photos/trust/family-friendly.webp"
-              onDecrease={() => update({ guests: Math.max(1, value.guests - 1) })}
-              onIncrease={() => update({ guests: value.guests + 1 })}
-            />
-            <CounterPhotoCard
-              lang={lang}
-              label={t.bedroomCounter}
-              hint={t.counterHint}
-              value={value.bedroomsCount}
-              photoSrc="/assets/filter-photos/counters/bedrooms.webp"
-              fallbackSrc="/assets/filter-photos/rooms/any-room.webp"
-              onDecrease={() => update({ bedroomsCount: Math.max(1, value.bedroomsCount - 1) })}
-              onIncrease={() => update({ bedroomsCount: value.bedroomsCount + 1 })}
-            />
-            <CounterPhotoCard
-              lang={lang}
-              label={t.bathroomCounter}
-              hint={t.counterHint}
-              value={value.bathrooms}
-              photoSrc="/assets/filter-photos/amenities/bathroom.png"
-              fallbackKind="bathroom"
-              onDecrease={() => update({ bathrooms: Math.max(1, value.bathrooms - 1) })}
-              onIncrease={() => update({ bathrooms: value.bathrooms + 1 })}
-            />
-          </section>
-        ) : null}
-
-        <label style={styles.label}>
-          {t.customPlace}
-          <input
-            value={value.customPlaceName}
-            onChange={(event) => update({ customPlaceName: event.target.value })}
-            placeholder={t.customPlacePlaceholder}
-            style={styles.input}
-          />
-        </label>
-        {value.customPlaceName.trim() ? (
-          <div style={{ ...styles.aiLearnBox, ...styles.aiLearnBoxActive }}>
-            <p style={styles.aiLearnText}>{t.customPlaceHint}</p>
+            ) : null}
           </div>
         ) : null}
 
-        {!isStay ? (
-          <label style={styles.label}>
-            {t.keyword}
+        {isStay ? (
+          <div className="usb-slot usb-slot-guests">
+            <button type="button" className={`usb-pill${openPop === 'guests' ? ' is-open' : ''}`} onClick={() => togglePop('guests')} aria-expanded={openPop === 'guests'}>
+              <span className="usb-pill-label">{t.guests}</span>
+              <strong className="usb-pill-value">{guestsSummary}</strong>
+            </button>
+            {openPop === 'guests' ? (
+              <div className="usb-pop usb-pop-guests" role="dialog" aria-label={t.guests}>
+                <Stepper
+                  lang={lang}
+                  label={t.guests}
+                  value={value.guests}
+                  onDecrease={() => update({ guests: Math.max(1, value.guests - 1) })}
+                  onIncrease={() => update({ guests: value.guests + 1 })}
+                />
+                <Stepper
+                  lang={lang}
+                  label={t.bedroomsStepper}
+                  value={value.bedroomsCount}
+                  onDecrease={() => update({ bedroomsCount: Math.max(1, value.bedroomsCount - 1) })}
+                  onIncrease={() => update({ bedroomsCount: value.bedroomsCount + 1 })}
+                />
+                <Stepper
+                  lang={lang}
+                  label={t.bathrooms}
+                  value={value.bathrooms}
+                  onDecrease={() => update({ bathrooms: Math.max(1, value.bathrooms - 1) })}
+                  onIncrease={() => update({ bathrooms: value.bathrooms + 1 })}
+                />
+                <div className="usb-pop-actions">
+                  <button type="button" className="usb-pop-done" onClick={() => setOpenPop(null)}>{t.done}</button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <label className="usb-slot usb-pill usb-pill-input">
+            <span className="usb-pill-label">{t.keyword}</span>
             <input
               value={value.keyword}
               onChange={(event) => update({ keyword: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') handleSearch()
+              }}
               placeholder={t.keywordPlaceholder}
-              style={styles.input}
             />
           </label>
-        ) : null}
+        )}
 
-        <div style={styles.preview}>
-          <span>{t.resultPreview}</span>
-          <b>{preview}</b>
-        </div>
+        <button
+          type="button"
+          className={`usb-filters-toggle${showFilters ? ' is-open' : ''}`}
+          onClick={() => {
+            setOpenPop(null)
+            setShowFilters((current) => !current)
+          }}
+          aria-expanded={showFilters}
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+            <circle cx="16" cy="7" r="2" />
+            <circle cx="10" cy="17" r="2" />
+          </svg>
+          <span>{t.filtersButton}</span>
+          {filterCount > 0 ? <b className="usb-filters-count">{filterCount}</b> : null}
+        </button>
 
-        <button type="button" style={styles.searchButton} onClick={handleSearch}>{t.search}</button>
+        <button type="button" className="usb-search" onClick={handleSearch}>
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+            <circle cx="11" cy="11" r="7" />
+            <path d="M20 20l-3.5-3.5" />
+          </svg>
+          <span>{t.search}</span>
+        </button>
       </div>
+
+      {showFilters ? (
+        <div className="usb-filters-panel">
+          <VisualFilterPanel groups={filterGroups} lang={lang} selection={filterSelection} onChange={updateFilters} compact />
+
+          <label className="usb-field">
+            <span>{t.customPlace}</span>
+            <input
+              value={value.customPlaceName}
+              onChange={(event) => update({ customPlaceName: event.target.value })}
+              placeholder={t.customPlacePlaceholder}
+            />
+          </label>
+          {value.customPlaceName.trim() ? <p className="usb-hint">{t.customPlaceHint}</p> : null}
+
+          <div className="usb-preview">
+            <span>{t.resultPreview}</span>
+            <b>{preview}</b>
+          </div>
+
+          <div className="usb-pop-actions">
+            <button type="button" className="usb-search" onClick={() => { setShowFilters(false); handleSearch() }}>
+              <span>{t.applyFilters}</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
+}
+
+function Stepper({ label, lang, value, onDecrease, onIncrease }: { label: string; lang: Lang; value: number; onDecrease: () => void; onIncrease: () => void }) {
+  return (
+    <div className="usb-stepper">
+      <span>{label}</span>
+      <span className="usb-stepper-controls" dir="ltr">
+        <button type="button" onClick={onDecrease} disabled={value <= 1} aria-label={pick(lang, `إنقاص ${label}`, `Decrease ${label}`, `Diminuer : ${label}`)}>−</button>
+        <strong>{value}</strong>
+        <button type="button" onClick={onIncrease} aria-label={pick(lang, `زيادة ${label}`, `Increase ${label}`, `Augmenter : ${label}`)}>+</button>
+      </span>
+    </div>
+  )
+}
+
+function shortDate(iso: string, lang: Lang) {
+  // "12 octobre 2026" -> "12 octobre": the year only adds width to the pill.
+  return formatDateForLang(iso, lang).replace(/\s\d{4}$/, '')
+}
+
+function guestsText(count: number, lang: Lang) {
+  if (lang === 'ar') {
+    if (count === 1) return 'ضيف واحد'
+    if (count === 2) return 'ضيفان'
+    if (count <= 10) return `${count} ضيوف`
+    return `${count} ضيفاً`
+  }
+  if (lang === 'fr') return `${count} voyageur${count > 1 ? 's' : ''}`
+  return `${count} guest${count > 1 ? 's' : ''}`
 }
 
 function stringValue(value: string | string[] | undefined, fallback: string) {
@@ -726,74 +805,6 @@ function stringValue(value: string | string[] | undefined, fallback: string) {
 
 function arrayValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value : []
-}
-
-function CounterPhotoCard({
-  hint,
-  label,
-  lang,
-  onDecrease,
-  onIncrease,
-  fallbackKind,
-  fallbackSrc,
-  photoSrc,
-  value,
-}: {
-  fallbackKind?: 'bathroom'
-  fallbackSrc?: string
-  hint: string
-  label: string
-  lang: Lang
-  onDecrease: () => void
-  onIncrease: () => void
-  photoSrc: string
-  value: number
-}) {
-  const [photoFailed, setPhotoFailed] = useState(false)
-  const [fallbackFailed, setFallbackFailed] = useState(false)
-  const currentSrc = photoFailed ? fallbackSrc : photoSrc
-  return (
-    <article style={styles.counterPhotoCard}>
-      <span style={styles.counterPhoto}>
-        {photoFailed && (!fallbackSrc || fallbackFailed) ? (
-          fallbackKind === 'bathroom' ? <BathroomCounterPicture /> : <span style={styles.counterPhotoFallback}>{label.slice(0, 1)}</span>
-        ) : (
-          <img
-            src={currentSrc || photoSrc}
-            alt={label}
-            loading="lazy"
-            onError={() => (photoFailed && fallbackSrc ? setFallbackFailed(true) : setPhotoFailed(true))}
-            style={styles.counterPhotoImage}
-          />
-        )}
-      </span>
-      <span style={styles.counterPhotoText}>
-        <b>{label}</b>
-        <small>{hint}</small>
-      </span>
-      <span style={styles.counterStepper} dir="ltr">
-        <button type="button" style={styles.counterButton} onClick={onDecrease} aria-label={pick(lang, `إنقاص ${label}`, `Decrease ${label}`, `Diminuer : ${label}`)}>
-          −
-        </button>
-        <strong style={styles.counterValue}>{value}</strong>
-        <button type="button" style={styles.counterButton} onClick={onIncrease} aria-label={pick(lang, `زيادة ${label}`, `Increase ${label}`, `Augmenter : ${label}`)}>
-          +
-        </button>
-      </span>
-    </article>
-  )
-}
-
-function BathroomCounterPicture() {
-  return (
-    <span style={styles.bathroomPicture}>
-      <span style={styles.bathroomMirror} />
-      <span style={styles.bathroomSink} />
-      <span style={styles.bathroomVanity} />
-      <span style={styles.bathroomShower} />
-      <span style={styles.bathroomShowerLine} />
-    </span>
-  )
 }
 
 function OptionGroup({
@@ -837,52 +848,10 @@ function OptionGroup({
 }
 
 const styles: Record<string, CSSProperties> = {
-  shell: { border: '1px solid #1e1e2a', borderRadius: 24, background: '#111118', padding: 16, color: '#fff' },
-  header: { display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 14 },
-  eyebrow: { color: '#d5a915', fontSize: 11, letterSpacing: 2, fontWeight: 900, margin: 0 },
-  title: { margin: '5px 0 4px', fontSize: 26 },
-  subtitle: { margin: 0, color: '#9aa6ba' },
-  tabs: { display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 12 },
-  tab: { minHeight: 44, border: '1px solid #30384d', borderRadius: 999, background: '#171b29', color: '#9aa6ba', padding: '0 14px', fontWeight: 900, whiteSpace: 'nowrap' },
-  tabActive: { background: '#4f6cff', borderColor: '#7f94ff', color: '#fff' },
-  lockedDivision: { border: '1px solid rgba(82,108,255,.55)', borderRadius: 16, background: 'rgba(82,108,255,.12)', color: '#fff', display: 'inline-flex', fontWeight: 950, marginBottom: 12, minHeight: 48, padding: '0 16px', alignItems: 'center', justifyContent: 'center', justifySelf: 'start' },
-  form: { display: 'grid', gap: 12 },
-  depthNote: { color: '#d5a915', fontSize: 12, fontWeight: 900 },
-  dateGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 },
-  calendarEngine: { border: '1px solid rgba(82,108,255,.55)', borderRadius: 18, background: 'linear-gradient(135deg, rgba(82,108,255,.16), rgba(32,210,155,.08)), #0c1220', display: 'grid', gap: 12, padding: 14 },
-  calendarEngineHead: { alignItems: 'center', display: 'flex', gap: 12, justifyContent: 'space-between' },
-  openCalendarButton: { minHeight: 52, border: '1px solid #4f6cff', borderRadius: 14, background: '#171b29', color: '#fff', fontWeight: 950 },
-  filtersPanel: { border: '1px solid #30384d', borderRadius: 16, background: '#0c1220', display: 'grid', gap: 12, padding: 12 },
-  filtersHead: { alignItems: 'center', background: 'transparent', border: 0, color: '#d5a915', display: 'flex', fontSize: 13, fontWeight: 950, justifyContent: 'space-between', gap: 12, minHeight: 44, padding: 0, textAlign: 'start', width: '100%' },
-  filtersHeadRight: { alignItems: 'center', display: 'flex', gap: 8 },
-  filtersCount: { alignItems: 'center', background: 'rgba(213,169,21,.16)', borderRadius: 999, color: '#d5a915', display: 'inline-flex', fontSize: 12, fontWeight: 950, height: 22, justifyContent: 'center', minWidth: 22, padding: '0 6px' },
-  filterGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 },
-  counterPhotoGrid: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))' },
-  counterPhotoCard: { alignItems: 'center', border: '1px solid #30384d', borderRadius: 16, background: '#111827', display: 'grid', gap: 12, gridTemplateColumns: '76px minmax(0, 1fr)', minHeight: 142, padding: 12 },
-  counterPhoto: { alignSelf: 'stretch', borderRadius: 14, background: '#0c1220', display: 'grid', minHeight: 86, overflow: 'hidden', placeItems: 'center' },
-  counterPhotoImage: { height: '100%', objectFit: 'cover', width: '100%' },
-  counterPhotoFallback: { color: '#d5a915', fontSize: 28, fontWeight: 950 },
-  bathroomPicture: { background: 'linear-gradient(135deg, #1e293b, #0f172a)', display: 'block', height: '100%', minHeight: 86, position: 'relative', width: '100%' },
-  bathroomMirror: { background: '#64748b', border: '2px solid #dbeafe', borderRadius: '50%', height: 26, left: 12, opacity: .9, position: 'absolute', top: 11, width: 26 },
-  bathroomSink: { background: '#e5edf7', borderRadius: '0 0 18px 18px', height: 13, left: 9, position: 'absolute', top: 45, width: 34 },
-  bathroomVanity: { background: '#475569', borderRadius: '0 0 5px 5px', height: 16, left: 13, position: 'absolute', top: 57, width: 26 },
-  bathroomShower: { border: '2px solid #dbeafe', borderBottom: 0, borderRadius: '16px 16px 0 0', height: 39, position: 'absolute', right: 12, top: 13, width: 24 },
-  bathroomShowerLine: { background: '#60a5fa', borderRadius: 999, bottom: 17, height: 3, position: 'absolute', right: 10, width: 30 },
-  counterPhotoText: { display: 'grid', gap: 5, minWidth: 0 },
-  counterStepper: { alignItems: 'center', display: 'grid', gap: 8, gridColumn: '1 / -1', gridTemplateColumns: '52px minmax(48px, 1fr) 52px' },
-  counterValue: { alignItems: 'center', background: '#0c1220', border: '1px solid #30384d', borderRadius: 13, color: '#fff', display: 'grid', fontSize: 24, minHeight: 52, placeItems: 'center' },
-  counterButton: { minWidth: 44, minHeight: 44, border: 0, borderRadius: 13, background: '#171b29', color: '#fff', fontSize: 22, fontWeight: 900 },
-  label: { display: 'grid', gap: 7, color: '#9aa6ba', fontSize: 12, fontWeight: 900 },
-  input: { minHeight: 54, border: '1px solid #30384d', borderRadius: 14, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
   optionGroup: { border: '1px solid #30384d', borderRadius: 14, background: '#111827', margin: 0, minWidth: 0, padding: '10px 10px 12px' },
   optionLegend: { color: '#9aa6ba', fontSize: 12, fontWeight: 900, padding: '0 6px' },
   optionRow: { display: 'flex', flexWrap: 'wrap', gap: 8 },
   optionButton: { alignItems: 'center', border: '1px solid #30384d', borderRadius: 12, background: '#0c1220', color: '#9aa6ba', display: 'grid', gap: 4, justifyItems: 'center', minHeight: 58, minWidth: 58, padding: '7px 8px' },
   optionButtonActive: { alignItems: 'center', border: '1px solid #7f94ff', borderRadius: 12, background: '#263575', color: '#fff', display: 'grid', gap: 4, justifyItems: 'center', minHeight: 58, minWidth: 58, padding: '7px 8px' },
   optionIcon: { fontSize: 16, fontWeight: 950, lineHeight: 1 },
-  aiLearnBox: { display: 'flex', gap: 10, border: '1px solid #2d3650', borderRadius: 14, background: '#0c1220', padding: 12, color: '#9aa6ba' },
-  aiLearnBoxActive: { borderColor: 'rgba(213,169,21,.45)', background: 'rgba(213,169,21,.08)' },
-  aiLearnText: { margin: '4px 0 0', fontSize: 12, lineHeight: 1.6 },
-  preview: { display: 'grid', gap: 5, border: '1px solid #2d3650', borderRadius: 14, background: '#0c1220', padding: 12, color: '#9aa6ba' },
-  searchButton: { minHeight: 54, border: 0, borderRadius: 16, background: 'linear-gradient(135deg,#4f6cff,#19d7ff)', color: '#fff', fontWeight: 950, fontSize: 16 },
 }

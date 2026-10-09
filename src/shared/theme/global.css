@@ -7956,3 +7956,547 @@ a {
     width: 100%;
   }
 }
+
+/* ── Division search (stays / cars / marketplace / new construction): Airbnb-style layout ──
+   Compact hero, one-row pill search bar with popovers, results directly underneath. */
+.search-experience {
+  gap: 16px;
+  padding-top: 18px;
+}
+
+.search-hero {
+  gap: 18px;
+  padding: 18px 22px;
+}
+
+.search-hero p {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.search-hero h1 {
+  font-size: clamp(28px, 3.2vw, 38px);
+  line-height: 1.15;
+}
+
+.search-hero span {
+  font-size: 15px;
+  line-height: 1.55;
+  margin-top: 8px;
+}
+
+.search-hero .stays-host-cta {
+  font-size: 13px;
+  margin-top: 12px;
+  padding: 8px 16px;
+}
+
+.search-hero-photo {
+  height: 112px;
+  width: 176px;
+}
+
+/* Search bar shell */
+.usb {
+  background: #111118;
+  border: 1px solid #1e1e2a;
+  border-radius: 20px;
+  color: #fff;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  position: relative;
+  z-index: 20;
+}
+
+.usb-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.usb-tab {
+  background: #171b29;
+  border: 1px solid #30384d;
+  border-radius: 999px;
+  color: #9aa6ba;
+  font-size: 13px;
+  font-weight: 900;
+  min-height: 36px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.usb-tab.is-active {
+  background: #4f6cff;
+  border-color: #7f94ff;
+  color: #fff;
+}
+
+.usb-row {
+  align-items: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.usb-slot {
+  flex: 1 1 180px;
+  min-width: 0;
+  position: relative;
+}
+
+.usb-slot-where {
+  flex-basis: 240px;
+}
+
+.usb-pill {
+  background: #0f1422;
+  border: 1px solid #2a3348;
+  border-radius: 14px;
+  color: #f8fafc;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  min-height: 54px;
+  padding: 8px 14px;
+  text-align: start;
+  width: 100%;
+}
+
+.usb-pill:hover {
+  border-color: #46557a;
+}
+
+.usb-pill.is-open,
+.usb-pill-input:focus-within {
+  background: #151d33;
+  border-color: #5d73ff;
+  box-shadow: 0 0 0 1px rgba(93, 115, 255, 0.3);
+}
+
+.usb-pill-label {
+  color: #9aa6ba;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.usb-pill-value {
+  font-size: 15px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usb-slot > .usb-pill {
+  height: 100%;
+}
+
+.usb-pill-input input {
+  height: 22px;
+  min-height: 0;
+  background: transparent;
+  border: 0;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  outline: none;
+  padding: 0;
+  width: 100%;
+}
+
+.usb-pill-input input::placeholder {
+  color: #6f7b91;
+  font-weight: 700;
+}
+
+.usb-filters-toggle {
+  align-items: center;
+  background: #0f1422;
+  border: 1px solid #2a3348;
+  border-radius: 14px;
+  color: #e5e9f5;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 900;
+  gap: 8px;
+  min-height: 54px;
+  padding: 0 16px;
+}
+
+.usb-filters-toggle.is-open {
+  border-color: #5d73ff;
+}
+
+.usb-filters-count {
+  align-items: center;
+  background: #d5a915;
+  border-radius: 999px;
+  color: #111;
+  display: inline-flex;
+  font-size: 11px;
+  height: 20px;
+  justify-content: center;
+  min-width: 20px;
+  padding: 0 6px;
+}
+
+.usb-search {
+  align-items: center;
+  background: linear-gradient(135deg, #4f6cff, #19d7ff);
+  border: 0;
+  border-radius: 14px;
+  color: #fff;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 15px;
+  font-weight: 950;
+  gap: 8px;
+  justify-content: center;
+  min-height: 54px;
+  padding: 0 22px;
+}
+
+/* Popovers float over the results instead of pushing them down. */
+.usb-pop {
+  background: #111118;
+  border: 1px solid #2d3650;
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  display: grid;
+  gap: 12px;
+  inset-inline-start: 0;
+  padding: 14px;
+  position: absolute;
+  top: calc(100% + 8px);
+  z-index: 40;
+}
+
+.usb-pop-where {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.usb-pop-dates {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  width: min(380px, calc(100vw - 48px));
+}
+
+.usb-pop-guests {
+  width: min(340px, calc(100vw - 48px));
+}
+
+.usb-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.usb-step {
+  background: #171b29;
+  border: 1px solid #30384d;
+  border-radius: 999px;
+  color: #c5cbe0;
+  font-size: 13px;
+  font-weight: 900;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.usb-step small {
+  color: #7d879c;
+  font-weight: 700;
+}
+
+.usb-step.is-active {
+  background: #263575;
+  border-color: #7f94ff;
+  color: #fff;
+}
+
+.usb-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.usb-choice-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.usb-choice {
+  background: #0f1422;
+  border: 1px solid #2a3348;
+  border-radius: 10px;
+  color: #f1f4fb;
+  font-size: 13px;
+  font-weight: 800;
+  min-height: 40px;
+  padding: 6px 8px;
+}
+
+.usb-choice.is-active {
+  background: #3347b8;
+  border-color: #6d82ff;
+  color: #fff;
+}
+
+.usb-pop-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.usb-pop-done {
+  background: #4f6cff;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 900;
+  min-height: 40px;
+  padding: 0 20px;
+}
+
+.usb-stepper {
+  align-items: center;
+  border-bottom: 1px solid #222a3c;
+  display: flex;
+  font-weight: 900;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 6px 0 10px;
+}
+
+.usb-stepper-controls {
+  align-items: center;
+  display: inline-flex;
+  gap: 12px;
+}
+
+.usb-stepper-controls button {
+  background: #171b29;
+  border: 1px solid #3a4560;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+  height: 36px;
+  width: 36px;
+}
+
+.usb-stepper-controls button:disabled {
+  opacity: 0.35;
+}
+
+.usb-stepper-controls strong {
+  min-width: 20px;
+  text-align: center;
+}
+
+.usb-filters-panel {
+  border-top: 1px solid #222a3c;
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.usb-field {
+  color: #9aa6ba;
+  display: grid;
+  font-size: 12px;
+  font-weight: 900;
+  gap: 6px;
+}
+
+.usb-field input {
+  background: #0f1422;
+  border: 1px solid #2a3348;
+  border-radius: 12px;
+  color: #fff;
+  font-weight: 800;
+  min-height: 46px;
+  padding: 0 12px;
+}
+
+.usb-hint {
+  color: #d5a915;
+  font-size: 12px;
+  margin: 0;
+}
+
+.usb-preview {
+  background: #0c1220;
+  border: 1px solid #2d3650;
+  border-radius: 12px;
+  color: #9aa6ba;
+  display: grid;
+  font-size: 13px;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.usb-preview b {
+  color: #e5e9f5;
+}
+
+/* Results */
+.search-results-loading {
+  color: #9aa6ba;
+  font-weight: 800;
+}
+
+.search-result-media {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  display: block;
+  padding: 0;
+  width: 100%;
+}
+
+.search-result-placeholder {
+  align-content: center;
+  aspect-ratio: 16 / 10;
+  background: linear-gradient(145deg, #1a2034 0%, #0d1019 100%);
+  color: #6b7591;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  width: 100%;
+}
+
+.search-result-placeholder small {
+  color: #8a93a8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.search-result-demo {
+  background: rgba(213, 169, 21, 0.92);
+  border-radius: 999px;
+  color: #111;
+  font-size: 11px;
+  font-weight: 950;
+  inset-inline-start: 10px;
+  padding: 3px 10px;
+  position: absolute;
+  top: 10px;
+}
+
+.search-result-place {
+  color: #aab3c8;
+  font-size: 13px;
+  font-weight: 800;
+  margin-top: -4px;
+}
+
+.search-result-body h2 {
+  font-size: 19px;
+}
+
+@media (max-width: 760px) {
+  .search-experience {
+    gap: 12px;
+    padding-top: 12px;
+  }
+
+  .search-hero {
+    align-items: start;
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) 84px;
+    padding: 14px 16px;
+  }
+
+  .search-hero h1 {
+    font-size: 26px;
+  }
+
+  .search-hero span {
+    display: -webkit-box;
+    font-size: 13px;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .search-hero-photo {
+    border-radius: 12px;
+    height: 84px;
+    width: 84px;
+  }
+
+  .search-hero-photo strong {
+    font-size: 12px;
+    padding: 2px 6px;
+  }
+
+  .usb-row {
+    gap: 6px;
+  }
+
+  .usb-slot,
+  .usb-slot-where {
+    flex: 1 1 100%;
+  }
+
+  .usb-slot-dates,
+  .usb-slot-guests {
+    flex: 1 1 calc(50% - 3px);
+  }
+
+  /* On phones the popover spans the bar's width instead of hanging off one pill. */
+  .usb-slot {
+    position: static;
+  }
+
+  .usb-pop,
+  .usb-pop-where,
+  .usb-pop-dates,
+  .usb-pop-guests {
+    inset-inline: 0;
+    width: auto;
+  }
+
+  .usb-filters-toggle {
+    flex: 1 1 calc(50% - 3px);
+    justify-content: center;
+  }
+
+  .usb-search {
+    flex: 1 1 calc(50% - 3px);
+  }
+
+  .search-result-placeholder {
+    aspect-ratio: auto;
+    height: 100%;
+    min-height: 116px;
+  }
+
+  .search-result-placeholder svg {
+    height: 32px;
+    width: 32px;
+  }
+
+  .search-result-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Phones: keep the header on one line (logo, language, log in). The breadcrumb and the
+   "become a host" link are reachable from the page itself; the hero search and host card cover them. */
+.top-nav .label-short { display: none; }
+@media (max-width: 640px) {
+  .top-nav .route-context { display: none; }
+  .top-nav .public-auth-actions .menu-action { display: none; }
+  .top-nav .label-long { display: none; }
+  .top-nav .label-short { display: inline; }
+  .top-nav .public-auth-actions .primary-action { white-space: nowrap; padding-inline: 14px; }
+  .top-nav .nav-actions { gap: 8px; min-width: 0; }
+}

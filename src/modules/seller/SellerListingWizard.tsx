@@ -37,6 +37,7 @@ type WizardDraft = {
   area: string
   address: string
   price: string
+  currency: string
   size: string
   bedrooms: string
   bathrooms: string
@@ -177,6 +178,7 @@ export function SellerListingWizard({ lang }: Props) {
   const [area, setArea] = useState(draft.area || 'old-city')
   const [address, setAddress] = useState(draft.address ?? (pick(lang, 'قرب شارع رئيسي', 'Near a main street', 'Près d’une rue principale')))
   const [price, setPrice] = useState(draft.price || '250000')
+  const [currency, setCurrency] = useState(draft.currency || 'SYP')
   const [size, setSize] = useState(draft.size || '110')
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
   const [bathrooms, setBathrooms] = useState(draft.bathrooms || '2')
@@ -292,6 +294,7 @@ export function SellerListingWizard({ lang }: Props) {
       area,
       address,
       price,
+      currency,
       size,
       bedrooms,
       bathrooms,
@@ -299,7 +302,7 @@ export function SellerListingWizard({ lang }: Props) {
       visualFilters,
     }
     window.sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(nextDraft))
-  }, [division, selectedType, title, description, governorate, city, area, address, price, size, bedrooms, bathrooms, instantBookEnabled, visualFilters])
+  }, [division, selectedType, title, description, governorate, city, area, address, price, currency, size, bedrooms, bathrooms, instantBookEnabled, visualFilters])
   const steps = isAdvertisingFlow ? AD_STEPS : STEPS
   const activeStep = steps[stepIndex]
   const progress = useMemo(() => `${Math.round(((stepIndex + 1) / steps.length) * 100)}%`, [stepIndex, steps.length])
@@ -379,7 +382,7 @@ export function SellerListingWizard({ lang }: Props) {
           titleEn: title,
           description,
           priceMinor: toMinor(price),
-          currency: 'SYP',
+          currency: currency === 'USD' ? 'USD' : 'SYP',
           instantBookEnabled: division === 'STAYS' ? instantBookEnabled : false,
           media: listingMedia,
           metadata: {
@@ -661,7 +664,14 @@ export function SellerListingWizard({ lang }: Props) {
             <div className="seller-wizard-section seller-form-grid">
               <label>
                 <span>{pick(lang, 'السعر المطلوب', 'Asking price', 'Prix demandé')}</span>
-                <input dir="ltr" onChange={(event) => setPrice(event.target.value)} placeholder="250000" value={price} />
+                <input dir="ltr" onChange={(event) => setPrice(event.target.value)} placeholder={currency === 'USD' ? '120' : '250000'} value={price} />
+              </label>
+              <label>
+                <span>{pick(lang, 'العملة', 'Currency', 'Devise')}</span>
+                <select dir="ltr" value={currency} onChange={(event) => setCurrency(event.target.value)}>
+                  <option value="SYP">{pick(lang, 'ل.س — ليرة سورية', 'SYP — Syrian pound', 'SYP — livre syrienne')}</option>
+                  <option value="USD">{pick(lang, '$ — دولار أمريكي', 'USD — US dollar', 'USD — dollar américain')}</option>
+                </select>
               </label>
               <label>
                 <span>{pick(lang, 'المساحة', 'Area', 'Superficie')}</span>

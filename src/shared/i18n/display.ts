@@ -174,7 +174,12 @@ export function divisionText(division: string | null | undefined, lang: Lang) {
 
 export function moneyText(amountMinor: number | null | undefined, currency = 'SYP', lang: Lang) {
   const amount = Number(amountMinor || 0).toLocaleString(localeForLang(lang))
-  const currencyText = lang === 'ar' && currency === 'SYP' ? 'ل.س' : currency
+  const code = String(currency || 'SYP').toUpperCase()
+  // Per-listing currency: Syria allows both the local pound (SYP) and USD (commonly quoted for
+  // stays/hotels). Each listing is shown in its own currency with no FX conversion. USD renders with
+  // a leading $ in every locale; the Arabic pound keeps its local symbol (ل.س).
+  if (code === 'USD') return `$${amount}`
+  const currencyText = lang === 'ar' && code === 'SYP' ? 'ل.س' : code
   return `${amount} ${currencyText}`
 }
 

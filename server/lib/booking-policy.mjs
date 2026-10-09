@@ -16,9 +16,10 @@
 // env (BOOKING_FULL_REFUND_CUTOFF_HOURS, BOOKING_UNPAID_EXPIRY_HOURS). The neutral defaults below
 // (UTC, 72h, 48h) apply only when a profile defines nothing.
 
-// Contractual STR (STAYS) platform commission -- owner-confirmed 12% of the WHOLE amount paid
-// excluding the protection fee (rent + cleaning + taxes + other fees). Unchanged from before.
-export const STR_COMMISSION_RATE = 0.12
+// Contractual STR (STAYS) platform commission of the WHOLE amount paid excluding the protection
+// fee (rent + cleaning + taxes + other fees). Owner decision 2026-10-09: raised from 12% to 15%
+// to match the short-term-rental market leaders (Airbnb/Booking.com host-only ~15%).
+export const STR_COMMISSION_RATE = 0.15
 // SR Ride platform commission -- owner decision 2026-10-09: match Uber's standard driver service
 // fee of 25% (riders pay the full fare; the driver keeps 75%). Applies to the ride fare only; a
 // cancellation fee stays 100% with the driver (it compensates the driver for a committed trip).

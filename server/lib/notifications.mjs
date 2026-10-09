@@ -39,6 +39,9 @@ function link(path) {
   return base ? `${base}${path}` : ''
 }
 
+// Absolute app link for templates ('' when PUBLIC_APP_URL is unset -- the email then has no link).
+export const appLink = link
+
 // Each template: (data) => { subject, body } per language. `data` is plain, pre-formatted values.
 const TEMPLATES = {
   guest_request_received: {
@@ -111,6 +114,22 @@ const TEMPLATES = {
     ar: (d) => ({ subject: 'SYBNB: رمز تفعيل حساب المضيف', body: `رمز تفعيل حسابك كمضيف على SYBNB هو: ${d.code}\nأدخله في لوحة المضيف (قسم التحقق). صالح حتى ${d.expiresAt}. لا تشاركه مع أحد.` }),
     en: (d) => ({ subject: 'SYBNB: your host activation code', body: `Your SYBNB host activation code is: ${d.code}\nEnter it in your host dashboard (verification). Valid until ${d.expiresAt}. Do not share it.` }),
     fr: (d) => ({ subject: "SYBNB : votre code d'activation hôte", body: `Votre code d'activation hôte SYBNB : ${d.code}\nSaisissez-le dans votre tableau de bord hôte (vérification). Valable jusqu'au ${d.expiresAt}. Ne le partagez pas.` }),
+  },
+  // Owner decision 2026-10-09: the code comes at the END of onboarding -- emailed automatically when
+  // the SYBNB team approves an unverified host's stay. Same no-store/no-log rule for the code.
+  host_listing_approved_code: {
+    ar: (d) => ({
+      subject: 'تمت الموافقة على إعلانك — رمز التفعيل',
+      body: `تمت الموافقة على إعلانك${d.listingTitle ? ` «${d.listingTitle}»` : ''} من فريق SYBNB.\nآخر خطوة: رمز تفعيل حسابك كمضيف هو: ${d.code}\nأدخله في لوحة المضيف ليظهر إعلانك للضيوف. صالح حتى ${d.expiresAt}. لا تشاركه مع أحد.`,
+    }),
+    en: (d) => ({
+      subject: 'Your listing is approved — activation code',
+      body: `The SYBNB team approved your listing${d.listingTitle ? ` "${d.listingTitle}"` : ''}.\nLast step: your host activation code is: ${d.code}\nEnter it in your host dashboard to make your listing visible to guests. Valid until ${d.expiresAt}. Do not share it.`,
+    }),
+    fr: (d) => ({
+      subject: "Votre annonce est approuvée — code d'activation",
+      body: `L'équipe SYBNB a approuvé votre annonce${d.listingTitle ? ` « ${d.listingTitle} »` : ''}.\nDernière étape : votre code d'activation hôte est : ${d.code}\nSaisissez-le dans votre tableau de bord hôte pour rendre votre annonce visible. Valable jusqu'au ${d.expiresAt}. Ne le partagez pas.`,
+    }),
   },
   admin_payment_proof: {
     ar: (d) => ({ subject: 'SYBNB: إثبات دفع جديد للمراجعة', body: `إثبات دفع ${d.amount} للحجز ${d.bookingId}.` }),

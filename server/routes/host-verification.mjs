@@ -3,7 +3,7 @@
 //   GET  /api/admin/hosts?status=unverified|verified|all[&q=]   ADMIN/SUPPORT  list hosts
 //   POST /api/admin/hosts/:userId/activation-code {sendEmail?}  ADMIN          issue a code (shown once)
 //   POST /api/host/activate {code}                              HOST/SELLER    redeem it
-//   GET  /api/host/verification                                 signed in      own status
+//   GET  /api/host/verification                                 signed in      own status + onboarding tracker
 //
 // Security model:
 //   - The 6-digit code is crypto-random (generateActivationCode) and only its HMAC is stored, with
@@ -21,7 +21,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
-import { hashOtpCode, verifyOtpCode } from '../lib/security.mjs'
+import { verifyOtpCode } from '../lib/security.mjs'
 import { isRateLimited, clientIp } from '../lib/rateLimit.mjs'
 import { notifyUser } from '../lib/notifications.mjs'
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
@@ -29,12 +29,12 @@ import {
   HOST_ACTIVATION_MAX_ATTEMPTS,
   HOST_ACTIVATION_PURPOSE,
   activationAttemptOutcome,
-  activationCodeExpiresAt,
   activationCodeState,
-  generateActivationCode,
   hostListStatusWhere,
+  hostOnboardingProgress,
   normalizeActivationCode,
 } from '../lib/host-verification.mjs'
+import { activationCodeSubject as codeSubject, issueHostActivationCodeTx } from '../lib/host-activation-issue.mjs'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HOUR_MS = 60 * 60_000
@@ -51,9 +51,6 @@ function fail(statusCode, code, message, extra) {
   if (extra) error.details = extra
   return error
 }
-
-// Hash subject: the host's user id, so a code is bound to exactly one account.
-const codeSubject = (hostId) => `host:${hostId}`
 
 function latestCodeView(code, now) {
   if (!code) return null
@@ -157,38 +154,16 @@ export async function handleHostVerification(req, res, url, context) {
     if (target.status !== 'ACTIVE') throw fail(409, 'ACCOUNT_NOT_ACTIVE', 'This account is not active.')
     if (target.hostVerifiedAt) throw fail(409, 'HOST_ALREADY_VERIFIED', 'This host is already verified.')
 
-    const code = generateActivationCode()
     const now = new Date()
-    const expiresAt = activationCodeExpiresAt(now)
-    const codeHash = hashOtpCode(codeSubject(hostId), HOST_ACTIVATION_PURPOSE, code)
-
-    const issued = await db().$transaction(async (tx) => {
+    // Same issuance as the listing-approval path (server/lib/host-activation-issue.mjs).
+    const { code, row: issued } = await db().$transaction(async (tx) => {
       await reauthorizeAtCommit(tx, context, {
         action: 'HOST_ACTIVATION_CODE_ISSUED',
         requiredRoles: ['ADMIN'],
         interestedPartyIds: [hostId],
         selfDealingError: { code: 'SELF_VERIFICATION_FORBIDDEN', message: 'An admin cannot issue an activation code for their own account.' },
       })
-      // One live code per host: retire every earlier unused one (expires now).
-      const retired = await tx.hostActivationCode.updateMany({
-        where: { hostId, usedAt: null, expiresAt: { gt: now } },
-        data: { expiresAt: now },
-      })
-      const row = await tx.hostActivationCode.create({
-        data: { hostId, codeHash, issuedById: context.user.id, issuedAt: now, expiresAt },
-        select: { id: true, issuedAt: true, expiresAt: true },
-      })
-      await tx.adminAuditLog.create({
-        data: {
-          actorUserId: context.user.id,
-          action: 'HOST_ACTIVATION_CODE_ISSUED',
-          entityType: 'users',
-          entityId: hostId,
-          // Never the code or its hash.
-          after: { codeId: row.id, expiresAt: row.expiresAt.toISOString(), retiredPrevious: retired.count, emailRequested: sendEmail },
-        },
-      })
-      return row
+      return issueHostActivationCodeTx(tx, { hostId, issuedById: context.user.id, now, auditAfter: { trigger: 'ADMIN_MANUAL', emailRequested: sendEmail } })
     })
 
     const emailQueued = sendEmail && Boolean(target.email)
@@ -222,14 +197,56 @@ export async function handleHostVerification(req, res, url, context) {
       }),
     ])
     const state = activationCodeState(latest, new Date())
-    return json(res, 200, {
-      ok: true,
+    const verification = {
       verified: Boolean(user?.hostVerifiedAt),
       verifiedAt: user?.hostVerifiedAt || null,
       hasPendingCode: !user?.hostVerifiedAt && state === 'ACTIVE',
       codeExpiresAt: state === 'ACTIVE' ? latest.expiresAt : null,
       codeLocked: !user?.hostVerifiedAt && state === 'LOCKED',
       attemptsRemaining: state === 'ACTIVE' ? HOST_ACTIVATION_MAX_ATTEMPTS - latest.attempts : 0,
+    }
+    // Onboarding tracker (2026-10-09): listing -> review (AI + team) -> code by email -> live.
+    // Counted over the account's STAYS only: host verification gates stays, not seller divisions.
+    const stays = verification.verified
+      ? []
+      : await db().listing.findMany({
+          where: { ownerId: context.user.id, division: 'STAYS' },
+          select: { id: true, status: true, titleAr: true, titleEn: true, description: true, priceMinor: true, currency: true, updatedAt: true, aiReview: { select: { hostFeedback: true } } },
+          orderBy: { updatedAt: 'desc' },
+          take: 50,
+        })
+    const counts = { total: stays.length, draft: 0, pending: 0, approved: 0, rejected: 0 }
+    for (const l of stays) {
+      if (l.status === 'DRAFT') counts.draft++
+      else if (l.status === 'PENDING_REVIEW') counts.pending++
+      else if (l.status === 'APPROVED' || l.status === 'PAUSED') counts.approved++
+      else if (l.status === 'REJECTED') counts.rejected++
+    }
+    // What the host must fix: only for listings currently sent back (REJECTED). The snapshot is
+    // written by the admin's decision (AI issues the admin kept + the admin's own note); the raw AI
+    // report (score, admin summary) is never sent to the host.
+    const feedback = stays
+      .filter((l) => l.status === 'REJECTED')
+      .slice(0, 5)
+      .map((l) => {
+        const fb = l.aiReview?.hostFeedback || {}
+        return {
+          listingId: l.id,
+          titleAr: l.titleAr,
+          titleEn: l.titleEn,
+          // For the dashboard's inline "fix and resubmit" form (PATCH /api/host/listings/:id).
+          description: l.description,
+          priceMinor: l.priceMinor,
+          currency: l.currency,
+          note: typeof fb.note === 'string' ? fb.note : null,
+          issues: Array.isArray(fb.issues) ? fb.issues.filter((i) => typeof i === 'string') : [],
+          at: fb.at || l.updatedAt,
+        }
+      })
+    return json(res, 200, {
+      ok: true,
+      ...verification,
+      onboarding: { ...hostOnboardingProgress(counts, verification), counts, feedback },
     })
   }
 

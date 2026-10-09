@@ -618,8 +618,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
         </button>
       </section>
 
-      {/* Host verification (2026-10-08): until the SYBNB activation code is entered, this host's
-          stays are hidden from guests and cannot be booked. Renders nothing once verified. */}
+      {/* Host onboarding tracker (2026-10-09): listing -> review (AI + team) -> code by email -> live.
+          Until the activation code is entered this host's stays are hidden from guests and cannot be
+          booked (server-enforced). Renders nothing once verified. */}
       {mode === 'host' && <HostVerificationCard lang={lang} />}
 
       <section style={styles.providerHealth}>
@@ -659,28 +660,66 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
 
       {status === 'error' && <section style={styles.alert}>{message}</section>}
 
-      <section style={styles.aiPanel}>
-        <div style={styles.aiTitle}>
-          <strong>AI Brain / {pick(lang, 'يقترح', 'Suggests', 'Suggère')}</strong>
-          <span>✣</span>
-        </div>
-        <small style={{ color: '#9aa6ba' }}>
-          {pick(lang, 'نصائح عامة، وليست تحليلاً مخصصاً لبيانات إعلانك.', 'Generic tips, not a personalized analysis of your listing data.', 'Conseils généraux, et non une analyse personnalisée des données de votre annonce.')}
-        </small>
-        {[
-          [t.addPhotos, pick(lang, 'مثال', 'EXAMPLE', 'EXEMPLE')],
-          [t.updatePolicy, pick(lang, 'مثال', 'EXAMPLE', 'EXEMPLE')],
-          [t.replyFaster, t.slaMaintenance],
-        ].map(([title, impact]) => (
-          <article key={title} style={styles.aiSuggestion}>
-            <button style={styles.goldButton} onClick={() => (window.location.hash = '/ai-brain')}>{t.apply}</button>
-            <div>
-              <span>{title}</span>
-              <small>{impact}</small>
+      {/* Real next steps computed from this host's own data. Each button opens the page where the
+          step is done (the old generic "AI Brain" tips linked to the admin-only /ai-brain page). */}
+      {(() => {
+        const listingsNow = overview?.listings || []
+        const pendingGuestRequests = (overview?.requests || []).filter((request) => request.status === 'REQUESTED').length
+        const fewPhotos = listingsNow.find((listing) => (Array.isArray(listing.media) ? listing.media.length : 0) < 5)
+        const steps: Array<{ key: string; text: string; action: string; go: () => void }> = []
+        if (!listingsNow.length) {
+          steps.push({
+            key: 'first-listing',
+            text: pick(lang, 'أضف إعلانك الأول ليبدأ الضيوف بالحجز.', 'Add your first listing so guests can book.', 'Ajoutez votre première annonce pour recevoir des réservations.'),
+            action: pick(lang, 'أضف إعلاناً', 'Add listing', 'Ajouter'),
+            go: () => (window.location.hash = '/sell/listing-wizard'),
+          })
+        }
+        if (pendingGuestRequests > 0) {
+          steps.push({
+            key: 'requests',
+            text: pick(lang, `لديك ${pendingGuestRequests} طلب حجز بانتظار ردك.`, `You have ${pendingGuestRequests} booking request(s) waiting for your answer.`, `Vous avez ${pendingGuestRequests} demande(s) en attente de réponse.`),
+            action: pick(lang, 'عرض الطلبات', 'View requests', 'Voir'),
+            go: () => document.getElementById('host-requests')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+          })
+        }
+        if (fewPhotos) {
+          steps.push({
+            key: 'photos',
+            text: pick(lang, 'الإعلانات التي فيها 5 صور أو أكثر تُحجز أكثر. أضف صوراً لإعلانك.', 'Listings with 5+ photos get more bookings. Add photos to your listing.', 'Les annonces avec 5 photos ou plus sont plus réservées.'),
+            action: pick(lang, 'عرض الإعلان', 'Open listing', 'Voir l’annonce'),
+            go: () => (window.location.hash = `/listing/${fewPhotos.id}`),
+          })
+        }
+        steps.push({
+          key: 'payout',
+          text: pick(lang, 'حدّد كيف تستلم أرباحك (شام كاش، تحويل بنكي، أو نقداً).', 'Choose how you receive your earnings (Sham Cash, bank, or cash).', 'Choisissez comment recevoir vos revenus.'),
+          action: pick(lang, 'طريقة الاستلام', 'Payout method', 'Versements'),
+          go: () => (window.location.hash = '/host/payouts'),
+        })
+        steps.push({
+          key: 'profile',
+          text: pick(lang, 'ملف مضيف بصورة ونبذة يزيد ثقة الضيوف.', 'A host profile with a photo and bio builds guest trust.', 'Un profil avec photo et présentation rassure les voyageurs.'),
+          action: pick(lang, 'ملفي', 'My profile', 'Mon profil'),
+          go: () => (window.location.hash = '/host/profile'),
+        })
+        return (
+          <section style={styles.aiPanel}>
+            <div style={styles.aiTitle}>
+              <strong>{pick(lang, 'خطواتك التالية', 'Your next steps', 'Vos prochaines étapes')}</strong>
+              <span>✣</span>
             </div>
-          </article>
-        ))}
-      </section>
+            {steps.slice(0, 4).map((step) => (
+              <article key={step.key} style={styles.aiSuggestion}>
+                <button style={styles.goldButton} onClick={step.go}>{step.action}</button>
+                <div>
+                  <span>{step.text}</span>
+                </div>
+              </article>
+            ))}
+          </section>
+        )
+      })()}
 
       <section style={styles.activeListings}>
         <div style={styles.sectionHead}>
@@ -840,6 +879,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           ))}
         </Panel>
 
+        <span id="host-requests" />
         <Panel title={t.inbox} empty={t.empty}>
           {visibleRequests.map((request) => (
             <article key={request.id} style={styles.card}>

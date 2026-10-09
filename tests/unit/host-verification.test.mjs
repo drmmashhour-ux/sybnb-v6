@@ -10,6 +10,7 @@ import {
   activationCodeTtlDays,
   generateActivationCode,
   hostListStatusWhere,
+  hostOnboardingProgress,
   isListingPubliclyVisible,
   normalizeActivationCode,
   publicListingVisibilityWhere,
@@ -98,4 +99,20 @@ test('visibility: stays need a verified owner, other divisions unchanged', () =>
   assert.equal(isListingPubliclyVisible(stay, { hostVerifiedAt: NOW }), true)
   assert.equal(isListingPubliclyVisible({ ...stay, status: 'PENDING_REVIEW' }, { hostVerifiedAt: NOW }), false)
   assert.equal(isListingPubliclyVisible({ status: 'APPROVED', division: 'CARS' }, { hostVerifiedAt: null }), true)
+})
+
+// Owner decision 2026-10-09: listing -> review (AI + team) -> code by email -> live.
+test('onboarding tracker: step computation', () => {
+  const unverified = { verified: false, hasPendingCode: false, codeLocked: false }
+  assert.deepEqual(hostOnboardingProgress({ total: 0 }, unverified), { step: 1, needsFixes: false, codeExpectedSoon: false })
+  assert.equal(hostOnboardingProgress({ total: 2, draft: 2 }, unverified).step, 1, 'drafts only = not submitted yet')
+  assert.deepEqual(hostOnboardingProgress({ total: 1, pending: 1 }, unverified), { step: 2, needsFixes: false, codeExpectedSoon: false })
+  assert.deepEqual(hostOnboardingProgress({ total: 1, rejected: 1 }, unverified), { step: 2, needsFixes: true, codeExpectedSoon: false })
+  assert.equal(hostOnboardingProgress({ total: 2, rejected: 1, pending: 1 }, unverified).needsFixes, false, 'a resubmitted listing is back in review')
+  assert.deepEqual(hostOnboardingProgress({ total: 1, pending: 1 }, { ...unverified, hasPendingCode: true }), { step: 3, needsFixes: false, codeExpectedSoon: false })
+  assert.deepEqual(hostOnboardingProgress({ total: 1, approved: 1 }, unverified), { step: 3, needsFixes: false, codeExpectedSoon: true })
+  assert.equal(hostOnboardingProgress({ total: 1, approved: 1 }, { ...unverified, codeLocked: true }).step, 3)
+  assert.equal(hostOnboardingProgress({ total: 1, approved: 1 }, { verified: true }).step, 4)
+  assert.equal(hostOnboardingProgress({}, { verified: true }).step, 4, 'verified hosts (e.g. migrated) are done')
+  assert.equal(hostOnboardingProgress(undefined, undefined).step, 1)
 })

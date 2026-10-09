@@ -103,3 +103,29 @@ export function isListingPubliclyVisible(listing, owner) {
   if (!requiresHostVerification(listing.division)) return true
   return Boolean(owner?.hostVerifiedAt)
 }
+
+// ---- Host onboarding tracker (owner decision of 2026-10-09) ----------------------------------------
+// Order for a NEW host: ① add a listing -> ② review (automatic AI check + SYBNB team) -> ③ activation
+// code by email (issued automatically when the team approves the stay) -> ④ listing live for guests.
+// Pure: computes where an account is from counts the route already has.
+//   counts: listing counts by status { total, draft, pending, approved, rejected } (any division the
+//           host owns; only stays need the code, but a host's first listing is the trigger either way)
+//   verification: { verified, hasPendingCode, codeLocked }
+// Returns { step: 1..4, needsFixes, codeExpectedSoon }.
+//   step 4  verified (the dashboard hides the tracker)
+//   step 3  a code is out (or locked), or a stay is already approved and only the code is missing
+//   step 2  something is waiting for review, or was sent back for fixes (needsFixes)
+//   step 1  nothing submitted yet (no listing, or drafts only)
+export function hostOnboardingProgress(counts = {}, verification = {}) {
+  const n = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0)
+  const pending = n(counts.pending)
+  const approved = n(counts.approved)
+  const rejected = n(counts.rejected)
+  if (verification.verified) return { step: 4, needsFixes: false, codeExpectedSoon: false }
+  if (verification.hasPendingCode || verification.codeLocked || approved > 0) {
+    return { step: 3, needsFixes: false, codeExpectedSoon: !verification.hasPendingCode && !verification.codeLocked }
+  }
+  if (pending > 0) return { step: 2, needsFixes: false, codeExpectedSoon: false }
+  if (rejected > 0) return { step: 2, needsFixes: true, codeExpectedSoon: false }
+  return { step: 1, needsFixes: false, codeExpectedSoon: false }
+}

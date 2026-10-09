@@ -8,6 +8,8 @@ import { normalizeBrowseCity, resolveListingCityName } from '../lib/listing-loca
 import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 // Host verification (2026-10-08): stays of an owner without users.host_verified_at are not public.
 import { isListingPubliclyVisible, publicListingVisibilityWhere } from '../lib/host-verification.mjs'
+// Owner decision 2026-10-09: automatic AI pre-check for the admin reviewer (advisory only).
+import { scheduleAiListingReview } from '../lib/ai-listing-review-runner.mjs'
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
 // Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
@@ -769,6 +771,11 @@ export async function handleListings(req, res, url, context) {
       where: { id: existing.id },
       data: { status: 'PENDING_REVIEW' },
     })
+    // AI pre-check (2026-10-09): fire-and-forget AFTER this response; it never blocks or fails the
+    // submission and never decides -- the admin does. Advertising campaigns (banners) are skipped.
+    if (listing.metadata?.advertising !== true) {
+      scheduleAiListingReview(listing.id, { actorUserId: context.user.id, trigger: 'SUBMIT' })
+    }
     return json(res, 200, { ok: true, listing })
   }
 

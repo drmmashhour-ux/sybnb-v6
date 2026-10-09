@@ -1,4 +1,5 @@
 import { db } from '../lib/prisma.mjs'
+import { scheduleAiListingReview } from '../lib/ai-listing-review-runner.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { resolveListingCityName } from '../lib/listing-location.mjs'
 import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed, payoutMethodConfig } from '../lib/country.mjs'
@@ -695,6 +696,11 @@ export async function handleHost(req, res, url, context) {
         data.status = 'PENDING_REVIEW'
       }
       const listing = await db().listing.update({ where: { id: existing.id }, data })
+      // Back in the review queue after an edit (e.g. a listing sent back for fixes): re-run the AI
+      // pre-check for the reviewer (2026-10-09). Fire-and-forget, advisory only.
+      if (data.status === 'PENDING_REVIEW' && listing.metadata?.advertising !== true) {
+        scheduleAiListingReview(listing.id, { actorUserId: context.user.id, trigger: 'EDIT_RESUBMIT' })
+      }
       await db().adminAuditLog.create({
         data: {
           actorUserId: context.user.id,

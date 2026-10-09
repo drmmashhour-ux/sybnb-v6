@@ -209,6 +209,9 @@ run "payment-refund-execute" refund-execution-wallet-credit.e2e.mjs
 run "booking-money-flow" booking-money-flow.e2e.mjs
 # Host verification + admin login code (owner decisions of 2026-10-08). Self-contained.
 run "host-verification" host-verification.e2e.mjs
+# Onboarding order (owner decision 2026-10-09): AI pre-check never decides; approving an unverified
+# host's stay auto-issues the activation code. Self-contained.
+run "listing-approval-code" listing-approval-activation.e2e.mjs
 run_full "marketplace"      marketplace.e2e.mjs      reset
 run_full "cars"             cars.e2e.mjs             reset
 run_full "buy"              buy.e2e.mjs              reset

@@ -396,6 +396,9 @@ model Listing {
   availability   ListingAvailability[]
   reviews        ListingReview[]
   inquiryThreads MessageThread[]
+  // AI pre-check for the admin reviewer (migration 050). Never included unless asked for, so it
+  // cannot leak through the many `include: { listing: true }` guest-facing responses.
+  aiReview       ListingAiReview?
 
   @@index([division, status])
   @@index([ownerId])
@@ -407,6 +410,28 @@ model Listing {
   // createdAt-ordered one.
   @@index([division, status, priceMinor, id])
   @@map("listings")
+}
+
+// Owner decision 2026-10-09: automatic AI check of a submitted listing, shown to the admin reviewer
+// next to the listing. Advisory only -- the admin decides. See migration 050_listing_ai_review.
+model ListingAiReview {
+  id           String    @id @default(uuid())
+  listingId    String    @unique @map("listing_id")
+  status       String    @default("PENDING")
+  model        String?
+  runId        String?   @map("run_id")
+  trigger      String?
+  result       Json?
+  error        String?
+  startedAt    DateTime? @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  hostFeedback Json?     @map("host_feedback")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@map("listing_ai_reviews")
 }
 
 model ListingAvailability {

@@ -19,8 +19,8 @@ import { HOST_PROFILE_NEXT_KEY } from '../host/HostProfilePage'
 //     embedded mode). As soon as it signs in, hosting is turned on for that account (no extra tap)
 //     and the host continues to the host profile, then the listing wizard.
 //   - signed in, not a host: one "Start hosting" button (becomeHost), same continuation.
-//   - signed in host, not verified yet: the activation-code step (a host's stays stay hidden until
-//     the SYBNB team's 6-digit code is entered), plus links to the profile / dashboard.
+//   - signed in host, not verified yet: the onboarding tracker (listing -> review -> code by email ->
+//     live; the code input shows only once a code was emailed), plus links to the profile / dashboard.
 //   - signed in, verified host: straight to /host.
 
 type Props = { lang: Lang }
@@ -98,23 +98,24 @@ export function HostJoinPage({ lang }: Props) {
     void startHosting()
   }
 
+  // Same 4 steps as the dashboard tracker (HostVerificationCard, owner decision 2026-10-09): the
+  // activation code now comes at the END, emailed when the SYBNB team approves the listing.
   const steps = [
     {
-      title: pick(lang, 'أنشئ حسابك أو سجّل الدخول', 'Create your account or sign in', 'Créez votre compte ou connectez-vous'),
-      body: pick(lang, 'حساب واحد للحجز وللاستضافة.', 'One account for booking and hosting.', 'Un seul compte pour réserver et accueillir.'),
+      title: pick(lang, 'أضف إعلانك', 'Add your listing', 'Ajoutez votre annonce'),
+      body: pick(lang, 'سجّل الدخول أو أنشئ حسابك، ثم أضف الصور والسعر والموقع.', 'Sign in or create your account, then add photos, price and location.', 'Connectez-vous ou créez votre compte, puis ajoutez photos, prix et emplacement.'),
     },
     {
-      title: pick(lang, 'عرّف بنفسك وأضف إعلانك', 'Introduce yourself and add your listing', 'Présentez-vous et ajoutez votre annonce'),
-      body: pick(lang, 'ملف المضيف ثم الصور والسعر والموقع.', 'Your host profile, then photos, price and location.', 'Votre profil d’hôte, puis photos, prix et emplacement.'),
+      title: pick(lang, 'المراجعة: فحص آلي + فريق SYBNB', 'Review: automatic check + SYBNB team', 'Vérification : contrôle automatique + équipe SYBNB'),
+      body: pick(lang, 'نفحص الصور والعنوان والسعر آلياً، ثم يراجع فريقنا الإعلان. إن احتاج تعديلاً نخبرك بما يجب تصحيحه.', 'Photos, address and price are checked automatically, then our team reviews the listing. If it needs changes we tell you what to fix.', 'Photos, adresse et prix sont contrôlés automatiquement, puis notre équipe vérifie l’annonce. Si des corrections sont nécessaires, nous vous les indiquons.'),
     },
     {
-      title: pick(lang, 'تحقّق برمز التفعيل', 'Get verified with an activation code', 'Faites-vous vérifier avec un code d’activation'),
-      body: pick(
-        lang,
-        'يتواصل معك فريق SYBNB ويعطيك رمزاً من 6 أرقام. بعد إدخاله يظهر إعلانك المعتمد للضيوف.',
-        'The SYBNB team contacts you and gives you a 6-digit code. Once entered, your approved listing is shown to guests.',
-        'L’équipe SYBNB vous contacte et vous donne un code à 6 chiffres. Une fois saisi, votre annonce approuvée est visible.',
-      ),
+      title: pick(lang, 'رمز التفعيل بالبريد', 'Activation code by email', 'Code d’activation par e-mail'),
+      body: pick(lang, 'عند الموافقة نرسل إلى بريدك رمزاً من 6 أرقام. أدخله في لوحة المضيف.', 'When it is approved we email you a 6-digit code. Enter it in your host dashboard.', 'À l’approbation, nous vous envoyons un code à 6 chiffres par e-mail. Saisissez-le dans votre tableau de bord.'),
+    },
+    {
+      title: pick(lang, 'إعلانك ظاهر للضيوف', 'Your listing is live for guests', 'Votre annonce est visible'),
+      body: pick(lang, 'بعد إدخال الرمز يظهر إعلانك المعتمد للضيوف ويمكن حجزه.', 'Once the code is entered, your approved listing is shown to guests and can be booked.', 'Une fois le code saisi, votre annonce approuvée est visible et réservable.'),
     },
   ]
 

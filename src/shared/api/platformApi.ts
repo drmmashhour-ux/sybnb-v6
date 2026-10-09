@@ -42,6 +42,32 @@ export type PlatformListing = {
   }
   media?: Array<Record<string, unknown>>
   location?: Record<string, unknown> | null
+  // Admin review queue only (2026-10-09): the advisory AI pre-check.
+  aiReview?: ListingAiReview | null
+}
+
+export type AiReviewCheckKey =
+  | 'photosRealAndClear'
+  | 'photosMatchListing'
+  | 'noContactInfoInPhotosOrText'
+  | 'addressConsistent'
+  | 'locationMatchesAddress'
+  | 'priceReasonable'
+  | 'textQuality'
+
+export type ListingAiReview = {
+  status: 'PENDING' | 'DONE' | 'FAILED' | 'SKIPPED'
+  model: string | null
+  at: string | null
+  reason?: string
+  error?: string
+  result?: {
+    score: number
+    recommendation: 'APPROVE' | 'NEEDS_FIXES' | 'REJECT'
+    checks: Record<AiReviewCheckKey, { ok: boolean; note: string }>
+    issuesForHost: string[]
+    summaryForAdmin: string
+  } | null
 }
 
 export type PlatformPaymentProof = {
@@ -700,6 +726,27 @@ export async function refreshStoredSessionRoles(options: { minIntervalMs?: numbe
 }
 
 // ---- Host verification (activation code, owner decision 2026-10-08) -----------------------------
+export type HostOnboardingFeedback = {
+  listingId: string
+  titleAr: string
+  titleEn: string | null
+  description: string | null
+  priceMinor: number
+  currency: string
+  note: string | null
+  issues: string[]
+  at: string
+}
+
+// Onboarding tracker (owner decision 2026-10-09): ① listing ② review (AI + team) ③ code by email ④ live.
+export type HostOnboarding = {
+  step: 1 | 2 | 3 | 4
+  needsFixes: boolean
+  codeExpectedSoon: boolean
+  counts: { total: number; draft: number; pending: number; approved: number; rejected: number }
+  feedback: HostOnboardingFeedback[]
+}
+
 export type HostVerificationStatus = {
   verified: boolean
   verifiedAt: string | null
@@ -707,6 +754,7 @@ export type HostVerificationStatus = {
   codeExpiresAt: string | null
   codeLocked: boolean
   attemptsRemaining: number
+  onboarding?: HostOnboarding
 }
 
 export async function fetchHostVerification(): Promise<HostVerificationStatus> {
@@ -718,6 +766,7 @@ export async function fetchHostVerification(): Promise<HostVerificationStatus> {
     codeExpiresAt: result.codeExpiresAt,
     codeLocked: result.codeLocked,
     attemptsRemaining: result.attemptsRemaining,
+    onboarding: result.onboarding,
   }
 }
 
@@ -1472,16 +1521,26 @@ export async function reviewPrototypeQueueEntity(
   entityId: string,
   decision: 'APPROVE' | 'REJECT',
   adminNote?: string,
+  // Listings sent back for fixes (2026-10-09): include the AI's issues for the host (default true).
+  extra?: { includeAiIssues?: boolean; hostIssues?: string[] },
 ) {
   const response = await runAdminRequest((token) => apiRequest<{ ok: true; entity: unknown }>(
     `/api/admin/review-queue/${entityType}/${entityId}`,
     {
       method: 'PATCH',
       token,
-      body: { decision, adminNote },
+      body: { decision, adminNote, ...(extra || {}) },
     },
   ))
   return response.entity
+}
+
+// Re-run the advisory AI pre-check of a listing (ADMIN). Runs in the background (202 PENDING).
+export async function rerunListingAiReview(listingId: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; aiReview: ListingAiReview }>(`/api/admin/listings/${listingId}/ai-review`, { method: 'POST', token }),
+  )
+  return response.aiReview
 }
 
 // <img src> can't send an Authorization header, and this file is admin/support-only, so the
@@ -2162,6 +2221,26 @@ export async function updatePrototypeHostListingStatus(
       body: { status },
     },
   )
+  return response.listing
+}
+
+// Fix a listing that was sent back and put it back in the review queue (2026-10-09). A content edit
+// moves a REJECTED listing to PENDING_REVIEW server-side (and re-runs the AI pre-check); with no
+// content change, the plain submit endpoint resubmits it as is.
+export async function resubmitHostListing(
+  listingId: string,
+  changes: { titleAr?: string; description?: string; priceMinor?: number },
+) {
+  const token = hostToken()
+  if (Object.keys(changes).length) {
+    const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/host/listings/${listingId}`, {
+      method: 'PATCH',
+      token,
+      body: changes,
+    })
+    return response.listing
+  }
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}/submit`, { method: 'PATCH', token })
   return response.listing
 }
 

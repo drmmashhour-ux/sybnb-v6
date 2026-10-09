@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { localeForLang } from '../../shared/country/presentation'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
@@ -14,8 +14,11 @@ import {
   releaseAdminPayout,
   reviewPrototypePaymentProof,
   reviewPrototypeQueueEntity,
+  rerunListingAiReview,
   uploadIdDocumentForUser,
   type AdminPayout,
+  type AiReviewCheckKey,
+  type ListingAiReview,
   type PlatformAdminAuditLog,
   type PlatformAdminMetrics,
   type PlatformIdDocumentReview,
@@ -230,7 +233,7 @@ export function AdminReviewPage({ lang }: Props) {
     entityType: 'listings' | 'payments' | 'gifts' | 'bookings' | 'iddocuments',
     id: string,
     decision: 'APPROVE' | 'REJECT',
-    options?: { shamCashReconciliation?: ShamCashApprovalPayload },
+    options?: { shamCashReconciliation?: ShamCashApprovalPayload; adminNote?: string; includeAiIssues?: boolean },
   ) {
     setStatus('saving')
     setMessage('')
@@ -238,6 +241,9 @@ export function AdminReviewPage({ lang }: Props) {
     try {
       if (entityType === 'payments') {
         await reviewPrototypePaymentProof(id, decision, undefined, options?.shamCashReconciliation)
+      } else if (entityType === 'listings' && decision === 'REJECT') {
+        // "Send back for fixes": the note + (optionally) the AI's issuesForHost reach the host's dashboard.
+        await reviewPrototypeQueueEntity(entityType, id, decision, options?.adminNote, { includeAiIssues: options?.includeAiIssues !== false })
       } else {
         await reviewPrototypeQueueEntity(entityType, id, decision)
       }
@@ -250,6 +256,35 @@ export function AdminReviewPage({ lang }: Props) {
       setStatus('ready')
     } catch (error) {
       setStatus('ready')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  // AI pre-check re-run (2026-10-09): runs in the background; poll the queue quietly until no listing
+  // is PENDING any more (max ~2 minutes).
+  const [aiPolling, setAiPolling] = useState(0)
+  useEffect(() => {
+    if (!aiPolling) return
+    const anyPending = (queue?.listings || []).some((l) => l.aiReview?.status === 'PENDING')
+    if (!anyPending || aiPolling > 30) return
+    const timer = window.setTimeout(() => {
+      fetchPrototypeReviewQueue()
+        .then((next) => setQueue(next))
+        .catch(() => {})
+        .finally(() => setAiPolling((n) => n + 1))
+    }, 4000)
+    return () => window.clearTimeout(timer)
+  }, [aiPolling, queue])
+
+  async function rerunAi(listingId: string) {
+    setMessage('')
+    try {
+      const pending = await rerunListingAiReview(listingId)
+      setQueue((current) =>
+        current ? { ...current, listings: current.listings.map((l) => (l.id === listingId ? { ...l, aiReview: pending } : l)) } : current,
+      )
+      setAiPolling(1)
+    } catch (error) {
       setMessage(error instanceof Error ? error.message : t.error)
     }
   }
@@ -270,7 +305,8 @@ export function AdminReviewPage({ lang }: Props) {
       onBookingDecision={(id, decision) => void decide('bookings', id, decision)}
       onPaymentDecision={(id, decision, shamCashReconciliation) => void decide('payments', id, decision, { shamCashReconciliation })}
       onIdDocumentDecision={(id, decision) => void decide('iddocuments', id, decision)}
-      onListingDecision={(id, decision) => void decide('listings', id, decision)}
+      onListingDecision={(id, decision, extra) => void decide('listings', id, decision, extra)}
+      onRerunAi={(id) => void rerunAi(id)}
       bookings={visibleBookings}
       payouts={payouts}
       payoutHoldDays={payoutHoldDays}
@@ -302,6 +338,7 @@ function ShortRentAdminCommandDashboard({
   onPaymentDecision,
   onIdDocumentDecision,
   onListingDecision,
+  onRerunAi,
   payouts,
   payoutHoldDays,
   releasingPayoutId,
@@ -322,7 +359,8 @@ function ShortRentAdminCommandDashboard({
   onBookingDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
   onPaymentDecision: (id: string, decision: 'APPROVE' | 'REJECT', shamCashReconciliation?: ShamCashApprovalPayload) => void
   onIdDocumentDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
-  onListingDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
+  onListingDecision: (id: string, decision: 'APPROVE' | 'REJECT', extra?: { adminNote?: string; includeAiIssues?: boolean }) => void
+  onRerunAi: (id: string) => void
   payouts: AdminPayout[]
   payoutHoldDays: number
   releasingPayoutId: string
@@ -969,7 +1007,8 @@ function ShortRentAdminCommandDashboard({
                 isAr={isAr}
                 lang={lang}
                 onApprove={() => onListingDecision(listing.id, 'APPROVE')}
-                onReject={() => onListingDecision(listing.id, 'REJECT')}
+                onReject={(adminNote, includeAiIssues) => onListingDecision(listing.id, 'REJECT', { adminNote, includeAiIssues })}
+                onRerunAi={() => onRerunAi(listing.id)}
               />
             ))}
           </div>
@@ -1524,44 +1563,183 @@ function AdminListingLine({
   lang,
   onApprove,
   onReject,
+  onRerunAi,
 }: {
   listing: PlatformListing
   disabled: boolean
   isAr: boolean
   lang: Lang
   onApprove: () => void
-  onReject: () => void
+  onReject: (adminNote: string, includeAiIssues: boolean) => void
+  onRerunAi: () => void
 }) {
   const reviewable = listing.status === 'PENDING_REVIEW'
+  const [sendingBack, setSendingBack] = useState(false)
+  const [note, setNote] = useState('')
+  const [includeAiIssues, setIncludeAiIssues] = useState(true)
   const thumbnailUrl = (listing.media || [])
     .map((item) => item.url || item.src || item.assetUrl)
-    .find((value): value is string => typeof value === 'string')
+    .find((value): value is string => typeof value === 'string' && /^(https?:|\/)/.test(value))
   const hostName = listing.owner?.displayName || (isAr ? 'مضيف غير معروف' : 'Unknown host')
+  const aiIssues = listing.aiReview?.status === 'DONE' ? listing.aiReview.result?.issuesForHost || [] : []
   return (
-    <article style={commandStyles.managementRow}>
-      {thumbnailUrl ? (
-        <img src={thumbnailUrl} alt="" style={commandStyles.listingThumbnail} />
-      ) : (
-        <div style={commandStyles.listingThumbnailPlaceholder}>{isAr ? 'لا صورة' : 'No image'}</div>
-      )}
-      <div>
-        <strong>
-          {listing.metadata?.advertising === true && (
-            <span style={{ color: '#d5a915' }}>{isAr ? '📢 إعلان · ' : '📢 Advertising · '}</span>
+    <div style={commandStyles.listingReviewBlock}>
+      <article style={commandStyles.managementRow}>
+        {thumbnailUrl ? (
+          <img src={thumbnailUrl} alt="" style={commandStyles.listingThumbnail} />
+        ) : (
+          <div style={commandStyles.listingThumbnailPlaceholder}>{isAr ? 'لا صورة' : 'No image'}</div>
+        )}
+        <div>
+          <strong>
+            {listing.metadata?.advertising === true && (
+              <span style={{ color: '#d5a915' }}>{isAr ? '📢 إعلان · ' : '📢 Advertising · '}</span>
+            )}
+            {listingTitleText(listing, lang)}
+          </strong>
+          <small>{divisionText(listing.division, lang)}</small>
+          <small>{hostName}</small>
+          <small>{moneyText(listing.priceMinor, listing.currency, lang)}</small>
+        </div>
+        <span>{statusText(listing.status, lang)}</span>
+        <div style={commandStyles.managementRowActions}>
+          {reviewable && !disabled && <button style={commandStyles.acceptButton} onClick={onApprove}>{isAr ? 'موافقة' : 'Approve'}</button>}
+          {reviewable && !disabled && (
+            <button style={commandStyles.rejectButton} onClick={() => setSendingBack((v) => !v)}>
+              {isAr ? 'إعادة للتعديل' : 'Send back for fixes'}
+            </button>
           )}
-          {listingTitleText(listing, lang)}
-        </strong>
-        <small>{divisionText(listing.division, lang)}</small>
-        <small>{hostName}</small>
-        <small>{moneyText(listing.priceMinor, listing.currency, lang)}</small>
-      </div>
-      <span>{statusText(listing.status, lang)}</span>
-      <div style={commandStyles.managementRowActions}>
-        {reviewable && !disabled && <button style={commandStyles.acceptButton} onClick={onApprove}>{isAr ? 'موافقة' : 'Approve'}</button>}
-        {reviewable && !disabled && <button style={commandStyles.rejectButton} onClick={onReject}>{isAr ? 'رفض' : 'Reject'}</button>}
-        <button style={commandStyles.blueButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>{isAr ? 'تفاصيل' : 'Details'}</button>
-      </div>
-    </article>
+          <button style={commandStyles.blueButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>{isAr ? 'تفاصيل' : 'Details'}</button>
+        </div>
+      </article>
+      {reviewable && <AiReportPanel review={listing.aiReview || null} isAr={isAr} disabled={disabled} onRerun={onRerunAi} />}
+      {reviewable && sendingBack && !disabled && (
+        <div style={commandStyles.sendBackBox}>
+          <label style={commandStyles.sendBackLabel}>
+            {isAr ? 'ملاحظة للمضيف (تظهر في لوحته)' : 'Note to the host (shown on their dashboard)'}
+            <textarea
+              style={commandStyles.sendBackInput}
+              value={note}
+              placeholder={isAr ? 'مثال: الرجاء إزالة رقم الهاتف من الصورة الثانية.' : 'e.g. Please remove the phone number from photo 2.'}
+              onChange={(event) => setNote(event.target.value)}
+            />
+          </label>
+          {aiIssues.length > 0 && (
+            <label style={commandStyles.sendBackCheck}>
+              <input type="checkbox" checked={includeAiIssues} onChange={(event) => setIncludeAiIssues(event.target.checked)} />
+              {isAr ? `أرسل للمضيف أيضاً ملاحظات الفحص الآلي (${aiIssues.length})` : `Also send the AI's ${aiIssues.length} issue(s) to the host`}
+            </label>
+          )}
+          <div style={commandStyles.sendBackActions}>
+            <button
+              style={commandStyles.rejectButton}
+              disabled={!note.trim() && !(includeAiIssues && aiIssues.length)}
+              onClick={() => onReject(note.trim(), includeAiIssues)}
+            >
+              {isAr ? 'إرسال للمضيف' : 'Send back to host'}
+            </button>
+            <button style={commandStyles.secondaryCommand} onClick={() => setSendingBack(false)}>{isAr ? 'إلغاء' : 'Cancel'}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+const AI_CHECK_LABELS: Record<AiReviewCheckKey, { en: string; ar: string }> = {
+  photosRealAndClear: { en: 'Photos real & clear', ar: 'الصور حقيقية وواضحة' },
+  photosMatchListing: { en: 'Photos match listing', ar: 'الصور تطابق الإعلان' },
+  noContactInfoInPhotosOrText: { en: 'No contact info', ar: 'لا معلومات اتصال' },
+  addressConsistent: { en: 'Address consistent', ar: 'العنوان متّسق' },
+  locationMatchesAddress: { en: 'Location matches address', ar: 'الموقع يطابق العنوان' },
+  priceReasonable: { en: 'Price reasonable', ar: 'السعر معقول' },
+  textQuality: { en: 'Text quality', ar: 'جودة النص' },
+}
+
+// Advisory AI pre-check (owner decision 2026-10-09). Display only: the admin decides.
+function AiReportPanel({ review, isAr, disabled, onRerun }: { review: ListingAiReview | null; isAr: boolean; disabled: boolean; onRerun: () => void }) {
+  const rerun = (
+    <button style={commandStyles.aiRerun} disabled={disabled || review?.status === 'PENDING'} onClick={onRerun}>
+      {review?.status === 'PENDING' ? (isAr ? 'جارٍ الفحص…' : 'Checking…') : (isAr ? 'إعادة الفحص الآلي' : 'Re-run AI check')}
+    </button>
+  )
+  const header = (badge: ReactNode, extra?: string) => (
+    <div style={commandStyles.aiHeader}>
+      <strong style={commandStyles.aiTitle}>{isAr ? 'الفحص الآلي (استشاري)' : 'AI check (advisory)'}</strong>
+      {badge}
+      {extra && <small style={commandStyles.aiMuted}>{extra}</small>}
+      <span style={{ flex: 1 }} />
+      {rerun}
+    </div>
+  )
+  if (!review) {
+    return <section style={commandStyles.aiPanel}>{header(null, isAr ? 'لم يُشغَّل بعد' : 'Not run yet')}</section>
+  }
+  if (review.status === 'PENDING') {
+    return <section style={commandStyles.aiPanel}>{header(<span style={{ ...commandStyles.aiBadge, ...commandStyles.aiBadgeMuted }}>{isAr ? 'قيد التشغيل' : 'Running'}</span>)}</section>
+  }
+  if (review.status === 'SKIPPED') {
+    const notConfigured = review.reason === 'NO_API_KEY'
+    return (
+      <section style={commandStyles.aiPanel}>
+        {header(
+          <span style={{ ...commandStyles.aiBadge, ...commandStyles.aiBadgeMuted }}>
+            {notConfigured ? (isAr ? 'الفحص الآلي غير مُفعّل' : 'AI not configured') : (isAr ? 'لم يُشغَّل' : 'Not run')}
+          </span>,
+          notConfigured ? (isAr ? 'أضف ANTHROPIC_API_KEY لتفعيله' : 'Set ANTHROPIC_API_KEY to enable it') : undefined,
+        )}
+      </section>
+    )
+  }
+  if (review.status === 'FAILED' || !review.result) {
+    return (
+      <section style={commandStyles.aiPanel}>
+        {header(<span style={{ ...commandStyles.aiBadge, ...commandStyles.aiBadgeBad }}>{isAr ? 'تعذّر الفحص' : 'Check failed'}</span>, review.error || undefined)}
+      </section>
+    )
+  }
+  const { score, recommendation, checks, issuesForHost, summaryForAdmin } = review.result
+  const scoreTone = score >= 75 ? commandStyles.aiBadgeGood : score >= 50 ? commandStyles.aiBadgeWarn : commandStyles.aiBadgeBad
+  const recTone = recommendation === 'APPROVE' ? commandStyles.aiBadgeGood : recommendation === 'NEEDS_FIXES' ? commandStyles.aiBadgeWarn : commandStyles.aiBadgeBad
+  const recText = recommendation === 'APPROVE'
+    ? (isAr ? 'يقترح الموافقة' : 'Suggests approve')
+    : recommendation === 'NEEDS_FIXES'
+      ? (isAr ? 'يحتاج تعديلات' : 'Needs fixes')
+      : (isAr ? 'يقترح الرفض' : 'Suggests reject')
+  return (
+    <section style={commandStyles.aiPanel}>
+      {header(
+        <>
+          <span style={{ ...commandStyles.aiBadge, ...scoreTone }} title={isAr ? 'الدرجة' : 'Score'}>{score}/100</span>
+          <span style={{ ...commandStyles.aiBadge, ...recTone }}>{recText}</span>
+        </>,
+        review.model || undefined,
+      )}
+      <p style={commandStyles.aiSummary}>{summaryForAdmin}</p>
+      <ul style={commandStyles.aiChecks}>
+        {(Object.keys(AI_CHECK_LABELS) as AiReviewCheckKey[]).map((key) => {
+          const check = checks[key]
+          if (!check) return null
+          return (
+            <li key={key} style={commandStyles.aiCheck}>
+              <span style={{ ...commandStyles.aiMark, color: check.ok ? '#20d29b' : '#ff6b81' }} aria-label={check.ok ? 'ok' : 'problem'}>{check.ok ? '✓' : '✗'}</span>
+              <span>
+                <b>{isAr ? AI_CHECK_LABELS[key].ar : AI_CHECK_LABELS[key].en}</b>
+                {check.note && <small style={commandStyles.aiMuted}> — {check.note}</small>}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+      {issuesForHost.length > 0 && (
+        <div style={commandStyles.aiIssues}>
+          <small style={commandStyles.aiMuted}>{isAr ? 'ما يجب على المضيف تصحيحه:' : 'Issues for the host (Arabic, sent if you send it back):'}</small>
+          <ul dir="rtl" style={commandStyles.aiIssueList}>
+            {issuesForHost.map((issue) => <li key={issue}>{issue}</li>)}
+          </ul>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -1847,6 +2025,28 @@ const commandStyles: Record<string, CSSProperties> = {
   sectionHeadRow: { display: 'grid', gap: 4, color: '#f7f7fb', padding: '4px 2px' },
   managementRow: { alignItems: 'center', background: '#0d0e14', border: '1px solid rgba(255,255,255,.08)', borderRadius: 8, color: '#f7f7fb', display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', minHeight: 62, padding: 12, textAlign: 'start' },
   listingThumbnail: { borderRadius: 6, height: 48, objectFit: 'cover', width: 48 },
+  listingReviewBlock: { display: 'grid', gap: 6 },
+  aiPanel: { background: '#0a0b11', border: '1px solid rgba(82,104,255,.28)', borderRadius: 8, color: '#e8eaf2', display: 'grid', gap: 8, padding: '10px 12px', textAlign: 'start' },
+  aiHeader: { alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 8 },
+  aiTitle: { fontSize: 13.5 },
+  aiBadge: { borderRadius: 999, fontSize: 12, fontWeight: 900, padding: '3px 9px' },
+  aiBadgeGood: { background: 'rgba(32,210,155,.16)', color: '#20d29b' },
+  aiBadgeWarn: { background: 'rgba(229,184,11,.16)', color: '#e5b80b' },
+  aiBadgeBad: { background: 'rgba(255,107,129,.16)', color: '#ff6b81' },
+  aiBadgeMuted: { background: 'rgba(255,255,255,.08)', color: '#aab0c0' },
+  aiMuted: { color: '#8e93a3', fontSize: 12 },
+  aiRerun: { background: 'transparent', border: '1px solid rgba(82,104,255,.5)', borderRadius: 6, color: '#9fb0ff', cursor: 'pointer', fontSize: 12, fontWeight: 800, padding: '5px 10px' },
+  aiSummary: { color: '#cfd3de', fontSize: 13, lineHeight: 1.6, margin: 0 },
+  aiChecks: { display: 'grid', gap: 4, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', listStyle: 'none', margin: 0, padding: 0 },
+  aiCheck: { alignItems: 'baseline', display: 'grid', fontSize: 12.5, gap: 6, gridTemplateColumns: '14px minmax(0, 1fr)', lineHeight: 1.5 },
+  aiMark: { fontWeight: 950 },
+  aiIssues: { display: 'grid', gap: 4 },
+  aiIssueList: { color: '#e8eaf2', fontSize: 13, lineHeight: 1.6, margin: 0, paddingInlineStart: 18 },
+  sendBackBox: { background: '#0d0e14', border: '1px solid rgba(255,107,129,.35)', borderRadius: 8, display: 'grid', gap: 8, padding: 12 },
+  sendBackLabel: { color: '#cfd3de', display: 'grid', fontSize: 12.5, fontWeight: 800, gap: 6 },
+  sendBackInput: { background: '#08090e', border: '1px solid #30384d', borderRadius: 6, color: '#fff', fontFamily: 'inherit', fontSize: 13, minHeight: 70, padding: 8 },
+  sendBackCheck: { alignItems: 'center', color: '#cfd3de', display: 'flex', fontSize: 12.5, gap: 8 },
+  sendBackActions: { display: 'flex', flexWrap: 'wrap', gap: 8 },
   listingThumbnailPlaceholder: { alignItems: 'center', background: 'rgba(255,255,255,.06)', borderRadius: 6, color: '#8e93a3', display: 'flex', fontSize: 11, height: 48, justifyContent: 'center', textAlign: 'center', width: 48 },
   selectedCard: { border: '1px solid rgba(82,104,255,.85)', boxShadow: '0 0 0 1px rgba(82,104,255,.2) inset' },
   managementRowActions: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(74px, 1fr))' },

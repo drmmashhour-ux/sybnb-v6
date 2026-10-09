@@ -1,7 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, executeManualRailRefund, finalizeCancellationLedgerEffects, markPayoutRequestPaid, recordWalletEntry, rejectPayoutRequest, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
-import { formatMoney, notifyBooking, notifyUser } from '../lib/notifications.mjs'
+import { appLink, formatMoney, notifyBooking, notifyUser } from '../lib/notifications.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
@@ -16,6 +16,11 @@ import { runBoundedRevocation } from '../lib/revocation-contention.mjs'
 // authority against locked, authoritative DB rows inside the SAME transaction as its own
 // state-changing write -- see server/lib/commit-authorization.mjs for the full reasoning.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
+// Owner decision 2026-10-09: AI pre-check shown to the reviewer + activation code at the END
+// (issued automatically when an admin approves an unverified host's stay).
+import { reviewListingNow, scheduleAiListingReview, serializeAiReview } from '../lib/ai-listing-review-runner.mjs'
+import { approvalActivationDecision, issueHostActivationCodeTx } from '../lib/host-activation-issue.mjs'
+import { isRateLimited } from '../lib/rateLimit.mjs'
 
 // Mirrors prisma/schema.prisma's RoleName enum. Validated here so an unknown role is a clean 400
 // rather than a Prisma enum error surfacing as a 500.
@@ -889,6 +894,8 @@ export async function handleAdmin(req, res, url, context) {
         include: {
           owner: { select: { id: true, displayName: true } },
           media: { orderBy: { sortOrder: 'asc' }, take: 1 },
+          // AI pre-check (2026-10-09), shown next to each pending listing. Advisory only.
+          aiReview: true,
         },
         orderBy: { createdAt: 'asc' },
         take: REVIEW_QUEUE_LIMIT,
@@ -950,9 +957,11 @@ export async function handleAdmin(req, res, url, context) {
       campaignListing: p.campaignListingId ? campaignListingById.get(p.campaignListingId) || null : null,
     }))
 
+    const listingsWithAi = listings.map(({ aiReview, ...listing }) => ({ ...listing, aiReview: serializeAiReview(aiReview) }))
+
     return json(res, 200, {
       ok: true,
-      queue: { listings, payments: paymentsWithCampaign, gifts, bookings, idDocuments },
+      queue: { listings: listingsWithAi, payments: paymentsWithCampaign, gifts, bookings, idDocuments },
       // Additive, not yet declared on the frontend's PlatformReviewQueue type -- safe for existing
       // callers (extra JSON fields are simply ignored) and ready for the frontend to surface once
       // that type is free to edit.
@@ -1363,6 +1372,50 @@ export async function handleAdmin(req, res, url, context) {
     })
   }
 
+  // Re-run the AI pre-check of one listing (2026-10-09). Advisory only: it never changes the
+  // listing's status. Runs in the background; the review queue shows PENDING until it lands.
+  const aiReviewMatch = url.pathname.match(/^\/api\/admin\/listings\/([^/]+)\/ai-review$/)
+  if (aiReviewMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const listingId = aiReviewMatch[1]
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(listingId)) {
+      const error = new Error('Listing not found.')
+      error.statusCode = 404
+      error.code = 'LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const listing = await db().listing.findUnique({ where: { id: listingId }, select: { id: true } })
+    if (!listing) {
+      const error = new Error('Listing not found.')
+      error.statusCode = 404
+      error.code = 'LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // Each run is a paid API call: cap re-runs per admin.
+    if (await isRateLimited(`ai-review-rerun:${context.user.id}`, 60 * 60_000, Number(process.env.AI_REVIEW_RERUN_RATE_MAX || 30))) {
+      const error = new Error('Too many AI re-runs. Wait a while and try again.')
+      error.statusCode = 429
+      error.code = 'RATE_LIMITED'
+      error.expose = true
+      throw error
+    }
+    await db().adminAuditLog.create({
+      data: { actorUserId: context.user.id, action: 'LISTING_AI_REVIEW_RERUN_REQUESTED', entityType: 'listings', entityId: listingId, after: {} },
+    })
+    const wait = url.searchParams.get('wait') === '1'
+    if (wait) {
+      // Synchronous variant (scripts/tests): waits for the result, bounded by the 45s API timeout.
+      await reviewListingNow(listingId, { actorUserId: context.user.id, trigger: 'ADMIN_RERUN' })
+      const row = await db().listingAiReview.findUnique({ where: { listingId } })
+      return json(res, 200, { ok: true, aiReview: serializeAiReview(row) })
+    }
+    scheduleAiListingReview(listingId, { actorUserId: context.user.id, trigger: 'ADMIN_RERUN' })
+    return json(res, 202, { ok: true, aiReview: { status: 'PENDING', model: null, at: new Date().toISOString() } })
+  }
+
   const reviewMatch = url.pathname.match(/^\/api\/admin\/review-queue\/([^/]+)\/([^/]+)$/)
   if (reviewMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
@@ -1423,7 +1476,15 @@ export async function handleAdmin(req, res, url, context) {
           after: after || {},
         },
       })
-      return { entity: after, auditLog }
+      // Owner decision 2026-10-09 -- the activation code comes at the END: approving a stay whose
+      // owner is not yet host-verified issues the code here, in the SAME transaction as the
+      // approval (same helper, hashing, expiry, retirement and audit as the manual admin route).
+      // The plaintext only leaves through the host's email below; never in this response.
+      let activation = null
+      if (reviewModel(entityType) === 'listing' && decision === 'APPROVED' && after) {
+        activation = await issueActivationCodeOnApproval(tx, after, context.user.id)
+      }
+      return { entity: after, auditLog, activation }
     })
     // Decision 8: a verified booking payment tells the guest and asks the host to accept (or tells
     // the host about a confirmed Instant Book booking). Fire-and-forget, after commit.
@@ -1431,10 +1492,74 @@ export async function handleAdmin(req, res, url, context) {
       notifyBooking('guest_payment_confirmed', result.entity.bookingId, { amount: formatMoney(result.entity.amountMinor, result.entity.currency) })
       notifyBooking('host_new_paid_request', result.entity.bookingId)
     }
-    return json(res, 200, { ok: true, ...result })
+    // Activation code email: fire-and-forget, only after the approval committed.
+    const { activation, ...rest } = result
+    let activationCode
+    if (activation) {
+      const emailQueued = Boolean(activation.issued && activation.ownerEmail)
+      if (emailQueued) {
+        notifyUser(
+          'host_listing_approved_code',
+          activation.ownerId,
+          {
+            code: activation.code,
+            expiresAt: activation.expiresAt.toISOString().slice(0, 10),
+            listingTitle: result.entity?.titleAr || result.entity?.titleEn || '',
+            url: appLink('/#/host'),
+          },
+          `host-activation:${activation.codeId}`,
+        )
+      }
+      activationCode = activation.issued
+        ? { issued: true, codeId: activation.codeId, expiresAt: activation.expiresAt, emailQueued }
+        : { issued: false, reason: activation.reason }
+    }
+    return json(res, 200, { ok: true, ...rest, ...(activationCode ? { activationCode } : {}) })
   }
 
   return false
+}
+
+// Runs inside the review transaction (see the caller). Returns null when not applicable, or
+// { issued:false, reason } / { issued:true, code, codeId, expiresAt, ownerId, ownerEmail }.
+async function issueActivationCodeOnApproval(tx, listing, actorUserId) {
+  const owner = await tx.user.findUnique({
+    where: { id: listing.ownerId },
+    select: { id: true, email: true, status: true, hostVerifiedAt: true },
+  })
+  const latestCode = owner
+    ? await tx.hostActivationCode.findFirst({
+        where: { hostId: owner.id, usedAt: null },
+        orderBy: { issuedAt: 'desc' },
+        select: { expiresAt: true, attempts: true, usedAt: true },
+      })
+    : null
+  const now = new Date()
+  const decision = approvalActivationDecision({ listing, owner, latestCode, now })
+  if (!decision.issue) return { issued: false, reason: decision.reason }
+  const { code, row } = await issueHostActivationCodeTx(tx, {
+    hostId: owner.id,
+    issuedById: actorUserId,
+    now,
+    auditAfter: { trigger: 'LISTING_APPROVED', listingId: listing.id, emailRequested: Boolean(owner.email) },
+  })
+  return { issued: true, code, codeId: row.id, expiresAt: row.expiresAt, ownerId: owner.id, ownerEmail: owner.email || null }
+}
+
+// What the host sees when a listing is sent back for fixes: the admin's note plus the AI's
+// issuesForHost (unless the admin turned them off, or supplied an edited list as `hostIssues`).
+function hostFeedbackSnapshot({ body, note, aiRow, actorUserId }) {
+  const explicit = Array.isArray(body?.hostIssues)
+    ? body.hostIssues.map((i) => (typeof i === 'string' ? i.trim().slice(0, 400) : '')).filter(Boolean).slice(0, 15)
+    : null
+  const aiIssues = aiRow?.status === 'DONE' && Array.isArray(aiRow.result?.issuesForHost) ? aiRow.result.issuesForHost : []
+  const issues = explicit ?? (body?.includeAiIssues === false ? [] : aiIssues)
+  return {
+    note: note ? String(note).trim().slice(0, 2000) : null,
+    issues,
+    at: new Date().toISOString(),
+    byId: actorUserId,
+  }
 }
 
 function toCountMap(rows, key) {
@@ -1558,6 +1683,17 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
       await tx.paymentProof.updateMany({
         where: { campaignListingId: entityId },
         data: { campaignListingId: null },
+      })
+    }
+    // "Send back for fixes" (2026-10-09) is this REJECTED decision: the host can edit and resubmit
+    // a REJECTED listing. Snapshot what they must fix so their dashboard can show it.
+    if (decision === 'REJECTED') {
+      const aiRow = await tx.listingAiReview.findUnique({ where: { listingId: entityId } })
+      const hostFeedback = hostFeedbackSnapshot({ body, note, aiRow, actorUserId })
+      await tx.listingAiReview.upsert({
+        where: { listingId: entityId },
+        create: { listingId: entityId, status: 'SKIPPED', error: 'NOT_RUN', hostFeedback },
+        update: { hostFeedback },
       })
     }
     return tx.listing.findUnique({ where: { id: entityId } })

@@ -1,8 +1,8 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
-import { currentAccountIsHost, getStoredGuestSession, signOutGuest as revokeGuestSession } from '../api/platformApi'
+import { currentAccountIsHost, getStoredGuestSession, getStoredStaffSession, signOutGuest as revokeGuestSession } from '../api/platformApi'
 import { Footer } from './Footer'
 
 type Props = {
@@ -26,19 +26,16 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
   // Division search pages already carry the breadcrumb in the header; a second Back/Home bar only
   // pushed the search and its results further down (Airbnb-style: one bar, search, results).
   const isDivisionSearch = DIVISION_SEARCH_PATHS.has(path)
-  const showFlowNav = !isLanding && !isAdminControlRoom && !isDivisionSearch
+  // Checkout carries its own back link (Airbnb-style), so the extra Back/Home bar is not shown there.
+  const isCheckout = path.startsWith('/checkout/')
+  const showFlowNav = !isLanding && !isAdminControlRoom && !isDivisionSearch && !isCheckout
   const guestSession = typeof window !== 'undefined' ? getStoredGuestSession() : null
   const isHost = typeof window !== 'undefined' && currentAccountIsHost()
+  const staffSession = typeof window !== 'undefined' ? getStoredStaffSession() : null
+  // Admin entry: the account's own roles, or an admin staff session signed in on this browser.
+  const isAdmin = Boolean(guestSession?.user.roles?.includes('ADMIN') || staffSession?.user.roles?.includes('ADMIN'))
   // /host/why is the public host landing page, not the host area.
   const inHostArea = path.startsWith('/host') && path !== '/host/why'
-  // Airbnb-style host switch: one account; the same button turns into "Switch to traveling" inside
-  // the host area. A non-host is taken to /host/stays, which shows the one-tap "Become a host" page.
-  const hostSwitchLabel = inHostArea
-    ? (pick(lang, 'التبديل إلى السفر', 'Switch to traveling', 'Passer en mode voyage'))
-    : isHost
-      ? (pick(lang, 'التبديل إلى الاستضافة', 'Switch to hosting', 'Passer en mode hôte'))
-      : (pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'))
-  const hostSwitchPath = inHostArea ? '/stays' : '/host/stays'
 
   function goBack() {
     navigate(routeContext.backPath)
@@ -94,29 +91,21 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
                 FR
               </button>
             </div>
-            {guestSession ? (
-              <div className="public-auth-actions" aria-label={pick(lang, 'حسابي', 'My account', 'Mon compte')}>
-                <button className="menu-action" onClick={() => navigate(hostSwitchPath)}>
-                  {hostSwitchLabel}
-                </button>
-                <button className="menu-action" onClick={() => navigate('/dashboard')}>
-                  {pick(lang, `مرحباً، ${guestSession.user.displayName}`, `Hi, ${guestSession.user.displayName}`, `Bonjour, ${guestSession.user.displayName}`)}
-                </button>
-                <button className="primary-action" onClick={signOutGuest}>
-                  {pick(lang, 'تسجيل الخروج', 'Sign out', 'Se déconnecter')}
-                </button>
-              </div>
-            ) : (
-              <div className="public-auth-actions">
-                <button className="menu-action" onClick={() => navigate('/host/why')}>
-                  {pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte')}
-                </button>
-                <button className="primary-action" onClick={() => navigate('/account/open')}>
-                  <span className="label-long">{pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription')}</span>
-                  <span className="label-short">{pick(lang, 'دخول', 'Log in', 'Connexion')}</span>
-                </button>
-              </div>
+            {!guestSession && (
+              <button type="button" className="host-text-link" onClick={() => navigate('/host/why')}>
+                {pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte')}
+              </button>
             )}
+            <AccountMenu
+              lang={lang}
+              path={path}
+              displayName={guestSession?.user.displayName || ''}
+              signedIn={Boolean(guestSession)}
+              isHost={isHost}
+              isAdmin={isAdmin}
+              inHostArea={inHostArea}
+              onSignOut={signOutGuest}
+            />
           </nav>
         </header>
       )}
@@ -140,6 +129,173 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
       )}
       {children}
       {!isAdvertisingTunnel && !isAdminControlRoom && <Footer lang={lang} />}
+    </div>
+  )
+}
+
+type AccountMenuProps = {
+  lang: Lang
+  path: string
+  displayName: string
+  signedIn: boolean
+  isHost: boolean
+  isAdmin: boolean
+  inHostArea: boolean
+  onSignOut: () => void | Promise<void>
+}
+
+type AccountMenuItem = { key: string; label: string; onSelect: () => void; strong?: boolean } | { key: string; separator: true }
+
+// Airbnb-style account menu: one round avatar + hamburger button that opens a small panel. Closes on
+// outside click, Escape and route change; arrow keys move between items.
+function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, inHostArea, onSignOut }: AccountMenuProps) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    setOpen(false)
+  }, [path, signedIn])
+
+  useEffect(() => {
+    if (!open) return
+    function onPointer(event: MouseEvent | TouchEvent) {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        buttonRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('touchstart', onPointer)
+    document.addEventListener('keydown', onKey)
+    // Move focus into the panel so keyboard users land on the first item.
+    panelRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('touchstart', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  function go(target: string) {
+    setOpen(false)
+    navigate(target)
+  }
+
+  const items: AccountMenuItem[] = signedIn
+    ? [
+        { key: 'trips', label: pick(lang, 'رحلاتي', 'My trips', 'Mes voyages'), onSelect: () => go('/dashboard'), strong: true },
+        { key: 'account', label: pick(lang, 'حسابي', 'My account', 'Mon compte'), onSelect: () => go('/account'), strong: true },
+        { key: 'sep1', separator: true },
+        inHostArea
+          ? { key: 'host', label: pick(lang, 'التبديل إلى السفر', 'Switch to traveling', 'Passer en mode voyage'), onSelect: () => go('/stays') }
+          : isHost
+            ? { key: 'host', label: pick(lang, 'التبديل إلى الاستضافة', 'Switch to hosting', 'Passer en mode hôte'), onSelect: () => go('/host') }
+            : { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/why') },
+        ...(isAdmin
+          ? [{ key: 'admin', label: pick(lang, 'لوحة الإدارة', 'Admin panel', 'Administration'), onSelect: () => go('/admin/review') }]
+          : []),
+        { key: 'sep2', separator: true },
+        {
+          key: 'signout',
+          label: pick(lang, 'تسجيل الخروج', 'Sign out', 'Se déconnecter'),
+          onSelect: () => {
+            setOpen(false)
+            void onSignOut()
+          },
+        },
+      ]
+    : [
+        { key: 'login', label: pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription'), onSelect: () => go('/account/open'), strong: true },
+        { key: 'sep1', separator: true },
+        { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/why') },
+      ]
+
+  function onPanelKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const buttons = Array.from(panelRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') || [])
+    if (!buttons.length) return
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const step = event.key === 'ArrowDown' ? 1 : -1
+      buttons[(index + step + buttons.length) % buttons.length].focus()
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      buttons[0].focus()
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      buttons[buttons.length - 1].focus()
+    } else if (event.key === 'Tab') {
+      setOpen(false)
+    }
+  }
+
+  const initial = displayName.trim().charAt(0).toUpperCase()
+  const menuLabel = signedIn
+    ? pick(lang, `قائمة الحساب — ${displayName}`, `Account menu — ${displayName}`, `Menu du compte — ${displayName}`)
+    : pick(lang, 'القائمة الرئيسية', 'Main menu', 'Menu principal')
+
+  return (
+    <div className="account-menu" ref={rootRef}>
+      <button
+        ref={buttonRef}
+        type="button"
+        className={`account-menu-trigger${open ? ' is-open' : ''}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls="account-menu-panel"
+        aria-label={menuLabel}
+        onClick={() => setOpen((value) => !value)}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' && !open) {
+            event.preventDefault()
+            setOpen(true)
+          }
+        }}
+      >
+        <svg className="account-menu-burger" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M4 7h16M4 12h16M4 17h16" />
+        </svg>
+        <span className={`account-menu-avatar${signedIn ? ' is-signed-in' : ''}`} aria-hidden="true">
+          {signedIn && initial ? (
+            initial
+          ) : (
+            <svg viewBox="0 0 24 24" focusable="false">
+              <circle cx="12" cy="8.5" r="4" />
+              <path d="M4 21c0-4.4 3.6-7.5 8-7.5s8 3.1 8 7.5" />
+            </svg>
+          )}
+        </span>
+      </button>
+      {open && (
+        <div id="account-menu-panel" ref={panelRef} className="account-menu-panel" role="menu" aria-label={menuLabel} onKeyDown={onPanelKeyDown}>
+          {signedIn && displayName && (
+            <div className="account-menu-greeting" aria-hidden="true">
+              {pick(lang, `مرحباً، ${displayName}`, `Hi, ${displayName}`, `Bonjour, ${displayName}`)}
+            </div>
+          )}
+          {items.map((item) =>
+            'separator' in item ? (
+              <div key={item.key} className="account-menu-separator" role="separator" />
+            ) : (
+              <button
+                key={item.key}
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                className={`account-menu-item${item.strong ? ' is-strong' : ''}`}
+                onClick={item.onSelect}
+              >
+                {item.label}
+              </button>
+            ),
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -219,6 +375,14 @@ function getRouteContext(path: string, lang: Lang) {
     // return path (sybnb.v6.guestReturnPath) so the breadcrumb names the right section.
     const returnPath = id ? `/listing/${id}` : readGuestReturnPath()
     return accountContext(returnPath, lang)
+  }
+  if (path.startsWith('/checkout/')) {
+    return {
+      section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'),
+      page: pick(lang, 'تأكيد ودفع', 'Confirm and pay', 'Confirmer et payer'),
+      backPath: `/listing/${path.split('/')[2] || ''}`,
+      nextPath: '',
+    }
   }
   if (path.startsWith('/booking/')) {
     return {

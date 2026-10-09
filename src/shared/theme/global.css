@@ -267,12 +267,6 @@ a {
   min-width: 112px;
 }
 
-.public-auth-actions {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-}
-
 .quick-nav {
   align-items: center;
   display: flex;
@@ -309,8 +303,7 @@ a {
   color: #d5a915;
 }
 
-.ghost-action,
-.menu-action {
+.ghost-action {
   background: #121c2f;
   border: 1px solid #263651 !important;
   padding: 0 16px;
@@ -343,14 +336,9 @@ a {
     padding: 0 8px;
   }
 
-  .menu-action,
   .primary-action {
     padding: 0 12px;
     font-size: 13px;
-  }
-
-  .public-auth-actions button {
-    white-space: nowrap;
   }
 }
 
@@ -4235,55 +4223,6 @@ a {
 
   .primary-action {
     display: none !important;
-  }
-
-  .menu-action {
-    border-radius: 12px;
-    font-size: 0;
-    height: 48px;
-    min-width: 48px;
-    padding: 0;
-    position: relative;
-  }
-
-  .menu-action::before {
-    color: #fff;
-    content: "☰";
-    font-size: 24px;
-    line-height: 1;
-  }
-
-  .public-auth-actions {
-    display: flex;
-    gap: 6px;
-    /* A long real display name (e.g. a full guest name) must never force this grid item wider than
-       the available track -- min-width:0 lets it shrink; the child .menu-action truncates with an
-       ellipsis instead. Without this, RTL's default right-anchored overflow scroll made the
-       overflow visible as the header pushed past the left edge (LTR just scrolled it out of view). */
-    min-width: 0;
-  }
-
-  .public-auth-actions .primary-action {
-    border-radius: 12px;
-    display: inline-flex !important;
-    min-height: 44px !important;
-    padding: 0 10px;
-  }
-
-  .public-auth-actions .menu-action {
-    border-radius: 12px;
-    font-size: 13px;
-    height: auto;
-    min-height: 44px !important;
-    min-width: 0;
-    overflow: hidden;
-    padding: 0 10px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .public-auth-actions .menu-action::before {
-    content: none;
   }
 
   .quick-nav {
@@ -8489,14 +8428,301 @@ a {
   }
 }
 
-/* Phones: keep the header on one line (logo, language, log in). The breadcrumb and the
-   "become a host" link are reachable from the page itself; the hero search and host card cover them. */
-.top-nav .label-short { display: none; }
+
+/* ---------------------------------------------------------------------------------------------
+   Header account menu (Airbnb-style): "Become a host" text link on wide screens, then one round
+   hamburger + avatar button that opens the account panel. Phones: logo, language switch and the
+   menu button only -- everything else lives inside the menu.
+   --------------------------------------------------------------------------------------------- */
+.top-nav .nav-actions { align-items: center; display: flex; gap: 10px; min-width: 0; }
+
+.top-nav .host-text-link {
+  background: transparent;
+  border-radius: 999px;
+  color: #f7f8ff;
+  font-weight: 800;
+  min-height: 44px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+.top-nav .host-text-link:hover { background: rgba(255, 255, 255, 0.07); }
+
+.account-menu { position: relative; }
+/* While the panel is open, lift the header above page content that has its own stacking context
+   (e.g. the stays search bar), so the panel is never drawn underneath it. */
+.top-nav:has(.account-menu-panel) { z-index: 70; }
+
+.top-nav .account-menu-trigger {
+  background: #121c2f;
+  border: 1px solid #2c3a57;
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  color: #f7f8ff;
+  cursor: pointer;
+  gap: 10px;
+  min-height: 46px;
+  padding: 4px 5px 4px 12px;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+[dir='rtl'] .top-nav .account-menu-trigger { padding: 4px 12px 4px 5px; }
+.top-nav .account-menu-trigger:hover,
+.top-nav .account-menu-trigger.is-open { border-color: #4a5c86; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
+.top-nav .account-menu-trigger:focus-visible { outline: 2px solid #8fa2ff; outline-offset: 2px; }
+
+.account-menu-burger { fill: none; height: 18px; stroke: currentColor; stroke-linecap: round; stroke-width: 2.2; width: 18px; }
+
+.account-menu-avatar {
+  align-items: center;
+  background: #3a4560;
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 15px;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  overflow: hidden;
+  width: 34px;
+}
+.account-menu-avatar.is-signed-in { background: linear-gradient(135deg, #526cff, #8a5cff); }
+.account-menu-avatar svg { fill: #c7cfe2; height: 22px; stroke: #c7cfe2; stroke-width: 0; width: 22px; }
+.account-menu-avatar svg path { fill: #c7cfe2; }
+
+.account-menu-panel {
+  background: #10131f;
+  border: 1px solid #262d44;
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  display: grid;
+  inset-inline-end: 0;
+  min-width: 248px;
+  padding: 8px 0;
+  position: absolute;
+  top: calc(100% + 10px);
+  z-index: 60;
+}
+
+.account-menu-greeting {
+  color: #9aa6ba;
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  padding: 6px 18px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-nav .account-menu-item {
+  background: transparent;
+  border-radius: 0;
+  color: #e6eaf5;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  justify-content: flex-start;
+  min-height: 44px;
+  padding: 0 18px;
+  text-align: start;
+  width: 100%;
+}
+.top-nav .account-menu-item.is-strong { color: #fff; font-weight: 850; }
+.top-nav .account-menu-item:hover,
+.top-nav .account-menu-item:focus-visible { background: rgba(255, 255, 255, 0.07); outline: none; }
+
+.account-menu-separator { background: #262d44; height: 1px; margin: 6px 0; }
+
+@media (max-width: 760px) {
+  .top-nav { grid-template-columns: auto minmax(0, 1fr); }
+  .top-nav .nav-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .top-nav .host-text-link { display: none; }
+}
+
 @media (max-width: 640px) {
   .top-nav .route-context { display: none; }
-  .top-nav .public-auth-actions .menu-action { display: none; }
-  .top-nav .label-long { display: none; }
-  .top-nav .label-short { display: inline; }
-  .top-nav .public-auth-actions .primary-action { white-space: nowrap; padding-inline: 14px; }
-  .top-nav .nav-actions { gap: 8px; min-width: 0; }
+  .top-nav .account-menu-trigger { gap: 8px; min-height: 44px; }
+  .account-menu-avatar { height: 30px; width: 30px; }
+  .account-menu-panel { min-width: min(280px, calc(100vw - 32px)); }
+}
+
+/* ---------------------------------------------------------------------------------------------
+   Checkout -- "Confirm and pay" (src/modules/bookings/CheckoutPage.tsx). Two columns on desktop
+   (choices | sticky price summary), stacked on phones with the summary first.
+   --------------------------------------------------------------------------------------------- */
+.checkout-page {
+  color: #f2f4fa;
+  margin: 0 auto;
+  max-width: 1160px;
+  padding: 28px clamp(16px, 4vw, 40px) 96px;
+}
+
+.checkout-header { align-items: center; display: flex; gap: 12px; margin-bottom: 24px; }
+.checkout-header h1 { font-size: clamp(24px, 3.4vw, 32px); font-weight: 900; margin: 0; }
+.checkout-back {
+  align-items: center;
+  background: transparent;
+  border: 1px solid #2c3550;
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font-size: 24px;
+  height: 42px;
+  justify-content: center;
+  line-height: 1;
+  width: 42px;
+}
+.checkout-back:hover { background: rgba(255, 255, 255, 0.07); }
+
+.checkout-grid {
+  align-items: start;
+  display: grid;
+  gap: clamp(28px, 5vw, 64px);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 410px);
+}
+
+.checkout-main { display: grid; gap: 18px; min-width: 0; }
+
+.checkout-card {
+  background: #0f121c;
+  border: 1px solid #232a3f;
+  border-radius: 16px;
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+.checkout-card h2,
+.checkout-summary-card h2 { font-size: 19px; font-weight: 900; margin: 0; }
+
+.checkout-alert { background: rgba(255, 96, 96, 0.08); border-color: rgba(255, 110, 110, 0.45); color: #ffd6d6; }
+.checkout-alert strong { color: #fff; }
+
+.checkout-row { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.checkout-row > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.checkout-row + .checkout-row { border-top: 1px solid #1f2538; padding-top: 14px; }
+
+.checkout-muted { color: #9aa6ba; font-size: 14px; line-height: 1.55; }
+.checkout-warning { color: #ffcf7a; font-weight: 700; margin: 0; }
+
+.checkout-link {
+  background: transparent;
+  border: 0;
+  color: #fff;
+  cursor: pointer;
+  flex: none;
+  font-weight: 800;
+  padding: 6px 2px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.checkout-picker { border-top: 1px solid #1f2538; padding-top: 12px; }
+
+.checkout-stepper { align-items: center; display: inline-flex; flex: none; gap: 12px; }
+.checkout-stepper button {
+  background: transparent;
+  border: 1px solid #3a4460;
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 18px;
+  height: 34px;
+  line-height: 1;
+  width: 34px;
+}
+.checkout-stepper button:disabled { cursor: not-allowed; opacity: 0.35; }
+.checkout-stepper output { font-weight: 800; min-width: 18px; text-align: center; }
+
+.checkout-options { display: grid; gap: 10px; }
+.checkout-option {
+  align-items: flex-start;
+  background: #121624;
+  border: 1px solid #2a3149;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.checkout-option:hover { border-color: #4a5577; }
+.checkout-option.is-selected { background: rgba(82, 108, 255, 0.1); border-color: #6c80ff; box-shadow: inset 0 0 0 1px #6c80ff; }
+.checkout-option.is-disabled { cursor: not-allowed; opacity: 0.55; }
+.checkout-option input { accent-color: #6c80ff; flex: none; height: 18px; margin: 3px 0 0; width: 18px; }
+.checkout-option-icon { flex: none; font-size: 20px; line-height: 1.2; }
+.checkout-option-body { display: grid; gap: 4px; line-height: 1.5; min-width: 0; }
+.checkout-option-body span { color: #c3cadb; font-size: 14px; }
+.checkout-option-body small { color: #8f9ab0; font-size: 13px; }
+
+.checkout-agreement { align-items: flex-start; cursor: pointer; display: flex; gap: 12px; }
+.checkout-agreement input { accent-color: #6c80ff; flex: none; height: 20px; margin: 2px 0 0; width: 20px; }
+.checkout-agreement > span { display: grid; gap: 6px; line-height: 1.6; }
+.checkout-agreement small { color: #aab3c6; font-size: 13px; }
+.checkout-agreement em { color: #7f8aa3; font-size: 12px; font-style: normal; }
+
+.checkout-account { display: grid; }
+
+.checkout-submit { display: grid; gap: 10px; }
+.checkout-primary {
+  background: linear-gradient(90deg, #4f66ff, #7a5cff);
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 17px;
+  font-weight: 900;
+  min-height: 56px;
+  padding: 0 24px;
+  width: 100%;
+}
+.checkout-primary:disabled { cursor: not-allowed; filter: grayscale(0.6); opacity: 0.5; }
+.checkout-primary:focus-visible { outline: 2px solid #b8c4ff; outline-offset: 3px; }
+.checkout-fineprint { color: #8f9ab0; font-size: 13px; line-height: 1.6; }
+
+.checkout-secondary {
+  background: #121c2f;
+  border: 1px solid #2f3a55;
+  border-radius: 10px;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 800;
+  justify-self: start;
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.checkout-summary { position: sticky; top: 100px; }
+.checkout-summary-card {
+  background: #0f121c;
+  border: 1px solid #232a3f;
+  border-radius: 16px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+}
+.checkout-listing { align-items: center; display: flex; gap: 14px; }
+.checkout-listing img { background: #1a2032; border-radius: 12px; flex: none; height: 92px; object-fit: cover; width: 112px; }
+.checkout-listing > div { display: grid; gap: 4px; min-width: 0; }
+.checkout-listing strong { font-size: 16px; line-height: 1.4; }
+.checkout-separator { background: #232a3f; height: 1px; }
+
+.checkout-prices { display: grid; gap: 10px; margin: 0; }
+.checkout-prices > div { display: flex; gap: 12px; justify-content: space-between; }
+.checkout-prices dt { color: #c3cadb; }
+.checkout-prices dd { margin: 0; white-space: nowrap; }
+.checkout-total { align-items: baseline; display: flex; font-size: 17px; font-weight: 900; gap: 12px; justify-content: space-between; }
+.checkout-total strong { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .checkout-grid { grid-template-columns: minmax(0, 1fr); }
+  /* Phones/tablets: the summary (photo + price) comes first, like Airbnb's mobile checkout. */
+  .checkout-summary { order: -1; position: static; }
+}
+
+@media (max-width: 640px) {
+  .checkout-page { padding: 18px 16px 110px; }
+  .checkout-card,
+  .checkout-summary-card { padding: 16px; }
+  .checkout-listing img { height: 76px; width: 92px; }
 }

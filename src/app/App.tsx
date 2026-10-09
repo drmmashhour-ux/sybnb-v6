@@ -13,6 +13,7 @@ import { authStorage } from '../shared/api/authStorage'
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
 const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrainPage')
 const BookingDetailPage = lazyNamed(() => import('../modules/bookings/BookingDetailPage'), 'BookingDetailPage')
+const CheckoutPage = lazyNamed(() => import('../modules/bookings/CheckoutPage'), 'CheckoutPage')
 const CompetitorsPage = lazyNamed(() => import('../modules/competitors/CompetitorsPage'), 'CompetitorsPage')
 const DashboardPage = lazyNamed(() => import('../modules/dashboard/DashboardPage'), 'DashboardPage')
 const DivisionLivePage = lazyNamed(() => import('../modules/divisions/DivisionLivePage'), 'DivisionLivePage')
@@ -100,6 +101,9 @@ export function App() {
   const trustBookingSubRouteMatch =
     /^\/booking\/(protection|guarantee|payment-status|dispute|dispute-closed)\/[^/]+$/.test(path)
   const listingMatch = path.match(/^\/listing\/([^/]+)$/)
+  // Airbnb-style "Confirm and pay". Deliberately NOT gated: the page signs the guest in inline and
+  // keeps every choice (dates, protection, payment method) while they do.
+  const checkoutMatch = path.match(/^\/checkout\/([^/]+)$/)
   const paymentReceiptMatch = path.match(/^\/payment\/receipt\/([^/]+)$/)
   const bookingPaymentMatch = path.match(/^\/payment\/local-wallet\/([^/]+)\/(\d+)\/([^/]+)$/)
   // SR Ride vs. Uber gap-closure (P0 #3): a trip-share link -- deliberately public/ungated, same
@@ -217,6 +221,8 @@ export function App() {
           <LegalPlaceholderPage lang={lang} page="privacy" />
         ) : bookingMatch ? (
           <BookingDetailPage bookingId={bookingMatch[1]} lang={lang} />
+        ) : checkoutMatch ? (
+          <CheckoutPage listingId={checkoutMatch[1]} lang={lang} />
         ) : listingMatch ? (
           <ListingDetailPage listingId={listingMatch[1]} lang={lang} />
         ) : path === '/ride' || path === '/ride-preview' ? (

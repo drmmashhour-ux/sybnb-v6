@@ -22,6 +22,7 @@ import { cancellationRuleText } from '../../shared/booking/cancellationPolicy'
 import { localeForLang } from '../../shared/country/presentation'
 import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
 import { guestFeeSummary } from './guestFeeSummary'
+import { CHECKOUT_NOTE_KEY_PREFIX, STRIPE_PENDING_KEY_PREFIX, takeSessionFlag } from './checkoutDraft'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 
 type Props = {
@@ -232,6 +233,11 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   const [stripeConfigured, setStripeConfigured] = useState(false)
   const [cardState, setCardState] = useState<'idle' | 'starting' | 'confirming' | 'error'>('idle')
   const [cardError, setCardError] = useState('')
+  // Result of a round trip to Stripe Checkout: 'paid' after the success URL confirmed the payment,
+  // 'unfinished' when the guest came back without paying (cancel URL / closed the Stripe page).
+  const [cardResult, setCardResult] = useState<'paid' | 'unfinished' | null>(null)
+  // Checkout sent the guest here first because the one-time ID photo is still missing.
+  const [checkoutNote] = useState(() => takeSessionFlag(`${CHECKOUT_NOTE_KEY_PREFIX}${bookingId}`))
   const [idFiles, setIdFiles] = useState<string[]>([])
   const [idFile, setIdFile] = useState<File | null>(null)
   const [idSaveState, setIdSaveState] = useState<'idle' | 'saving' | 'error'>('idle')
@@ -253,12 +259,17 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sessionId = params.get('session_id')
-    if (!sessionId) return
+    const leftForStripe = takeSessionFlag(`${STRIPE_PENDING_KEY_PREFIX}${bookingId}`)
+    if (!sessionId) {
+      if (leftForStripe) setCardResult('unfinished')
+      return
+    }
 
     setCardState('confirming')
     confirmStripePayment(sessionId)
       .then(() => {
         setCardState('idle')
+        setCardResult('paid')
         window.history.replaceState(null, '', window.location.pathname + window.location.hash)
         void loadBooking()
       })
@@ -274,6 +285,11 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
     setCardError('')
     try {
       const session = await createStripeCheckoutSession(booking.id)
+      try {
+        sessionStorage.setItem(`${STRIPE_PENDING_KEY_PREFIX}${booking.id}`, '1')
+      } catch {
+        // ignore
+      }
       window.location.href = session.url
     } catch (error) {
       setCardState('error')
@@ -498,6 +514,45 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
         <>
           {cardState === 'confirming' && <section style={styles.panel}>{t.stripeConfirming}</section>}
           {cardState === 'error' && <section style={styles.alert}>{cardError}</section>}
+          {cardResult === 'paid' && (
+            <section style={styles.paidBanner} role="status">
+              <strong>✓ {pick(lang, 'تم الدفع', 'Payment received', 'Paiement reçu')}</strong>
+              <span>
+                {pick(
+                  lang,
+                  'استلمنا دفعتك بالبطاقة. تفاصيل حجزك وحالته أدناه.',
+                  'We received your card payment. Your booking details and status are below.',
+                  'Nous avons bien reçu votre paiement par carte. Le détail et le statut de votre réservation figurent ci-dessous.',
+                )}
+              </span>
+            </section>
+          )}
+          {cardResult === 'unfinished' && cardState !== 'confirming' && (
+            <section style={styles.deadlineBanner} role="status">
+              <strong>{pick(lang, 'لم يكتمل الدفع', 'Payment not completed', 'Paiement non effectué')}</strong>
+              <span>
+                {pick(
+                  lang,
+                  'لم يتم خصم أي مبلغ. يمكنك المحاولة مرة أخرى أو اختيار شام كاش أو التحويل البنكي قبل انتهاء مهلة الدفع.',
+                  'You were not charged. You can try again, or choose Sham Cash or a bank transfer before the payment deadline.',
+                  'Aucun montant n’a été prélevé. Vous pouvez réessayer ou choisir Sham Cash ou un virement bancaire avant la date limite de paiement.',
+                )}
+              </span>
+            </section>
+          )}
+          {checkoutNote && !hasIdDocument && (
+            <section style={styles.deadlineBanner} role="status">
+              <strong>{pick(lang, 'تم إنشاء حجزك — خطوة واحدة قبل الدفع', 'Your booking was created — one step before paying', 'Votre réservation est créée — une étape avant le paiement')}</strong>
+              <span>
+                {pick(
+                  lang,
+                  'أرسل صورة إثبات الهوية مرة واحدة أدناه، ثم أكمل الدفع من هذه الصفحة.',
+                  'Send a photo of your ID once below, then complete the payment from this page.',
+                  'Envoyez une seule fois une photo de votre pièce d’identité ci-dessous, puis effectuez le paiement depuis cette page.',
+                )}
+              </span>
+            </section>
+          )}
 
           {paymentDeadline && (
             <section style={styles.deadlineBanner} role="status">
@@ -860,5 +915,6 @@ const styles: Record<string, CSSProperties> = {
   expiredBanner: { border: '1px solid rgba(255,96,96,.5)', borderRadius: 10, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 16, display: 'grid', gap: 6, lineHeight: 1.6 },
   cancelPanel: { border: '1px solid #30384d', borderRadius: 10, background: '#111118', color: '#fff', padding: 16, display: 'grid', gap: 12, lineHeight: 1.6 },
   cancelNumbers: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' },
+  paidBanner: { border: '1px solid rgba(32,210,155,.5)', borderRadius: 10, background: 'rgba(32,210,155,.1)', color: '#c9f7e6', padding: 16, display: 'grid', gap: 6, lineHeight: 1.6 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
 }

@@ -27,6 +27,8 @@ import { localeForLang } from '../../shared/country/presentation'
 import { guestFeeSummary } from '../bookings/guestFeeSummary'
 import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
+import { saveCheckoutDraft } from '../bookings/checkoutDraft'
+import { stayGuestAgreement } from '../../shared/booking/guestAgreement'
 
 type Props = {
   listingId: string
@@ -91,10 +93,10 @@ const copy = {
     parkingFee: 'رسوم مواقف السيارات',
     feesIncluded: 'شامل رسوم التنظيف والضرائب',
     agreementTitle: 'اتفاقية الإيجار اليومي',
-    agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي. أعلم أن SYBNB تخصم عمولة خدمة (12% من إجمالي قيمة الحجز، عدا رسوم الحماية) من مستحقات المضيف مقابل إدارة الحجز والدفع والحماية.',
+    agreementCopy: stayGuestAgreement('ar').body,
     agreementRequired: 'يجب قبول اتفاقية الإيجار اليومي قبل إرسال طلب الحجز.',
     datesTitle: 'اختر تاريخ الإقامة',
-    datesRequired: 'اختر تاريخ الدخول والخروج قبل إرسال طلب الحجز.',
+    datesRequired: 'اختر تاريخ الدخول والخروج أولاً.',
     editDates: 'تعديل التواريخ',
     quoteLoading: 'جار حساب السعر...',
     agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
@@ -120,7 +122,7 @@ const copy = {
     instantBookBadge: '⚡ حجز فوري',
     instantBookExplain: 'هذه الاستضافة تفعّل الحجز الفوري: يتأكد حجزك تلقائياً فور نجاح الدفع، دون انتظار موافقة المضيف.',
     share: 'مشاركة',
-    requestOnlyAfterAccount: 'افتح حسابك أو سجّل الدخول أولاً، ثم أرسل طلب الحجز.',
+    requestOnlyAfterAccount: 'لن يُخصم أي مبلغ الآن — ستراجع حجزك وتسجّل الدخول وتختار طريقة الدفع في الخطوة التالية.',
     bottomContact: 'تواصل',
     inquirySentTitle: 'تم إرسال طلبك',
     inquirySentCopy: 'وصل طلبك إلى البائع/المضيف عبر صندوق الرسائل داخل SYBNB. لا حاجة للدفع الآن — سيتواصل معك الطرف الآخر من خلال المنصة.',
@@ -193,10 +195,10 @@ const copy = {
     parkingFee: 'Parking fee',
     feesIncluded: 'Includes cleaning fee and taxes',
     agreementTitle: 'Short-Term Rental Agreement',
-    agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action. I understand SYBNB deducts a service commission (12% of the total booking amount, excluding the protection fee) from the host payout for managing the booking, payment, and protection.',
+    agreementCopy: stayGuestAgreement('en').body,
     agreementRequired: 'You must accept the short-term rental agreement before sending the booking request.',
     datesTitle: 'Choose your stay dates',
-    datesRequired: 'Choose check-in and check-out dates before sending the booking request.',
+    datesRequired: 'Choose your check-in and check-out dates first.',
     editDates: 'Edit dates',
     quoteLoading: 'Calculating price...',
     agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
@@ -222,7 +224,7 @@ const copy = {
     instantBookBadge: '⚡ Instant Book',
     instantBookExplain: 'This stay has Instant Book enabled: your booking confirms automatically once payment succeeds, no host approval wait.',
     share: 'Share',
-    requestOnlyAfterAccount: 'Open an account or sign in first, then send the booking request.',
+    requestOnlyAfterAccount: 'You won’t be charged yet — you’ll review your booking, sign in and choose how to pay on the next step.',
     bottomContact: 'Contact',
     inquirySentTitle: 'Your request was sent',
     inquirySentCopy: "Your request reached the seller/host through SYBNB's inbox. No payment needed now — they'll follow up with you through the platform.",
@@ -295,10 +297,10 @@ const copy = {
     parkingFee: 'Frais de stationnement',
     feesIncluded: 'Frais de ménage et taxes inclus',
     agreementTitle: 'Contrat de location de courte durée',
-    agreementCopy: 'Je confirme que mes informations sont exactes, que les règles de réservation et d’annulation s’appliquent, que le paiement s’effectue uniquement dans SYBNB, qu’aucun accord hors plateforme n’est autorisé, que les règles du logement doivent être respectées et que tout litige est soumis à l’équipe SYBNB avant toute démarche externe. Je comprends que SYBNB prélève une commission de service (12 % du montant total de la réservation, hors frais de protection) sur le versement à l’hôte pour la gestion de la réservation, du paiement et de la protection.',
+    agreementCopy: stayGuestAgreement('fr').body,
     agreementRequired: 'Vous devez accepter le contrat de location de courte durée avant d’envoyer la demande de réservation.',
     datesTitle: 'Choisissez les dates de votre séjour',
-    datesRequired: 'Choisissez les dates d’arrivée et de départ avant d’envoyer la demande de réservation.',
+    datesRequired: 'Choisissez d’abord vos dates d’arrivée et de départ.',
     editDates: 'Modifier les dates',
     quoteLoading: 'Calcul du prix...',
     agreementVersion: 'SYBNB_SHORT_TERM_RENTAL_GUEST_AGREEMENT_V1',
@@ -324,7 +326,7 @@ const copy = {
     instantBookBadge: '⚡ Réservation instantanée',
     instantBookExplain: 'Ce logement propose la réservation instantanée : votre réservation est confirmée automatiquement dès que le paiement aboutit, sans attendre l’accord de l’hôte.',
     share: 'Partager',
-    requestOnlyAfterAccount: 'Ouvrez un compte ou connectez-vous d’abord, puis envoyez la demande de réservation.',
+    requestOnlyAfterAccount: 'Aucun montant n’est prélevé maintenant : vous vérifierez votre réservation, vous vous connecterez et choisirez le mode de paiement à l’étape suivante.',
     bottomContact: 'Contacter',
     inquirySentTitle: 'Votre demande a été envoyée',
     inquirySentCopy: 'Votre demande a été transmise au vendeur ou à l’hôte via la messagerie SYBNB. Aucun paiement n’est requis pour le moment : il vous répondra via la plateforme.',
@@ -574,22 +576,22 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
   async function requestListing() {
     if (!listing || notBookable) return
-    // Signed-out: go to sign-in FIRST (before asking for dates). Any dates already picked stay in
-    // the per-listing booking draft (sessionStorage) and are restored when we come back here.
+    if (listing.division === 'STAYS') {
+      // Airbnb-style: "Reserve" only needs dates here; sign-in, the agreement and the payment method
+      // all happen on /checkout/:id, which reads these choices from the checkout draft.
+      if (!isValidDate(dateRange.checkIn) || !isValidDate(dateRange.checkOut) || nightsBetween(dateRange.checkIn, dateRange.checkOut) < 1) {
+        setShowDatePicker(true)
+        setMessage(t.datesRequired)
+        document.getElementById('listing-booking')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+      saveCheckoutDraft({ listingId: listing.id, checkIn: dateRange.checkIn, checkOut: dateRange.checkOut, protection: cancellationProtection })
+      window.location.hash = `/checkout/${listing.id}`
+      return
+    }
+    // Contact-only divisions open a message thread, which needs an account first.
     if (!getStoredGuestSession()) {
       goToAccountAndBack(listing.id)
-      return
-    }
-    if (
-      listing.division === 'STAYS' &&
-      (!isValidDate(dateRange.checkIn) || !isValidDate(dateRange.checkOut) || nightsBetween(dateRange.checkIn, dateRange.checkOut) < 1)
-    ) {
-      setShowDatePicker(true)
-      setMessage(t.datesRequired)
-      return
-    }
-    if (listing.division === 'STAYS' && !acceptedGuestAgreement) {
-      setMessage(t.agreementRequired)
       return
     }
     setStatus('saving')
@@ -1019,25 +1021,6 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                   )}
                 </section>
 
-                {!booking && (
-                  // Inline (not sticky) so it never covers the listing while scrolling.
-                  <label style={styles.agreementBox}>
-                    <input
-                      checked={acceptedGuestAgreement}
-                      onChange={(event) => {
-                        setAcceptedGuestAgreement(event.target.checked)
-                        if (event.target.checked && message === t.agreementRequired) setMessage('')
-                      }}
-                      style={styles.agreementInput}
-                      type="checkbox"
-                    />
-                    <span style={{ display: 'grid', gap: 6 }}>
-                      <strong>{detailCopy.agreementTitle}</strong>
-                      <small>{detailCopy.agreementCopy}</small>
-                      <em>{t.agreementVersionLabel}</em>
-                    </span>
-                  </label>
-                )}
               </>
             )}
 
@@ -1189,7 +1172,7 @@ function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir
 
 function actionForDivision(division: string, lang: Lang) {
   const actions: Record<string, Record<Lang, string>> = {
-    STAYS: { ar: 'إرسال طلب الحجز', en: 'Send booking request', fr: 'Envoyer la demande de réservation' },
+    STAYS: { ar: 'احجز', en: 'Reserve', fr: 'Réserver' },
     RENTALS: { ar: 'طلب تواصل', en: 'Request contact', fr: 'Demander un contact' },
     // Non-bookable divisions only open a conversation with the seller -- never "booking" wording.
     BUY: { ar: 'تواصل مع البائع', en: 'Contact seller', fr: 'Contacter le vendeur' },

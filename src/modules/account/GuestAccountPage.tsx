@@ -18,6 +18,11 @@ type Props = {
   listingId?: string
   flow?: 'stays' | 'rentals' | 'ride' | 'generic'
   returnPath?: string
+  // Embedded (e.g. inline on the checkout page): no page chrome, no navigation after sign-in --
+  // the host page gets onSignedIn() and keeps the guest where they are with all choices intact.
+  embedded?: boolean
+  onSignedIn?: () => void
+  embeddedTitle?: string
 }
 
 type Step = 'email' | 'password' | 'finish' | 'reset'
@@ -101,7 +106,7 @@ const copy = {
     ready: 'Done. Your account is ready.',
   },
   fr: {
-    forgot: 'Mot de passe oublié?',
+    forgot: 'Mot de passe oublié ?',
     resetTitle: 'Réinitialiser votre mot de passe',
     resetBody: (masked: string) => `Nous avons envoyé un code à 6 chiffres à ${masked}. Saisissez-le, puis choisissez un nouveau mot de passe.`,
     newPassword: 'Nouveau mot de passe',
@@ -113,7 +118,7 @@ const copy = {
     continue: 'Continuer',
     passwordTitle: 'Saisissez votre mot de passe',
     password: 'Mot de passe',
-    passwordHint: 'Nouveau sur SYBNB? Choisissez un mot de passe d’au moins 8 caractères.',
+    passwordHint: 'Nouveau sur SYBNB ? Choisissez un mot de passe d’au moins 8 caractères.',
     show: 'Afficher',
     keepSignedIn: 'Rester connecté sur cet appareil',
     keepSignedInHint: 'Ne cochez pas cette case sur un ordinateur partagé ou public.',
@@ -139,7 +144,7 @@ const copy = {
   },
 }
 
-export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPath }: Props) {
+export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPath, embedded = false, onSignedIn, embeddedTitle }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [step, setStep] = useState<Step>('email')
@@ -154,17 +159,25 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
   const [message, setMessage] = useState('')
   const [tone, setTone] = useState<'error' | 'success' | 'info'>('info')
   const focusRef = useRef<HTMLInputElement>(null)
+  const initialStep = useRef<Step | null>('email')
 
   const returnPath = listingId ? `/listing/${listingId}` : sanitizeReturnPath(explicitReturnPath) || readStoredReturnPath()
   const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
 
   useEffect(() => {
+    // Embedded: don't steal focus (and scroll the page) on first paint; only follow the user's own
+    // steps. Compared by value so React StrictMode's double effect run cannot trigger it.
+    if (embedded && initialStep.current === step) return
+    initialStep.current = null
     focusRef.current?.focus()
   }, [step])
 
   // Already signed in (persisted session): never ask again -- go straight back to where they were.
   useEffect(() => {
-    if (getStoredGuestSession()) finishAndReturn()
+    if (getStoredGuestSession()) {
+      if (embedded) onSignedIn?.()
+      else finishAndReturn()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -178,6 +191,12 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
   }
 
   function finishAndReturn() {
+    if (embedded) {
+      say(t.ready, 'success')
+      window.dispatchEvent(new Event('sybnb-session-changed'))
+      onSignedIn?.()
+      return
+    }
     sessionStorage.setItem(CUSTOMER_GATE_KEY, '1')
     if (listingId) sessionStorage.setItem(`${CUSTOMER_GATE_KEY}:${listingId}`, '1')
     if (!listingId) sessionStorage.removeItem(GUEST_RETURN_PATH_KEY)
@@ -310,11 +329,14 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
 
   const title = step === 'email' ? t.emailTitle : step === 'password' ? t.passwordTitle : step === 'reset' ? t.resetTitle : t.finishTitle
 
+  const Wrapper = embedded ? 'div' : 'main'
   return (
-    <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
-      <section style={styles.card}>
+    <Wrapper dir={isAr ? 'rtl' : 'ltr'} style={embedded ? styles.embeddedPage : styles.page}>
+      <section style={embedded ? styles.embeddedCard : styles.card}>
         <header style={styles.header}>
-          {step === 'email' ? (
+          {step === 'email' && embedded ? (
+            <span style={styles.iconSpacer} />
+          ) : step === 'email' ? (
             <button style={styles.iconButton} onClick={goBackFromAccount} aria-label={t.back}>
               ×
             </button>
@@ -323,7 +345,11 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
               {isAr ? '›' : '‹'}
             </button>
           )}
-          <h1 style={styles.headerTitle}>{title}</h1>
+          {embedded ? (
+            <h2 style={styles.headerTitle}>{step === 'email' && embeddedTitle ? embeddedTitle : title}</h2>
+          ) : (
+            <h1 style={styles.headerTitle}>{title}</h1>
+          )}
           <span style={styles.iconSpacer} />
         </header>
 
@@ -340,7 +366,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
         >
           {step === 'email' ? (
             <>
-              <h2 style={styles.welcome}>{t.welcome}</h2>
+              {!embedded && <h2 style={styles.welcome}>{t.welcome}</h2>}
               <input
                 ref={focusRef}
                 dir="ltr"
@@ -480,7 +506,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
           </button>
         </form>
       </section>
-    </main>
+    </Wrapper>
   )
 }
 
@@ -507,6 +533,8 @@ function sanitizeReturnPath(value?: string | null) {
 
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: 'calc(100vh - 160px)', background: '#08090e', color: '#fff', padding: '24px 16px 90px', display: 'grid', alignContent: 'start', justifyItems: 'center' },
+  embeddedPage: { color: '#fff' },
+  embeddedCard: { width: '100%', border: '1px solid #232638', borderRadius: 16, background: '#0e0f16', overflow: 'hidden' },
   card: { width: '100%', maxWidth: 520, border: '1px solid #232638', borderRadius: 16, background: '#0e0f16', overflow: 'hidden' },
   header: { display: 'grid', gridTemplateColumns: '44px 1fr 44px', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid #232638' },
   headerTitle: { margin: 0, fontSize: 16, fontWeight: 900, textAlign: 'center' },

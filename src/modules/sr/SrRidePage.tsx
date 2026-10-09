@@ -578,7 +578,7 @@ export function SrRidePage({ lang }: Props) {
         pickup,
         dropoff,
         category,
-        currency: 'SYP',
+        currency: 'USD',
         lowDataMode,
         accuracyMeters,
         pickupCoords,
@@ -908,7 +908,7 @@ export function SrRidePage({ lang }: Props) {
 
           <div style={styles.stat}>
             <span>{t.fare}</span>
-            <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinor, 'SYP', lang)}</strong>
+            <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinor, ride?.currency || quote?.currency || 'USD', lang)}</strong>
           </div>
 
           {quote?.estimatedMinutes ? (
@@ -920,11 +920,25 @@ export function SrRidePage({ lang }: Props) {
             </div>
           ) : null}
 
-          {!ride && quote?.isPeak && (quote?.surgeMultiplier ?? 1) > 1 ? (
+          {!ride && quote && (quote.airportTrip || (quote.fuelSurchargePercent ?? 0) > 0 || quote.isPeak || (quote.demandMultiplier ?? 1) > 1) ? (
             <div style={styles.addressWarning} dir={isAr ? 'rtl' : 'ltr'}>
-              {isAr
-                ? `\u062a\u0633\u0639\u064a\u0631 \u0633\u0627\u0639\u0627\u062a \u0627\u0644\u0630\u0631\u0648\u0629 (+${Math.round(((quote.surgeMultiplier ?? 1) - 1) * 100)}%)`
-                : `Peak-hour pricing (+${Math.round(((quote.surgeMultiplier ?? 1) - 1) * 100)}%)`}
+              {(isAr ? '\u062a\u0633\u0639\u064a\u0631 \u0645\u062a\u063a\u064a\u0631: ' : 'Dynamic pricing: ') +
+                [
+                  quote.isPeak
+                    ? (isAr ? `\u0630\u0631\u0648\u0629 +${Math.round(((quote.peakMultiplier ?? 1) - 1) * 100)}%` : `peak +${Math.round(((quote.peakMultiplier ?? 1) - 1) * 100)}%`)
+                    : null,
+                  (quote.fuelSurchargePercent ?? 0) > 0
+                    ? (isAr ? `\u0648\u0642\u0648\u062f +${quote.fuelSurchargePercent}%` : `fuel +${quote.fuelSurchargePercent}%`)
+                    : null,
+                  (quote.demandMultiplier ?? 1) > 1
+                    ? (isAr ? `\u0637\u0644\u0628 \u00d7${quote.demandMultiplier}` : `demand \u00d7${quote.demandMultiplier}`)
+                    : null,
+                  quote.airportTrip
+                    ? (isAr ? `\u0627\u0644\u0645\u0637\u0627\u0631 $${quote.airportSurcharge}` : `airport $${quote.airportSurcharge}`)
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' \u00b7 ')}
             </div>
           ) : null}
 
@@ -1154,7 +1168,7 @@ export function SrRidePage({ lang }: Props) {
 
           {canCancel && estimatedCancellationFeeMinor > 0 && (
             <p style={styles.addressWarning}>
-              {t.cancellationFeeWarning.replace('{amount}', moneyText(estimatedCancellationFeeMinor, ride?.currency || 'SYP', lang))}
+              {t.cancellationFeeWarning.replace('{amount}', moneyText(estimatedCancellationFeeMinor, ride?.currency || 'USD', lang))}
             </p>
           )}
 

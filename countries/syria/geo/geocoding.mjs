@@ -66,45 +66,68 @@ export function haversineKm(a, b) {
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h))
 }
 
-// SR fare model (owner decision 2026-10-09): base + per-km + per-minute, floored at a per-category
-// minimum fare — the standard Uber/Careem/Bolt shape (time + distance + a floor), not distance-only.
-// Five categories, matching how regional apps tier by vehicle class: a budget motorbike tier (common
-// across MENA, e.g. Careem bikes), Economy, Comfort, SUV, and a Van/XL for groups. All SYP minor.
-// Rate LEVELS recalibrated 2026-10-09 to the real Damascus market reported by Enab Baladi (2025):
-// a cross-town app trip (al-Dweila -> al-Mazzeh, ~9 km / ~20 min) runs ~42,000 SYP, so SR Economy at
-// that distance now lands near that figure instead of ~half of it.
+// SR SMART VARIABLE PRICING (owner decision 2026-10-09, USD). Fares are priced in USD, not SYP: the
+// Syrian pound is volatile (parallel market ~13,000 old SYP/USD, Aug 2026) and the Syria profile
+// already advertises in USD, so a USD anchor keeps the real fare stable as the pound moves. Amounts
+// are whole USD (the platform renders money in whole currency units). Rate LEVELS are calibrated to
+// the LOCAL Syrian market, NOT tourist taxi aggregators: Enab Baladi (2025) puts a cross-town app
+// trip (~8-9 km) near 42,000 old SYP ~= $3, so SR Economy at that distance lands ~$3 here.
+//
+// Final fare = BASE x variable factors:
+//   base   = baseUsd + perKmUsd*km + perMinUsd*min (+ airport surcharge), floored at minFareUsd
+//   x (1 + fuel%)   -- FACTOR 2 fuel/gas cost pass-through (raise when pump prices rise)
+//   x peak          -- FACTOR 1 automatic rush-hour multiplier (time of day)
+//   x demand        -- FACTOR 3 operator "live" knob for demand/weather/holidays (other factors)
+// then rounded to the nearest whole USD (min $1). Every factor is env-tunable with a safe default,
+// so pricing is steered without a code change.
 const CATEGORY_RATES = {
-  'SR Bike':    { baseMinor: 6000,  perKmMinor: 1100, perMinMinor: 150, minFareMinor: 8000 },
-  'SR Economy': { baseMinor: 12000, perKmMinor: 2200, perMinMinor: 300, minFareMinor: 15000 },
-  'SR Comfort': { baseMinor: 16000, perKmMinor: 2800, perMinMinor: 400, minFareMinor: 22000 },
-  'SR SUV':     { baseMinor: 22000, perKmMinor: 3600, perMinMinor: 550, minFareMinor: 32000 },
-  'SR Van':     { baseMinor: 26000, perKmMinor: 4200, perMinMinor: 650, minFareMinor: 40000 },
+  'SR Bike':    { baseUsd: 0.8, perKmUsd: 0.11, perMinUsd: 0.015, minFareUsd: 1 },
+  'SR Economy': { baseUsd: 1.2, perKmUsd: 0.18, perMinUsd: 0.02,  minFareUsd: 2 },
+  'SR Comfort': { baseUsd: 1.5, perKmUsd: 0.22, perMinUsd: 0.028, minFareUsd: 3 },
+  'SR SUV':     { baseUsd: 2.2, perKmUsd: 0.32, perMinUsd: 0.045, minFareUsd: 4 },
+  'SR Van':     { baseUsd: 2.8, perKmUsd: 0.38, perMinUsd: 0.055, minFareUsd: 5 },
+}
+const SR_FARE_CURRENCY = 'USD'
+
+// Read a numeric env with a default and a safe clamp (out-of-range or non-numeric -> default).
+function srEnvNum(name, def, min, max) {
+  const raw = Number(process.env[name])
+  return Number.isFinite(raw) && raw >= min && raw <= max ? raw : def
 }
 
-// Peak-hour surge. Syrian ride apps raise fares during rush hours; SR mirrors that with a single
-// multiplier applied to the whole fare during morning and evening peaks. Env-tunable
-// (SR_PEAK_SURGE_MULTIPLIER, a 1..3 factor); default 1.25 (a 25% peak premium).
-const SR_PEAK_SURGE_MULTIPLIER = (() => {
-  const raw = Number(process.env.SR_PEAK_SURGE_MULTIPLIER)
-  return Number.isFinite(raw) && raw >= 1 && raw <= 3 ? raw : 1.25
-})()
-// Damascus local time is a fixed UTC+3 (Syria abolished daylight saving in 2022), so local hour is
-// UTC+3 with no DST branch. Peak windows: 07:00-09:59 and 16:00-19:59 local.
+// FACTOR 1 -- Peak-hour surge (time). Env SR_PEAK_SURGE_MULTIPLIER (1..3), default 1.25 (+25%).
+const SR_PEAK_SURGE_MULTIPLIER = srEnvNum('SR_PEAK_SURGE_MULTIPLIER', 1.25, 1, 3)
+// Damascus local time is a fixed UTC+3 (Syria abolished daylight saving in 2022). Peaks: 07:00-09:59
+// and 16:00-19:59 local.
 const SYRIA_UTC_OFFSET_HOURS = 3
 export function isPeakHour(date = new Date()) {
   const localHour = (date.getUTCHours() + SYRIA_UTC_OFFSET_HOURS) % 24
   return (localHour >= 7 && localHour < 10) || (localHour >= 16 && localHour < 20)
 }
 
-// Average city speed used to estimate trip minutes from distance for the per-minute component (the
-// quote is pre-trip, so actual minutes aren't known yet). Env-tunable; the server re-quotes the real route.
-const SR_AVG_SPEED_KMH = (() => {
-  const raw = Number(process.env.SR_AVG_SPEED_KMH)
-  return Number.isFinite(raw) && raw > 0 ? raw : 28
-})()
+// FACTOR 2 -- Fuel/gas surcharge %. Added to the base fare so a rise in pump prices passes through.
+// Env SR_FUEL_SURCHARGE_PERCENT (0..100), default 0 (off until fuel rises).
+const SR_FUEL_SURCHARGE_PERCENT = srEnvNum('SR_FUEL_SURCHARGE_PERCENT', 0, 0, 100)
 
-// Live-tracking surcharge for riders who opt out of low-data mode, mirroring the previous flat-fare model.
-const LIVE_TRACKING_SURCHARGE_MINOR = 2500
+// FACTOR 3 -- Demand / "other factors" surge. One live multiplier the operator raises for high
+// demand, weather, holidays, etc. Env SR_DEMAND_SURGE_MULTIPLIER (1..5), default 1 (no surge).
+const SR_DEMAND_SURGE_MULTIPLIER = srEnvNum('SR_DEMAND_SURGE_MULTIPLIER', 1, 1, 5)
+
+// FACTOR 4 -- Airport zone surcharge. Airport runs are specially priced everywhere (highway, waiting,
+// empty return leg), so a linear per-km fare underprices them. Fixed USD add-on when pickup OR dropoff
+// is Damascus airport. Env SR_AIRPORT_SURCHARGE_USD (0..50), default 5.
+const SR_AIRPORT_SURCHARGE_USD = srEnvNum('SR_AIRPORT_SURCHARGE_USD', 5, 0, 50)
+const DAMASCUS_AIRPORT_COORDS = { lat: 33.4114, lng: 36.5156 }
+const AIRPORT_RADIUS_KM = 3
+function isAirportPoint(coords) {
+  return Boolean(coords) && haversineKm(coords, DAMASCUS_AIRPORT_COORDS) <= AIRPORT_RADIUS_KM
+}
+
+// Average city speed to estimate trip minutes from distance (quote is pre-trip). Env-tunable.
+const SR_AVG_SPEED_KMH = srEnvNum('SR_AVG_SPEED_KMH', 28, 1, 200)
+
+// Live-tracking surcharge (USD) for riders who opt out of low-data mode.
+const LIVE_TRACKING_SURCHARGE_USD = 0.2
 
 // SYBNB SR only operates in Syria. A client-supplied override (device GPS) landing wildly outside
 // the country is almost certainly bad data (GPS glitch or manipulation), not a real pickup/dropoff
@@ -165,25 +188,41 @@ export function quoteSrRide({
   // Per-minute (time) component: the quote is pre-trip, so estimate minutes from distance at the
   // city average speed. per-km + per-min together is the standard time-and-distance model.
   const estimatedMinutes = Math.max(1, Math.round((distanceKm / SR_AVG_SPEED_KMH) * 60))
-  const perMinMinor = rates.perMinMinor || 0
-  const minFareMinor = rates.minFareMinor || 0
-  const computedMinor = rates.baseMinor
-    + rates.perKmMinor * distanceKm
-    + perMinMinor * estimatedMinutes
-    + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_MINOR)
-  // Floor at the category minimum fare so very short/slow trips are never underpriced, THEN apply the
-  // peak-hour surge to the floored amount so even minimum-fare trips carry the rush-hour premium.
-  const flooredMinor = Math.max(minFareMinor, computedMinor)
+
+  // Base fare (USD): base + per-km + per-minute + optional live-tracking + airport surcharge, floored
+  // at the category minimum.
+  const airportTrip = isAirportPoint(pickupCoords) || isAirportPoint(dropoffCoords)
+  const airportSurchargeUsd = airportTrip ? SR_AIRPORT_SURCHARGE_USD : 0
+  const rawBaseUsd = rates.baseUsd
+    + rates.perKmUsd * distanceKm
+    + rates.perMinUsd * estimatedMinutes
+    + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_USD)
+    + airportSurchargeUsd
+  const baseFareUsd = Math.max(rates.minFareUsd || 0, rawBaseUsd)
+
+  // Variable factors on the base fare: fuel% (cost) -> peak (time) -> demand (other factors).
   const peak = isPeakHour()
-  const surgeMultiplier = peak ? SR_PEAK_SURGE_MULTIPLIER : 1
-  const surgedMinor = flooredMinor * surgeMultiplier
-  const fareMinor = Math.round(surgedMinor / 500) * 500
+  const peakMultiplier = peak ? SR_PEAK_SURGE_MULTIPLIER : 1
+  const fuelMultiplier = 1 + SR_FUEL_SURCHARGE_PERCENT / 100
+  const demandMultiplier = SR_DEMAND_SURGE_MULTIPLIER
+  const surgeMultiplier = Math.round(peakMultiplier * fuelMultiplier * demandMultiplier * 1000) / 1000
+  const variedUsd = baseFareUsd * fuelMultiplier * peakMultiplier * demandMultiplier
+
+  // The platform renders money in whole currency units, so round to the nearest whole USD (min $1).
+  const fareMinor = Math.max(1, Math.round(variedUsd))
 
   return {
     fareMinor,
+    currency: SR_FARE_CURRENCY,
     distanceKm: Math.round(distanceKm * 10) / 10,
     estimatedMinutes,
     estimated,
+    baseFareMinor: Math.round(baseFareUsd),
+    airportSurcharge: airportSurchargeUsd,
+    airportTrip,
+    fuelSurchargePercent: SR_FUEL_SURCHARGE_PERCENT,
+    peakMultiplier,
+    demandMultiplier,
     surgeMultiplier,
     isPeak: peak,
     pickupCoords,

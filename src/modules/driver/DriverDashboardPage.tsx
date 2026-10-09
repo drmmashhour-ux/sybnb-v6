@@ -375,13 +375,13 @@ export function DriverDashboardPage({ lang }: Props) {
   }
 
   const stats = useMemo(() => {
-    const pct = Math.round((1 - (overview?.totals.commissionRate ?? 0.25)) * 100)
+    const pct = Math.round((1 - (overview?.totals.commissionRate ?? 0.15)) * 100)
     const base = [
       { label: t.assigned, value: String(overview?.totals.assigned || 0) },
       { label: t.active, value: String(overview?.totals.active || 0) },
       { label: t.completed, value: String(overview?.totals.completed || 0) },
-      { label: `${t.earnings} · ${t.keepPrefix} ${pct}%`, value: moneyText(overview?.totals.earningsMinor || 0, 'SYP', lang) },
-      { label: t.awaiting, value: moneyText(overview?.totals.awaitingMinor || 0, 'SYP', lang) },
+      { label: `${t.earnings} · ${t.keepPrefix} ${pct}%`, value: moneyText(overview?.totals.earningsMinor || 0, overview?.totals.currency || 'USD', lang) },
+      { label: t.awaiting, value: moneyText(overview?.totals.awaitingMinor || 0, overview?.totals.currency || 'USD', lang) },
     ]
     // Only ever a real, rider-submitted average -- never a placeholder for a driver with zero
     // ratings yet (CAPSULE_RULES.noFakeTrustSignal).
@@ -493,7 +493,7 @@ export function DriverDashboardPage({ lang }: Props) {
                   <span>{String(pendingRide.metadata.dropoff || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
                   <small dir="ltr" style={{ color: '#7dd3b0' }}>
-                    {t.netEarn}: {moneyText(Math.round((pendingRide.fareMinor || 0) * (1 - (overview?.totals.commissionRate ?? 0.25))), pendingRide.currency, lang)}
+                    {t.netEarn}: {moneyText(Math.round((pendingRide.fareMinor || 0) * (1 - (overview?.totals.commissionRate ?? 0.15))), pendingRide.currency, lang)}
                   </small>
                   <i dir="ltr">
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
@@ -597,7 +597,7 @@ export function DriverDashboardPage({ lang }: Props) {
       <section style={{ ...styles.earningsPanel, gridTemplateColumns: '1fr' }}>
         <div>
           <span>{t.earnings}</span>
-          <strong dir="ltr">{moneyText(overview?.totals.earningsMinor || 0, 'SYP', lang)}</strong>
+          <strong dir="ltr">{moneyText(overview?.totals.earningsMinor || 0, overview?.totals.currency || 'USD', lang)}</strong>
           <small>{isAr ? `${overview?.totals.completed || 0} رحلة مكتملة` : `${overview?.totals.completed || 0} completed rides`}</small>
         </div>
       </section>

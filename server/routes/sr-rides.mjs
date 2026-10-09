@@ -179,7 +179,9 @@ export async function handleSrRides(req, res, url, context) {
       promoCodeId: promo?.id,
       discountMinor: promo ? discountMinor : undefined,
       businessAccountId,
-      currency: body.currency || defaultCurrency(),
+      // SR fares are priced in USD by the fare engine (quote.currency); fall back to the request
+      // currency or the country default only if the quote somehow omitted it.
+      currency: quote.currency || body.currency || defaultCurrency(),
       metadata: {
         ...(body.metadata || {}),
         pickup,

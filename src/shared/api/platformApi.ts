@@ -450,6 +450,7 @@ export type PlatformDriverOverview = {
     billedMinor?: number
     awaitingMinor?: number
     commissionRate?: number
+    currency?: string
   }
   rating: { averageRating: number | null; ratingCount: number }
   rides: PlatformRideRequest[]
@@ -1892,9 +1893,16 @@ export async function uploadIdDocumentForUser(userId: string, file: File) {
 
 export type PlatformSrQuote = {
   fareMinor: number
+  currency?: string
   distanceKm: number
   estimated: boolean
   estimatedMinutes?: number
+  baseFareMinor?: number
+  airportSurcharge?: number
+  airportTrip?: boolean
+  fuelSurchargePercent?: number
+  peakMultiplier?: number
+  demandMultiplier?: number
   surgeMultiplier?: number
   isPeak?: boolean
   pickupCoords: { lat: number; lng: number } | null

@@ -259,6 +259,10 @@ export async function handleDriver(req, res, url, context) {
           awaitingMinor,
           // So the UI can show "you keep X%" without hardcoding the rate.
           commissionRate: SR_RIDE_COMMISSION_RATE,
+          // SR fares are USD-denominated (see countries/syria/geo/geocoding.mjs). Surface the currency
+          // so the dashboard labels earnings in the ride currency instead of a hardcoded SYP. Falls
+          // back to the first ride's currency, then USD.
+          currency: rides[0]?.currency || 'USD',
         },
         rating: ratingSummary,
         rides: annotatedRides,

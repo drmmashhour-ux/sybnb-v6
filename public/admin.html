@@ -3,11 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Installable "SYBNB Admin" app (owner decision 2026-10-08). Its own manifest; the main site
-         is unchanged. Opens the admin portal, which always asks for password + a fresh email code. -->
+    <!-- Installable "SYBNB Admin" app (owner decision 2026-10-08/09). Its own manifest; the main site
+         is unchanged. In a normal browser tab this page stays put so the browser can offer to install
+         THIS manifest (an immediate redirect made Chrome install the public site instead). Opened as
+         the installed app (standalone), it goes straight to the admin portal, which always asks for
+         password + a fresh email code. Short address: sybnb.app/admin (rewrite in vercel.json). -->
     <link rel="manifest" href="/manifest-admin.webmanifest" />
     <meta name="theme-color" content="#080a10" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="SYBNB Admin" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="apple-touch-icon" href="/assets/logos/sybnb-arch-monogram.png" />
@@ -17,21 +21,52 @@
     <style>
       html, body { margin: 0; min-height: 100%; background: #080a10; color: #fff; font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; }
       main { min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; text-align: center; }
-      img { width: 72px; height: 72px; border-radius: 16px; }
-      a { color: #9fb0ff; font-weight: 800; }
+      .card { max-width: 420px; display: grid; gap: 14px; justify-items: center; }
+      img { width: 84px; height: 84px; border-radius: 18px; }
+      h1 { margin: 0; font-size: 24px; }
+      p { margin: 0; color: #c6cce0; line-height: 1.6; }
+      button, a.btn { min-height: 48px; width: 100%; border: 0; border-radius: 10px; font-weight: 800; font-size: 16px; cursor: pointer; display: grid; place-items: center; text-decoration: none; box-sizing: border-box; }
+      .primary { background: #526cff; color: #fff; }
+      .ghost { background: transparent; color: #cfd7ff; border: 1px solid #2a3150; }
+      .hint { font-size: 13px; color: #8d96b3; }
+      [hidden] { display: none !important; }
     </style>
     <script>
-      // Go straight to the admin portal (hash route). replace() keeps the back button out of a loop.
-      window.location.replace('/#/admin/review')
+      // Installed app (standalone window, or iOS home-screen app): go straight to the admin portal.
+      var standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true
+      if (standalone) window.location.replace('/#/admin/review')
     </script>
   </head>
   <body>
     <main>
-      <div>
+      <div class="card">
         <img src="/assets/logos/sybnb-arch-monogram.png" alt="" />
-        <p>SYBNB Admin…</p>
-        <p><a href="/#/admin/review">فتح لوحة الإدارة / Open the admin panel</a></p>
+        <h1>SYBNB Admin</h1>
+        <p>تطبيق الإدارة المستقل. ثبّته مرة واحدة، ثم افتحه من سطح المكتب أو الشاشة الرئيسية — كل دخول يطلب كلمة المرور ورمزاً جديداً يُرسل إلى بريدك.</p>
+        <button id="install" class="primary" hidden>تثبيت تطبيق الإدارة / Install admin app</button>
+        <p id="manual" class="hint">
+          Chrome: ⋮ ← «Cast, save and share» ← «Install page as app…»<br />
+          iPhone (Safari): مشاركة ← «إضافة إلى الشاشة الرئيسية»
+        </p>
+        <a class="btn ghost" href="/#/admin/review">فتح لوحة الإدارة الآن / Open admin panel now</a>
       </div>
     </main>
+    <script>
+      var deferred = null
+      var btn = document.getElementById('install')
+      window.addEventListener('beforeinstallprompt', function (event) {
+        event.preventDefault()
+        deferred = event
+        btn.hidden = false
+      })
+      btn.addEventListener('click', function () {
+        if (!deferred) return
+        deferred.prompt()
+        deferred.userChoice.finally(function () { deferred = null; btn.hidden = true })
+      })
+      window.addEventListener('appinstalled', function () {
+        btn.hidden = true
+        document.getElementById('manual').textContent = 'تم التثبيت ✓ — افتح «SYBNB Admin» من التطبيقات. / Installed — open "SYBNB Admin" from your apps.'
+      })
+    </script>
   </body>
-</html>

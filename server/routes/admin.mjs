@@ -1,6 +1,6 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, executeManualRailRefund, finalizeCancellationLedgerEffects, markPayoutRequestPaid, recordWalletEntry, rejectPayoutRequest, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, executeManualRailRefund, finalizeCancellationLedgerEffects, markPayoutRequestPaid, recordWalletEntry, rejectPayoutRequest, reverseBookingPlatformShare, reverseRidePayment } from '../lib/finance-ledger.mjs'
 import { appLink, formatMoney, notifyBooking, notifyUser } from '../lib/notifications.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
@@ -1287,6 +1287,80 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, refund: refreshed })
   }
 
+  // 2026-10-09: live-rides view. Operators previously had no way to see open/active rides (only
+  // aggregate status counts in platform-metrics), so they couldn't watch the service or find a ride
+  // to dispatch without direct DB access. Lists the operationally-interesting rides, newest first.
+  if (url.pathname === '/api/admin/sr/rides') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const statusParam = url.searchParams.get('status')
+    const ACTIVE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+    const where = statusParam
+      ? { status: statusParam }
+      : { status: { in: ACTIVE_STATUSES } }
+    const rides = await db().rideRequest.findMany({
+      where,
+      select: {
+        id: true, status: true, fareMinor: true, currency: true, cancellationFeeMinor: true,
+        riderId: true, driverId: true, accessibilityRequired: true, scheduledFor: true,
+        createdAt: true, updatedAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    })
+    return json(res, 200, { ok: true, rides, count: rides.length })
+  }
+
+  // 2026-10-09: reverse an approved ride payment (correction/refund). Rides have no HOLD/dispute
+  // window like bookings, so there was previously NO way to undo a wrongly-approved, duplicated, or
+  // fraudulent ride fare. This DEBITs the actual recipients of the credits that approval created --
+  // the driver's fare/cancellation-fee and the platform's commission -- via reverseRidePayment,
+  // under a commit-boundary re-authorization. Idempotent: a second call is a no-op.
+  const rideReverseMatch = url.pathname.match(/^\/api\/admin\/sr\/rides\/([^/]+)\/reverse-payment$/)
+  if (rideReverseMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const reason = body.reason ? String(body.reason).slice(0, 500) : 'Ride payment reversed by admin.'
+
+    const ride = await db().rideRequest.findUnique({ where: { id: rideReverseMatch[1] }, select: { id: true } })
+    if (!ride) {
+      const error = new Error('Ride not found.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    authorizePaymentOperation({
+      operation: 'refund',
+      rail: 'manual_proof',
+      provider: 'manual',
+      division: 'SR',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+
+    const result = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, { action: 'ADMIN_RIDE_PAYMENT_REVERSED', requiredRoles: ['ADMIN'] })
+      const reversal = await reverseRidePayment(tx, { rideId: ride.id, reason })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'ADMIN_RIDE_PAYMENT_REVERSED',
+          entityType: 'ride_requests',
+          entityId: ride.id,
+          before: null,
+          after: reversal,
+        },
+      })
+      return reversal
+    })
+
+    return json(res, 200, { ok: true, reversal: result })
+  }
+
   if (url.pathname === '/api/admin/review-queue') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
@@ -1349,6 +1423,10 @@ export async function handleAdmin(req, res, url, context) {
             },
           },
           payer: { select: { id: true, displayName: true, email: true } },
+          // 2026-10-09: ride fare proofs previously showed only payer + amount, with no indication
+          // of WHICH ride/driver they settled -- so an admin reconciling a ride payment had no
+          // context. Include the ride so the queue row is self-explanatory.
+          ride: { select: { id: true, status: true, fareMinor: true, currency: true, driverId: true } },
         },
         orderBy: { createdAt: 'asc' },
         take: REVIEW_QUEUE_LIMIT,
@@ -1785,6 +1863,7 @@ export async function handleAdmin(req, res, url, context) {
       giftsByStatus,
       wallets,
       approvedPaymentVolume,
+      platformRevenue,
     ] = await Promise.all([
       db().userRole.groupBy({ by: ['role'], _count: { _all: true } }),
       db().listing.groupBy({ by: ['division'], _count: { _all: true }, orderBy: { division: 'asc' } }),
@@ -1799,7 +1878,27 @@ export async function handleAdmin(req, res, url, context) {
         _count: { _all: true },
         _sum: { amountMinor: true },
       }),
+      // 2026-10-09: actual platform revenue, broken out by stream + currency. Previously the only
+      // money metric was gross approved-payment volume (what customers paid, most of which is passed
+      // through to hosts/drivers). This sums the CREDITs that are genuinely SYBNB's: ride commission,
+      // booking commission, protection fees, and seller/dealer plan fees -- the house's real income.
+      db().walletEntry.groupBy({
+        by: ['referenceType', 'currency'],
+        where: {
+          type: 'CREDIT',
+          referenceType: { in: ['ride_commission', 'booking_admin_share', 'booking_protection_fee', 'seller_plan_fee'] },
+        },
+        _sum: { amountMinor: true },
+      }),
     ])
+
+    // Reversed platform revenue (ride/booking reversals) netted out per currency, so the KPI shows
+    // revenue actually retained, not gross-of-corrections.
+    const platformRevenueReversed = await db().walletEntry.groupBy({
+      by: ['currency'],
+      where: { type: 'DEBIT', referenceType: { in: ['ride_commission_reversal', 'booking_admin_share_reversal'] } },
+      _sum: { amountMinor: true },
+    })
 
     return json(res, 200, {
       ok: true,
@@ -1815,6 +1914,22 @@ export async function handleAdmin(req, res, url, context) {
         walletBalanceMinor: wallets._sum.cachedBalanceMinor || 0,
         approvedPaymentCount: approvedPaymentVolume._count._all,
         approvedPaymentVolumeMinor: approvedPaymentVolume._sum.amountMinor || 0,
+        // Real platform income (the house's cut), by stream and by currency, net of reversals.
+        platformRevenueByStream: platformRevenue.map((r) => ({
+          stream: r.referenceType,
+          currency: r.currency,
+          amountMinor: r._sum.amountMinor || 0,
+        })),
+        platformRevenueByCurrency: (() => {
+          const gross = platformRevenue.reduce((acc, r) => {
+            acc[r.currency] = (acc[r.currency] || 0) + (r._sum.amountMinor || 0)
+            return acc
+          }, {})
+          for (const r of platformRevenueReversed) {
+            gross[r.currency] = (gross[r.currency] || 0) - (r._sum.amountMinor || 0)
+          }
+          return gross
+        })(),
       },
     })
   }

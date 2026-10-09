@@ -489,17 +489,22 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       // The platform's ride commission -- routed to the fixed house account (PLATFORM_ACCOUNT_ID),
       // exactly like the booking admin-share and seller-plan fee above, so all platform revenue
       // pools in one place rather than fragmenting across operators' personal wallets. Falls back
-      // to the approving admin only when no house account is configured (dev/e2e). Skipped entirely
-      // for a zero commission (e.g. a cancellation fee, or an env-set 0% launch rate).
-      if (commissionMinor > 0 && actorUserId) {
+      // to the approving admin ONLY when no house account is configured (dev/e2e). Revenue-integrity
+      // fix (2026-10-09): recording no longer depends on `actorUserId` being truthy -- the commission
+      // is recorded whenever there is any recipient to credit, so a future system/automated approval
+      // (no actor) with PLATFORM_ACCOUNT_ID set still books the revenue instead of silently paying
+      // the driver 75% and losing the 25% off-ledger. The idempotency key is pinned by proof.id
+      // alone (not the actor), so the same proof can never be credited twice by a different actor.
+      const commissionRecipient = process.env.PLATFORM_ACCOUNT_ID || actorUserId
+      if (commissionMinor > 0 && commissionRecipient) {
         await recordWalletEntry(tx, {
-          userId: process.env.PLATFORM_ACCOUNT_ID || actorUserId,
+          userId: commissionRecipient,
           type: 'CREDIT',
           amountMinor: commissionMinor,
           currency: proof.currency,
           referenceType: 'ride_commission',
           referenceId: proof.rideId,
-          keyParts: ['ride-commission', proof.rideId, proof.id, actorUserId],
+          keyParts: ['ride-commission', proof.rideId, proof.id],
           note: 'SYBNB ride commission collected after verified rider payment.',
         })
       }
@@ -521,6 +526,44 @@ export async function originalAdminShareRecipient(tx, bookingId) {
     include: { wallet: true },
   })
   return entry?.wallet?.userId
+}
+
+// Ride payment reversal (2026-10-09). Rides have no booking-style HOLD/dispute window, so until now
+// there was NO correction path at all: a ride fare approved in error, fraudulently, or at the wrong
+// amount could not be undone, and both the driver's share and the platform's commission stayed
+// permanently credited. This reverses an approved ride payment by DEBITing the ACTUAL recipients of
+// the credits approvePaymentProof() created -- the driver's fare (or cancellation-fee) credit and
+// the platform's commission credit -- resolved from their real wallet entries (same discipline as
+// originalAdminShareRecipient), never re-derived from a rate. Idempotent by key: a second call for
+// the same ride is a no-op. Returns a summary of what was reversed.
+export async function reverseRidePayment(tx, { rideId, reason = 'Ride payment reversed by admin.' }) {
+  const credits = await tx.walletEntry.findMany({
+    where: {
+      referenceId: rideId,
+      type: 'CREDIT',
+      referenceType: { in: ['ride_fare', 'ride_cancellation_fee', 'ride_commission'] },
+    },
+    include: { wallet: true },
+  })
+  let reversedMinor = 0
+  const reversed = []
+  for (const credit of credits) {
+    const recipientUserId = credit.wallet?.userId
+    if (!recipientUserId) continue
+    await recordWalletEntry(tx, {
+      userId: recipientUserId,
+      type: 'DEBIT',
+      amountMinor: credit.amountMinor,
+      currency: credit.currency,
+      referenceType: `${credit.referenceType}_reversal`,
+      referenceId: rideId,
+      keyParts: [`${credit.referenceType}-reversal`, rideId, credit.id],
+      note: reason,
+    })
+    reversedMinor += credit.amountMinor
+    reversed.push({ referenceType: credit.referenceType, amountMinor: credit.amountMinor, userId: recipientUserId })
+  }
+  return { reversedEntries: reversed.length, reversedMinor, reversed }
 }
 
 // Cancellation/refund reversal of the platform's own position on a booking: the admin-share

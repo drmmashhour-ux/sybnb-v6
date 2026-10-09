@@ -55,6 +55,19 @@ if (process.env.NODE_ENV === 'production' && !/[?&]connection_limit=/.test(proce
   })
 }
 
+// Revenue-integrity guard (2026-10-09): all platform revenue (ride commission, booking commission,
+// seller-plan/advertising fees) routes to PLATFORM_ACCOUNT_ID — the single house account. If it is
+// unset in production, those credits fall back to whichever admin happened to approve the payment,
+// fragmenting and commingling real revenue across operators' personal wallets. A loud WARNING, not
+// a boot-blocking failure, matching the connection_limit guard above: failing closed here would
+// take the whole API down over an env var the fix for is a one-line env change, not code. Set
+// PLATFORM_ACCOUNT_ID to the house account's user id before relying on the commission model.
+if (process.env.NODE_ENV === 'production' && !process.env.PLATFORM_ACCOUNT_ID) {
+  log.error('revenue_warning_no_platform_account', {
+    message: 'PLATFORM_ACCOUNT_ID is unset — platform commission/fees will fall back to the approving admin\'s personal wallet instead of a single house account. Set PLATFORM_ACCOUNT_ID to the house account user id.',
+  })
+}
+
 // Port: honor an explicit API_PORT, else the host-injected PORT (Render/Cloud Run/etc.), else dev default.
 const PORT = Number(process.env.API_PORT || process.env.PORT || 3051)
 // Host: bind all interfaces in production (containers must accept external traffic); keep loopback in

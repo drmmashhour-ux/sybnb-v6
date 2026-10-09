@@ -443,6 +443,8 @@ export type PlatformDriverOverview = {
     completed: number
     earningsMinor: number
     billedMinor?: number
+    awaitingMinor?: number
+    commissionRate?: number
   }
   rating: { averageRating: number | null; ratingCount: number }
   rides: PlatformRideRequest[]

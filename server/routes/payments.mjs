@@ -757,6 +757,10 @@ export async function handlePayments(req, res, url, context) {
 
     if (proof.bookingId) {
       notifyAdmin('admin_payment_proof', { amount: formatMoney(proof.amountMinor, proof.currency), bookingId: proof.bookingId }, `admin_payment_proof:${proof.id}`)
+    } else if (proof.rideId) {
+      // Fix 2026-10-09: ride fare proofs used to land silently in the review queue (only bookings
+      // notified an admin), so on a manual-approval rail a ride could sit unpaid with no signal.
+      notifyAdmin('admin_payment_proof', { amount: formatMoney(proof.amountMinor, proof.currency), rideId: proof.rideId }, `admin_payment_proof:${proof.id}`)
     }
 
     return json(res, 201, { ok: true, proof })

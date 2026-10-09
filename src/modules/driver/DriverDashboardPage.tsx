@@ -45,7 +45,13 @@ const copy = {
     assigned: 'مسندة',
     active: 'نشطة',
     completed: 'مكتملة',
-    earnings: 'إيراد مكتمل',
+    earnings: 'المحصّل (صافي)',
+    awaiting: 'بانتظار الدفع',
+    keepPrefix: 'تحتفظ بـ',
+    paidTag: 'مدفوع',
+    awaitingTag: 'بانتظار الدفع',
+    netEarn: 'صافي ربحك',
+    verifyToAccept: 'أكمل التحقق (هوية معتمدة + مركبة مسجّلة) لقبول الرحلات.',
     rating: 'تقييمك',
     rider: 'الراكب',
     pickup: 'الانطلاق',
@@ -121,7 +127,13 @@ const copy = {
     assigned: 'Assigned',
     active: 'Active',
     completed: 'Completed',
-    earnings: 'Completed earnings',
+    earnings: 'Collected (net)',
+    awaiting: 'Awaiting payment',
+    keepPrefix: 'You keep',
+    paidTag: 'Paid',
+    awaitingTag: 'Awaiting payment',
+    netEarn: 'You earn',
+    verifyToAccept: 'Finish verification (approved ID + registered vehicle) to accept rides.',
     rating: 'Your rating',
     rider: 'Rider',
     pickup: 'Pickup',
@@ -197,7 +209,13 @@ const copy = {
     assigned: 'Assignées',
     active: 'Actives',
     completed: 'Terminées',
-    earnings: 'Revenus des courses terminées',
+    earnings: 'Encaissé (net)',
+    awaiting: 'En attente de paiement',
+    keepPrefix: 'Vous gardez',
+    paidTag: 'Payé',
+    awaitingTag: 'En attente',
+    netEarn: 'Vous gagnez',
+    verifyToAccept: 'Terminez la vérification (pièce d’identité approuvée + véhicule enregistré) pour accepter des courses.',
     rating: 'Votre note',
     rider: 'Passager',
     pickup: 'Prise en charge',
@@ -357,11 +375,13 @@ export function DriverDashboardPage({ lang }: Props) {
   }
 
   const stats = useMemo(() => {
+    const pct = Math.round((1 - (overview?.totals.commissionRate ?? 0.25)) * 100)
     const base = [
       { label: t.assigned, value: String(overview?.totals.assigned || 0) },
       { label: t.active, value: String(overview?.totals.active || 0) },
       { label: t.completed, value: String(overview?.totals.completed || 0) },
-      { label: t.earnings, value: moneyText(overview?.totals.earningsMinor || 0, 'SYP', lang) },
+      { label: `${t.earnings} · ${t.keepPrefix} ${pct}%`, value: moneyText(overview?.totals.earningsMinor || 0, 'SYP', lang) },
+      { label: t.awaiting, value: moneyText(overview?.totals.awaitingMinor || 0, 'SYP', lang) },
     ]
     // Only ever a real, rider-submitted average -- never a placeholder for a driver with zero
     // ratings yet (CAPSULE_RULES.noFakeTrustSignal).
@@ -370,6 +390,11 @@ export function DriverDashboardPage({ lang }: Props) {
     }
     return base
   }, [lang, overview, t])
+
+  // Verification gate for accepting rides (matches the server claim gate): approved ID + a
+  // registered vehicle. Surfaced in the UI so the driver sees a clear "finish verification" state
+  // instead of tapping Accept and eating a 403.
+  const canAccept = idDocumentStatus === 'APPROVED' && Boolean(overview?.driver.vehiclePlate)
 
   async function loadOverview() {
     setStatus('loading')
@@ -457,6 +482,7 @@ export function DriverDashboardPage({ lang }: Props) {
           <strong>{t.dispatch}</strong>
           {claimError && <p style={styles.insuranceWarning}>{claimError}</p>}
           <div style={styles.offerGrid}>
+            {!canAccept && <p style={styles.insuranceWarning}>{t.verifyToAccept}</p>}
             {pendingRides.length === 0 ? (
               <p style={{ color: '#9aa6ba' }}>{pendingStatus === 'loading' ? t.pendingLoading : t.pendingEmpty}</p>
             ) : (
@@ -464,6 +490,9 @@ export function DriverDashboardPage({ lang }: Props) {
                 <article key={pendingRide.id} style={styles.offerCard}>
                   <span>{String(pendingRide.metadata.dropoff || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
+                  <small dir="ltr" style={{ color: '#7dd3b0' }}>
+                    {t.netEarn}: {moneyText(Math.round((pendingRide.fareMinor || 0) * (1 - (overview?.totals.commissionRate ?? 0.25))), pendingRide.currency, lang)}
+                  </small>
                   <i dir="ltr">
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
                   </i>
@@ -474,7 +503,7 @@ export function DriverDashboardPage({ lang }: Props) {
                       {pendingRide.stops.length} {t.stopsCount}
                     </span>
                   )}
-                  <button disabled={claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
+                  <button disabled={!canAccept || claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
                     {claimingRideId === pendingRide.id ? t.claiming : t.accept}
                   </button>
                 </article>

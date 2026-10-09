@@ -6,6 +6,7 @@ import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { updateDriverLocation } from '../lib/live-map.mjs'
 import { activateScheduledRides } from '../lib/ride-schedule.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
+import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
 // SEC-002R rounds 3 and 4: the two TERMINAL transitions this route can write are Class A -- COMPLETED
 // makes a fare billable, CANCELLED irreversibly destroys a receivable. See the ride status handler
 // below for the full reasoning on each.
@@ -180,14 +181,34 @@ export async function handleDriver(req, res, url, context) {
       where: { userId: context.user.id },
       select: { accessibilityCapable: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true },
     })
-    // Honest earnings: COLLECTED money — the driver's actual ride-fare wallet credits — not merely
-    // the BILLED fares of completed rides, which overstated earnings whenever a rider never paid.
-    const collected = await db().walletEntry.aggregate({
+    // Honest earnings: COLLECTED money — the driver's actual ride-fare wallet credits (already net
+    // of the SYBNB commission) — not merely the BILLED fares of completed rides, which overstated
+    // earnings whenever a rider hadn't paid yet. We also surface, per ride, whether it's been PAID
+    // or is still AWAITING_PAYMENT, so a driver can see exactly what's outstanding instead of
+    // silently wondering why a completed ride didn't pay (driver-satisfaction fix 2026-10-09).
+    const collectedEntries = await db().walletEntry.findMany({
       where: { wallet: { userId: context.user.id }, type: 'CREDIT', referenceType: { in: ['ride_fare', 'ride_cancellation_fee'] } },
-      _sum: { amountMinor: true },
+      select: { referenceId: true, amountMinor: true },
     })
-    const collectedMinor = collected._sum.amountMinor || 0
+    const collectedMinor = collectedEntries.reduce((sum, e) => sum + (e.amountMinor || 0), 0)
+    const paidRideIds = new Set(collectedEntries.map((e) => e.referenceId))
+    // Net the driver will receive once a completed/cancelled-fee ride is paid: a fare is net of the
+    // commission; a cancellation fee is paid in full (no commission).
+    const expectedNetForRide = (ride) => {
+      if (ride.status === 'CANCELLED') return ride.cancellationFeeMinor || 0
+      if (ride.status === 'COMPLETED') return Math.round((ride.fareMinor || 0) * (1 - SR_RIDE_COMMISSION_RATE))
+      return 0
+    }
+    const annotatedRides = rides.map((ride) => {
+      const payable = ride.status === 'COMPLETED' || (ride.status === 'CANCELLED' && ride.cancellationFeeMinor)
+      const paymentStatus = paidRideIds.has(ride.id) ? 'PAID' : (payable ? 'AWAITING_PAYMENT' : 'NONE')
+      return { ...ride, paymentStatus, expectedNetMinor: expectedNetForRide(ride) }
+    })
     const billedMinor = rides.filter((ride) => ride.status === 'COMPLETED').reduce((sum, ride) => sum + (ride.fareMinor || 0), 0)
+    // Net earnings still awaiting payment (rides done but not yet paid by rider + approved).
+    const awaitingMinor = annotatedRides
+      .filter((ride) => ride.paymentStatus === 'AWAITING_PAYMENT')
+      .reduce((sum, ride) => sum + (ride.expectedNetMinor || 0), 0)
     return json(res, 200, {
       ok: true,
       overview: {
@@ -205,12 +226,16 @@ export async function handleDriver(req, res, url, context) {
           assigned: rides.length,
           active: rides.filter((ride) => ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(ride.status)).length,
           completed: rides.filter((ride) => ride.status === 'COMPLETED').length,
-          // earningsMinor is money actually COLLECTED; billedMinor is the fare value of completed rides.
+          // earningsMinor is money actually COLLECTED (net of commission); billedMinor is the gross
+          // fare value of completed rides; awaitingMinor is net still owed on unpaid completed rides.
           earningsMinor: collectedMinor,
           billedMinor,
+          awaitingMinor,
+          // So the UI can show "you keep X%" without hardcoding the rate.
+          commissionRate: SR_RIDE_COMMISSION_RATE,
         },
         rating: ratingSummary,
-        rides,
+        rides: annotatedRides,
       },
     })
   }

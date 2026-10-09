@@ -32,9 +32,19 @@ import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mj
 // stale/misleading rather than genuinely live.
 const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 
-// Placeholder rate pending a real business decision from the owner -- see the cancel handler
-// below for the disclosure. Not derived from anything; a plain, named, easily-found constant.
-const RIDE_CANCELLATION_FEE_PERCENT = 20
+// SR cancellation policy (owner decision 2026-10-09, Uber-aligned). The fee percentage and the
+// free-cancel grace window are both env-tunable for operational tuning; the defaults below are the
+// confirmed launch values (15% of the locked fare, 120s grace after a driver is assigned). A rider
+// always cancels for free before a driver commits, and for free within the grace window right after
+// assignment; after that, or once the driver is en route, the fee applies.
+const RIDE_CANCELLATION_FEE_PERCENT = (() => {
+  const raw = Number(process.env.RIDE_CANCELLATION_FEE_PERCENT)
+  return Number.isFinite(raw) && raw >= 0 && raw <= 100 ? raw : 15
+})()
+const RIDE_CANCEL_GRACE_MS = (() => {
+  const raw = Number(process.env.RIDE_CANCEL_GRACE_SECONDS)
+  return (Number.isFinite(raw) && raw >= 0 ? raw : 120) * 1000
+})()
 
 export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/sr/quote') {
@@ -327,13 +337,16 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
-    // SR Ride vs. Uber gap-closure (P1 #9): a driver already assigned or en route has committed
-    // real time/travel to this ride -- cancelling on them for free, unlike cancelling before a
-    // driver exists (REQUESTED/MATCHING, always free), is what Uber's own cancellation-fee policy
-    // protects against. RIDE_CANCELLATION_FEE_PERCENT is a placeholder rate pending a real business
-    // decision from the owner (same disclosure the 0%-commission ride-payment default already
-    // carries) -- computed here from the ride's own locked fareMinor, never invented.
-    const driverAlreadyCommitted = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(existing.status)
+    // SR cancellation policy (owner decision 2026-10-09, Uber-aligned). A driver already assigned or
+    // en route has committed real time/travel, so cancelling on them is not free -- EXCEPT within a
+    // short grace window right after assignment (Uber's own model), during which the rider may still
+    // cancel at no charge. Before a driver commits (REQUESTED/MATCHING) it is always free. The fee is
+    // computed from the ride's own locked fareMinor, never invented. updatedAt is the assignment
+    // timestamp here: the status transition to DRIVER_ASSIGNED is the last write before a cancel.
+    const withinGraceWindow = existing.status === 'DRIVER_ASSIGNED'
+      && existing.updatedAt
+      && (Date.now() - new Date(existing.updatedAt).getTime() < RIDE_CANCEL_GRACE_MS)
+    const driverAlreadyCommitted = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(existing.status) && !withinGraceWindow
     const cancellationFeeMinor = driverAlreadyCommitted && existing.fareMinor
       ? Math.round((existing.fareMinor * RIDE_CANCELLATION_FEE_PERCENT) / 100)
       : null
@@ -407,6 +420,29 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
+    // Verification parity with the self-claim path (fix 2026-10-09): admin/support dispatch must NOT
+    // be a backdoor around the rider-safety gate. The driver being assigned must have an approved ID
+    // document AND a registered vehicle, exactly as a self-claiming driver must -- otherwise an
+    // operator could put an unverified, vehicle-less driver onto a live passenger.
+    if (driver.idDocumentStatus !== 'APPROVED') {
+      const error = new Error('This driver has not completed identity verification (an approved ID document) and cannot be dispatched.')
+      error.statusCode = 400
+      error.code = 'DRIVER_NOT_VERIFIED'
+      error.expose = true
+      throw error
+    }
+    const assignedDriverProfile = await db().driverProfile.findUnique({
+      where: { userId: driver.id },
+      select: { vehiclePlate: true, accessibilityCapable: true },
+    })
+    if (!assignedDriverProfile?.vehiclePlate) {
+      const error = new Error('This driver has no registered vehicle (make, model and plate) and cannot be dispatched.')
+      error.statusCode = 400
+      error.code = 'DRIVER_VEHICLE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
     const existing = await db().rideRequest.findUnique({ where: { id: assignMatch[1] } })
     if (!existing || !['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED'].includes(existing.status)) {
       const error = new Error('Ride is not available for driver assignment.')
@@ -417,21 +453,14 @@ export async function handleSrRides(req, res, url, context) {
     }
 
     // Same accessibility guarantee the self-claim path enforces: a rider who marked
-    // accessibilityRequired needs a driver whose vehicle is self-declared capable. Without this the
-    // admin/support dispatch could assign a non-capable driver and silently break that guarantee
-    // (CAPSULE_RULES.noFakeTrustSignal).
-    if (existing.accessibilityRequired) {
-      const assignedDriverProfile = await db().driverProfile.findUnique({
-        where: { userId: driver.id },
-        select: { accessibilityCapable: true },
-      })
-      if (!assignedDriverProfile?.accessibilityCapable) {
-        const error = new Error('This ride requires an accessibility-capable vehicle.')
-        error.statusCode = 400
-        error.code = 'RIDE_ACCESSIBILITY_MISMATCH'
-        error.expose = true
-        throw error
-      }
+    // accessibilityRequired needs a driver whose vehicle is self-declared capable. Reuses the
+    // driver-profile read above (which already fetched accessibilityCapable).
+    if (existing.accessibilityRequired && !assignedDriverProfile.accessibilityCapable) {
+      const error = new Error('This ride requires an accessibility-capable vehicle.')
+      error.statusCode = 400
+      error.code = 'RIDE_ACCESSIBILITY_MISMATCH'
+      error.expose = true
+      throw error
     }
 
     // SEC-002R round 3, item 2. Class A, and the SAME durable effect as /claim below (protected in

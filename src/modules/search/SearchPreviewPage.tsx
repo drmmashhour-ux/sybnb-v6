@@ -289,8 +289,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             // bedrooms/bathrooms metadata at all, so that JSON-path filter matched nothing and
             // every filtered search returned zero results while blaming the user's filters. Only
             // send these for the divisions that actually carry that metadata.
-            bedroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) ? value.bedroomsCount || undefined : undefined,
-            bathroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) ? value.bathrooms || undefined : undefined,
+            bedroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) && value.bedroomsCount > 1 ? value.bedroomsCount : undefined,
+            // 1 is the stepper's floor and means "any": sending it dropped every listing without bedroom data.
+            bathroomsMin: HAS_BEDROOM_BATHROOM_FILTERS.has(value.division) && value.bathrooms > 1 ? value.bathrooms : undefined,
             // Wire the chosen location to the server so results actually narrow to the selected
             // governorate (maps the capsule key to the stored English city name). Only once the
             // guest actually touches the location picker -- UnifiedSearchBar's governorate/city

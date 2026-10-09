@@ -8,6 +8,7 @@ import type { CSSVars } from '../../shared/theme/cssVars'
 import { fetchActiveAdvertising } from '../../shared/api/platformApi'
 import type { ActiveAd } from '../../shared/api/platformApi'
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
+import { HeroSearch } from './HeroSearch'
 
 const BANNER_KIND_PRIORITY = ['desktopBanner', 'mainBanner', 'tabletBanner', 'phoneBanner']
 
@@ -177,19 +178,50 @@ export function LandingPage({ lang }: Props) {
               'Tout ce dont vous avez besoin au même endroit : immobilier, véhicules, services et Trajets SR.',
             )}
           </p>
-          <div className="landing-actions">
-            <button className="landing-primary" onClick={() => navigate('/search-preview')}>
-              {pick(lang, 'ابدأ الآن', 'Start now', 'Commencer')}
-            </button>
-            <button className="landing-secondary" onClick={showAbout}>
-              {pick(lang, 'تعرف علينا', 'Know us', 'Découvrez-nous')}
-            </button>
-          </div>
+          <HeroSearch lang={lang} />
+          <button
+            onClick={showAbout}
+            style={{ background: 'transparent', border: 0, color: '#9fb0ff', fontWeight: 800, textDecoration: 'underline', cursor: 'pointer', padding: 0 }}
+          >
+            {pick(lang, 'تعرف على SYBNB', 'About SYBNB', 'À propos de SYBNB')}
+          </button>
         </div>
         <div className="landing-hero-visual" aria-hidden="true">
           <img className="hero-photo hero-photo-back" src={DIVISION_PHOTOS.stays} alt="" />
           <img className="hero-photo hero-photo-front" src={DIVISION_PHOTOS.cars} alt="" />
         </div>
+      </section>
+
+      <h2 className="landing-section-title">{pick(lang, 'استكشف الفئات', 'Explore categories', 'Explorer les catégories')}</h2>
+      <section className="division-grid" aria-label={pick(lang, 'أقسام المنصة', 'Platform divisions', 'Sections de la plateforme')}>
+        {DIVISIONS.map((division, index) => {
+          const disabled = division.status === 'soon'
+          const title = divisionTitle(division.id, division.title, lang)
+          return (
+            <article
+              className={`division-card ${disabled ? 'disabled' : ''}`}
+              key={division.id}
+              style={{ '--accent': division.accent, '--delay': `${index * 80}ms` } as CSSVars}
+            >
+              <button
+                className="division-card-hit"
+                disabled={disabled}
+                onClick={() => navigate(divisionRoute(division.id, division.route))}
+                aria-label={title}
+              />
+              <div className="division-media" aria-hidden="true">
+                <img src={DIVISION_PHOTOS[division.id]} alt="" loading="lazy" />
+              </div>
+              <div className="division-card-content">
+                <div className="division-title-row">
+                  <span className="division-icon" aria-hidden="true">{DIVISION_ICONS[division.id]}</span>
+                  <h2>{title}</h2>
+                </div>
+                <span className="division-open">{disabled ? (pick(lang, 'قريباً', 'Soon', 'Bientôt')) : (pick(lang, 'افتح', 'Open', 'Ouvrir'))}</span>
+              </div>
+            </article>
+          )
+        })}
       </section>
 
       <section id="platform-about" className="landing-about" aria-label={about.eyebrow}>
@@ -213,6 +245,9 @@ export function LandingPage({ lang }: Props) {
           </div>
         </div>
         <div className={`landing-about-movie ${moviePlaying ? 'playing' : ''}`}>
+          <p className="landing-movie-caption">
+            <b>{about.movieTitle}</b> · {about.movieBody}
+          </p>
           <video
             className="about-movie-video"
             src={movieSrc}
@@ -253,38 +288,6 @@ export function LandingPage({ lang }: Props) {
         </section>
       )}
 
-      <h2 className="landing-section-title">{pick(lang, 'استكشف الفئات', 'Explore categories', 'Explorer les catégories')}</h2>
-      <section className="division-grid" aria-label={pick(lang, 'أقسام المنصة', 'Platform divisions', 'Sections de la plateforme')}>
-        {DIVISIONS.map((division, index) => {
-          const disabled = division.status === 'soon'
-          const title = divisionTitle(division.id, division.title, lang)
-          return (
-            <article
-              className={`division-card ${disabled ? 'disabled' : ''}`}
-              key={division.id}
-              style={{ '--accent': division.accent, '--delay': `${index * 80}ms` } as CSSVars}
-            >
-              <button
-                className="division-card-hit"
-                disabled={disabled}
-                onClick={() => navigate(divisionRoute(division.id, division.route))}
-                aria-label={title}
-              />
-              <div className="division-media" aria-hidden="true">
-                <img src={DIVISION_PHOTOS[division.id]} alt="" loading="lazy" />
-              </div>
-              <div className="division-card-content">
-                <div className="division-title-row">
-                  <span className="division-icon" aria-hidden="true">{DIVISION_ICONS[division.id]}</span>
-                  <h2>{title}</h2>
-                </div>
-                <small>{lang === 'ar' ? DIVISION_TITLES[division.id].en : DIVISION_TITLES[division.id].ar}</small>
-                <span className="division-open">{disabled ? (pick(lang, 'قريباً', 'Soon', 'Bientôt')) : (pick(lang, 'افتح', 'Open', 'Ouvrir'))}</span>
-              </div>
-            </article>
-          )
-        })}
-      </section>
 
     </main>
   )

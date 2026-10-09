@@ -7913,3 +7913,14 @@ a {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Home: caption above the about video so visitors know what it is before pressing play. */
+.landing-movie-caption {
+  color: #aab3c8;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 10px;
+}
+.landing-movie-caption b {
+  color: #fff;
+}

@@ -976,13 +976,25 @@ export function clearStoredStaffSession() {
 export function getStoredSellerSession(): PlatformAuthSession | null {
   try {
     const raw = authStorage.getItem(SELLER_SESSION_KEY)
-    if (!raw) return null
-    const session = JSON.parse(raw) as PlatformAuthSession
-    if (!session?.token || !session?.user) return null
-    return session
+    if (raw) {
+      const session = JSON.parse(raw) as PlatformAuthSession
+      if (session?.token && session?.user) return session
+    }
   } catch {
-    return null
+    /* fall through */
   }
+  // One account for everything: a signed-in guest account that has HOST or SELLER is also the
+  // seller/host identity (the listing wizard, uploads and seller pages use it directly). Without this
+  // fallback a host who signed in normally was told "sign in first" inside the listing form.
+  const hostRoles = (session: PlatformAuthSession | null) => {
+    const roles = session?.user?.roles || []
+    return Boolean(session?.token && (roles.includes('HOST') || roles.includes('SELLER')))
+  }
+  const guest = getStoredGuestSession()
+  if (hostRoles(guest)) return guest
+  const staff = getStoredStaffSession()
+  if (hostRoles(staff)) return staff
+  return null
 }
 
 async function getHostDashboardSession(mode: HostDashboardMode) {

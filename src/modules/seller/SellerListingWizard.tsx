@@ -404,7 +404,9 @@ export function SellerListingWizard({ lang }: Props) {
 
   const back = () => {
     if (stepIndex === 0) {
-      navigate('/sell/account')
+      // Hosts arrive from the host dashboard; sellers from the seller account page.
+      const roles = getStoredSellerSession()?.user?.roles || []
+      navigate(roles.includes('HOST') ? '/host' : '/sell/account')
       return
     }
 

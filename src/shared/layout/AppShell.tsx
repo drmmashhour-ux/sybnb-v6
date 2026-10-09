@@ -359,6 +359,14 @@ function getRouteContext(path: string, lang: Lang) {
       nextPath: '',
     }
   }
+  if (path.startsWith('/sell/listing-wizard')) {
+    return {
+      section: pick(lang, 'المضيف', 'Host', 'Hôte'),
+      page: pick(lang, 'إعلان جديد', 'New listing', 'Nouvelle annonce'),
+      backPath: '/host',
+      nextPath: '',
+    }
+  }
   if (path.startsWith('/sell') || path.startsWith('/advertising')) {
     const isPaymentTunnel = path.includes('/payment')
     return {

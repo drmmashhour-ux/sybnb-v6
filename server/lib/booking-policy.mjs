@@ -20,14 +20,15 @@
 // fee (rent + cleaning + taxes + other fees). Owner decision 2026-10-09: raised from 12% to 15%
 // to match the short-term-rental market leaders (Airbnb/Booking.com host-only ~15%).
 export const STR_COMMISSION_RATE = 0.15
-// SR Ride platform commission -- owner decision 2026-10-09: match Uber's standard driver service
-// fee of 25% (riders pay the full fare; the driver keeps 75%). Applies to the ride fare only; a
-// cancellation fee stays 100% with the driver (it compensates the driver for a committed trip).
-// Overridable via env (SR_RIDE_COMMISSION_RATE, a 0..1 fraction) for operational tuning without a
-// code change -- e.g. a lower launch rate to help driver acquisition.
+// SR Ride platform commission -- owner decision 2026-10-09 (revised): match the SYRIAN ride-hailing
+// market rather than Uber. Syria's own apps (Zakinn, Wassilni, SyriaGo, YallaGo, per Enab Baladi
+// 2025) take 12-15% per trip, some up to 20% -- NOT Uber's 25%. Default set to 15% so the driver
+// keeps 85%, in line with local competitors. Applies to the ride fare only; a cancellation fee stays
+// 100% with the driver. Overridable via env (SR_RIDE_COMMISSION_RATE, a 0..1 fraction) without a
+// code change -- e.g. 0.12 for the low end, or 0.20 for the high end of the local range.
 export const SR_RIDE_COMMISSION_RATE = (() => {
   const raw = Number(process.env.SR_RIDE_COMMISSION_RATE)
-  return Number.isFinite(raw) && raw >= 0 && raw < 1 ? raw : 0.25
+  return Number.isFinite(raw) && raw >= 0 && raw < 1 ? raw : 0.15
 })()
 // Cancellation protection add-on: 3% of the FULL stay amount (all nights, before cleaning/taxes).
 export const PROTECTION_RATE = 0.03

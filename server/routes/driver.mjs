@@ -69,7 +69,7 @@ export async function handleDriver(req, res, url, context) {
     if (req.method === 'GET') {
       const profile = await db().driverProfile.findUnique({
         where: { userId: context.user.id },
-        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true },
+        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true },
       })
       return json(res, 200, { ok: true, driverProfile: profile || null })
     }
@@ -85,11 +85,14 @@ export async function handleDriver(req, res, url, context) {
         error.expose = true
         throw error
       }
+      // Registering or changing the vehicle sends it (back) to PENDING_REVIEW: a self-declared
+      // vehicle must be reviewed before the driver can accept rides, and any later change re-opens
+      // review so a driver can't swap to an unapproved car after approval.
       const profile = await db().driverProfile.upsert({
         where: { userId: context.user.id },
-        create: { userId: context.user.id, vehicleMake, vehicleModel, vehiclePlate },
-        update: { vehicleMake, vehicleModel, vehiclePlate },
-        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true },
+        create: { userId: context.user.id, vehicleMake, vehicleModel, vehiclePlate, vehicleStatus: 'PENDING_REVIEW' },
+        update: { vehicleMake, vehicleModel, vehiclePlate, vehicleStatus: 'PENDING_REVIEW' },
+        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true },
       })
       return json(res, 200, { ok: true, driverProfile: profile })
     }
@@ -179,7 +182,7 @@ export async function handleDriver(req, res, url, context) {
     const ratingSummary = await getDriverRatingSummary(context.user.id)
     const driverProfile = await db().driverProfile.findUnique({
       where: { userId: context.user.id },
-      select: { accessibilityCapable: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true },
+      select: { accessibilityCapable: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true },
     })
     // Honest earnings: COLLECTED money — the driver's actual ride-fare wallet credits (already net
     // of the SYBNB commission) — not merely the BILLED fares of completed rides, which overstated
@@ -221,6 +224,7 @@ export async function handleDriver(req, res, url, context) {
           vehicleMake: driverProfile?.vehicleMake || null,
           vehicleModel: driverProfile?.vehicleModel || null,
           vehiclePlate: driverProfile?.vehiclePlate || null,
+          vehicleStatus: driverProfile?.vehicleStatus || null,
         },
         totals: {
           assigned: rides.length,

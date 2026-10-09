@@ -1361,6 +1361,73 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, reversal: result })
   }
 
+  // 2026-10-09: vehicle verification review. A driver's self-declared vehicle must be approved
+  // before they can carry a passenger (the claim/assign gates enforce vehicleStatus === 'APPROVED').
+  // GET lists drivers whose registered vehicle is awaiting review; PATCH approves/rejects one.
+  if (url.pathname === '/api/admin/driver-vehicles') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const pending = await db().driverProfile.findMany({
+      where: { vehicleStatus: 'PENDING_REVIEW', NOT: { vehiclePlate: null } },
+      select: {
+        userId: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, updatedAt: true,
+        user: { select: { displayName: true, email: true, idDocumentStatus: true } },
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: 200,
+    })
+    return json(res, 200, { ok: true, vehicles: pending, count: pending.length })
+  }
+  const vehicleReviewMatch = url.pathname.match(/^\/api\/admin\/driver\/([^/]+)\/vehicle-review$/)
+  if (vehicleReviewMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const decision = String(body.decision || '').toUpperCase()
+    if (!['APPROVE', 'APPROVED', 'REJECT', 'REJECTED'].includes(decision)) {
+      const error = new Error('decision must be APPROVE or REJECT.')
+      error.statusCode = 400
+      error.code = 'VEHICLE_REVIEW_DECISION_INVALID'
+      error.expose = true
+      throw error
+    }
+    const nextStatus = decision.startsWith('APPROVE') ? 'APPROVED' : 'REJECTED'
+    const profile = await db().driverProfile.findUnique({
+      where: { userId: vehicleReviewMatch[1] },
+      select: { vehiclePlate: true },
+    })
+    if (!profile) {
+      const error = new Error('Driver vehicle profile not found.')
+      error.statusCode = 404
+      error.code = 'DRIVER_VEHICLE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (nextStatus === 'APPROVED' && !profile.vehiclePlate) {
+      const error = new Error('Cannot approve a vehicle with no registered plate.')
+      error.statusCode = 400
+      error.code = 'DRIVER_VEHICLE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const updated = await db().driverProfile.update({
+      where: { userId: vehicleReviewMatch[1] },
+      data: { vehicleStatus: nextStatus },
+      select: { userId: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true },
+    })
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: nextStatus === 'APPROVED' ? 'ADMIN_VEHICLE_APPROVED' : 'ADMIN_VEHICLE_REJECTED',
+        entityType: 'driver_profiles',
+        entityId: vehicleReviewMatch[1],
+        before: null,
+        after: updated,
+      },
+    })
+    return json(res, 200, { ok: true, driverProfile: updated })
+  }
+
   if (url.pathname === '/api/admin/review-queue') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])

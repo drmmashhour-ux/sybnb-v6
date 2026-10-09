@@ -436,6 +436,7 @@ export type PlatformDriverOverview = {
     vehicleMake?: string | null
     vehicleModel?: string | null
     vehiclePlate?: string | null
+    vehicleStatus?: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null
   }
   totals: {
     assigned: number

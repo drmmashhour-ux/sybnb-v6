@@ -433,12 +433,19 @@ export async function handleSrRides(req, res, url, context) {
     }
     const assignedDriverProfile = await db().driverProfile.findUnique({
       where: { userId: driver.id },
-      select: { vehiclePlate: true, accessibilityCapable: true },
+      select: { vehiclePlate: true, vehicleStatus: true, accessibilityCapable: true },
     })
     if (!assignedDriverProfile?.vehiclePlate) {
       const error = new Error('This driver has no registered vehicle (make, model and plate) and cannot be dispatched.')
       error.statusCode = 400
       error.code = 'DRIVER_VEHICLE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    if (assignedDriverProfile.vehicleStatus !== 'APPROVED') {
+      const error = new Error('This driver\'s vehicle has not been approved by review and cannot be dispatched.')
+      error.statusCode = 400
+      error.code = 'DRIVER_VEHICLE_NOT_APPROVED'
       error.expose = true
       throw error
     }
@@ -546,12 +553,19 @@ export async function handleSrRides(req, res, url, context) {
     }
     const claimingVehicle = await db().driverProfile.findUnique({
       where: { userId: context.user.id },
-      select: { vehiclePlate: true },
+      select: { vehiclePlate: true, vehicleStatus: true },
     })
     if (!claimingVehicle?.vehiclePlate) {
       const error = new Error('Register your vehicle (make, model and plate) before accepting rides.')
       error.statusCode = 403
       error.code = 'DRIVER_VEHICLE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    if (claimingVehicle.vehicleStatus !== 'APPROVED') {
+      const error = new Error('Your vehicle is awaiting review. You can accept rides once it is approved.')
+      error.statusCode = 403
+      error.code = 'DRIVER_VEHICLE_NOT_APPROVED'
       error.expose = true
       throw error
     }

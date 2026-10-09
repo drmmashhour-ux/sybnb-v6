@@ -45,6 +45,14 @@ enum IdDocumentStatus {
   @@map("id_document_status")
 }
 
+enum VehicleStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+
+  @@map("vehicle_status")
+}
+
 enum AvailabilityStatus {
   BLOCKED
   AVAILABLE
@@ -398,6 +406,7 @@ model DriverProfile {
   vehicleMake     String?  @map("vehicle_make")
   vehicleModel    String?  @map("vehicle_model")
   vehiclePlate    String?  @map("vehicle_plate")
+  vehicleStatus   VehicleStatus @default(PENDING_REVIEW) @map("vehicle_status")
   photoRef        String?  @map("photo_ref")
   photoMimeType   String?  @map("photo_mime_type")
   active          Boolean  @default(false)

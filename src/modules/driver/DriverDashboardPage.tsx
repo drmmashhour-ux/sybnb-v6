@@ -394,7 +394,9 @@ export function DriverDashboardPage({ lang }: Props) {
   // Verification gate for accepting rides (matches the server claim gate): approved ID + a
   // registered vehicle. Surfaced in the UI so the driver sees a clear "finish verification" state
   // instead of tapping Accept and eating a 403.
-  const canAccept = idDocumentStatus === 'APPROVED' && Boolean(overview?.driver.vehiclePlate)
+  const canAccept = idDocumentStatus === 'APPROVED'
+    && Boolean(overview?.driver.vehiclePlate)
+    && overview?.driver.vehicleStatus === 'APPROVED'
 
   async function loadOverview() {
     setStatus('loading')

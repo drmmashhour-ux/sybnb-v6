@@ -661,6 +661,16 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    // Prepaid rides (2026-10-09) were already paid from the rider's wallet at request time and
+    // settle automatically on completion — a post-ride proof would double-charge, so it's refused.
+    if (ride && ride.metadata && ride.metadata.prepaid) {
+      const error = new Error('This ride was prepaid from your wallet; no payment proof is needed.')
+      error.statusCode = 409
+      error.code = 'RIDE_ALREADY_PREPAID'
+      error.expose = true
+      throw error
+    }
+
     // When a booking is linked, the real amount due is the full guest total — rent plus cleaning
     // fee, tax, extra fees, and the cancellation-protection add-on if purchased (expectedTotalMinor,
     // the same function the Stripe path uses so both rails charge the identical figure the guest was

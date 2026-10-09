@@ -509,9 +509,94 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
         })
       }
     }
+  } else if (proof.planCode === 'wallet_topup') {
+    // Rider wallet top-up (2026-10-09): approving a top-up proof credits the rider's own SYBNB
+    // wallet, so they can pre-fund rides (SR prepayment). 100% to the rider — no counterparty,
+    // no commission. Idempotent by proof id.
+    await recordWalletEntry(tx, {
+      userId: proof.userId,
+      type: 'CREDIT',
+      amountMinor: proof.amountMinor,
+      currency: proof.currency,
+      referenceType: 'wallet_topup',
+      referenceId: proof.id,
+      keyParts: ['wallet-topup', proof.id],
+      note: 'Rider wallet top-up credited after verified payment.',
+    })
   }
 
   return proof
+}
+
+// SR prepaid-ride settlement (2026-10-09). A prepaid ride already DEBITed the rider's wallet at
+// request time (referenceType 'ride_prepayment'), so the platform holds the fare. On completion this
+// pays it out: the driver receives the fare net of the SR commission, and the platform keeps the
+// commission — the exact same split as a proof-approved ride, just funded from the prepayment
+// instead of a post-ride proof. Idempotent by ride id, so a re-run of the completion sweep is safe.
+export async function settlePrepaidRide(tx, { ride, actorUserId }) {
+  const fareMinor = Math.round(ride.fareMinor || 0)
+  if (!ride.driverId || fareMinor <= 0) return { settled: false }
+  const commissionMinor = Math.round(fareMinor * SR_RIDE_COMMISSION_RATE)
+  const driverMinor = fareMinor - commissionMinor
+  await recordWalletEntry(tx, {
+    userId: ride.driverId,
+    type: 'CREDIT',
+    amountMinor: driverMinor,
+    currency: ride.currency,
+    referenceType: 'ride_fare',
+    referenceId: ride.id,
+    keyParts: ['ride-fare-prepaid', ride.id],
+    note: `Driver fare net of the ${Math.round(SR_RIDE_COMMISSION_RATE * 100)}% SYBNB ride commission, settled from the rider's prepayment.`,
+  })
+  const commissionRecipient = process.env.PLATFORM_ACCOUNT_ID || actorUserId
+  if (commissionMinor > 0 && commissionRecipient) {
+    await recordWalletEntry(tx, {
+      userId: commissionRecipient,
+      type: 'CREDIT',
+      amountMinor: commissionMinor,
+      currency: ride.currency,
+      referenceType: 'ride_commission',
+      referenceId: ride.id,
+      keyParts: ['ride-commission-prepaid', ride.id],
+      note: 'SYBNB ride commission settled from the rider prepayment.',
+    })
+  }
+  return { settled: true, driverMinor, commissionMinor }
+}
+
+// Refund a prepaid ride that was cancelled before completion. The rider gets their prepayment back,
+// minus any cancellation fee that was assessed; if a fee was assessed it goes to the driver (who
+// committed to the trip). Idempotent by ride id.
+export async function refundPrepaidRide(tx, { ride }) {
+  const prepaidMinor = Math.round((ride.metadata && ride.metadata.prepaidAmountMinor) || 0)
+  if (prepaidMinor <= 0) return { refunded: false }
+  const feeMinor = Math.min(prepaidMinor, Math.max(0, Math.round(ride.cancellationFeeMinor || 0)))
+  const riderRefundMinor = prepaidMinor - feeMinor
+  if (riderRefundMinor > 0) {
+    await recordWalletEntry(tx, {
+      userId: ride.riderId,
+      type: 'REFUND',
+      amountMinor: riderRefundMinor,
+      currency: ride.currency,
+      referenceType: 'ride_prepayment_refund',
+      referenceId: ride.id,
+      keyParts: ['ride-prepayment-refund', ride.id],
+      note: 'Rider prepayment refunded after ride cancellation.',
+    })
+  }
+  if (feeMinor > 0 && ride.driverId) {
+    await recordWalletEntry(tx, {
+      userId: ride.driverId,
+      type: 'CREDIT',
+      amountMinor: feeMinor,
+      currency: ride.currency,
+      referenceType: 'ride_cancellation_fee',
+      referenceId: ride.id,
+      keyParts: ['ride-cancellation-fee-prepaid', ride.id],
+      note: 'Driver cancellation fee, settled from the rider prepayment (no commission).',
+    })
+  }
+  return { refunded: true, riderRefundMinor, feeMinor }
 }
 
 // Cancellation/refund reversals used to re-derive "which admin to reverse" from

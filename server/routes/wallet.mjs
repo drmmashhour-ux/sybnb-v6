@@ -6,6 +6,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { giftReviewThresholdMinor, recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 
 export async function handleWallet(req, res, url, context) {
   if (url.pathname === '/api/wallet') {
@@ -30,6 +31,64 @@ export async function handleWallet(req, res, url, context) {
     const availableMinor = Math.max(0, wallet.cachedBalanceMinor || 0)
     const refundMinor = Math.max(0, refundAgg._sum.amountMinor || 0)
     return json(res, 200, { ok: true, wallet: { ...wallet, heldMinor, availableMinor, refundMinor } })
+  }
+
+  // Rider wallet top-up (2026-10-09): the rider funds their SYBNB wallet via the same manual-proof
+  // rail as everything else (bank / Sham Cash) — they submit the amount + a transaction reference,
+  // and an admin approves it (crediting the wallet, see approvePaymentProof's wallet_topup branch).
+  // Pre-funding is what lets a ride be prepaid and settle instantly on completion.
+  if (url.pathname === '/api/wallet/topup-proof') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const amountMinor = Math.round(Number(body.amountMinor || 0))
+    if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+      const error = new Error('Top-up amount must be greater than zero.')
+      error.statusCode = 400
+      error.code = 'PAYMENT_AMOUNT_INVALID'
+      error.expose = true
+      throw error
+    }
+    const currency = body.currency ? String(body.currency).toUpperCase() : defaultCurrency()
+    if (!isCurrencyAllowed(currency)) {
+      const error = new Error('This currency is not supported.')
+      error.statusCode = 400
+      error.code = 'WALLET_CURRENCY_NOT_ALLOWED'
+      error.expose = true
+      throw error
+    }
+    const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
+    if (!providerRef) {
+      const error = new Error('Syrian wallet / bank transaction reference is required.')
+      error.statusCode = 400
+      error.code = 'PAYMENT_REFERENCE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    authorizePaymentOperation({
+      operation: 'create', rail: 'manual_proof', provider: 'manual', division: 'PLATFORM',
+      country: activePolicyCountryKey(), environment: policyEnvironment(), actor: { roles: context.roles },
+    })
+    const duplicate = await db().paymentProof.findFirst({ where: { provider: 'syrian_local_wallet', providerRef } })
+    if (duplicate) {
+      const error = new Error('This transaction reference was already submitted.')
+      error.statusCode = 409
+      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+      error.expose = true
+      throw error
+    }
+    const proof = await db().paymentProof.create({
+      data: {
+        userId: context.user.id,
+        provider: 'syrian_local_wallet',
+        status: 'PENDING_ADMIN_REVIEW',
+        amountMinor,
+        currency,
+        providerRef,
+        planCode: 'wallet_topup',
+      },
+    })
+    return json(res, 201, { ok: true, proof })
   }
 
   if (url.pathname === '/api/wallet/gifts') {

@@ -18,6 +18,7 @@ import {
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { notifyAdmin } from '../lib/notifications.mjs'
+import { recordWalletEntry, refundPrepaidRide } from '../lib/finance-ledger.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
 // file -- promo-code creation, promo-code activation toggling, and business-account onboarding --
 // were bare db().x.create/update calls with no transaction and no commit-boundary re-authorization.
@@ -237,6 +238,38 @@ export async function handleSrRides(req, res, url, context) {
     // undefined crashed the tracking screen's `ride?.stops.map(...)` on the very next render --
     // the `?.` only guarded `ride`, not `ride.stops`. Fixed at the root here (a consistent
     // response shape) rather than only defensively in the frontend.
+    // Pre-authorization (2026-10-09): if the rider has enough wallet balance, DEBIT the fare now and
+    // mark the ride prepaid, so it settles to the driver INSTANTLY on completion with no post-ride
+    // proof or admin step (the single biggest driver-reliability win). Best-effort: only for an
+    // immediate, non-pooled ride (a shared ride's fare changes at claim), and any failure
+    // (insufficient balance, payments gated) silently falls back to the existing post-ride proof
+    // path — a ride is never blocked by prepayment. The DEBIT moves the rider's OWN money into
+    // platform custody (same pattern as funding a wallet gift), with recordWalletEntry's atomic
+    // no-overdraw guard preventing double-spend.
+    if (!scheduledFor && !shareable && finalFareMinor > 0) {
+      try {
+        await db().$transaction(async (tx) => {
+          await recordWalletEntry(tx, {
+            userId: context.user.id,
+            type: 'DEBIT',
+            amountMinor: finalFareMinor,
+            currency: ride.currency,
+            referenceType: 'ride_prepayment',
+            referenceId: ride.id,
+            keyParts: ['ride-prepayment', ride.id],
+            note: 'Rider prepaid the ride fare from wallet balance.',
+          })
+          await tx.rideRequest.update({
+            where: { id: ride.id },
+            data: { metadata: { ...ride.metadata, prepaid: true, prepaidAmountMinor: finalFareMinor } },
+          })
+        })
+        ride = { ...ride, metadata: { ...ride.metadata, prepaid: true, prepaidAmountMinor: finalFareMinor } }
+      } catch (err) {
+        if (err?.code !== 'WALLET_INSUFFICIENT_FUNDS' && err?.code !== 'WALLET_ENTRY_RACE_LOST') throw err
+        // insufficient balance -> leave the ride unprepaid; it uses the post-ride proof path.
+      }
+    }
     const [createdStops, createdCoords] = await Promise.all([
       db().rideStop.findMany({ where: { rideId: ride.id }, select: { address: true, lat: true, lng: true }, orderBy: { sequence: 'asc' } }),
       getRideCoords(ride.id),
@@ -393,10 +426,16 @@ export async function handleSrRides(req, res, url, context) {
       })
       // Optimistic-concurrency guard: re-check the status we read so a driver claim/arrival
       // landing at the same moment cannot be silently overwritten by this cancel.
-      return tx.rideRequest.updateMany({
+      const result = await tx.rideRequest.updateMany({
         where: { id: existing.id, status: existing.status, riderId: context.user.id },
         data: { status: 'CANCELLED', cancellationFeeMinor },
       })
+      // Prepaid ride: refund the rider their prepayment (minus any cancellation fee, which goes to
+      // the committed driver) atomically with the cancellation. Idempotent by ride id.
+      if (result.count === 1 && existing.metadata?.prepaid) {
+        await refundPrepaidRide(tx, { ride: { ...existing, cancellationFeeMinor } })
+      }
+      return result
     })
 
     if (cancelResult.count === 0) {

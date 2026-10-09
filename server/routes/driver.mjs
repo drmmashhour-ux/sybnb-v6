@@ -7,6 +7,7 @@ import { updateDriverLocation, getDriverLocation, getRideCoords, haversineKm, et
 import { activateScheduledRides } from '../lib/ride-schedule.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
+import { settlePrepaidRide } from '../lib/finance-ledger.mjs'
 // SEC-002R rounds 3 and 4: the two TERMINAL transitions this route can write are Class A -- COMPLETED
 // makes a fare billable, CANCELLED irreversibly destroys a receivable. See the ride status handler
 // below for the full reasoning on each.
@@ -328,7 +329,18 @@ export async function handleDriver(req, res, url, context) {
             action: `SR_RIDE_${nextStatus}`,
             requiredRoles: ['DRIVER'],
           })
-          return tx.rideRequest.updateMany({ where: guardedWhere, data: { status: nextStatus } })
+          const r = await tx.rideRequest.updateMany({ where: guardedWhere, data: { status: nextStatus } })
+          // Prepaid ride (2026-10-09): completing it settles the fare INSTANTLY from the rider's
+          // prepayment — driver gets 75%, platform 25% — with no post-ride proof or admin step.
+          // Idempotent (keyed by ride id) and marked settled so a re-run never double-pays.
+          if (r.count === 1 && nextStatus === 'COMPLETED' && existing.metadata?.prepaid && !existing.metadata?.settled) {
+            await settlePrepaidRide(tx, { ride: existing, actorUserId: context.user.id })
+            await tx.rideRequest.update({
+              where: { id: existing.id },
+              data: { metadata: { ...existing.metadata, settled: true } },
+            })
+          }
+          return r
         })
       // Re-check status in the WHERE clause (optimistic concurrency): if another request already
       // moved this ride between our read and this write, this matches zero rows instead of

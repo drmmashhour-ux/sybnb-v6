@@ -62,26 +62,37 @@ export async function handleHost(req, res, url, context) {
 
     const rows = bookings.map((booking) => buildPayoutRow(booking, releasedBookingIds))
 
-    const totals = rows.reduce(
-      (acc, row) => {
-        if (row.status === 'CONFIRMED') {
-          acc.forecastedMinor += row.hostGrossMinor
-        } else if (row.status === 'COMPLETED') {
-          acc.grossEarnedMinor += row.hostGrossMinor
-          if (row.payoutStatus === 'RELEASED') acc.releasedMinor += row.hostGrossMinor
-          else acc.pendingMinor += row.hostGrossMinor
-        }
-        return acc
-      },
-      { forecastedMinor: 0, grossEarnedMinor: 0, releasedMinor: 0, pendingMinor: 0 },
-    )
+    // Totals grouped by currency — a host who prices some listings in USD has SYP and USD earnings
+    // that must never be summed into one scalar (no FX). One totals bucket per currency present.
+    const byCurrency = new Map()
+    for (const row of rows) {
+      const cur = row.currency || defaultCurrency()
+      if (!byCurrency.has(cur)) {
+        byCurrency.set(cur, { currency: cur, forecastedMinor: 0, grossEarnedMinor: 0, releasedMinor: 0, pendingMinor: 0 })
+      }
+      const acc = byCurrency.get(cur)
+      if (row.status === 'CONFIRMED') {
+        acc.forecastedMinor += row.hostGrossMinor
+      } else if (row.status === 'COMPLETED') {
+        acc.grossEarnedMinor += row.hostGrossMinor
+        if (row.payoutStatus === 'RELEASED') acc.releasedMinor += row.hostGrossMinor
+        else acc.pendingMinor += row.hostGrossMinor
+      }
+    }
+    const totalsByCurrency = [...byCurrency.values()]
+    // Backward-compatible single `totals`: the first currency present (or the settlement default when
+    // there are no rows), while totalsByCurrency is the authoritative per-currency breakdown.
+    const totals = totalsByCurrency[0] || {
+      currency: defaultCurrency(),
+      forecastedMinor: 0,
+      grossEarnedMinor: 0,
+      releasedMinor: 0,
+      pendingMinor: 0,
+    }
 
     return json(res, 200, {
       ok: true,
-      earnings: {
-        rows,
-        totals: { ...totals, currency: rows[0]?.currency || defaultCurrency() },
-      },
+      earnings: { rows, totals, totalsByCurrency },
     })
   }
 
@@ -142,16 +153,28 @@ export async function handleHost(req, res, url, context) {
       })),
     )
 
+    // Confirmed revenue grouped by currency (no cross-currency sum / no FX). `revenueMinor` keeps
+    // the primary (settlement default, or first present) currency for the existing dashboard tile;
+    // `revenueByCurrency` carries the full per-currency breakdown.
+    const confirmedBookings = requests.filter((booking) => booking.status === 'CONFIRMED')
+    const revenueMap = new Map()
+    for (const booking of confirmedBookings) {
+      const cur = booking.currency || defaultCurrency()
+      revenueMap.set(cur, (revenueMap.get(cur) || 0) + booking.amountMinor)
+    }
+    const revenueByCurrency = [...revenueMap.entries()].map(([currency, amountMinor]) => ({ currency, amountMinor }))
+    const primaryRevenue = revenueByCurrency.find((r) => r.currency === defaultCurrency()) || revenueByCurrency[0] || null
+
     const totals = {
       listings: listings.length,
       approvedListings: listings.filter((listing) => listing.status === 'APPROVED').length,
       pendingListings: listings.filter((listing) => listing.status === 'PENDING_REVIEW').length,
       requests: requests.length,
       requested: requests.filter((booking) => booking.status === 'REQUESTED').length,
-      confirmed: requests.filter((booking) => booking.status === 'CONFIRMED').length,
-      revenueMinor: requests
-        .filter((booking) => booking.status === 'CONFIRMED')
-        .reduce((sum, booking) => sum + booking.amountMinor, 0),
+      confirmed: confirmedBookings.length,
+      revenueMinor: primaryRevenue?.amountMinor || 0,
+      revenueCurrency: primaryRevenue?.currency || defaultCurrency(),
+      revenueByCurrency,
     }
 
     return json(res, 200, {

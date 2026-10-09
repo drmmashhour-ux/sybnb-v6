@@ -199,7 +199,7 @@ export async function handleAdmin(req, res, url, context) {
           wallet: { select: { user: { select: { id: true, displayName: true, email: true } } } },
         },
       }),
-      db().walletEntry.groupBy({ by: ['type'], where, _sum: { amountMinor: true } }),
+      db().walletEntry.groupBy({ by: ['type', 'currency'], where, _sum: { amountMinor: true } }),
       db().walletEntry.count({ where }),
     ])
 
@@ -216,26 +216,40 @@ export async function handleAdmin(req, res, url, context) {
       user: r.wallet?.user ? { id: r.wallet.user.id, displayName: r.wallet.user.displayName, email: r.wallet.user.email } : null,
     }))
 
-    const sumFor = (type) => grouped.find((g) => g.type === type)?._sum.amountMinor || 0
-    const creditMinor = sumFor('CREDIT')
-    const debitMinor = sumFor('DEBIT')
-    const holdMinor = sumFor('HOLD')
-    const releaseMinor = sumFor('RELEASE')
-    const refundMinor = sumFor('REFUND')
+    // Totals are grouped by currency: SYP and USD minor units must never be summed into one scalar
+    // (SYP is 1:1 whole units, USD is a different currency entirely — no FX here). One summary row
+    // per currency present in the filtered set.
+    const currencies = [...new Set(grouped.map((g) => g.currency || 'SYP'))]
+    const sumFor = (cur, type) =>
+      grouped.find((g) => (g.currency || 'SYP') === cur && g.type === type)?._sum.amountMinor || 0
+    const summaryFor = (cur) => {
+      const creditMinor = sumFor(cur, 'CREDIT')
+      const debitMinor = sumFor(cur, 'DEBIT')
+      const releaseMinor = sumFor(cur, 'RELEASE')
+      const refundMinor = sumFor(cur, 'REFUND')
+      return {
+        currency: cur,
+        creditMinor,
+        debitMinor,
+        holdMinor: sumFor(cur, 'HOLD'),
+        releaseMinor,
+        refundMinor,
+        // Money genuinely added to wallets (credits, releases and refunds all raise a balance) minus
+        // money taken out — within a single currency.
+        netMinor: creditMinor + releaseMinor + refundMinor - debitMinor,
+      }
+    }
+    const summariesByCurrency = currencies.map(summaryFor)
+    // Backward-compatible single `summary`: the dominant currency (or SYP when the set is empty), so
+    // older consumers keep working while the per-currency breakdown is authoritative.
+    const primaryCurrency = summariesByCurrency.length ? summariesByCurrency[0].currency : 'SYP'
+    const primarySummary = summariesByCurrency.find((s) => s.currency === primaryCurrency) || summaryFor('SYP')
 
     return json(res, 200, {
       ok: true,
       entries,
-      summary: {
-        creditMinor,
-        debitMinor,
-        holdMinor,
-        releaseMinor,
-        refundMinor,
-        // Money genuinely added to wallets minus money genuinely taken out, across the filtered set.
-        netMinor: creditMinor + releaseMinor - debitMinor,
-        count: total,
-      },
+      summary: { ...primarySummary, count: total },
+      summariesByCurrency,
       page: { limit, offset, hasMore },
     })
   }

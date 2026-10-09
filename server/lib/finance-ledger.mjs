@@ -437,10 +437,14 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // already-collected seller-plan revenue -- the entire monetization model for the 0%-commission
     // divisions (CARS/MARKETPLACE/NEW_CONSTRUCTION) -- was invisible everywhere a WalletEntry is
     // the source of truth: admin finance totals, income projections, payout rows. Recorded the
-    // same way booking commission is: a CREDIT to the approving admin's own wallet.
+    // same way booking commission is. This is 100% platform revenue, so it routes to the fixed
+    // house account (PLATFORM_ACCOUNT_ID) exactly like the booking admin-share above — otherwise the
+    // entire monetization of the 0%-commission divisions (CARS/MARKETPLACE/NEW_CONSTRUCTION) would
+    // fragment across individual operators' personal wallets. Falls back to the actor only when no
+    // house account is configured (dev/e2e).
     if (actorUserId) {
       await recordWalletEntry(tx, {
-        userId: actorUserId,
+        userId: process.env.PLATFORM_ACCOUNT_ID || actorUserId,
         type: 'CREDIT',
         amountMinor: proof.amountMinor,
         currency: proof.currency,

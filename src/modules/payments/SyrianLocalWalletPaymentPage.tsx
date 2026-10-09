@@ -39,7 +39,7 @@ const copy = {
     back: 'العودة للرئيسية',
     title: 'الدفع عبر المحفظة المحلية السورية',
     subtitle: 'أرسل إثبات التحويل داخل SYBNB فقط ليبقى الحجز محمياً.',
-    mode: 'مراجعة يدوية / قاعدة بيانات مباشرة',
+    mode: 'الدفع بالحوالة أو شام كاش',
     recipient: 'المستلم',
     maskedAccount: 'الحساب',
     amountDue: 'المبلغ المستحق',
@@ -51,7 +51,7 @@ const copy = {
     senderName: 'اسم المرسل',
     senderPhone: 'هاتف المرسل',
     submit: 'إرسال للمراجعة',
-    adminTitle: 'تتبع إثبات الدفع',
+    adminTitle: 'متابعة دفعتك',
     viewBooking: 'عرض الحجز',
     submittedReference: 'رقم العملية المرسل',
     proof: 'إثبات الدفع',
@@ -60,9 +60,9 @@ const copy = {
     hostApproved: 'تم تأكيد الدفع ويمكن متابعة الحجز.',
     hostRejected: 'تم رفض الدفع. يمكن للضيف إعادة إرسال الإثبات.',
     bookingStatus: 'حالة دفع الحجز',
-    manualOnly: 'يتم التحويل في تطبيق المحفظة السورية الخارجي. تحفظ SYBNB الإثبات في قاعدة البيانات لمراجعة فريق SYBNB.',
+    manualOnly: 'يتم التحويل عبر تطبيق المحفظة أو شام كاش. ارفع صورة الإيصال هنا ويؤكده فريق SYBNB.',
     seed: 'حالة المراجعة',
-    security: 'طبقة الأمان',
+    security: 'حالة الدفع',
     validationPassed: 'تم التحقق من الحقول',
     validationFailed: 'يوجد خطأ في بيانات الدفع',
     duplicateBlocked: 'منع التكرار',
@@ -70,8 +70,8 @@ const copy = {
     riskFlags: 'ملاحظات المخاطر',
     noRisk: 'لا توجد ملاحظات',
     lockedDecision: 'تم إغلاق القرار',
-    dbStatus: 'حالة قاعدة البيانات',
-    proofId: 'رقم إثبات قاعدة البيانات',
+    dbStatus: 'الحالة',
+    proofId: 'الرقم المرجعي',
     receipt: 'فتح الإيصال',
     dashboard: 'فتح حسابي',
     savePayment: 'حفظ معلومات الدفع',
@@ -92,7 +92,7 @@ const copy = {
     back: 'Back to landing',
     title: 'Syrian Local Wallet / QR Payment',
     subtitle: 'Submit transfer proof inside SYBNB only so the booking stays protected.',
-    mode: 'Manual review / live database',
+    mode: 'Pay by bank transfer or Sham Cash',
     recipient: 'Recipient',
     maskedAccount: 'Account',
     amountDue: 'Amount due',
@@ -104,7 +104,7 @@ const copy = {
     senderName: 'Sender name',
     senderPhone: 'Sender phone',
     submit: 'Submit for review',
-    adminTitle: 'Payment proof tracking',
+    adminTitle: 'Your payment',
     viewBooking: 'View booking',
     submittedReference: 'Submitted reference',
     proof: 'Payment proof',
@@ -113,9 +113,9 @@ const copy = {
     hostApproved: 'Payment confirmed. Booking can continue.',
     hostRejected: 'Payment rejected. Guest can resubmit proof.',
     bookingStatus: 'Booking payment status',
-    manualOnly: 'The transfer happens in the external Syrian wallet app. SYBNB stores the proof in PostgreSQL for SYBNB team review.',
+    manualOnly: 'The transfer happens in your wallet or Sham Cash app. Upload your receipt here and the SYBNB team confirms it.',
     seed: 'Review status',
-    security: 'Security layer',
+    security: 'Payment status',
     validationPassed: 'Fields validated',
     validationFailed: 'Payment data has an error',
     duplicateBlocked: 'Duplicate blocked',
@@ -123,8 +123,8 @@ const copy = {
     riskFlags: 'Risk flags',
     noRisk: 'No risk notes',
     lockedDecision: 'Decision locked',
-    dbStatus: 'Database status',
-    proofId: 'Database proof ID',
+    dbStatus: 'Status',
+    proofId: 'Reference',
     receipt: 'Open receipt',
     dashboard: 'Open my account',
     savePayment: 'Save Payment Info',
@@ -145,7 +145,7 @@ const copy = {
     back: 'Retour à l’accueil',
     title: 'Paiement par portefeuille local syrien / QR',
     subtitle: 'Envoyez la preuve de virement uniquement dans SYBNB pour que la réservation reste protégée.',
-    mode: 'Vérification manuelle / base de données en direct',
+    mode: 'Paiement par virement ou Sham Cash',
     recipient: 'Destinataire',
     maskedAccount: 'Compte',
     amountDue: 'Montant dû',
@@ -157,7 +157,7 @@ const copy = {
     senderName: 'Nom de l’expéditeur',
     senderPhone: 'Téléphone de l’expéditeur',
     submit: 'Envoyer pour vérification',
-    adminTitle: 'Suivi de la preuve de paiement',
+    adminTitle: 'Votre paiement',
     viewBooking: 'Voir la réservation',
     submittedReference: 'Référence envoyée',
     proof: 'Preuve de paiement',
@@ -166,9 +166,9 @@ const copy = {
     hostApproved: 'Paiement confirmé. La réservation peut se poursuivre.',
     hostRejected: 'Paiement refusé. Le voyageur peut renvoyer une preuve.',
     bookingStatus: 'Statut du paiement de la réservation',
-    manualOnly: 'Le virement s’effectue dans l’application externe de portefeuille syrien. SYBNB conserve la preuve dans la base de données pour vérification par l’équipe SYBNB.',
+    manualOnly: 'Le virement se fait dans votre application de portefeuille ou Sham Cash. Téléversez votre reçu ici et l’équipe SYBNB le confirme.',
     seed: 'Statut de la vérification',
-    security: 'Couche de sécurité',
+    security: 'État du paiement',
     validationPassed: 'Champs validés',
     validationFailed: 'Les données de paiement contiennent une erreur',
     duplicateBlocked: 'Doublon bloqué',
@@ -176,8 +176,8 @@ const copy = {
     riskFlags: 'Signalements de risque',
     noRisk: 'Aucun signalement',
     lockedDecision: 'Décision verrouillée',
-    dbStatus: 'Statut dans la base de données',
-    proofId: 'Numéro de preuve (base de données)',
+    dbStatus: 'Statut',
+    proofId: 'Référence',
     receipt: 'Ouvrir le reçu',
     dashboard: 'Ouvrir mon compte',
     savePayment: 'Enregistrer les infos de paiement',
@@ -219,8 +219,10 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
   const isAr = lang === 'ar'
   const defaultTransactionReference = `SLW-${bookingId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`
   const [transactionReference, setTransactionReference] = useState(defaultTransactionReference)
-  const [senderName, setSenderName] = useState(pick(lang, 'ضيف SYBNB', 'SYBNB Guest', 'Voyageur SYBNB'))
-  const [senderPhone, setSenderPhone] = useState('+963 900 000 001')
+  // Start blank so the guest enters their REAL sender name/phone — a pre-filled placeholder ("SYBNB
+  // Guest", a dummy number) left unedited gives the admin meaningless data to reconcile against.
+  const [senderName, setSenderName] = useState('')
+  const [senderPhone, setSenderPhone] = useState('')
   const [uploadedProofFiles, setUploadedProofFiles] = useState<string[]>([])
   // Real uploaded proof URLs (payment-proof:// references), parallel to uploadedProofFiles' names —
   // the last one wins as the proof actually sent to admin. Previously this whole flow only ever
@@ -233,8 +235,8 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
       userId: 'USR-LOCAL-WALLET-001',
       amount: Math.max(Number(amountMinor || 10), 1),
       transactionReference: defaultTransactionReference,
-      senderName: pick(lang, 'ضيف SYBNB', 'SYBNB Guest', 'Voyageur SYBNB'),
-      senderPhone: '+963 900 000 001',
+      senderName: '',
+      senderPhone: '',
       proofUrl: undefined,
     }),
   )
@@ -579,14 +581,6 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
           <div className="wallet-stat">
             <span>{t.proof}</span>
             <strong>{submission.proofUrl ? uploadedProofFiles.length || '✓' : '-'}</strong>
-          </div>
-          <div className="wallet-stat">
-            <span>{t.hash}</span>
-            <strong dir="ltr">{submission.verificationHash}</strong>
-          </div>
-          <div className="wallet-stat">
-            <span>{t.riskFlags}</span>
-            <strong>{submission.riskFlags.length ? submission.riskFlags.join(', ') : t.noRisk}</strong>
           </div>
           {paymentProof && (
             <button className="wallet-primary" onClick={() => (window.location.hash = `/payment/receipt/${paymentProof.id}`)}>

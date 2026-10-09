@@ -97,7 +97,7 @@ export function AdminMoneyFlowPage({ lang }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, query, offset])
 
-  const money = (minor: number) => moneyText(minor, 'SYP', lang)
+  const money = (minor: number, cur = 'SYP') => moneyText(minor, cur, lang)
   const fmtDateTime = (value: string) => {
     try {
       return new Date(value).toLocaleString(isAr ? 'ar' : lang === 'fr' ? 'fr' : 'en', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -108,6 +108,9 @@ export function AdminMoneyFlowPage({ lang }: Props) {
 
   const isStaff = Boolean(getStoredStaffSession('ADMIN'))
   const summary = data?.summary
+  // One KPI row per currency — SYP and USD are never summed together (no FX).
+  const summaries = data?.summariesByCurrency?.length ? data.summariesByCurrency : summary ? [summary] : []
+  const multiCur = summaries.length > 1
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -122,13 +125,20 @@ export function AdminMoneyFlowPage({ lang }: Props) {
 
       {!isStaff && <section style={{ ...styles.alert, background: 'linear-gradient(90deg, rgba(232,189,42,.14), rgba(232,189,42,.04))', borderColor: 'rgba(232,189,42,.4)', color: '#f3d672' }}>{pick(lang, 'سجّل الدخول كمسؤول لعرض حركة الأموال.', 'Sign in as admin to view money flow.', 'Connectez-vous en tant qu’admin.')}</section>}
 
-      <section style={styles.statsRow}>
-        <Stat label={t.moneyIn} value={summary ? money(summary.creditMinor) : '—'} tone={T.green} />
-        <Stat label={t.moneyOut} value={summary ? money(summary.debitMinor) : '—'} tone={T.red} />
-        <Stat label={t.refunds} value={summary ? money(summary.refundMinor) : '—'} tone={T.gold} />
-        <Stat label={t.net} value={summary ? money(summary.netMinor) : '—'} tone={T.cyan} />
-        <Stat label={t.count} value={summary ? String(summary.count) : '—'} tone={T.blue2} />
-      </section>
+      {(summaries.length ? summaries : [null]).map((sc, i) => (
+        <section key={sc?.currency || i} style={styles.statsRow}>
+          <Stat label={t.moneyIn + (sc && multiCur ? ` · ${sc.currency}` : '')} value={sc ? money(sc.creditMinor, sc.currency) : '—'} tone={T.green} />
+          <Stat label={t.moneyOut} value={sc ? money(sc.debitMinor, sc.currency) : '—'} tone={T.red} />
+          <Stat label={t.refunds} value={sc ? money(sc.refundMinor, sc.currency) : '—'} tone={T.gold} />
+          <Stat label={t.net} value={sc ? money(sc.netMinor, sc.currency) : '—'} tone={T.cyan} />
+          {!multiCur && <Stat label={t.count} value={summary ? String(summary.count) : '—'} tone={T.blue2} />}
+        </section>
+      ))}
+      {multiCur && (
+        <section style={styles.statsRow}>
+          <Stat label={t.count} value={summary ? String(summary.count) : '—'} tone={T.blue2} />
+        </section>
+      )}
 
       <section style={styles.toolbar}>
         <div style={styles.searchRow}>

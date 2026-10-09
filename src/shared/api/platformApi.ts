@@ -1711,17 +1711,19 @@ export type PlatformLedgerEntry = {
   createdAt: string
   user: { id: string; displayName: string; email: string | null } | null
 }
+export type PlatformLedgerCurrencySummary = {
+  currency: string
+  creditMinor: number
+  debitMinor: number
+  holdMinor: number
+  releaseMinor: number
+  refundMinor: number
+  netMinor: number
+}
 export type PlatformLedgerResult = {
   entries: PlatformLedgerEntry[]
-  summary: {
-    creditMinor: number
-    debitMinor: number
-    holdMinor: number
-    releaseMinor: number
-    refundMinor: number
-    netMinor: number
-    count: number
-  }
+  summary: PlatformLedgerCurrencySummary & { count: number }
+  summariesByCurrency?: PlatformLedgerCurrencySummary[]
   page: { limit: number; offset: number; hasMore: boolean }
 }
 
@@ -2317,9 +2319,11 @@ export type PlatformHostEarningsRow = {
   eligibleAt: string | null
 }
 
+export type PlatformHostEarningsTotals = { forecastedMinor: number; grossEarnedMinor: number; releasedMinor: number; pendingMinor: number; currency: string }
 export type PlatformHostEarnings = {
   rows: PlatformHostEarningsRow[]
-  totals: { forecastedMinor: number; grossEarnedMinor: number; releasedMinor: number; pendingMinor: number; currency: string }
+  totals: PlatformHostEarningsTotals
+  totalsByCurrency?: PlatformHostEarningsTotals[]
 }
 
 export async function fetchPrototypeHostEarnings(mode: HostDashboardMode = 'host') {
@@ -2797,9 +2801,10 @@ export async function saveHostPayoutMethod(method: HostPayoutMethod, mode: HostD
   return response.method
 }
 
-export async function fetchHostPayouts(mode: HostDashboardMode = 'host') {
+export async function fetchHostPayouts(mode: HostDashboardMode = 'host', currency = 'SYP') {
   const session = await getHostDashboardSession(mode)
-  const response = await apiRequest<{ ok: true } & HostPayoutsSummary>('/api/host/payouts', { token: session.token })
+  const query = `?currency=${encodeURIComponent(String(currency || 'SYP').toUpperCase())}`
+  const response = await apiRequest<{ ok: true } & HostPayoutsSummary>(`/api/host/payouts${query}`, { token: session.token })
   return {
     availableMinor: response.availableMinor,
     pendingMinor: response.pendingMinor,
@@ -2808,12 +2813,12 @@ export async function fetchHostPayouts(mode: HostDashboardMode = 'host') {
   } satisfies HostPayoutsSummary
 }
 
-export async function requestHostPayout(amountMinor: number, mode: HostDashboardMode = 'host') {
+export async function requestHostPayout(amountMinor: number, mode: HostDashboardMode = 'host', currency = 'SYP') {
   const session = await getHostDashboardSession(mode)
   const response = await apiRequest<{ ok: true; request: HostPayoutRequest }>('/api/host/payouts', {
     method: 'POST',
     token: session.token,
-    body: { amountMinor },
+    body: { amountMinor, currency: String(currency || 'SYP').toUpperCase() },
   })
   return response.request
 }

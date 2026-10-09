@@ -281,8 +281,11 @@ function FeedbackItem({ item, lang, onResubmitted }: { item: HostOnboardingFeedb
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(item.titleAr || '')
   const [description, setDescription] = useState(item.description || '')
-  // priceMinor is in minor units: cents for two-decimal currencies, whole units otherwise (SYP).
-  const minorFactor = ['USD', 'EUR', 'CAD', 'GBP'].includes(String(item.currency).toUpperCase()) ? 100 : 1
+  // priceMinor is stored as WHOLE units for every currency in this app (SYP and USD alike) — the
+  // listing wizard's toMinor() never multiplies, and moneyText() never divides. The earlier cents
+  // assumption for USD/EUR/… corrupted USD prices 100x (a $120 listing showed as "1.2", and saving
+  // "120" stored 12000 → "$12,000"). Keep this at whole units to match the rest of the pipeline.
+  const minorFactor = 1
   const [price, setPrice] = useState(item.priceMinor ? String(item.priceMinor / minorFactor) : '')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')

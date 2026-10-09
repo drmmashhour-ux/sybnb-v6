@@ -67,11 +67,20 @@ export function HostPayoutsPage({ lang, mode = 'host' }: Props) {
   const [amountText, setAmountText] = useState('')
   const [withdrawState, setWithdrawState] = useState<'idle' | 'saving' | 'done' | 'error'>('idle')
   const [withdrawError, setWithdrawError] = useState('')
+  // Balances are currency-scoped (wallets are keyed by user + currency, no FX). A host who prices
+  // some listings in USD has a separate USD balance, so they pick which currency to view/withdraw.
+  const [payoutCurrency, setPayoutCurrency] = useState<'SYP' | 'USD'>('SYP')
 
   useEffect(() => {
     void loadMethod()
-    void loadSummary()
   }, [])
+
+  useEffect(() => {
+    void loadSummary()
+    // Switching currency clears any in-progress amount so it can't be submitted against the wrong balance.
+    setAmountText('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payoutCurrency])
 
   async function loadMethod() {
     setMethodState('loading')
@@ -90,7 +99,7 @@ export function HostPayoutsPage({ lang, mode = 'host' }: Props) {
   async function loadSummary() {
     setSummaryState('loading')
     try {
-      setSummary(await fetchHostPayouts(mode))
+      setSummary(await fetchHostPayouts(mode, payoutCurrency))
       setSummaryState('ready')
     } catch (error) {
       setSummaryState('error')
@@ -142,7 +151,7 @@ export function HostPayoutsPage({ lang, mode = 'host' }: Props) {
     setWithdrawState('saving')
     setWithdrawError('')
     try {
-      await requestHostPayout(amountMinor, mode)
+      await requestHostPayout(amountMinor, mode, payoutCurrency)
       setAmountText('')
       setWithdrawState('done')
       await loadSummary()
@@ -275,6 +284,20 @@ export function HostPayoutsPage({ lang, mode = 'host' }: Props) {
         {/* Withdraw */}
         <section style={styles.card} aria-labelledby="withdraw-title">
           <h2 id="withdraw-title" style={styles.cardTitle}>{pick(lang, 'سحب الرصيد', 'Withdraw', 'Retrait')}</h2>
+          <div style={styles.currencyRow} role="tablist" aria-label={pick(lang, 'العملة', 'Currency', 'Devise')}>
+            {(['SYP', 'USD'] as const).map((cur) => (
+              <button
+                key={cur}
+                type="button"
+                role="tab"
+                aria-selected={payoutCurrency === cur}
+                style={{ ...styles.currencyTab, ...(payoutCurrency === cur ? styles.currencyTabActive : {}) }}
+                onClick={() => setPayoutCurrency(cur)}
+              >
+                {cur === 'SYP' ? pick(lang, 'ل.س ليرة سورية', 'SYP · Syrian pound', 'SYP · livre') : pick(lang, '$ دولار', 'USD · US dollar', 'USD · dollar')}
+              </button>
+            ))}
+          </div>
           {summaryState === 'loading' && <p style={styles.body}>{pick(lang, 'جار التحميل...', 'Loading...', 'Chargement...')}</p>}
           {summaryState === 'error' && <p style={styles.alert}>{summaryError || pick(lang, 'تعذر تحميل الرصيد.', 'Could not load your balance.', 'Impossible de charger votre solde.')}</p>}
           {summary && (
@@ -398,6 +421,9 @@ const styles: Record<string, CSSProperties> = {
   field: { display: 'grid', gap: 6, color: '#c8cfdd', fontSize: 14, fontWeight: 700 },
   input: { minHeight: 44, width: '100%', boxSizing: 'border-box', border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#fff', padding: '0 12px', fontSize: 16, fontFamily: 'inherit' },
   amountRow: { display: 'grid', gap: 8, gridTemplateColumns: '1fr auto' },
+  currencyRow: { display: 'flex', gap: 8, margin: '0 0 14px', flexWrap: 'wrap' },
+  currencyTab: { minHeight: 40, border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#9aa6ba', fontWeight: 900, padding: '0 14px', cursor: 'pointer', fontSize: 13 },
+  currencyTabActive: { border: '1px solid #20d29b', background: 'rgba(32,210,155,.14)', color: '#b7ffe8' },
   row: { display: 'flex', gap: 10, flexWrap: 'wrap' },
   stats: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' },
   stat: { border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#9aa6ba', display: 'grid', gap: 6, padding: 12, fontSize: 13 },

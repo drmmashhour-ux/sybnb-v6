@@ -105,7 +105,9 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
     }
   }
 
-  const currency = earnings?.totals.currency || 'SYP'
+  // One stat block per currency — SYP and USD earnings are shown separately (no FX).
+  const earningsTotals = earnings?.totalsByCurrency?.length ? earnings.totalsByCurrency : earnings ? [earnings.totals] : []
+  const multiCur = earningsTotals.length > 1
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -125,24 +127,26 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
 
       {earnings && (
         <>
-          <section style={styles.stats}>
-            <div style={styles.stat}>
-              <span>{t.forecasted}</span>
-              <b>{moneyText(earnings.totals.forecastedMinor, currency, lang)}</b>
-            </div>
-            <div style={styles.stat}>
-              <span>{t.earned}</span>
-              <b>{moneyText(earnings.totals.grossEarnedMinor, currency, lang)}</b>
-            </div>
-            <div style={styles.stat}>
-              <span>{t.released}</span>
-              <b style={{ color: '#20d29b' }}>{moneyText(earnings.totals.releasedMinor, currency, lang)}</b>
-            </div>
-            <div style={styles.stat}>
-              <span>{t.pending}</span>
-              <b style={{ color: '#e5b80b' }}>{moneyText(earnings.totals.pendingMinor, currency, lang)}</b>
-            </div>
-          </section>
+          {earningsTotals.map((tot) => (
+            <section key={tot.currency} style={styles.stats}>
+              <div style={styles.stat}>
+                <span>{t.forecasted}{multiCur ? ` · ${tot.currency}` : ''}</span>
+                <b>{moneyText(tot.forecastedMinor, tot.currency, lang)}</b>
+              </div>
+              <div style={styles.stat}>
+                <span>{t.earned}</span>
+                <b>{moneyText(tot.grossEarnedMinor, tot.currency, lang)}</b>
+              </div>
+              <div style={styles.stat}>
+                <span>{t.released}</span>
+                <b style={{ color: '#20d29b' }}>{moneyText(tot.releasedMinor, tot.currency, lang)}</b>
+              </div>
+              <div style={styles.stat}>
+                <span>{t.pending}</span>
+                <b style={{ color: '#e5b80b' }}>{moneyText(tot.pendingMinor, tot.currency, lang)}</b>
+              </div>
+            </section>
+          ))}
 
           <section style={styles.table}>
             <div style={styles.tableHead}>

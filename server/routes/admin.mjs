@@ -1303,9 +1303,9 @@ export async function handleAdmin(req, res, url, context) {
       select: {
         id: true, status: true, fareMinor: true, currency: true, cancellationFeeMinor: true,
         riderId: true, driverId: true, accessibilityRequired: true, scheduledFor: true,
-        createdAt: true, updatedAt: true,
+        requestedAt: true, updatedAt: true,
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { requestedAt: 'desc' },
       take: 200,
     })
     return json(res, 200, { ok: true, rides, count: rides.length })

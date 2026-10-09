@@ -31,6 +31,7 @@ const HostProfilePage = lazyNamed(() => import('../modules/host/HostProfilePage'
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
 const HostPayoutsPage = lazyNamed(() => import('../modules/host/HostPayoutsPage'), 'HostPayoutsPage')
 const AdminMoneyPage = lazyNamed(() => import('../modules/admin/AdminMoneyPage'), 'AdminMoneyPage')
+const AdminCustomerPage = lazyNamed(() => import('../modules/admin/AdminCustomerPage'), 'AdminCustomerPage')
 const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesPage'), 'HostInquiriesPage')
 const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/ImmocontactPage'), 'ImmocontactPage')
 const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'LandingPage')
@@ -236,6 +237,8 @@ export function App() {
           <AdminHostsPage lang={lang} />
         ) : path === '/admin/money' ? (
           <AdminMoneyPage lang={lang} />
+        ) : path === '/admin/customers' || path.startsWith('/admin/customers/') ? (
+          <AdminCustomerPage lang={lang} />
         ) : path === '/admin/review' ? (
           <AdminReviewPage lang={lang} />
         ) : path === '/ai-brain' ? (

@@ -205,6 +205,108 @@ export type PlatformIdDocumentReview = {
   idDocumentStatus?: string | null
 }
 
+// Customer / Host 360 overview — a single account's full footprint for the admin.
+// Read-only aggregate assembled server-side; see GET /api/admin/users/:id/overview.
+export type PlatformAdminOverviewListing = {
+  id: string
+  titleAr: string
+  titleEn: string | null
+  division: string
+  status: string
+  priceMinor: number
+  currency: string
+  createdAt: string
+}
+export type PlatformAdminOverviewBooking = {
+  id: string
+  listingId: string
+  guestId?: string
+  status: string
+  checkIn: string | null
+  checkOut: string | null
+  amountMinor: number
+  currency: string
+  createdAt: string
+  listing: { titleAr: string; titleEn: string | null } | null
+}
+export type PlatformAdminOverviewPayment = {
+  id: string
+  bookingId: string | null
+  provider: string
+  status: string
+  amountMinor: number
+  currency: string
+  createdAt: string
+}
+export type PlatformAdminOverviewPayout = {
+  id: string
+  amountMinor: number
+  currency: string
+  status: string
+  createdAt: string
+  decidedAt: string | null
+}
+export type PlatformAdminOverviewWalletEntry = {
+  id: string
+  type: string
+  amountMinor: number
+  currency: string
+  referenceType: string
+  referenceId: string
+  note: string | null
+  createdAt: string
+}
+export type PlatformAdminOverviewWallet = {
+  id: string
+  currency: string
+  cachedBalanceMinor: number
+  entries: PlatformAdminOverviewWalletEntry[]
+}
+export type PlatformAdminOverviewGift = {
+  id: string
+  amountMinor: number
+  currency: string
+  status: string
+  createdAt: string
+}
+export type PlatformAdminOverviewAudit = {
+  id: string
+  action: string
+  entityType: string
+  entityId: string
+  createdAt: string
+}
+export type PlatformAdminUserOverview = {
+  user: {
+    id: string
+    displayName: string
+    email: string | null
+    status: string
+    locale: string
+    createdAt: string
+    hostVerifiedAt: string | null
+    idDocumentStatus: string | null
+    roles: string[]
+  }
+  listings: PlatformAdminOverviewListing[]
+  bookingsAsGuest: PlatformAdminOverviewBooking[]
+  bookingsAsHost: PlatformAdminOverviewBooking[]
+  payments: PlatformAdminOverviewPayment[]
+  payouts: PlatformAdminOverviewPayout[]
+  wallets: PlatformAdminOverviewWallet[]
+  giftsSent: PlatformAdminOverviewGift[]
+  giftsReceived: PlatformAdminOverviewGift[]
+  audit: PlatformAdminOverviewAudit[]
+  totals: {
+    lifetimeSpentMinor: number
+    lifetimePayoutMinor: number
+    walletBalanceMinor: number
+    listingsCount: number
+    guestBookingsCount: number
+    hostBookingsCount: number
+  }
+}
+
 // The real backlog size per category, independent of the (currently 100-item) cap on the arrays
 // below. Added server-side (e59ab6f) specifically so a genuine backlog surge would be visible
 // instead of silently capped -- an admin-satisfaction audit found this never reached the UI, so
@@ -1587,6 +1689,15 @@ export async function lookupAdminUserByEmail(email: string) {
     { token },
   ))
   return response.user
+}
+
+export async function fetchAdminUserOverview(userId: string) {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true } & PlatformAdminUserOverview>(
+    `/api/admin/users/${encodeURIComponent(userId)}/overview`,
+    { token },
+  ))
+  const { ok: _ok, ...overview } = response
+  return overview as PlatformAdminUserOverview
 }
 
 export async function uploadIdDocumentForUser(userId: string, file: File) {

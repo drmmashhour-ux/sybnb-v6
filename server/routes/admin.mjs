@@ -27,6 +27,137 @@ import { isRateLimited } from '../lib/rateLimit.mjs'
 const VALID_ROLES = new Set(['GUEST', 'HOST', 'SELLER', 'DRIVER', 'ADMIN', 'SUPPORT'])
 
 export async function handleAdmin(req, res, url, context) {
+  // ---------------------------------------------------------------------------
+  // Customer / Host 360 overview (read-only). Surfaces a single account's full
+  // footprint for the admin — profile, listings, bookings (as guest AND as host),
+  // payment proofs, payout requests, wallet balance + ledger entries, gifts, and
+  // the audit trail touching this account. Purely a read: it moves no money and
+  // changes no state, so it only needs ADMIN/SUPPORT (same as users/lookup) and
+  // records a lightweight lookup audit entry.
+  const userOverviewMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/overview$/)
+  if (userOverviewMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const targetUserId = userOverviewMatch[1]
+
+    const found = await db().user.findUnique({
+      where: { id: targetUserId },
+      select: {
+        id: true,
+        displayName: true,
+        email: true,
+        status: true,
+        locale: true,
+        createdAt: true,
+        hostVerifiedAt: true,
+        idDocumentStatus: true,
+        roles: { select: { role: true } },
+      },
+    })
+    if (!found) {
+      const error = new Error('No account found for this id.')
+      error.statusCode = 404
+      error.code = 'USER_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+
+    const listingTitleSelect = { titleAr: true, titleEn: true }
+    const [listings, bookingsAsGuest, bookingsAsHost, payments, payouts, wallets, giftsSent, giftsReceived, auditEntries] = await Promise.all([
+      db().listing.findMany({
+        where: { ownerId: targetUserId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: { id: true, titleAr: true, titleEn: true, division: true, status: true, priceMinor: true, currency: true, createdAt: true },
+      }),
+      db().booking.findMany({
+        where: { guestId: targetUserId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: { id: true, listingId: true, status: true, checkIn: true, checkOut: true, amountMinor: true, currency: true, createdAt: true, listing: { select: listingTitleSelect } },
+      }),
+      db().booking.findMany({
+        where: { listing: { ownerId: targetUserId } },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: { id: true, listingId: true, guestId: true, status: true, checkIn: true, checkOut: true, amountMinor: true, currency: true, createdAt: true, listing: { select: listingTitleSelect } },
+      }),
+      db().paymentProof.findMany({
+        where: { userId: targetUserId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: { id: true, bookingId: true, provider: true, status: true, amountMinor: true, currency: true, createdAt: true },
+      }),
+      db().payoutRequest.findMany({
+        where: { hostId: targetUserId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        select: { id: true, amountMinor: true, currency: true, status: true, createdAt: true, decidedAt: true },
+      }),
+      db().wallet.findMany({
+        where: { userId: targetUserId },
+        select: {
+          id: true,
+          currency: true,
+          cachedBalanceMinor: true,
+          entries: {
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+            select: { id: true, type: true, amountMinor: true, currency: true, referenceType: true, referenceId: true, note: true, createdAt: true },
+          },
+        },
+      }),
+      db().walletGift.findMany({
+        where: { senderUserId: targetUserId },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: { id: true, amountMinor: true, currency: true, status: true, createdAt: true },
+      }),
+      db().walletGift.findMany({
+        where: { recipientUserId: targetUserId },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: { id: true, amountMinor: true, currency: true, status: true, createdAt: true },
+      }),
+      db().adminAuditLog.findMany({
+        where: { entityId: targetUserId },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: { id: true, action: true, entityType: true, entityId: true, createdAt: true },
+      }),
+    ])
+
+    const lifetimeSpentMinor = payments.filter((p) => p.status === 'APPROVED').reduce((sum, p) => sum + p.amountMinor, 0)
+    const lifetimePayoutMinor = payouts.filter((p) => p.status === 'PAID').reduce((sum, p) => sum + p.amountMinor, 0)
+    const walletBalanceMinor = wallets.reduce((sum, w) => sum + w.cachedBalanceMinor, 0)
+
+    await db().adminAuditLog.create({
+      data: { actorUserId: context.user.id, action: 'ADMIN_USER_OVERVIEW', entityType: 'user', entityId: targetUserId, before: null, after: null },
+    })
+
+    return json(res, 200, {
+      ok: true,
+      user: { ...found, roles: found.roles.map((r) => r.role) },
+      listings,
+      bookingsAsGuest,
+      bookingsAsHost,
+      payments,
+      payouts,
+      wallets,
+      giftsSent,
+      giftsReceived,
+      audit: auditEntries,
+      totals: {
+        lifetimeSpentMinor,
+        lifetimePayoutMinor,
+        walletBalanceMinor,
+        listingsCount: listings.length,
+        guestBookingsCount: bookingsAsGuest.length,
+        hostBookingsCount: bookingsAsHost.length,
+      },
+    })
+  }
+
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)
   if (hideReviewMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])

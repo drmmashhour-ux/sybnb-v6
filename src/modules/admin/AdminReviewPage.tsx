@@ -677,6 +677,9 @@ function ShortRentAdminCommandDashboard({
         <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/money')}>
           {pick(lang, 'الصرف والاسترداد', 'Payouts & refunds', 'Versements et remboursements')}
         </button>
+        <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/customers')}>
+          {pick(lang, 'ملف العميل الشامل', 'Customer 360', 'Client 360')}
+        </button>
       </nav>
 
       <section style={commandStyles.departmentGroups} aria-label={isAr ? 'أقسام الإدارة' : 'Admin departments'}>

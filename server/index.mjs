@@ -55,17 +55,18 @@ if (process.env.NODE_ENV === 'production' && !/[?&]connection_limit=/.test(proce
   })
 }
 
-// Revenue-integrity guard (2026-10-09): all platform revenue (ride commission, booking commission,
-// seller-plan/advertising fees) routes to PLATFORM_ACCOUNT_ID — the single house account. If it is
-// unset in production, those credits fall back to whichever admin happened to approve the payment,
-// fragmenting and commingling real revenue across operators' personal wallets. A loud WARNING, not
-// a boot-blocking failure, matching the connection_limit guard above: failing closed here would
-// take the whole API down over an env var the fix for is a one-line env change, not code. Set
-// PLATFORM_ACCOUNT_ID to the house account's user id before relying on the commission model.
+// Revenue-integrity guard (owner decision 2026-10-09): all platform revenue (ride commission,
+// booking commission, seller-plan/advertising fees) routes to PLATFORM_ACCOUNT_ID — the single
+// house account. If it is unset in production, commission would either fall back to the approving
+// admin's personal wallet (booking/seller paths) or silently not be booked at all (prepaid rides) —
+// a revenue-capture hole. Per the owner's explicit decision this is now a HARD boot failure in
+// production (not merely a warning like the connection_limit guard), so a misconfigured deploy can
+// never silently drop the platform's cut: fail closed and refuse to start until it is set.
 if (process.env.NODE_ENV === 'production' && !process.env.PLATFORM_ACCOUNT_ID) {
-  log.error('revenue_warning_no_platform_account', {
-    message: 'PLATFORM_ACCOUNT_ID is unset — platform commission/fees will fall back to the approving admin\'s personal wallet instead of a single house account. Set PLATFORM_ACCOUNT_ID to the house account user id.',
+  log.error('revenue_fatal_no_platform_account', {
+    message: 'PLATFORM_ACCOUNT_ID is unset in production — refusing to start. Set it to the house account user id so platform commission/fees are always booked to the house account.',
   })
+  process.exit(1)
 }
 
 // Port: honor an explicit API_PORT, else the host-injected PORT (Render/Cloud Run/etc.), else dev default.

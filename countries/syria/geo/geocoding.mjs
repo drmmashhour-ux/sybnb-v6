@@ -66,11 +66,24 @@ export function haversineKm(a, b) {
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h))
 }
 
+// SR fare model (owner decision 2026-10-09): base + per-km + per-minute, floored at a per-category
+// minimum fare — the standard Uber/Careem/Bolt shape (time + distance + a floor), not distance-only.
+// Five categories, matching how regional apps tier by vehicle class: a budget motorbike tier (common
+// across MENA, e.g. Careem bikes), Economy, Comfort, SUV, and a Van/XL for groups. All SYP minor.
 const CATEGORY_RATES = {
-  'SR Economy': { baseMinor: 8000, perKmMinor: 900 },
-  'SR Comfort': { baseMinor: 12000, perKmMinor: 1300 },
-  'SR SUV': { baseMinor: 18000, perKmMinor: 1800 },
+  'SR Bike':    { baseMinor: 4000,  perKmMinor: 500,  perMinMinor: 100, minFareMinor: 6000 },
+  'SR Economy': { baseMinor: 8000,  perKmMinor: 900,  perMinMinor: 150, minFareMinor: 12000 },
+  'SR Comfort': { baseMinor: 12000, perKmMinor: 1300, perMinMinor: 200, minFareMinor: 18000 },
+  'SR SUV':     { baseMinor: 18000, perKmMinor: 1800, perMinMinor: 300, minFareMinor: 28000 },
+  'SR Van':     { baseMinor: 20000, perKmMinor: 2000, perMinMinor: 350, minFareMinor: 32000 },
 }
+
+// Average city speed used to estimate trip minutes from distance for the per-minute component (the
+// quote is pre-trip, so actual minutes aren't known yet). Env-tunable; the server re-quotes the real route.
+const SR_AVG_SPEED_KMH = (() => {
+  const raw = Number(process.env.SR_AVG_SPEED_KMH)
+  return Number.isFinite(raw) && raw > 0 ? raw : 28
+})()
 
 // Live-tracking surcharge for riders who opt out of low-data mode, mirroring the previous flat-fare model.
 const LIVE_TRACKING_SURCHARGE_MINOR = 2500
@@ -131,12 +144,23 @@ export function quoteSrRide({
     estimated = false
   }
 
-  const rawFareMinor = rates.baseMinor + rates.perKmMinor * distanceKm + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_MINOR)
-  const fareMinor = Math.round(rawFareMinor / 500) * 500
+  // Per-minute (time) component: the quote is pre-trip, so estimate minutes from distance at the
+  // city average speed. per-km + per-min together is the standard time-and-distance model.
+  const estimatedMinutes = Math.max(1, Math.round((distanceKm / SR_AVG_SPEED_KMH) * 60))
+  const perMinMinor = rates.perMinMinor || 0
+  const minFareMinor = rates.minFareMinor || 0
+  const computedMinor = rates.baseMinor
+    + rates.perKmMinor * distanceKm
+    + perMinMinor * estimatedMinutes
+    + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_MINOR)
+  // Floor at the category minimum fare so very short/slow trips are never underpriced.
+  const flooredMinor = Math.max(minFareMinor, computedMinor)
+  const fareMinor = Math.round(flooredMinor / 500) * 500
 
   return {
     fareMinor,
     distanceKm: Math.round(distanceKm * 10) / 10,
+    estimatedMinutes,
     estimated,
     pickupCoords,
     dropoffCoords,

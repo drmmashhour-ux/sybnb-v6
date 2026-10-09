@@ -307,19 +307,23 @@ const copy = {
   },
 }
 
-const categories = ['SR Economy', 'SR Comfort', 'SR SUV']
+const categories = ['SR Bike', 'SR Economy', 'SR Comfort', 'SR SUV', 'SR Van']
 
 const rideCategoryByFilter: Record<string, string> = {
+  bike: 'SR Bike',
   economy: 'SR Economy',
   comfort: 'SR Comfort',
   familyVan: 'SR SUV',
+  van: 'SR Van',
 }
 
 // Reverse of the above: keep the category strip and the filter-panel category selection in sync.
 const filterKeyByCategory: Record<string, string> = {
+  'SR Bike': 'bike',
   'SR Economy': 'economy',
   'SR Comfort': 'comfort',
   'SR SUV': 'familyVan',
+  'SR Van': 'van',
 }
 
 export function SrRidePage({ lang }: Props) {

@@ -124,6 +124,11 @@ function isAirportPoint(coords) {
 }
 
 // Average city speed to estimate trip minutes from distance (quote is pre-trip). Env-tunable.
+// Fare rounding step (USD). Fares round UP to the nearest multiple of this, so prices land on clean
+// numbers (e.g. 5, 10, 15, 20) instead of odd figures -- easier for a cash market. Env
+// SR_FARE_ROUNDING_USD (1..50), default 5. Set to 1 for fine per-dollar steps.
+const SR_FARE_ROUNDING_USD = srEnvNum('SR_FARE_ROUNDING_USD', 5, 1, 50)
+
 const SR_AVG_SPEED_KMH = srEnvNum('SR_AVG_SPEED_KMH', 28, 1, 200)
 
 // Live-tracking surcharge (USD) for riders who opt out of low-data mode.
@@ -208,8 +213,9 @@ export function quoteSrRide({
   const surgeMultiplier = Math.round(peakMultiplier * fuelMultiplier * demandMultiplier * 1000) / 1000
   const variedUsd = baseFareUsd * fuelMultiplier * peakMultiplier * demandMultiplier
 
-  // The platform renders money in whole currency units, so round to the nearest whole USD (min $1).
-  const fareMinor = Math.max(1, Math.round(variedUsd))
+  // Round the charged fare UP to the nearest SR_FARE_ROUNDING_USD step (owner decision: never round a
+  // fare down; land on clean numbers like 5/10/15/20). The step is also the effective minimum fare.
+  const fareMinor = Math.ceil(variedUsd / SR_FARE_ROUNDING_USD) * SR_FARE_ROUNDING_USD
 
   return {
     fareMinor,
@@ -217,7 +223,7 @@ export function quoteSrRide({
     distanceKm: Math.round(distanceKm * 10) / 10,
     estimatedMinutes,
     estimated,
-    baseFareMinor: Math.round(baseFareUsd),
+    baseFareMinor: Math.ceil(baseFareUsd),
     airportSurcharge: airportSurchargeUsd,
     airportTrip,
     fuelSurchargePercent: SR_FUEL_SURCHARGE_PERCENT,

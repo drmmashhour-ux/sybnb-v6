@@ -16,6 +16,7 @@ const LIVE_TRACKING_SURCHARGE_USD = 0.2
 const DEFAULT_DISTANCE_KM = 5
 const SR_AVG_SPEED_KMH = 28
 const SR_PEAK_SURGE_MULTIPLIER = 1.25
+const SR_FARE_ROUNDING_USD = 5 // mirror of server default; fares round up to the nearest $5
 const SYRIA_UTC_OFFSET_HOURS = 3
 
 // Mirror of the server peak-hour window (fixed UTC+3; peaks 07:00-09:59 and 16:00-19:59 local).
@@ -30,5 +31,5 @@ export function srFallbackFareMinor(category: string, lowDataMode: boolean): num
   const base = rates.baseUsd + rates.perKmUsd * DEFAULT_DISTANCE_KM + rates.perMinUsd * estMinutes + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_USD)
   const floored = Math.max(rates.minFareUsd, base)
   const varied = floored * (srIsPeakHour() ? SR_PEAK_SURGE_MULTIPLIER : 1)
-  return Math.max(1, Math.round(varied))
+  return Math.ceil(varied / SR_FARE_ROUNDING_USD) * SR_FARE_ROUNDING_USD
 }

@@ -309,7 +309,11 @@ export async function handleAdmin(req, res, url, context) {
               guest: payment.booking.guest?.displayName || null,
             }
           : null,
-        amountMatchesBooking: payment.booking ? payment.amountMinor === payment.booking.amountMinor : null,
+        // The payment amount is the full guest total (base rent + taxes + fees + any cancellation-
+        // protection add-on), so it is NORMALLY HIGHER than the booking's base amount. Give the model
+        // this context explicitly so a legitimate fee margin is not mistaken for a mismatch.
+        amountNote: 'payment.amount is the full guest total (base rent + taxes + fees + add-ons); booking.amount is the base rent, so the payment is normally higher than the booking amount. Treat a payment above the booking base by a plausible fee margin as expected, NOT a discrepancy. Only a payment that is LOWER than the booking base, or far above it, is a real concern.',
+        paymentMinusBookingBaseMinor: payment.booking ? payment.amountMinor - payment.booking.amountMinor : null,
       }
     } else {
       const booking = await db().booking.findUnique({

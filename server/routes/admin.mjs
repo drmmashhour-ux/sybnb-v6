@@ -19,6 +19,9 @@ import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 // Owner decision 2026-10-09: AI pre-check shown to the reviewer + activation code at the END
 // (issued automatically when an admin approves an unverified host's stay).
 import { reviewListingNow, scheduleAiListingReview, serializeAiReview } from '../lib/ai-listing-review-runner.mjs'
+// Advisory-only AI decision assistant for the review desk (disputes + manual payments). Reuses the
+// same Anthropic plumbing / key gating as the listing review; never moves money or changes state.
+import { runAdminAiAssist, ADMIN_ASSIST_KINDS } from '../lib/ai-admin-assist.mjs'
 import { approvalActivationDecision, issueHostActivationCodeTx } from '../lib/host-activation-issue.mjs'
 import { isRateLimited } from '../lib/rateLimit.mjs'
 
@@ -156,6 +159,206 @@ export async function handleAdmin(req, res, url, context) {
         hostBookingsCount: bookingsAsHost.length,
       },
     })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Transactions & money-flow explorer (read-only). A platform-wide, filterable
+  // browser over the wallet ledger — every CREDIT/DEBIT/HOLD/RELEASE/REFUND with
+  // the account it belongs to and what it references. Pure read; no money moves.
+  if (url.pathname === '/api/admin/ledger') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+
+    const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '50', 10) || 50, 1), 200)
+    const offset = Math.max(parseInt(url.searchParams.get('offset') || '0', 10) || 0, 0)
+    const typeParam = String(url.searchParams.get('type') || '').toUpperCase()
+    const refType = String(url.searchParams.get('referenceType') || '').trim()
+    const q = String(url.searchParams.get('q') || '').trim()
+
+    const VALID_ENTRY_TYPES = new Set(['CREDIT', 'DEBIT', 'HOLD', 'RELEASE', 'REFUND'])
+    const where = {}
+    if (typeParam && VALID_ENTRY_TYPES.has(typeParam)) where.type = typeParam
+    if (refType) where.referenceType = refType
+    if (q) {
+      where.OR = [
+        { referenceId: { contains: q } },
+        { note: { contains: q, mode: 'insensitive' } },
+        { wallet: { user: { email: { contains: q.toLowerCase() } } } },
+        { wallet: { user: { displayName: { contains: q, mode: 'insensitive' } } } },
+      ]
+    }
+
+    const [rows, grouped, total] = await Promise.all([
+      db().walletEntry.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit + 1,
+        select: {
+          id: true, type: true, amountMinor: true, currency: true, referenceType: true, referenceId: true, note: true, createdAt: true,
+          wallet: { select: { user: { select: { id: true, displayName: true, email: true } } } },
+        },
+      }),
+      db().walletEntry.groupBy({ by: ['type'], where, _sum: { amountMinor: true } }),
+      db().walletEntry.count({ where }),
+    ])
+
+    const hasMore = rows.length > limit
+    const entries = (hasMore ? rows.slice(0, limit) : rows).map((r) => ({
+      id: r.id,
+      type: r.type,
+      amountMinor: r.amountMinor,
+      currency: r.currency,
+      referenceType: r.referenceType,
+      referenceId: r.referenceId,
+      note: r.note,
+      createdAt: r.createdAt,
+      user: r.wallet?.user ? { id: r.wallet.user.id, displayName: r.wallet.user.displayName, email: r.wallet.user.email } : null,
+    }))
+
+    const sumFor = (type) => grouped.find((g) => g.type === type)?._sum.amountMinor || 0
+    const creditMinor = sumFor('CREDIT')
+    const debitMinor = sumFor('DEBIT')
+    const holdMinor = sumFor('HOLD')
+    const releaseMinor = sumFor('RELEASE')
+    const refundMinor = sumFor('REFUND')
+
+    return json(res, 200, {
+      ok: true,
+      entries,
+      summary: {
+        creditMinor,
+        debitMinor,
+        holdMinor,
+        releaseMinor,
+        refundMinor,
+        // Money genuinely added to wallets minus money genuinely taken out, across the filtered set.
+        netMinor: creditMinor + releaseMinor - debitMinor,
+        count: total,
+      },
+      page: { limit, offset, hasMore },
+    })
+  }
+
+  // ---------------------------------------------------------------------------
+  // AI decision assistant (advisory only). The admin asks for a recommendation on
+  // a specific manual payment proof or a disputed booking; we gather the same facts
+  // the admin is already looking at, ask Claude for a structured recommendation, and
+  // return it. This NEVER moves money or changes any state — the real approve/reject/
+  // hold still goes through the existing Class-A endpoints. With no ANTHROPIC_API_KEY
+  // it returns { configured:false } and the UI shows nothing.
+  if (url.pathname === '/api/admin/ai-assist') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+
+    const body = await readJson(req)
+    const kind = String(body.kind || '').toLowerCase()
+    const entityId = String(body.entityId || '').trim()
+    if (!ADMIN_ASSIST_KINDS.includes(kind) || !entityId) {
+      const error = new Error('kind must be "payment" or "dispute" and entityId is required.')
+      error.statusCode = 400
+      error.code = 'AI_ASSIST_BAD_REQUEST'
+      error.expose = true
+      throw error
+    }
+
+    let facts
+    if (kind === 'payment') {
+      const payment = await db().paymentProof.findUnique({
+        where: { id: entityId },
+        select: {
+          id: true, provider: true, status: true, amountMinor: true, currency: true,
+          proofAssetUrl: true, providerRef: true, planCode: true, adminNote: true, createdAt: true, reviewedAt: true,
+          booking: {
+            select: {
+              id: true, status: true, amountMinor: true, currency: true, checkIn: true, checkOut: true,
+              listing: { select: { titleAr: true, titleEn: true, division: true, status: true } },
+              guest: { select: { displayName: true } },
+            },
+          },
+        },
+      })
+      if (!payment) {
+        const error = new Error('Payment proof not found.')
+        error.statusCode = 404
+        error.code = 'PAYMENT_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      facts = {
+        payment: {
+          provider: payment.provider,
+          status: payment.status,
+          amount: `${(payment.amountMinor / 100).toFixed(2)} ${payment.currency}`,
+          hasProofDocument: Boolean(payment.proofAssetUrl),
+          hasProviderReference: Boolean(payment.providerRef),
+          planCode: payment.planCode || null,
+          adminNote: payment.adminNote || null,
+          submittedAt: payment.createdAt,
+          alreadyReviewedAt: payment.reviewedAt || null,
+        },
+        booking: payment.booking
+          ? {
+              status: payment.booking.status,
+              amount: `${(payment.booking.amountMinor / 100).toFixed(2)} ${payment.booking.currency}`,
+              checkIn: payment.booking.checkIn,
+              checkOut: payment.booking.checkOut,
+              listingTitle: payment.booking.listing?.titleEn || payment.booking.listing?.titleAr || null,
+              listingDivision: payment.booking.listing?.division || null,
+              listingStatus: payment.booking.listing?.status || null,
+              guest: payment.booking.guest?.displayName || null,
+            }
+          : null,
+        amountMatchesBooking: payment.booking ? payment.amountMinor === payment.booking.amountMinor : null,
+      }
+    } else {
+      const booking = await db().booking.findUnique({
+        where: { id: entityId },
+        select: {
+          id: true, status: true, amountMinor: true, currency: true, checkIn: true, checkOut: true,
+          guestCheckedInAt: true, guestCheckedOutAt: true, createdAt: true,
+          listing: { select: { titleAr: true, titleEn: true, division: true, status: true, owner: { select: { displayName: true } } } },
+          guest: { select: { displayName: true } },
+          payments: { select: { provider: true, status: true, amountMinor: true, currency: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 10 },
+        },
+      })
+      if (!booking) {
+        const error = new Error('Booking not found.')
+        error.statusCode = 404
+        error.code = 'BOOKING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      facts = {
+        booking: {
+          status: booking.status,
+          amount: `${(booking.amountMinor / 100).toFixed(2)} ${booking.currency}`,
+          checkIn: booking.checkIn,
+          checkOut: booking.checkOut,
+          guestCheckedInAt: booking.guestCheckedInAt,
+          guestCheckedOutAt: booking.guestCheckedOutAt,
+          createdAt: booking.createdAt,
+          listingTitle: booking.listing?.titleEn || booking.listing?.titleAr || null,
+          listingDivision: booking.listing?.division || null,
+          host: booking.listing?.owner?.displayName || null,
+          guest: booking.guest?.displayName || null,
+        },
+        payments: booking.payments.map((p) => ({
+          provider: p.provider,
+          status: p.status,
+          amount: `${(p.amountMinor / 100).toFixed(2)} ${p.currency}`,
+          submittedAt: p.createdAt,
+        })),
+      }
+    }
+
+    const result = await runAdminAiAssist({ kind, facts })
+
+    await db().adminAuditLog.create({
+      data: { actorUserId: context.user.id, action: 'ADMIN_AI_ASSIST', entityType: kind === 'payment' ? 'payment_proofs' : 'bookings', entityId, before: null, after: null },
+    })
+
+    return json(res, 200, { ok: true, ...result })
   }
 
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)

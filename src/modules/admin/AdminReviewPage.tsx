@@ -29,6 +29,7 @@ import {
   type PlatformWalletGift,
 } from '../../shared/api/platformApi'
 import { BrandLogo } from '../../shared/brand'
+import { AdminAiAssistButton } from './AdminAiAssistButton'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, providerText, statusText } from '../../shared/i18n/display'
 
 type Props = {
@@ -680,6 +681,9 @@ function ShortRentAdminCommandDashboard({
         <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/customers')}>
           {pick(lang, 'ملف العميل الشامل', 'Customer 360', 'Client 360')}
         </button>
+        <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/money-flow')}>
+          {pick(lang, 'حركة الأموال', 'Money flow', 'Flux financier')}
+        </button>
       </nav>
 
       <section style={commandStyles.departmentGroups} aria-label={isAr ? 'أقسام الإدارة' : 'Admin departments'}>
@@ -886,6 +890,7 @@ function ShortRentAdminCommandDashboard({
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
+                  <AdminAiAssistButton kind="payment" entityId={payment.id} lang={lang} />
                 </div>
               </article>
             ))}
@@ -1140,6 +1145,7 @@ function ShortRentAdminCommandDashboard({
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
+                  <AdminAiAssistButton kind="payment" entityId={payment.id} lang={lang} />
                 </div>
               </article>
             ))}
@@ -1570,6 +1576,7 @@ function AdminBookingLine({
         {!disabled && <button style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); onApprove() }}>{isAr ? 'تأكيد' : 'Confirm'}</button>}
         {!disabled && <button style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); onReject() }}>{isAr ? 'رفض' : 'Reject'}</button>}
         <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); window.location.hash = `/booking/${booking.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
+        <AdminAiAssistButton kind="dispute" entityId={booking.id} lang={lang} />
       </div>
     </article>
   )

@@ -1700,6 +1700,71 @@ export async function fetchAdminUserOverview(userId: string) {
   return overview as PlatformAdminUserOverview
 }
 
+export type PlatformLedgerEntry = {
+  id: string
+  type: string
+  amountMinor: number
+  currency: string
+  referenceType: string
+  referenceId: string
+  note: string | null
+  createdAt: string
+  user: { id: string; displayName: string; email: string | null } | null
+}
+export type PlatformLedgerResult = {
+  entries: PlatformLedgerEntry[]
+  summary: {
+    creditMinor: number
+    debitMinor: number
+    holdMinor: number
+    releaseMinor: number
+    refundMinor: number
+    netMinor: number
+    count: number
+  }
+  page: { limit: number; offset: number; hasMore: boolean }
+}
+
+export async function fetchAdminLedger(params: { limit?: number; offset?: number; type?: string; referenceType?: string; q?: string } = {}) {
+  const search = new URLSearchParams()
+  if (params.limit != null) search.set('limit', String(params.limit))
+  if (params.offset != null) search.set('offset', String(params.offset))
+  if (params.type) search.set('type', params.type)
+  if (params.referenceType) search.set('referenceType', params.referenceType)
+  if (params.q) search.set('q', params.q)
+  const qs = search.toString()
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true } & PlatformLedgerResult>(
+    `/api/admin/ledger${qs ? `?${qs}` : ''}`,
+    { token },
+  ))
+  const { ok: _ok, ...result } = response
+  return result as PlatformLedgerResult
+}
+
+export type PlatformAiAssistRecommendation = {
+  recommendation: 'APPROVE' | 'REJECT' | 'HOLD' | 'NEEDS_INFO'
+  confidence: 'low' | 'medium' | 'high'
+  summary: string
+  reasons: string[]
+  nextSteps: string[]
+}
+export type PlatformAiAssistResult = {
+  configured: boolean
+  model: string
+  ok?: boolean
+  error?: string
+  recommendation?: PlatformAiAssistRecommendation
+}
+
+export async function requestAdminAiAssist(kind: 'payment' | 'dispute', entityId: string) {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true } & PlatformAiAssistResult>(
+    `/api/admin/ai-assist`,
+    { method: 'POST', token, body: { kind, entityId } },
+  ))
+  const { ok: _ok, ...result } = response
+  return result as PlatformAiAssistResult
+}
+
 export async function uploadIdDocumentForUser(userId: string, file: File) {
   const fileBase64 = await readFileAsBase64(file)
   const response = await runAdminRequest((token) => apiRequest<{ ok: true; user: PlatformIdDocumentReview }>(

@@ -6,8 +6,10 @@ import {
   lookupAdminUser,
   fetchAdminUserOverview,
   getStoredStaffSession,
+  adminAiLoyaltyReview,
   type PlatformAdminUserOverview,
   type PlatformAdminOverviewBooking,
+  type AdminLoyaltyAiResult,
 } from '../../shared/api/platformApi'
 
 type Props = { lang: Lang }
@@ -48,6 +50,20 @@ export function AdminCustomerPage({ lang }: Props) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(initialId ? 'loading' : 'idle')
   const [message, setMessage] = useState('')
   const [data, setData] = useState<PlatformAdminUserOverview | null>(null)
+  const [aiLoyalty, setAiLoyalty] = useState<AdminLoyaltyAiResult | null>(null)
+  const [aiLoyaltyBusy, setAiLoyaltyBusy] = useState(false)
+
+  async function runLoyaltyAi(userId: string) {
+    setAiLoyaltyBusy(true)
+    setAiLoyalty(null)
+    try {
+      setAiLoyalty(await adminAiLoyaltyReview(userId))
+    } catch (error) {
+      setAiLoyalty({ ok: true, configured: true, aiFailed: true, error: error instanceof Error ? error.message : 'failed' })
+    } finally {
+      setAiLoyaltyBusy(false)
+    }
+  }
 
   const t = {
     title: pick(lang, 'ملف العميل الشامل', 'Customer 360', 'Client 360'),
@@ -168,6 +184,41 @@ export function AdminCustomerPage({ lang }: Props) {
               </div>
             </div>
             <div style={{ color: T.dim, fontSize: 12 }}>{t.member} {fmtDate(data.user.createdAt)}</div>
+          </section>
+
+          <section style={styles.section}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 15 }}>🤖 {pick(lang, 'مدير الولاء الذكي', 'AI loyalty manager', 'Gestionnaire IA de fidélité')}</h3>
+                <small style={{ color: T.dim }}>{pick(lang, 'يراجع نشاط العضو ويمنح مكافأة نقاط ضمن حدود آمنة.', 'Reviews the member and grants a bonus within safe caps.', 'Examine le membre et accorde un bonus plafonné.')}</small>
+              </div>
+              <button style={styles.blueBtn} disabled={aiLoyaltyBusy} onClick={() => void runLoyaltyAi(data.user.id)}>
+                {aiLoyaltyBusy ? pick(lang, 'جارٍ…', 'Running…', 'En cours…') : pick(lang, 'شغّل المدير الذكي', 'Run AI manager', 'Lancer')}
+              </button>
+            </div>
+            {aiLoyalty && (
+              <div style={{ border: `1px solid ${T.line}`, borderRadius: 12, padding: 12, background: '#070b16', display: 'grid', gap: 6, fontSize: 13 }}>
+                {aiLoyalty.configured === false ? (
+                  <span style={{ color: T.dim }}>{pick(lang, 'الذكاء الاصطناعي غير مُفعّل (لا يوجد مفتاح).', 'AI is not configured (no API key).', 'IA non configurée.')}</span>
+                ) : aiLoyalty.aiFailed ? (
+                  <span style={{ color: '#ff8f8f' }}>{pick(lang, 'تعذّر تشغيل الذكاء الاصطناعي.', 'AI run failed.', 'Échec IA.')} {aiLoyalty.error}</span>
+                ) : (
+                  <>
+                    <div><b style={{ color: T.blue2 }}>{aiLoyalty.decision?.action}</b> · {pick(lang, 'ثقة', 'confidence', 'confiance')}: {aiLoyalty.decision?.confidence}</div>
+                    {typeof aiLoyalty.applied?.awarded === 'number' && aiLoyalty.applied.awarded > 0 && (
+                      <div style={{ color: T.green, fontWeight: 800 }}>+{aiLoyalty.applied.awarded} {pick(lang, 'نقطة مُنحت', 'points granted', 'points accordés')}</div>
+                    )}
+                    {aiLoyalty.decision?.summary && <div style={{ color: T.muted }}>{aiLoyalty.decision.summary}</div>}
+                    {aiLoyalty.decision?.flags && aiLoyalty.decision.flags.length > 0 && (
+                      <div style={{ color: '#ffb067' }}>⚑ {aiLoyalty.decision.flags.join('; ')}</div>
+                    )}
+                    {aiLoyalty.loyalty && (
+                      <div style={{ color: T.dim }}>{pick(lang, 'الرصيد', 'Balance', 'Solde')}: {aiLoyalty.loyalty.pointsBalance} · {aiLoyalty.loyalty.tier}</div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </section>
 
           <section style={styles.statsRow}>

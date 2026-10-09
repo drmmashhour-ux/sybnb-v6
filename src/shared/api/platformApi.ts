@@ -1657,6 +1657,103 @@ export async function fetchIdDocumentBlobUrl(userId: string) {
   return URL.createObjectURL(blob)
 }
 
+// --- Profile + loyalty -------------------------------------------------------------------------
+export type LoyaltyTierName = 'BRONZE' | 'SILVER' | 'GOLD' | 'PLATINUM'
+export type LoyaltySummaryData = {
+  pointsBalance: number
+  lifetimePoints: number
+  tier: LoyaltyTierName
+  multiplier: number
+  nextTier: { tier: LoyaltyTierName; pointsToGo: number } | null
+  redeemableMinor: number
+  config: {
+    tiers: { tier: LoyaltyTierName; min: number; multiplier: number }[]
+    redeem: { pointsPerUnit: number; minorPerUnit: number; currency: string; minPoints: number; stepPoints: number }
+    earn: { divisor: Record<string, number> }
+  }
+  recent: { id: string; type: string; points: number; reason: string | null; createdAt: string }[]
+}
+export type MyProfileData = {
+  id: string
+  email: string | null
+  displayName: string
+  hasAvatar: boolean
+  locale: string
+  memberSince: string
+  isVerifiedHost: boolean
+}
+
+// Profile/loyalty endpoints accept any signed-in account; use whichever session token is present.
+function anyUserToken(): string | null {
+  return (
+    getStoredGuestSession()?.token ||
+    getStoredStaffSession('HOST')?.token ||
+    getStoredStaffSession('SELLER')?.token ||
+    getStoredStaffSession('ADMIN')?.token ||
+    null
+  )
+}
+
+export async function fetchMyProfile() {
+  const token = anyUserToken()
+  if (!token) throw new Error('Not signed in')
+  const r = await apiRequest<{ ok: true; profile: MyProfileData; loyalty: LoyaltySummaryData }>('/api/me/profile', { token })
+  return { profile: r.profile, loyalty: r.loyalty }
+}
+
+export async function updateMyDisplayName(displayName: string) {
+  const token = anyUserToken()
+  if (!token) throw new Error('Not signed in')
+  await apiRequest<{ ok: true }>('/api/me/profile', { method: 'PATCH', token, body: { displayName } })
+}
+
+export async function uploadMyAvatar(file: File) {
+  const token = anyUserToken()
+  if (!token) throw new Error('Not signed in')
+  const fileBase64 = await readFileAsBase64(file)
+  await apiRequest<{ ok: true }>('/api/me/avatar', { method: 'PATCH', token, body: { fileBase64, mimeType: file.type } })
+}
+
+export async function fetchMyAvatarBlobUrl() {
+  const token = anyUserToken()
+  if (!token) throw new Error('Not signed in')
+  const response = await fetch(`${API_BASE_URL}/api/me/avatar/file`, { headers: { authorization: `Bearer ${token}` } })
+  if (!response.ok) throw new Error('no avatar')
+  return URL.createObjectURL(await response.blob())
+}
+
+export async function fetchMyLoyalty() {
+  const token = anyUserToken()
+  if (!token) throw new Error('Not signed in')
+  const r = await apiRequest<{ ok: true; loyalty: LoyaltySummaryData }>('/api/me/loyalty', { token })
+  return r.loyalty
+}
+
+export async function redeemLoyaltyPoints(points: number) {
+  const token = anyUserToken()
+  if (!token) throw new Error('Not signed in')
+  return apiRequest<{ ok: true; redeemed: { points: number; creditMinor: number; currency: string }; loyalty: LoyaltySummaryData }>(
+    '/api/me/loyalty/redeem',
+    { method: 'POST', token, body: { points } },
+  )
+}
+
+export type AdminLoyaltyAiResult = {
+  ok: true
+  configured: boolean
+  aiFailed?: boolean
+  error?: string
+  model?: string
+  decision?: { action: string; bonusPoints: number; suggestTier: string | null; confidence: string; flags: string[]; summary: string }
+  applied?: { awarded: number; action: string; flags: string[]; summary: string; capPerReview: number; capPerDay: number }
+  loyalty?: LoyaltySummaryData
+}
+export async function adminAiLoyaltyReview(userId: string) {
+  return runAdminRequest((token) =>
+    apiRequest<AdminLoyaltyAiResult>('/api/admin/loyalty/ai-review', { method: 'POST', token, body: { userId } }),
+  )
+}
+
 async function runAdminRequest<T>(request: (token: string) => Promise<T>) {
   const session = await ensurePrototypeAdminSession()
 

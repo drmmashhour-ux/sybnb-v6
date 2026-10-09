@@ -28,6 +28,7 @@ const HostJoinPage = lazyNamed(() => import('../modules/account/HostJoinPage'), 
 const AdminHostsPage = lazyNamed(() => import('../modules/admin/AdminHostsPage'), 'AdminHostsPage')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
 const HostProfilePage = lazyNamed(() => import('../modules/host/HostProfilePage'), 'HostProfilePage')
+const ProfilePage = lazyNamed(() => import('../modules/profile/ProfilePage'), 'ProfilePage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
 const HostPayoutsPage = lazyNamed(() => import('../modules/host/HostPayoutsPage'), 'HostPayoutsPage')
 const AdminMoneyPage = lazyNamed(() => import('../modules/admin/AdminMoneyPage'), 'AdminMoneyPage')
@@ -147,8 +148,8 @@ export function App() {
   // talks to the server.
   const giftClaimRoute = path === '/wallet/gift/claim' || /^\/wallet\/gift\/claim\/[^/]+$/.test(path)
     || path === '/wallet/gift/code' || /^\/wallet\/gift\/code\/[^/]+$/.test(path)
-  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
-  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/wallet' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch ? 'generic' : 'stays'
+  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/profile' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
+  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/profile' || path === '/wallet' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch ? 'generic' : 'stays'
   const hasGuestSession = typeof window !== 'undefined' && Boolean(authStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
@@ -207,6 +208,8 @@ export function App() {
           <DashboardPage lang={lang} />
         ) : path === '/host/profile' ? (
           <HostProfilePage lang={lang} />
+        ) : path === '/profile' ? (
+          <ProfilePage lang={lang} />
         ) : path === '/host' ||
           path === '/host/seller' ||
           path === '/host/stays' ||

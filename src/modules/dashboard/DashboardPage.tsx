@@ -355,6 +355,10 @@ export function DashboardPage({ lang }: Props) {
               <span>{t.trustScore}</span>
               <small>{pick(lang, 'مركز الثقة', 'Trust Center', 'Centre de confiance')}</small>
             </button>
+            <button style={styles.trustTile} onClick={() => (window.location.hash = '/profile')}>
+              <span>★</span>
+              <small>{pick(lang, 'ملفي ونقاط الولاء', 'Profile & rewards', 'Profil & fidélité')}</small>
+            </button>
           </section>
         </div>
       </section>

@@ -22,6 +22,8 @@ import { reviewListingNow, scheduleAiListingReview, serializeAiReview } from '..
 // Advisory-only AI decision assistant for the review desk (disputes + manual payments). Reuses the
 // same Anthropic plumbing / key gating as the listing review; never moves money or changes state.
 import { runAdminAiAssist, ADMIN_ASSIST_KINDS } from '../lib/ai-admin-assist.mjs'
+import { runLoyaltyManager } from '../lib/ai-loyalty-manager.mjs'
+import { applyAiLoyaltyDecision, loyaltySummary, AI_BONUS_CAP_PER_REVIEW, AI_BONUS_CAP_PER_DAY } from '../lib/loyalty.mjs'
 import { approvalActivationDecision, issueHostActivationCodeTx } from '../lib/host-activation-issue.mjs'
 import { isRateLimited } from '../lib/rateLimit.mjs'
 
@@ -382,6 +384,77 @@ export async function handleAdmin(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, ...result })
+  }
+
+  // AI loyalty manager — the AI runs the loyalty program for one member: it reviews their activity and
+  // AUTONOMOUSLY grants a bonus (clamped to the deterministic per-review and per-day caps in
+  // loyalty.mjs) and/or flags abuse. The conversion rate and caps are fixed in code, so the AI cannot
+  // mint unlimited value. Every run is audited; an admin can later adjust via the ledger.
+  if (url.pathname === '/api/admin/loyalty/ai-review') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const userId = String(body.userId || '').trim()
+    if (!userId) {
+      const error = new Error('userId is required.')
+      error.statusCode = 400
+      error.code = 'LOYALTY_AI_BAD_REQUEST'
+      error.expose = true
+      throw error
+    }
+    const member = await db().user.findUnique({
+      where: { id: userId },
+      select: { id: true, displayName: true, createdAt: true, hostVerifiedAt: true },
+    })
+    if (!member) {
+      const error = new Error('Member not found.')
+      error.statusCode = 404
+      error.code = 'USER_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // Facts the AI reasons over — booking history + current loyalty standing. No invented data.
+    const [bookingsAsGuest, grouped, completedAsHost, summaryBefore] = await Promise.all([
+      db().booking.count({ where: { guestId: userId } }),
+      db().booking.groupBy({ by: ['status'], where: { guestId: userId }, _count: { _all: true } }),
+      db().booking.count({ where: { status: 'COMPLETED', listing: { ownerId: userId } } }),
+      loyaltySummary(userId),
+    ])
+    const countFor = (s) => grouped.find((g) => g.status === s)?._count._all || 0
+    const facts = {
+      member: {
+        displayName: member.displayName,
+        memberSince: member.createdAt,
+        isVerifiedHost: Boolean(member.hostVerifiedAt),
+        tenureDays: Math.floor((Date.now() - new Date(member.createdAt).getTime()) / 86400000),
+      },
+      bookings: {
+        totalAsGuest: bookingsAsGuest,
+        completedAsGuest: countFor('COMPLETED'),
+        cancelledAsGuest: countFor('CANCELLED'),
+        disputedAsGuest: countFor('DISPUTED'),
+        completedAsHost,
+      },
+      loyalty: { tier: summaryBefore.tier, pointsBalance: summaryBefore.pointsBalance, lifetimePoints: summaryBefore.lifetimePoints },
+    }
+    const caps = { perReview: AI_BONUS_CAP_PER_REVIEW, perDay: AI_BONUS_CAP_PER_DAY }
+    const ai = await runLoyaltyManager({ facts, caps })
+    if (!ai.configured) return json(res, 200, { ok: true, configured: false, model: ai.model })
+    if (!ai.ok) return json(res, 200, { ok: true, configured: true, aiFailed: true, error: ai.error, model: ai.model })
+
+    const applied = await db().$transaction((tx) => applyAiLoyaltyDecision(tx, { userId, decision: ai.decision }))
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'ADMIN_AI_LOYALTY',
+        entityType: 'loyalty_accounts',
+        entityId: userId,
+        before: null,
+        after: { action: ai.decision.action, bonusAwarded: applied.awarded, flags: ai.decision.flags, summary: ai.decision.summary, confidence: ai.decision.confidence },
+      },
+    })
+    const loyalty = await loyaltySummary(userId)
+    return json(res, 200, { ok: true, configured: true, decision: ai.decision, applied, loyalty, model: ai.model })
   }
 
   const hideReviewMatch = url.pathname.match(/^\/api\/admin\/reviews\/([^/]+)\/hide$/)

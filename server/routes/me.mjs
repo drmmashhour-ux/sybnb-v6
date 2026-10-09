@@ -5,6 +5,7 @@ import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { bookingExpiresAt } from '../lib/booking-policy.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { bookingPolicySettings, defaultCurrency } from '../lib/country.mjs'
+import { loyaltySummary, redeemPoints } from '../lib/loyalty.mjs'
 // SEC-002R round 3, item 1: the self-service half of finding G1 -- see the id-document handler below.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
@@ -159,6 +160,118 @@ export async function handleMe(req, res, url, context) {
     })
     res.end(buffer)
     return true
+  }
+
+  // --- Profile photo (avatar) --------------------------------------------------------------------
+  // Any signed-in account can set a personal profile photo. Stored like the ID document (object
+  // storage key + mime). Replacing one deletes the previous blob only after the new row is committed.
+  if (url.pathname === '/api/me/avatar') {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const fileBase64 = typeof body.fileBase64 === 'string' ? body.fileBase64 : ''
+    const mimeType = typeof body.mimeType === 'string' ? body.mimeType : ''
+    if (!fileBase64 || !mimeType) {
+      const error = new Error('An image file is required.')
+      error.statusCode = 400
+      error.code = 'AVATAR_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    if (!mimeType.startsWith('image/')) {
+      const error = new Error('Profile photo must be an image.')
+      error.statusCode = 400
+      error.code = 'AVATAR_NOT_IMAGE'
+      error.expose = true
+      throw error
+    }
+    const storageKey = await saveIdDocument(fileBase64, mimeType)
+    let supersededRef = null
+    try {
+      const current = await db().user.findUnique({ where: { id: context.user.id }, select: { avatarRef: true } })
+      supersededRef = current?.avatarRef ?? null
+      await db().user.update({
+        where: { id: context.user.id },
+        data: { avatarRef: storageKey, avatarMimeType: mimeType },
+      })
+    } catch (err) {
+      await deleteIdDocument(storageKey).catch(() => {})
+      throw err
+    }
+    if (supersededRef && supersededRef !== storageKey) await deleteIdDocument(supersededRef).catch(() => {})
+    return json(res, 200, { ok: true, hasAvatar: true })
+  }
+
+  if (url.pathname === '/api/me/avatar/file') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    if (!context.user.avatarRef) {
+      const error = new Error('No profile photo set.')
+      error.statusCode = 404
+      error.code = 'AVATAR_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const buffer = await readIdDocument(context.user.avatarRef)
+    res.writeHead(200, { 'content-type': context.user.avatarMimeType || 'image/jpeg', 'cache-control': 'private, max-age=60' })
+    res.end(buffer)
+    return true
+  }
+
+  // --- Profile + loyalty -------------------------------------------------------------------------
+  if (url.pathname === '/api/me/profile') {
+    if (req.method === 'GET') {
+      requireAuth(context)
+      const user = await db().user.findUnique({
+        where: { id: context.user.id },
+        select: { id: true, email: true, displayName: true, avatarRef: true, locale: true, createdAt: true, hostVerifiedAt: true },
+      })
+      const loyalty = await loyaltySummary(context.user.id)
+      return json(res, 200, {
+        ok: true,
+        profile: {
+          id: user.id,
+          email: user.email,
+          displayName: user.displayName,
+          hasAvatar: Boolean(user.avatarRef),
+          locale: user.locale,
+          memberSince: user.createdAt,
+          isVerifiedHost: Boolean(user.hostVerifiedAt),
+        },
+        loyalty,
+      })
+    }
+    if (req.method === 'PATCH') {
+      requireAuth(context)
+      const body = await readJson(req)
+      const displayName = typeof body.displayName === 'string' ? body.displayName.trim().slice(0, 120) : ''
+      if (!displayName) {
+        const error = new Error('Display name is required.')
+        error.statusCode = 400
+        error.code = 'DISPLAY_NAME_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      await db().user.update({ where: { id: context.user.id }, data: { displayName } })
+      return json(res, 200, { ok: true })
+    }
+    return methodNotAllowed(res, ['GET', 'PATCH'])
+  }
+
+  if (url.pathname === '/api/me/loyalty') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    return json(res, 200, { ok: true, loyalty: await loyaltySummary(context.user.id) })
+  }
+
+  if (url.pathname === '/api/me/loyalty/redeem') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const points = Number(body.points)
+    const result = await db().$transaction((tx) => redeemPoints(tx, { userId: context.user.id, points }))
+    const loyalty = await loyaltySummary(context.user.id)
+    return json(res, 200, { ok: true, redeemed: result, loyalty })
   }
 
   // SR Ride vs. Uber gap-closure (P2 #13): saved places (e.g. "Home", "Work") for quick reuse

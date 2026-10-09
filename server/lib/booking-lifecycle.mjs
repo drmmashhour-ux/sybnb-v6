@@ -37,9 +37,27 @@ export async function completeExpiredBookings(where = {}) {
   })
   const completed = await db().booking.findMany({
     where: { id: { in: due.map((b) => b.id) }, status: 'COMPLETED' },
-    select: { id: true },
+    select: { id: true, guestId: true, amountMinor: true, currency: true, listing: { select: { ownerId: true } } },
   })
-  for (const booking of completed) notifyBooking('guest_stay_completed', booking.id)
+  // Loaded dynamically to avoid a static import cycle (loyalty -> finance-ledger -> booking-lifecycle).
+  // Loyalty awarding is idempotent per booking+role, so a re-run of this sweep never double-awards,
+  // and a failure here must never break the read path that piggybacks completion.
+  let awardBookingCompletion = null
+  try {
+    ;({ awardBookingCompletion } = await import('./loyalty.mjs'))
+  } catch (error) {
+    log.warn('loyalty_module_load_failed', { message: error instanceof Error ? error.message : String(error) })
+  }
+  for (const booking of completed) {
+    notifyBooking('guest_stay_completed', booking.id)
+    if (awardBookingCompletion) {
+      try {
+        await db().$transaction((tx) => awardBookingCompletion(tx, booking))
+      } catch (error) {
+        log.warn('loyalty_award_failed', { bookingId: booking.id, message: error instanceof Error ? error.message : String(error) })
+      }
+    }
+  }
   return result.count
 }
 

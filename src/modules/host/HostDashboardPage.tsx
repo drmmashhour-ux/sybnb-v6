@@ -973,6 +973,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           [t.opsSupport, '/operations', '?'],
           [t.clientMessages, '/host/inquiries', '✉'],
           [pick(lang, 'السحب والدفعات', 'Payouts', 'Versements'), '/host/payouts', '⇄'],
+          [pick(lang, 'ملفي ونقاط الولاء', 'Profile & rewards', 'Profil & fidélité'), '/profile', '★'],
         ].map(([label, route, icon]) => (
           <button key={label} style={styles.quickLink} onClick={() => (window.location.hash = String(route))}>
             <strong>{label}</strong>

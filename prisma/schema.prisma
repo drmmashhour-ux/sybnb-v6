@@ -147,6 +147,10 @@ model User {
   idDocumentSubmittedAt DateTime? @map("id_document_submitted_at")
   idDocumentMimeType String? @map("id_document_mime_type")
   idDocumentStatus IdDocumentStatus? @map("id_document_status")
+  // Personal profile photo (migration 051). Stored like the ID document (object storage key + mime);
+  // applies to any account (guest or host) for the profile section.
+  avatarRef String? @map("avatar_ref")
+  avatarMimeType String? @map("avatar_mime_type")
   idDocumentReviewedById String? @map("id_document_reviewed_by_id")
   idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
   // Host verification (migration 049): set when the host redeems an admin-issued activation code.
@@ -189,8 +193,63 @@ model User {
   hostsVerified                User[]          @relation("HostVerifiedBy")
   hostActivationCodes          HostActivationCode[] @relation("HostActivationCodeHost")
   hostActivationCodesIssued    HostActivationCode[] @relation("HostActivationCodeIssuedBy")
+  loyaltyAccount               LoyaltyAccount?
 
   @@map("users")
+}
+
+// Loyalty program (migration 051). Points are earned when a booking completes and can be redeemed
+// for SYBNB wallet credit; tier is derived from lifetime points. Earn rates, tier thresholds and
+// the redemption rate are owned by server/lib/loyalty.mjs (kept out of the schema so they stay
+// country-/config-tunable).
+enum LoyaltyTier {
+  BRONZE
+  SILVER
+  GOLD
+  PLATINUM
+
+  @@map("loyalty_tier")
+}
+
+enum LoyaltyEntryType {
+  EARN
+  REDEEM
+  ADJUST
+
+  @@map("loyalty_entry_type")
+}
+
+model LoyaltyAccount {
+  id             String      @id @default(uuid())
+  userId         String      @unique @map("user_id")
+  pointsBalance  Int         @default(0) @map("points_balance")
+  lifetimePoints Int         @default(0) @map("lifetime_points")
+  tier           LoyaltyTier @default(BRONZE)
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entries LoyaltyEntry[]
+
+  @@map("loyalty_accounts")
+}
+
+model LoyaltyEntry {
+  id            String           @id @default(uuid())
+  accountId     String           @map("account_id")
+  type          LoyaltyEntryType
+  points        Int
+  reason        String?
+  referenceType String           @map("reference_type")
+  referenceId   String           @map("reference_id")
+  idempotencyKey String          @unique @map("idempotency_key")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  account LoyaltyAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+  @@index([referenceType, referenceId])
+  @@map("loyalty_entries")
 }
 
 // SEC-002 server-backed session. One row per issued session token; the token carries this row's id

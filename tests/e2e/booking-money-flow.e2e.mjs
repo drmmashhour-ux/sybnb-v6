@@ -25,6 +25,7 @@
 import { randomUUID } from 'node:crypto'
 import { createSessionToken } from './_session.mjs'
 import { db, disconnectDb } from '../../server/lib/prisma.mjs'
+import { signWebhook } from '../../server/lib/payment-webhook.mjs'
 
 const API = process.env.API_BASE || 'http://127.0.0.1:3051'
 const RUN = randomUUID().slice(0, 8)
@@ -180,7 +181,7 @@ async function main() {
   const refund = await db().refund.findFirst({ where: { paymentProofId: proofId } })
   check('refund request created for exactly the HALF amount', refund?.amountMinor === expectedRefund, refund)
   const snapshot = (await db().booking.findUnique({ where: { id: booking.id } })).metadata?.cancellation
-  check('booking.metadata.cancellation snapshot records the rule', snapshot?.rule === 'HALF' && snapshot?.refundMinor === expectedRefund && snapshot?.cancelledBy === 'GUEST', snapshot)
+  check('booking.metadata.cancellation snapshot records the rule and the exact approved proof', snapshot?.rule === 'HALF' && snapshot?.refundMinor === expectedRefund && snapshot?.cancelledBy === 'GUEST' && snapshot?.approvedProofId === proofId, snapshot)
   const cancelAgain = await call('PATCH', `/api/bookings/${booking.id}/cancel`, guest.token, {})
   check('cancelling again -> 400 BOOKING_NOT_CANCELLABLE', cancelAgain.status === 400 && code(cancelAgain) === 'BOOKING_NOT_CANCELLABLE', cancelAgain)
 
@@ -319,6 +320,62 @@ async function main() {
   check('after PAID + REJECTED: available = 100, nothing pending', finalView?.availableMinor === 100 && finalView?.pendingMinor === 0, finalView)
   const overAfter = await call('POST', '/api/host/payouts', host.token, { amountMinor: 101 })
   check('cannot withdraw already-paid money again (409)', overAfter.status === 409, overAfter)
+
+  // --- 7. Review fixes ---------------------------------------------------------------------------
+  console.log('\n--- 7a. no cancellation once the stay has ended ---')
+  const ended = (await call('POST', '/api/bookings', guest.token, { listingId: listing.id, checkIn: dayFromToday(90), checkOut: dayFromToday(92) })).j?.booking
+  await payAndApprove(guest, admin, ended.id)
+  await call('PATCH', `/api/host/requests/${ended.id}`, host.token, { decision: 'CONFIRM', acceptedTerms: true })
+  await db().booking.update({ where: { id: ended.id }, data: { checkIn: new Date(dayFromToday(-5)), checkOut: new Date(dayFromToday(-2)) } })
+  const endedQuote = await call('GET', `/api/bookings/${ended.id}/cancel-quote`, guest.token)
+  check('cancel-quote after check-out -> 409 BOOKING_STAY_ENDED', endedQuote.status === 409 && code(endedQuote) === 'BOOKING_STAY_ENDED', endedQuote)
+  const endedCancel = await call('PATCH', `/api/bookings/${ended.id}/cancel`, guest.token, {})
+  check('guest cancel after check-out -> 409 BOOKING_STAY_ENDED (no 50% refund of a used stay)', endedCancel.status === 409 && code(endedCancel) === 'BOOKING_STAY_ENDED', endedCancel)
+  const endedHostCancel = await call('PATCH', `/api/host/requests/${ended.id}`, host.token, { decision: 'CANCEL' })
+  check('host cancel after check-out -> 409 BOOKING_STAY_ENDED', endedHostCancel.status === 409 && code(endedHostCancel) === 'BOOKING_STAY_ENDED', endedHostCancel)
+  const endedAfter = await db().booking.findUnique({ where: { id: ended.id } })
+  check('the ended stay was not cancelled and no refund request exists', endedAfter.status !== 'CANCELLED' && !(await db().refund.findFirst({ where: { bookingId: ended.id } })), endedAfter.status)
+
+  console.log('\n--- 7b. a proof cannot advance a booking that is no longer awaiting payment ---')
+  const raced = (await call('POST', '/api/bookings', guest.token, { listingId: listing.id, checkIn: dayFromToday(100), checkOut: dayFromToday(101) })).j?.booking
+  const racedProof = await call('POST', '/api/payments/local-wallet-proof', guest.token, { bookingId: raced.id, providerRef: `mf_race_${RUN}` })
+  await db().booking.update({ where: { id: raced.id }, data: { status: 'REQUESTED' } }) // simulates a concurrent state change
+  const racedApprove = await call('PATCH', `/api/admin/review-queue/payment/${racedProof.j?.proof?.id}`, admin.token, {
+    decision: 'APPROVE',
+    shamCashReconciliation: { accountMinor: racedProof.j?.proof?.amountMinor, expectedMinor: racedProof.j?.proof?.amountMinor, differenceMinor: 0 },
+  })
+  check('approval refused with 409 BOOKING_STATE_CHANGED', racedApprove.status === 409 && code(racedApprove) === 'BOOKING_STATE_CHANGED', racedApprove)
+  check('no HOLD/commission posted and the proof stayed under review', (await entries(raced.id, 'booking_payout')).length === 0 && (await entries(raced.id, 'booking_admin_share')).length === 0 && (await db().paymentProof.findUnique({ where: { id: racedProof.j?.proof?.id } }))?.status === 'PENDING_ADMIN_REVIEW', 'ledger touched')
+
+  console.log('\n--- 7c. card money arriving for a cancelled booking is recorded + refunded, not dropped ---')
+  if (process.env.PAYMENT_INTENTS_ENABLED === 'true') {
+    const closed = (await call('POST', '/api/bookings', guest.token, { listingId: listing.id, checkIn: dayFromToday(110), checkOut: dayFromToday(111) })).j?.booking
+    const intent = (await call('POST', '/api/payments/intents', guest.token, { bookingId: closed.id })).j?.intent
+    check('setup: payment intent created', Boolean(intent?.reference), intent)
+    const closedCancel = await call('PATCH', `/api/bookings/${closed.id}/cancel`, guest.token, {})
+    check('setup: guest cancels the unpaid booking', closedCancel.status === 200, closedCancel)
+    const secret = process.env.PAYMENT_WEBHOOK_SECRET || 'whsec_sandbox_test'
+    const sendEvent = async (type, extra) => {
+      const payload = JSON.stringify({ id: `evt_mf_${RUN}_${type}`, type, data: { object: { reference: intent.reference, id: `pi_mf_${RUN}`, ...extra } } })
+      const res = await fetch(API + '/api/payments/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signWebhook(payload, secret) }, body: payload })
+      return res.status
+    }
+    const succStatus = await sendEvent('payment_intent.succeeded', { amount_minor: intent.amountMinor, currency: intent.currency })
+    check('late succeeded webhook accepted (200)', succStatus === 200, succStatus)
+    const lateProof = await db().paymentProof.findFirst({ where: { provider: 'payment_intent', providerRef: intent.reference } })
+    check('the payment is recorded (proof REFUNDED, linked to the booking)', lateProof?.status === 'REFUNDED' && lateProof?.bookingId === closed.id && lateProof?.amountMinor === intent.amountMinor, lateProof)
+    const lateRefund = lateProof ? await db().refund.findFirst({ where: { paymentProofId: lateProof.id } }) : null
+    check('a refund is open for the full amount (PAYMENT_AFTER_BOOKING_CLOSED, IN_PROGRESS)', lateRefund?.reasonCode === 'PAYMENT_AFTER_BOOKING_CLOSED' && lateRefund?.status === 'IN_PROGRESS' && lateRefund?.amountMinor === intent.amountMinor, lateRefund)
+    check('the cancelled booking was not resurrected and no ledger effect was posted', (await db().booking.findUnique({ where: { id: closed.id } })).status === 'CANCELLED' && (await entries(closed.id, 'booking_payout')).length === 0, 'booking/ledger changed')
+    check('an audit row records it', Boolean(lateProof && await db().adminAuditLog.findFirst({ where: { entityId: lateProof.id, action: 'PAYMENT_RECEIVED_FOR_CLOSED_BOOKING' } })), 'no audit row')
+    const adminRefunds = await call('GET', '/api/admin/refunds?status=IN_PROGRESS', admin.token)
+    check('it is visible in the admin refund list', adminRefunds.j?.refunds?.some((r) => r.id === lateRefund?.id), adminRefunds.status)
+    const refundStatus = await sendEvent('charge.refunded', { amount_minor: intent.amountMinor })
+    const settled = lateRefund ? await db().refund.findUnique({ where: { id: lateRefund.id } }) : null
+    check('provider refund webhook closes it (refund SUCCEEDED)', refundStatus === 200 && settled?.status === 'SUCCEEDED', { refundStatus, settled })
+  } else {
+    console.log('   (skipped: PAYMENT_INTENTS_ENABLED is not true in this environment)')
+  }
 
   console.log(`\n==== BOOKING MONEY FLOW E2E: ${pass} passed, ${fail} failed ====`)
 }

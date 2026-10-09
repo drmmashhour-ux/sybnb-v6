@@ -277,3 +277,37 @@ export function payoutAvailability({
   const pending = toMinor(pendingMinor)
   return { availableMinor, pendingMinor: pending, requestableMinor: Math.max(0, availableMinor - pending) }
 }
+
+// A stay has ended once its check-out date has begun in the country's time (00:00 local on the
+// check-out date -- the same day boundary the cancellation cutoffs use). From then on nothing is
+// left to cancel: the guest has used every night. Cancel / cancel-quote refuse with
+// BOOKING_STAY_ENDED instead of applying the post-check-in 50% rule (COMPLETED is only set lazily).
+export function stayEndMs(checkOut, policy = DEFAULT_BOOKING_POLICY) {
+  return checkInStartMs(checkOut, policy)
+}
+
+export function hasStayEnded(booking, { now = new Date(), policy = DEFAULT_BOOKING_POLICY } = {}) {
+  if (!booking?.checkOut) return false
+  const end = stayEndMs(booking.checkOut, policy)
+  return end !== null && new Date(now).getTime() >= end
+}
+
+// Latest Stripe Checkout session expiry for an unpaid booking (decision 6 + review fix): never past
+// the booking's own unpaid-expiry deadline, never more than Stripe's 24h maximum (1 minute safety
+// margin). Returns null when less than Stripe's 30-minute minimum (+1 minute margin) remains --
+// the caller refuses with BOOKING_NOT_PAYABLE.
+export function checkoutSessionExpiresAtSeconds(booking, { now = new Date(), policy = DEFAULT_BOOKING_POLICY } = {}) {
+  const nowMs = new Date(now).getTime()
+  const bookingDeadline = bookingExpiresAt(booking, policy)
+  const stripeMaxMs = nowMs + 24 * HOUR_MS - 60 * 1000
+  const deadlineMs = bookingDeadline ? Math.min(Date.parse(bookingDeadline), stripeMaxMs) : stripeMaxMs
+  if (deadlineMs - nowMs < 31 * 60 * 1000) return null
+  return Math.floor(deadlineMs / 1000)
+}
+
+// Expiry-sweep interval (minutes) from env: 15 unless a positive finite number, never below 1.
+export function sweepIntervalMinutes(raw) {
+  const n = Number(raw)
+  if (raw === undefined || raw === null || raw === '' || !Number.isFinite(n) || n <= 0) return 15
+  return Math.max(1, n)
+}

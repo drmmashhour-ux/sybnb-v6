@@ -15,6 +15,9 @@ import {
   protectionFeeMinor,
   resolveBookingPolicy,
   splitCommission,
+  hasStayEnded,
+  checkoutSessionExpiresAtSeconds,
+  sweepIntervalMinutes,
 } from '../../server/lib/booking-policy.mjs'
 
 // Syria profile values (countries/syria/profile.mjs): UTC+3, 72h cutoff, 48h unpaid expiry.
@@ -25,6 +28,7 @@ const CHECK_IN_START = Date.parse('2026-11-09T21:00:00.000Z')
 const CUTOFF = Date.parse('2026-11-06T21:00:00.000Z')
 const at = (ms) => new Date(ms)
 const H = 60 * 60 * 1000
+const DAY_MS = 24 * H
 
 function assertConserved(c, paid) {
   assert.equal(c.refundMinor + c.retainedMinor, paid, 'refund + retained must equal paid')
@@ -210,4 +214,38 @@ test('host withdrawal availability: released earnings net of debits, capped by w
   // Never more than the real wallet balance.
   assert.equal(payoutAvailability({ releasedMinor: 100_000, walletBalanceMinor: 40_000 }).availableMinor, 40_000)
   assert.equal(payoutAvailability({ releasedMinor: 100_000, walletBalanceMinor: 100_000, pendingMinor: 150_000 }).requestableMinor, 0)
+})
+
+test('stay ended: from 00:00 (country time) on the check-out date, cancellation is refused', () => {
+  const booking = { checkIn: CHECK_IN, checkOut: '2026-11-13T00:00:00.000Z' }
+  // Check-out day 00:00 Syria = 2026-11-12T21:00Z.
+  const end = Date.parse('2026-11-12T21:00:00.000Z')
+  assert.equal(hasStayEnded(booking, { now: at(end - 1), policy: SYRIA }), false)
+  assert.equal(hasStayEnded(booking, { now: at(end), policy: SYRIA }), true)
+  assert.equal(hasStayEnded(booking, { now: at(end + 30 * DAY_MS), policy: SYRIA }), true)
+  // During the stay it is not ended (the post-check-in 50% rule still applies there).
+  assert.equal(hasStayEnded(booking, { now: at(CHECK_IN_START + H), policy: SYRIA }), false)
+  assert.equal(hasStayEnded({ checkOut: null }, { now: at(end), policy: SYRIA }), false)
+})
+
+test('Stripe checkout session expiry: min(booking unpaid deadline, now + 24h); refused under 30 min', () => {
+  const now = new Date('2026-10-08T12:00:00.000Z')
+  const fresh = { status: 'PAYMENT_PENDING', createdAt: now }
+  // 48h left -> capped near Stripe's 24h maximum.
+  const capped = checkoutSessionExpiresAtSeconds(fresh, { now, policy: SYRIA })
+  assert.ok(capped * 1000 <= now.getTime() + 24 * H && capped * 1000 >= now.getTime() + 23 * H)
+  // 2h left -> exactly the booking deadline.
+  const twoHoursLeft = { status: 'PAYMENT_PENDING', createdAt: new Date(now.getTime() - 46 * H) }
+  assert.equal(checkoutSessionExpiresAtSeconds(twoHoursLeft, { now, policy: SYRIA }), Math.floor((now.getTime() + 2 * H) / 1000))
+  // 20 minutes left -> not payable.
+  const almostGone = { status: 'PAYMENT_PENDING', createdAt: new Date(now.getTime() - 48 * H + 20 * 60 * 1000) }
+  assert.equal(checkoutSessionExpiresAtSeconds(almostGone, { now, policy: SYRIA }), null)
+  // Already expired -> not payable.
+  assert.equal(checkoutSessionExpiresAtSeconds({ status: 'PAYMENT_PENDING', createdAt: new Date(now.getTime() - 50 * H) }, { now, policy: SYRIA }), null)
+})
+
+test('expiry sweep interval: 15 unless a positive finite number, floor 1', () => {
+  for (const raw of [undefined, '', 'NaN', 'abc', '0', '-5', 'Infinity']) assert.equal(sweepIntervalMinutes(raw), 15, String(raw))
+  assert.equal(sweepIntervalMinutes('30'), 30)
+  assert.equal(sweepIntervalMinutes('0.2'), 1)
 })

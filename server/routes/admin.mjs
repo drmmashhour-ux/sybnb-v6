@@ -201,6 +201,11 @@ export async function handleAdmin(req, res, url, context) {
     // Paying a host is the same operation class as releasing a booking payout to them
     // (payout_release, ADMIN-only, manual/internal-ledger provider): one DEBIT on the host's wallet
     // recording money the platform sent outside itself. Gated on the 'paid' action only.
+    // OPERATOR NOTE: a withdrawal is not tied to one booking, so it is authorized under the
+    // division-neutral 'PLATFORM' division -- PAYMENT_POLICY_ELIGIBLE_DIVISIONS must include PLATFORM
+    // (e.g. STAYS,PLATFORM) or every mark-paid is refused with PAYMENT_POLICY_DENIED
+    // (COUNTRY_DIVISION_NOT_ELIGIBLE). Also needs PAYMENT_RAIL_MANUAL_PROOF_ENABLED=true and
+    // PAYMENT_OPERATION_MANUAL_PROOF_PAYOUT_RELEASE_ENABLED=true.
     if (action === 'paid') {
       authorizePaymentOperation({
         operation: 'payout_release',
@@ -436,7 +441,13 @@ export async function handleAdmin(req, res, url, context) {
     // structurally impossible for a booking that was cancelled with no approved payment at all
     // (nothing to reverse, no fee to charge), matching the same guard the cancel handlers apply to
     // createRefundRequest() itself.
-    const approvedPayment = existing.payments.find((payment) => payment.status === 'REFUNDED')
+    // Review fix (LOW): cancellations recorded since 2026-10-08 name the exact proof they reversed
+    // (metadata.cancellation.approvedProofId) -- settle against that one, never an arbitrary
+    // REFUNDED proof. Legacy rows without it keep the original lookup.
+    const recordedProofId = existing.metadata?.cancellation?.approvedProofId
+    const approvedPayment = recordedProofId
+      ? existing.payments.find((payment) => payment.id === recordedProofId && payment.status === 'REFUNDED')
+      : existing.payments.find((payment) => payment.status === 'REFUNDED')
     if (!approvedPayment) {
       const error = new Error('This booking has no reversed payment to finalize (it was cancelled with no approved payment).')
       error.statusCode = 409

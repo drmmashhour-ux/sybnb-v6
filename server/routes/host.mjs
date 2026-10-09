@@ -10,7 +10,7 @@ import {
   createRefundRequest,
   hostPayoutBalances,
 } from '../lib/finance-ledger.mjs'
-import { computeCancellation } from '../lib/booking-policy.mjs'
+import { computeCancellation, hasStayEnded } from '../lib/booking-policy.mjs'
 import { formatMoney, notifyAdmin, notifyBooking } from '../lib/notifications.mjs'
 import { isRateLimited } from '../lib/rateLimit.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
@@ -203,6 +203,16 @@ export async function handleHost(req, res, url, context) {
       throw error
     }
 
+    // Review fix: once the check-out date has begun (country time) the stay is used -- a host
+    // "cancel" would refund a finished stay in full. Refuse like the guest cancel route does.
+    if (canCancel && hasStayEnded(existing, { policy: bookingPolicySettings() })) {
+      const error = new Error('This stay has already ended and can no longer be cancelled.')
+      error.statusCode = 409
+      error.code = 'BOOKING_STAY_ENDED'
+      error.expose = true
+      throw error
+    }
+
     if (canConfirm && body.acceptedTerms !== true) {
       const error = new Error('Host must accept SYBNB rules and conditions before confirming this booking.')
       error.statusCode = 400
@@ -312,6 +322,7 @@ export async function handleHost(req, res, url, context) {
               policy: bookingPolicySettings(),
             }),
             paidMinor: approvedPayment?.amountMinor || 0,
+            approvedProofId: approvedPayment?.id || null,
           }
         : null
 

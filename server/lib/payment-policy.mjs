@@ -226,7 +226,13 @@ function countryDivisionEligible({ country, division, environment }) {
   // consistent with APPROVED_PROVIDER_CONFIGS' permittedCustomerCountries — never the internal
   // platform profile key (profile.key, e.g. 'syria'), which is a different, unrelated identifier.
   if (!profile || profile.country !== country) return false
-  const productionEligible = profile.gates?.payments === 'enabled'
+  // SYBNB_PAYMENTS_GATE=enabled (exact string) is an explicit, operator-set override of the profile's
+  // gates.payments, which stays 'disabled' in countries/syria/profile.mjs. Default unset = the
+  // profile value decides, exactly as before. It only opens THIS gate (country eligibility); the
+  // division list, provider approval (Stripe also needs PAYMENT_PROVIDER_STRIPE_APPROVED=true), rail
+  // and per-operation flags, emergency stop and actor checks all still apply. Setting it is an owner
+  // decision (AGENTS.md section 5): it is how a server is switched to accept payments at all.
+  const productionEligible = profile.gates?.payments === 'enabled' || process.env.SYBNB_PAYMENTS_GATE === 'enabled'
   const testOverrideEligible = environment !== 'production' && process.env.PAYMENT_POLICY_TEST_COUNTRY_ELIGIBLE === 'true'
   if (!productionEligible && !testOverrideEligible) return false
   const eligibleDivisions = String(process.env.PAYMENT_POLICY_ELIGIBLE_DIVISIONS || '')

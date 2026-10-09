@@ -347,10 +347,21 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // Instant Book listings skip the manual host-confirmation step: payment approval
     // is enough to confirm the stay outright, same as Airbnb's Instant Book.
     const nextStatus = existing.booking?.listing?.instantBookEnabled ? 'CONFIRMED' : 'REQUESTED'
-    await tx.booking.update({
-      where: { id: proof.bookingId },
+    // Review fix (LOW): only an unpaid booking can be moved forward by a payment. Conditional on
+    // PAYMENT_PENDING in the UPDATE itself, so a guest cancel / expiry sweep / second proof that
+    // landed after the read above cannot be overwritten (and no second HOLD/commission is posted);
+    // the throw rolls the proof approval back with it.
+    const advanced = await tx.booking.updateMany({
+      where: { id: proof.bookingId, status: 'PAYMENT_PENDING' },
       data: { status: nextStatus },
     })
+    if (advanced.count !== 1) {
+      const error = new Error('This booking is no longer awaiting payment (it was cancelled, expired, or already paid).')
+      error.statusCode = 409
+      error.code = 'BOOKING_STATE_CHANGED'
+      error.expose = true
+      throw error
+    }
 
     const split = bookingFinanceSplit(existing.booking, proof.amountMinor)
     await recordWalletEntry(tx, {
@@ -766,6 +777,119 @@ async function finalizeRuleBasedCancellation(tx, { booking, approvedPayment, can
     retainedMinor: cancellation.retainedMinor,
     ledger: { ...deltas, hostReleasedMinor, protectionReversedMinor },
   }
+}
+
+// --- Card money arriving for a booking that can no longer take it (review fix, MEDIUM) ----------
+//
+// A card rail (Stripe Checkout session / PaymentIntent) can capture funds AFTER the booking stopped
+// awaiting payment -- expired unpaid (48h), cancelled by the guest, or already paid another way.
+// Before this fix the webhook settled the event and dropped the money silently. Now the payment is
+// RECORDED and made REFUNDABLE in the same transaction as the event settlement:
+//   - a PaymentProof row (status REFUNDED: money in, owed back; no booking/ledger effect at all --
+//     no HOLD, no commission, the booking is not touched), carrying the provider payment object id
+//     a real provider refund needs;
+//   - a Refund (rail = the card rail, reasonCode PAYMENT_AFTER_BOOKING_CLOSED, IN_PROGRESS, its
+//     amount reserved against the proof) + its CLAIMED attempt, so it shows in GET
+//     /api/admin/refunds and in the payment-intent reconciliation view. The refund itself must be
+//     issued in the provider dashboard (no provider refund call exists in this codebase);
+//   - an audit row (PAYMENT_RECEIVED_FOR_CLOSED_BOOKING). The caller sends the admin alert email.
+// Idempotent through the proof's (provider, providerRef) uniqueness: a redelivery finds the proof.
+export const CLOSED_BOOKING_REFUND_REASON = 'PAYMENT_AFTER_BOOKING_CLOSED'
+export async function recordCardPaymentForClosedBooking(tx, {
+  booking, // may be null (booking gone)
+  bookingId,
+  payerUserId,
+  provider, // 'stripe' | 'payment_intent'
+  rail, // 'stripe_checkout' | 'payment_intent'
+  providerRef,
+  amountMinor,
+  currency,
+  providerPaymentObjectType,
+  providerPaymentObjectId,
+  proofAssetUrl,
+}) {
+  const amount = Math.max(0, Math.round(Number(amountMinor) || 0))
+  const proof = await tx.paymentProof.create({
+    data: {
+      bookingId: booking?.id || undefined,
+      userId: payerUserId,
+      provider,
+      status: 'REFUNDED',
+      amountMinor: amount,
+      currency,
+      providerRef,
+      proofAssetUrl,
+      providerPaymentObjectType: providerPaymentObjectType || null,
+      providerPaymentObjectId: providerPaymentObjectId || null,
+      adminNote: `Card payment captured after the booking stopped awaiting payment (booking status ${booking?.status || 'MISSING'}). Not applied to the booking; refund owed through the provider.`,
+    },
+  })
+  let refund = null
+  if (amount > 0) {
+    await tx.$executeRaw`
+      UPDATE payment_proofs SET reserved_refund_minor = reserved_refund_minor + ${amount}
+      WHERE id = ${proof.id}::uuid AND reserved_refund_minor + succeeded_refund_minor + accepted_refund_minor + ${amount} <= amount_minor
+    `
+    refund = await tx.refund.create({
+      data: {
+        paymentProofId: proof.id, bookingId: bookingId || null, requestedByUserId: null,
+        amountMinor: amount, currency,
+        reason: 'Card payment captured after the booking was cancelled/expired/already paid -- refund through the provider.',
+        reasonCode: CLOSED_BOOKING_REFUND_REASON, rail, status: 'IN_PROGRESS', reservationHeld: true,
+        migratedFromLegacy: false,
+      },
+    })
+    const objectType = providerPaymentObjectType || 'provider_ref'
+    const objectId = providerPaymentObjectId || providerRef
+    await tx.refundAttempt.create({
+      data: {
+        refundId: refund.id, status: 'CLAIMED', migratedFromLegacy: false,
+        canonicalRequestVersion: 1, provider, providerPaymentObjectType: objectType, providerPaymentObjectId: objectId,
+        providerEndpointKey: `${provider}-refund`, amountMinor: amount, currency,
+        idempotencyKey: idempotencyKey(['closed-booking-card-refund', proof.id]),
+        requestFingerprint: idempotencyKey([provider, objectType, objectId, `${provider}-refund`, String(amount), currency, '1']),
+      },
+    })
+  }
+  await tx.adminAuditLog.create({
+    data: {
+      actorUserId: null,
+      action: 'PAYMENT_RECEIVED_FOR_CLOSED_BOOKING',
+      entityType: 'payment_proofs',
+      entityId: proof.id,
+      before: { bookingId: bookingId || null, bookingStatus: booking?.status || null },
+      after: { proofId: proof.id, refundId: refund?.id || null, amountMinor: amount, currency, provider, providerRef },
+    },
+  })
+  return { proof, refund }
+}
+
+// The provider reported the card refund for such a payment (e.g. PaymentIntent charge.refunded):
+// close the open PAYMENT_AFTER_BOOKING_CLOSED refund -- attempt SUCCEEDED, proof counters
+// reserved -> succeeded, refund SUCCEEDED. No wallet entry: the card network returned the money.
+// Returns the closed refund, or null when there is nothing open to close (idempotent).
+export async function settleClosedBookingCardRefund(tx, { paymentProofId }) {
+  const refund = await tx.refund.findFirst({
+    where: { paymentProofId, reasonCode: CLOSED_BOOKING_REFUND_REASON, status: 'IN_PROGRESS', reservationHeld: true },
+    include: { attempts: true },
+  })
+  if (!refund) return null
+  const attempt = refund.attempts.find((a) => a.status === 'CLAIMED' && !a.migratedFromLegacy)
+  if (attempt) {
+    await tx.refundAttempt.updateMany({
+      where: { id: attempt.id, status: 'CLAIMED' },
+      data: { status: 'SUCCEEDED', completedAt: new Date(), providerStatus: 'provider_reported_refunded' },
+    })
+  }
+  await tx.paymentProof.updateMany({
+    where: { id: paymentProofId, reservedRefundMinor: { gte: refund.amountMinor } },
+    data: { reservedRefundMinor: { decrement: refund.amountMinor }, succeededRefundMinor: { increment: refund.amountMinor } },
+  })
+  await tx.refund.updateMany({
+    where: { id: refund.id, status: 'IN_PROGRESS' },
+    data: { status: 'SUCCEEDED', reservationHeld: false, succeededAt: new Date() },
+  })
+  return refund
 }
 
 // --- Host withdrawals (decision 2) ---------------------------------------------------------------

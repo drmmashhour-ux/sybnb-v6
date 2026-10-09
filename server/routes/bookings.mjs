@@ -15,8 +15,10 @@ import {
   computeCancellation,
   computeGuestTotals,
   dateBlockingBookingWhere,
+  hasStayEnded,
   protectionFeeMinor,
 } from '../lib/booking-policy.mjs'
+import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { formatMoney, notifyBooking } from '../lib/notifications.mjs'
 import { clientIp, isRateLimited } from '../lib/rateLimit.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
@@ -91,6 +93,7 @@ export async function handleBookings(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['GUEST'])
     const existing = await findGuestBooking(cancelQuoteMatch[1], context.user.id)
+    await assertStayNotEnded(existing)
     const { cancellation } = guestCancellationFor(existing)
     return json(res, 200, {
       ok: true,
@@ -110,6 +113,9 @@ export async function handleBookings(req, res, url, context) {
     requireAuth(context, ['GUEST'])
     const body = await readJson(req)
     const existing = await findGuestBooking(cancelMatch[1], context.user.id)
+    // Review fix (HIGH): COMPLETED is only set lazily, so a CONFIRMED booking whose stay is already
+    // over must be refused here -- otherwise the post-check-in 50% rule would refund a used stay.
+    await assertStayNotEnded(existing)
 
     // Decision 3: an unpaid request (PAYMENT_PENDING) can now also be cancelled by its guest --
     // nothing to refund. REQUESTED/CONFIRMED follow the refund rules below.
@@ -176,6 +182,23 @@ export async function handleBookings(req, res, url, context) {
         throw error
       }
       const approvedPayment = approvedAtRead
+
+      // Review fix (LOW): re-check for a live proof INSIDE the transaction, after the status claim
+      // above has locked the booking row. A receipt submitted between the outer read and the claim
+      // must still block an unpaid cancel (same rule as the pre-check above).
+      if (!approvedPayment) {
+        const liveProof = await tx.paymentProof.findFirst({
+          where: { bookingId: existing.id, status: { in: ['PENDING_ADMIN_REVIEW', 'APPROVED'] } },
+          select: { id: true },
+        })
+        if (liveProof) {
+          const error = new Error('A payment for this booking is being reviewed or was just approved. Refresh and try again.')
+          error.statusCode = 409
+          error.code = 'PAYMENT_UNDER_REVIEW'
+          error.expose = true
+          throw error
+        }
+      }
 
       if (!approvedPayment) {
         // Unpaid: just cancel. A never-uploaded placeholder proof (PENDING_PROOF) is closed out.
@@ -245,6 +268,8 @@ export async function handleBookings(req, res, url, context) {
               cancelledAt: new Date().toISOString(),
               ...cancellation,
               paidMinor: approvedPayment?.amountMinor || 0,
+              // Review fix (LOW): finalize-cancellation settles against exactly this proof.
+              approvedProofId: approvedPayment?.id || null,
             },
           },
         },
@@ -596,6 +621,18 @@ async function findGuestBooking(id, guestId) {
     throw error
   }
   return existing
+}
+
+// Refuses (409 BOOKING_STAY_ENDED) once the check-out date has begun in country time, and runs the
+// lazy completion sweep for this booking so its status catches up to COMPLETED.
+async function assertStayNotEnded(booking) {
+  if (!hasStayEnded(booking, { policy: bookingPolicySettings() })) return
+  await completeExpiredBookings({ id: booking.id }).catch(() => {})
+  const error = new Error('This stay has already ended and can no longer be cancelled. Open a dispute if something went wrong.')
+  error.statusCode = 409
+  error.code = 'BOOKING_STAY_ENDED'
+  error.expose = true
+  throw error
 }
 
 // Decision 3 applied to a guest's own cancellation of `booking` right now.

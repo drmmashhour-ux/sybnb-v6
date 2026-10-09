@@ -9,8 +9,11 @@ import {
   approvePaymentProof,
   expectedTotalMinor,
   firstAdminId,
+  recordCardPaymentForClosedBooking,
   reverseBookingPlatformShare,
+  settleClosedBookingCardRefund,
 } from '../lib/finance-ledger.mjs'
+import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 import { log } from '../lib/logger.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { applyPaymentEvent as applyPaymentEventPipeline, intakeEvent, verifyAndLockClaim, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
@@ -96,10 +99,33 @@ async function applyPaymentIntentSuccess(tx, { intent, obj }) {
         note: 'Auto-approved: verified payment-intent webhook confirmed funds captured.',
       })
     }
-    // else: funds were genuinely captured on this intent, but there's no booking left to apply them
-    // to (e.g. a second intent for the same booking lost the race to a first one that already
-    // finalized it). Still SUCCEEDED — surfaces via reconciliation as "no linked PaymentProof" for
-    // an operator to follow up (manual refund via the provider).
+    // Review fix (MEDIUM): funds were genuinely captured on this intent, but the booking is no
+    // longer awaiting payment (expired unpaid, cancelled, or a second intent lost the race to one
+    // that already paid it). Previously only visible as reconciliation drift; now the payment is
+    // recorded and a refund opened in this same transaction (recordCardPaymentForClosedBooking),
+    // and admin is alerted. Reconciliation still flags it until the provider refund lands
+    // (PAID_AFTER_BOOKING_CLOSED_REFUND_OWED).
+    else if (intent.bookingId) {
+      const recorded = await recordCardPaymentForClosedBooking(tx, {
+        booking,
+        bookingId: intent.bookingId,
+        payerUserId: booking?.guestId || intent.userId,
+        provider: 'payment_intent',
+        rail: 'payment_intent',
+        providerRef: intent.reference,
+        amountMinor: intent.amountMinor,
+        currency: intent.currency.toUpperCase(),
+        providerPaymentObjectType: obj?.id ? 'payment_intent' : null,
+        providerPaymentObjectId: obj?.id || null,
+        proofAssetUrl: obj?.id ? `payment-intent://provider_refs/${obj.id}` : undefined,
+      })
+      notifyAdmin('admin_payment_closed_booking', {
+        amount: formatMoney(recorded.proof.amountMinor, recorded.proof.currency),
+        bookingId: intent.bookingId,
+        provider: 'payment_intent',
+        refundId: recorded.refund?.id || '',
+      }, `admin_payment_closed_booking:${recorded.proof.id}`)
+    }
   }
 
   return tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'SUCCEEDED', providerRef } })
@@ -115,6 +141,9 @@ async function applyPaymentIntentRefund(tx, { intent }) {
     where: { provider: 'payment_intent', providerRef: intent.reference },
   })
   if (!proof || proof.status !== 'APPROVED') {
+    // A payment recorded for a closed booking (recordCardPaymentForClosedBooking) had an open refund
+    // waiting for exactly this provider confirmation -- close it. No-op for every other case.
+    if (proof?.status === 'REFUNDED') await settleClosedBookingCardRefund(tx, { paymentProofId: proof.id })
     return tx.paymentIntent.update({ where: { id: intent.id }, data: { status: 'REFUNDED' } })
   }
   const booking = await tx.booking.findUnique({ where: { id: proof.bookingId }, include: { listing: true } })
@@ -263,6 +292,9 @@ function decodeReconciliationCursor(raw) {
 function computeDriftReasons(intent, { proof, walletEntries, latestEvent }) {
   const reasons = []
   if (intent.status === 'SUCCEEDED' && intent.bookingId && !proof) reasons.push('SUCCEEDED_WITHOUT_PAYMENT_PROOF')
+  // Paid after the booking closed: recorded + refund opened, but the money is still owed back until
+  // the provider reports the refund (intent -> REFUNDED).
+  if (intent.status === 'SUCCEEDED' && proof?.status === 'REFUNDED') reasons.push('PAID_AFTER_BOOKING_CLOSED_REFUND_OWED')
   if (intent.status === 'SUCCEEDED' && proof?.status === 'APPROVED') {
     const hasHold = walletEntries.some((e) => e.referenceType === 'booking_payout' && ['HOLD', 'RELEASE'].includes(e.type))
     if (!hasHold) reasons.push('SUCCEEDED_WITHOUT_WALLET_HOLD')

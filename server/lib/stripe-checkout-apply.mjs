@@ -4,7 +4,8 @@
 // path — see that route's handling of a stripe_checkout-rail PaymentEvent) can call it, and so the
 // webhook path can wrap it with the same attempts/dead-letter bookkeeping the payment_intent rail
 // already has (see payment-event-pipeline.mjs).
-import { approvePaymentProof, firstAdminId, isProviderRefUniqueViolation } from './finance-ledger.mjs'
+import { approvePaymentProof, firstAdminId, isProviderRefUniqueViolation, recordCardPaymentForClosedBooking } from './finance-ledger.mjs'
+import { formatMoney, notifyAdmin } from './notifications.mjs'
 import { verifyAndLockClaim, ClaimLostError } from './payment-event-pipeline.mjs'
 import { reauthorizeAtCommit } from './commit-authorization.mjs'
 import { withTx, dbOrTx } from './tx-scope.mjs'
@@ -63,8 +64,35 @@ export async function finalizeStripeSession(session, { verifyOwnership, beforeEf
 
     const booking = await tx.booking.findUnique({ where: { id: bookingId } })
     if (!booking || booking.status !== 'PAYMENT_PENDING') {
-      if (markSettled) await markSettled(tx, { applied: false })
-      return null
+      // Review fix (MEDIUM): the card was charged but the booking is no longer awaiting payment
+      // (expired unpaid, cancelled, or already paid). Never drop the money: record it and open a
+      // refund (see recordCardPaymentForClosedBooking), settle the event as APPLIED, alert admin.
+      const payerUserId = booking?.guestId || session.metadata?.guestId
+      if (!payerUserId) {
+        if (markSettled) await markSettled(tx, { applied: false })
+        return null
+      }
+      const recorded = await recordCardPaymentForClosedBooking(tx, {
+        booking,
+        bookingId,
+        payerUserId,
+        provider: 'stripe',
+        rail: 'stripe_checkout',
+        providerRef: session.id,
+        amountMinor: Number(session.metadata?.sypTotalMinor || booking?.amountMinor || 0),
+        currency: booking?.currency || String(session.metadata?.currency || 'SYP').toUpperCase(),
+        providerPaymentObjectType: session.payment_intent ? 'payment_intent' : null,
+        providerPaymentObjectId: typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || null,
+        proofAssetUrl: session.payment_intent ? `stripe://payment_intents/${typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id}` : undefined,
+      })
+      notifyAdmin('admin_payment_closed_booking', {
+        amount: formatMoney(recorded.proof.amountMinor, recorded.proof.currency),
+        bookingId,
+        provider: 'stripe',
+        refundId: recorded.refund?.id || '',
+      }, `admin_payment_closed_booking:${recorded.proof.id}`)
+      if (markSettled) await markSettled(tx, { applied: true })
+      return recorded.proof
     }
 
     const created = await tx.paymentProof.create({

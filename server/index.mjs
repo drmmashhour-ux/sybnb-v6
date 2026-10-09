@@ -7,6 +7,7 @@ import { loadEnv, validateEnv } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
 import { pruneExpiredOtps } from './lib/otp-retention.mjs'
 import { expireUnpaidBookings } from './lib/booking-lifecycle.mjs'
+import { sweepIntervalMinutes } from './lib/booking-policy.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
 import { log, logRequest, newRequestId } from './lib/logger.mjs'
 import { handleAdmin } from './routes/admin.mjs'
@@ -310,7 +311,9 @@ otpPruneTimer.unref() // never keep the process alive on its own (tests/scripts 
 // and date-overlap checks already ignore such requests before either runs; this light interval only
 // makes the CANCELLED status + guest email timely when nobody is browsing. Idempotent per row (each
 // cancel is a conditional update), so multiple replicas sweeping is harmless.
-const BOOKING_EXPIRY_SWEEP_INTERVAL_MS = Number(process.env.BOOKING_EXPIRY_SWEEP_MINUTES || 15) * 60 * 1000
+// Falls back to 15 unless BOOKING_EXPIRY_SWEEP_MINUTES is a positive finite number; floor of 1 min
+// (a NaN/0/negative value would otherwise reach setInterval as NaN and spin).
+const BOOKING_EXPIRY_SWEEP_INTERVAL_MS = sweepIntervalMinutes(process.env.BOOKING_EXPIRY_SWEEP_MINUTES) * 60 * 1000
 async function runBookingExpirySweep() {
   try {
     await expireUnpaidBookings()

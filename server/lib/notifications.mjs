@@ -110,6 +110,11 @@ const TEMPLATES = {
     en: (d) => ({ subject: 'SYBNB admin: new payment proof to review', body: `Payment proof of ${d.amount} for booking ${d.bookingId}.` }),
     fr: (d) => ({ subject: 'SYBNB admin : nouvelle preuve de paiement', body: `Preuve de paiement de ${d.amount} pour la réservation ${d.bookingId}.` }),
   },
+  admin_payment_closed_booking: {
+    ar: (d) => ({ subject: 'SYBNB: دفعة بطاقة لحجز مغلق — يلزم استرداد', body: `وصلت دفعة ${d.amount} عبر ${d.provider} للحجز ${d.bookingId} بعد إلغائه أو انتهاء مهلته. سُجّلت وفُتح طلب استرداد (${d.refundId}). نفّذ الاسترداد من لوحة مزوّد الدفع.` }),
+    en: (d) => ({ subject: 'SYBNB admin: card payment for a closed booking — refund owed', body: `A ${d.amount} payment via ${d.provider} arrived for booking ${d.bookingId} after it was cancelled/expired/already paid. It was recorded and refund ${d.refundId} opened. Issue the refund in the provider dashboard.` }),
+    fr: (d) => ({ subject: 'SYBNB admin : paiement carte pour une réservation close — remboursement dû', body: `Un paiement de ${d.amount} via ${d.provider} est arrivé pour la réservation ${d.bookingId} après son annulation/expiration. Il a été enregistré et le remboursement ${d.refundId} ouvert. Effectuez le remboursement dans le tableau de bord du prestataire.` }),
+  },
   admin_payout_request: {
     ar: (d) => ({ subject: 'SYBNB: طلب سحب جديد من مضيف', body: `طلب سحب ${d.amount} (${d.method}) من ${d.hostName}.` }),
     en: (d) => ({ subject: 'SYBNB admin: new host payout request', body: `Payout request of ${d.amount} (${d.method}) from ${d.hostName}.` }),

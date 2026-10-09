@@ -6,7 +6,8 @@ import { expectedTotalMinor, isProviderRefUniqueViolation, sypPerUsd } from '../
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
-import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
+import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
+import { checkoutSessionExpiresAtSeconds } from '../lib/booking-policy.mjs'
 import { log } from '../lib/logger.mjs'
 import { expireUnpaidBookings } from '../lib/booking-lifecycle.mjs'
 import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
@@ -215,12 +216,25 @@ export async function handlePayments(req, res, url, context) {
       actor: { roles: context.roles },
     })
 
+    // Review fix (MEDIUM): the Checkout session must die no later than the booking's own unpaid
+    // deadline (Stripe: between 30 min and 24 h ahead), so a guest cannot pay after the dates were
+    // released. Too little time left -> not payable.
+    const sessionExpiresAt = checkoutSessionExpiresAtSeconds(booking, { policy: bookingPolicySettings() })
+    if (!sessionExpiresAt) {
+      const error = new Error('The payment window for this booking is about to close. Please make a new booking request.')
+      error.statusCode = 409
+      error.code = 'BOOKING_NOT_PAYABLE'
+      error.expose = true
+      throw error
+    }
+
     const totalMinor = expectedTotalMinor(booking)
     const { currency, unitAmount } = stripeChargeAmount(totalMinor)
     const listingTitle = booking.listing?.titleEn || booking.listing?.titleAr || 'SYBNB stay'
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      expires_at: sessionExpiresAt,
       payment_method_types: ['card'],
       line_items: [
         {
@@ -294,6 +308,15 @@ export async function handlePayments(req, res, url, context) {
     // from live). confirmStripeCheckoutSessionForActor() runs reauthorizeAtCommit() INSIDE
     // finalizeStripeSession's own transaction, before the first effect-producing statement.
     const proof = await confirmStripeCheckoutSessionForActor({ session, context })
+    if (proof && proof.status === 'REFUNDED' && proof.bookingId === session.metadata?.bookingId && proof.providerRef === session.id) {
+      // The charge landed after the booking stopped awaiting payment: it was recorded and a refund
+      // opened (recordCardPaymentForClosedBooking) instead of being applied to the booking.
+      const error = new Error('This booking was no longer awaiting payment. Your card payment was recorded and will be refunded.')
+      error.statusCode = 409
+      error.code = 'BOOKING_NOT_PAYABLE'
+      error.expose = true
+      throw error
+    }
     if (!proof) {
       const error = new Error('Could not confirm this payment against the booking.')
       error.statusCode = 409

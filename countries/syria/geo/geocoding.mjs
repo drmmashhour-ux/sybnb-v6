@@ -70,12 +70,30 @@ export function haversineKm(a, b) {
 // minimum fare — the standard Uber/Careem/Bolt shape (time + distance + a floor), not distance-only.
 // Five categories, matching how regional apps tier by vehicle class: a budget motorbike tier (common
 // across MENA, e.g. Careem bikes), Economy, Comfort, SUV, and a Van/XL for groups. All SYP minor.
+// Rate LEVELS recalibrated 2026-10-09 to the real Damascus market reported by Enab Baladi (2025):
+// a cross-town app trip (al-Dweila -> al-Mazzeh, ~9 km / ~20 min) runs ~42,000 SYP, so SR Economy at
+// that distance now lands near that figure instead of ~half of it.
 const CATEGORY_RATES = {
-  'SR Bike':    { baseMinor: 4000,  perKmMinor: 500,  perMinMinor: 100, minFareMinor: 6000 },
-  'SR Economy': { baseMinor: 8000,  perKmMinor: 900,  perMinMinor: 150, minFareMinor: 12000 },
-  'SR Comfort': { baseMinor: 12000, perKmMinor: 1300, perMinMinor: 200, minFareMinor: 18000 },
-  'SR SUV':     { baseMinor: 18000, perKmMinor: 1800, perMinMinor: 300, minFareMinor: 28000 },
-  'SR Van':     { baseMinor: 20000, perKmMinor: 2000, perMinMinor: 350, minFareMinor: 32000 },
+  'SR Bike':    { baseMinor: 6000,  perKmMinor: 1100, perMinMinor: 150, minFareMinor: 8000 },
+  'SR Economy': { baseMinor: 12000, perKmMinor: 2200, perMinMinor: 300, minFareMinor: 15000 },
+  'SR Comfort': { baseMinor: 16000, perKmMinor: 2800, perMinMinor: 400, minFareMinor: 22000 },
+  'SR SUV':     { baseMinor: 22000, perKmMinor: 3600, perMinMinor: 550, minFareMinor: 32000 },
+  'SR Van':     { baseMinor: 26000, perKmMinor: 4200, perMinMinor: 650, minFareMinor: 40000 },
+}
+
+// Peak-hour surge. Syrian ride apps raise fares during rush hours; SR mirrors that with a single
+// multiplier applied to the whole fare during morning and evening peaks. Env-tunable
+// (SR_PEAK_SURGE_MULTIPLIER, a 1..3 factor); default 1.25 (a 25% peak premium).
+const SR_PEAK_SURGE_MULTIPLIER = (() => {
+  const raw = Number(process.env.SR_PEAK_SURGE_MULTIPLIER)
+  return Number.isFinite(raw) && raw >= 1 && raw <= 3 ? raw : 1.25
+})()
+// Damascus local time is a fixed UTC+3 (Syria abolished daylight saving in 2022), so local hour is
+// UTC+3 with no DST branch. Peak windows: 07:00-09:59 and 16:00-19:59 local.
+const SYRIA_UTC_OFFSET_HOURS = 3
+export function isPeakHour(date = new Date()) {
+  const localHour = (date.getUTCHours() + SYRIA_UTC_OFFSET_HOURS) % 24
+  return (localHour >= 7 && localHour < 10) || (localHour >= 16 && localHour < 20)
 }
 
 // Average city speed used to estimate trip minutes from distance for the per-minute component (the
@@ -153,15 +171,21 @@ export function quoteSrRide({
     + rates.perKmMinor * distanceKm
     + perMinMinor * estimatedMinutes
     + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_MINOR)
-  // Floor at the category minimum fare so very short/slow trips are never underpriced.
+  // Floor at the category minimum fare so very short/slow trips are never underpriced, THEN apply the
+  // peak-hour surge to the floored amount so even minimum-fare trips carry the rush-hour premium.
   const flooredMinor = Math.max(minFareMinor, computedMinor)
-  const fareMinor = Math.round(flooredMinor / 500) * 500
+  const peak = isPeakHour()
+  const surgeMultiplier = peak ? SR_PEAK_SURGE_MULTIPLIER : 1
+  const surgedMinor = flooredMinor * surgeMultiplier
+  const fareMinor = Math.round(surgedMinor / 500) * 500
 
   return {
     fareMinor,
     distanceKm: Math.round(distanceKm * 10) / 10,
     estimatedMinutes,
     estimated,
+    surgeMultiplier,
+    isPeak: peak,
     pickupCoords,
     dropoffCoords,
     stopCoords,

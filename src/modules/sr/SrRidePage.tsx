@@ -911,6 +911,23 @@ export function SrRidePage({ lang }: Props) {
             <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(fareMinor, 'SYP', lang)}</strong>
           </div>
 
+          {quote?.estimatedMinutes ? (
+            <div style={styles.stat}>
+              <span>{isAr ? '\u0627\u0644\u0648\u0642\u062a \u0627\u0644\u062a\u0642\u0631\u064a\u0628\u064a' : 'Est. time'}</span>
+              <strong dir="ltr">
+                {quote.estimatedMinutes} {isAr ? '\u062f\u0642\u064a\u0642\u0629' : 'min'}
+              </strong>
+            </div>
+          ) : null}
+
+          {!ride && quote?.isPeak && (quote?.surgeMultiplier ?? 1) > 1 ? (
+            <div style={styles.addressWarning} dir={isAr ? 'rtl' : 'ltr'}>
+              {isAr
+                ? `\u062a\u0633\u0639\u064a\u0631 \u0633\u0627\u0639\u0627\u062a \u0627\u0644\u0630\u0631\u0648\u0629 (+${Math.round(((quote.surgeMultiplier ?? 1) - 1) * 100)}%)`
+                : `Peak-hour pricing (+${Math.round(((quote.surgeMultiplier ?? 1) - 1) * 100)}%)`}
+            </div>
+          ) : null}
+
           {!ride && addressUnrecognized && <div style={styles.addressWarning}>⚠ {t.addressUnrecognized}</div>}
 
           {!ride && (

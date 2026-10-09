@@ -1894,6 +1894,9 @@ export type PlatformSrQuote = {
   fareMinor: number
   distanceKm: number
   estimated: boolean
+  estimatedMinutes?: number
+  surgeMultiplier?: number
+  isPeak?: boolean
   pickupCoords: { lat: number; lng: number } | null
   dropoffCoords: { lat: number; lng: number } | null
 }

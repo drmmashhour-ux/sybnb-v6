@@ -1600,6 +1600,7 @@ export type AdminPayout = {
   eligibleAt: string | null
   eligibleNow: boolean
   hostPayoutMinor: number
+  adminCommissionMinor: number
   currency: string
 }
 

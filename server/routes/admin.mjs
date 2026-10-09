@@ -544,6 +544,7 @@ export async function handleAdmin(req, res, url, context) {
             eligibleAt: payoutEligibleAt(booking.checkOut),
             eligibleNow: isPayoutEligible(booking),
             hostPayoutMinor: split.hostGrossMinor,
+            adminCommissionMinor: split.adminCommissionMinor,
             currency: booking.currency,
           }
         })

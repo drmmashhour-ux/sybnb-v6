@@ -19,6 +19,15 @@
 // Contractual STR (STAYS) platform commission -- owner-confirmed 12% of the WHOLE amount paid
 // excluding the protection fee (rent + cleaning + taxes + other fees). Unchanged from before.
 export const STR_COMMISSION_RATE = 0.12
+// SR Ride platform commission -- owner decision 2026-10-09: match Uber's standard driver service
+// fee of 25% (riders pay the full fare; the driver keeps 75%). Applies to the ride fare only; a
+// cancellation fee stays 100% with the driver (it compensates the driver for a committed trip).
+// Overridable via env (SR_RIDE_COMMISSION_RATE, a 0..1 fraction) for operational tuning without a
+// code change -- e.g. a lower launch rate to help driver acquisition.
+export const SR_RIDE_COMMISSION_RATE = (() => {
+  const raw = Number(process.env.SR_RIDE_COMMISSION_RATE)
+  return Number.isFinite(raw) && raw >= 0 && raw < 1 ? raw : 0.25
+})()
 // Cancellation protection add-on: 3% of the FULL stay amount (all nights, before cleaning/taxes).
 export const PROTECTION_RATE = 0.03
 // Fallback fee percentages for a STAYS listing with no explicit itemized fee set (pre-existing).

@@ -3,6 +3,7 @@ import { isPayoutEligible, payoutEligibleAt } from './booking-lifecycle.mjs'
 import {
   PROTECTION_RATE,
   STR_COMMISSION_RATE,
+  SR_RIDE_COMMISSION_RATE,
   STR_CLEANING_RATE as POLICY_STR_CLEANING_RATE,
   STR_TAX_RATE as POLICY_STR_TAX_RATE,
   cancellationLedgerDeltas,
@@ -457,27 +458,51 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
   } else if (proof.rideId) {
     // SR Ride vs. Uber gap-closure: no booking-style HOLD/release two-step -- a ride completes in
     // one continuous session (unlike a multi-day stay), so there's no equivalent dispute window to
-    // hold funds against. 100% of the fare goes straight to the driver: SR Ride has no owner-set
-    // commission rate yet, the same "0% until a real business decision is made" placeholder already
-    // used for CARS/MARKETPLACE/NEW_CONSTRUCTION above -- not an assumption, a documented gap.
+    // hold funds against. The fare is split at approval time, mirroring Uber's standard model:
+    // SYBNB keeps SR_RIDE_COMMISSION_RATE (owner decision 2026-10-09: 25%, Uber's driver service
+    // fee) and the driver receives the rest. A CANCELLED-with-a-fee ride takes NO commission -- the
+    // cancellation fee compensates the driver for a committed trip, so it stays 100% with them.
     const ride = await tx.rideRequest.findUnique({ where: { id: proof.rideId }, select: { driverId: true, status: true } })
     if (ride?.driverId) {
       // A ride is either COMPLETED (this is the fare) or CANCELLED-with-a-fee (this is the
       // cancellation fee, capsule 20) -- never both, so the ride's own status at approval time is
       // enough to label the ledger entry correctly for finance reconciliation.
       const isCancellationFee = ride.status === 'CANCELLED'
+      const fareMinor = Math.round(proof.amountMinor || 0)
+      // Commission applies to fares only, never to a cancellation fee.
+      const commissionMinor = isCancellationFee
+        ? 0
+        : Math.round(fareMinor * SR_RIDE_COMMISSION_RATE)
+      const driverMinor = fareMinor - commissionMinor
       await recordWalletEntry(tx, {
         userId: ride.driverId,
         type: 'CREDIT',
-        amountMinor: proof.amountMinor,
+        amountMinor: driverMinor,
         currency: proof.currency,
         referenceType: isCancellationFee ? 'ride_cancellation_fee' : 'ride_fare',
         referenceId: proof.rideId,
         keyParts: [isCancellationFee ? 'ride-cancellation-fee' : 'ride-fare', proof.rideId, proof.id],
         note: isCancellationFee
-          ? 'Driver cancellation fee collected after verified rider payment proof.'
-          : 'Driver fare collected after verified rider payment proof.',
+          ? 'Driver cancellation fee collected after verified rider payment proof (no commission).'
+          : `Driver fare net of the ${Math.round(SR_RIDE_COMMISSION_RATE * 100)}% SYBNB ride commission, collected after verified rider payment proof.`,
       })
+      // The platform's ride commission -- routed to the fixed house account (PLATFORM_ACCOUNT_ID),
+      // exactly like the booking admin-share and seller-plan fee above, so all platform revenue
+      // pools in one place rather than fragmenting across operators' personal wallets. Falls back
+      // to the approving admin only when no house account is configured (dev/e2e). Skipped entirely
+      // for a zero commission (e.g. a cancellation fee, or an env-set 0% launch rate).
+      if (commissionMinor > 0 && actorUserId) {
+        await recordWalletEntry(tx, {
+          userId: process.env.PLATFORM_ACCOUNT_ID || actorUserId,
+          type: 'CREDIT',
+          amountMinor: commissionMinor,
+          currency: proof.currency,
+          referenceType: 'ride_commission',
+          referenceId: proof.rideId,
+          keyParts: ['ride-commission', proof.rideId, proof.id, actorUserId],
+          note: 'SYBNB ride commission collected after verified rider payment.',
+        })
+      }
     }
   }
 

@@ -334,7 +334,7 @@ export async function handleDriver(req, res, url, context) {
           // prepayment — driver gets 75%, platform 25% — with no post-ride proof or admin step.
           // Idempotent (keyed by ride id) and marked settled so a re-run never double-pays.
           if (r.count === 1 && nextStatus === 'COMPLETED' && existing.metadata?.prepaid && !existing.metadata?.settled) {
-            await settlePrepaidRide(tx, { ride: existing, actorUserId: context.user.id })
+            await settlePrepaidRide(tx, { ride: existing })
             await tx.rideRequest.update({
               where: { id: existing.id },
               data: { metadata: { ...existing.metadata, settled: true } },

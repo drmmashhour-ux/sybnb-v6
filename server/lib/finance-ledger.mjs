@@ -533,7 +533,7 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
 // pays it out: the driver receives the fare net of the SR commission, and the platform keeps the
 // commission — the exact same split as a proof-approved ride, just funded from the prepayment
 // instead of a post-ride proof. Idempotent by ride id, so a re-run of the completion sweep is safe.
-export async function settlePrepaidRide(tx, { ride, actorUserId }) {
+export async function settlePrepaidRide(tx, { ride }) {
   const fareMinor = Math.round(ride.fareMinor || 0)
   if (!ride.driverId || fareMinor <= 0) return { settled: false }
   const commissionMinor = Math.round(fareMinor * SR_RIDE_COMMISSION_RATE)
@@ -548,8 +548,14 @@ export async function settlePrepaidRide(tx, { ride, actorUserId }) {
     keyParts: ['ride-fare-prepaid', ride.id],
     note: `Driver fare net of the ${Math.round(SR_RIDE_COMMISSION_RATE * 100)}% SYBNB ride commission, settled from the rider's prepayment.`,
   })
-  const commissionRecipient = process.env.PLATFORM_ACCOUNT_ID || actorUserId
-  if (commissionMinor > 0 && commissionRecipient) {
+  // The commission goes to the house account ONLY. Unlike the proof-approval path (where the actor
+  // is an admin, a safe third-party fallback), a prepaid ride is completed by the DRIVER, so there
+  // is no safe actor fallback — crediting the actor would pay the commission to the counterparty.
+  // If PLATFORM_ACCOUNT_ID is unset (dev/e2e), the commission is simply not booked to anyone and the
+  // driver still receives only their net; it is never paid to the driver. Production sets the var
+  // (see the boot guard in server/index.mjs), where it is captured correctly.
+  const commissionRecipient = process.env.PLATFORM_ACCOUNT_ID || null
+  if (commissionMinor > 0 && commissionRecipient && commissionRecipient !== ride.driverId) {
     await recordWalletEntry(tx, {
       userId: commissionRecipient,
       type: 'CREDIT',

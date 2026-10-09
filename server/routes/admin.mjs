@@ -892,7 +892,9 @@ export async function handleAdmin(req, res, url, context) {
         // make an approve/reject call. Price is already a scalar on Listing; owner/media are
         // relations that need an explicit include to come back at all.
         include: {
-          owner: { select: { id: true, displayName: true } },
+          // idDocumentStatus (2026-10-09): the reviewer approves the host's ID from this same card
+          // before the listing (approval is refused with OWNER_ID_NOT_APPROVED otherwise).
+          owner: { select: { id: true, displayName: true, idDocumentStatus: true, idDocumentMimeType: true, idDocumentSubmittedAt: true } },
           media: { orderBy: { sortOrder: 'asc' }, take: 1 },
           // AI pre-check (2026-10-09), shown next to each pending listing. Advisory only.
           aiReview: true,
@@ -1668,6 +1670,21 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
     const existing = await tx.listing.findUnique({ where: { id: entityId } })
     if (!existing || existing.status !== 'PENDING_REVIEW') throw reviewStateError('LISTING_NOT_REVIEWABLE')
     assertNoSelfReview('listing', existing, actorUserId)
+    // Owner decision 2026-10-09: the host submits listing + ID together (submit only needs the ID
+    // UPLOADED); the admin must approve the host's ID before approving the listing, so a listing
+    // never goes live (and no activation code is issued) for an unverified owner. Rejecting /
+    // sending back for fixes is always allowed.
+    if (decision === 'APPROVED') {
+      const owner = await tx.user.findUnique({ where: { id: existing.ownerId }, select: { idDocumentStatus: true } })
+      if (owner?.idDocumentStatus !== 'APPROVED') {
+        const error = new Error("Approve the host's ID first.")
+        error.statusCode = 409
+        error.code = 'OWNER_ID_NOT_APPROVED'
+        error.expose = true
+        error.details = { ownerId: existing.ownerId, idDocumentStatus: owner?.idDocumentStatus || null }
+        throw error
+      }
+    }
     // Re-check status in the WHERE clause so two concurrent decisions on the same listing can't
     // both apply (same TOCTOU class as the payment-proof and SR-ride races fixed earlier).
     const updated = await tx.listing.updateMany({

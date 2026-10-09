@@ -143,6 +143,8 @@ export function AdminReviewPage({ lang }: Props) {
   const [payouts, setPayouts] = useState<AdminPayout[]>([])
   const [payoutHoldDays, setPayoutHoldDays] = useState(14)
   const [releasingPayoutId, setReleasingPayoutId] = useState('')
+  // A decision the server refused (e.g. 409 OWNER_ID_NOT_APPROVED), shown inline on that item.
+  const [decisionError, setDecisionError] = useState<{ id: string; text: string } | null>(null)
 
   const total = useMemo(() => {
     if (!queue) return 0
@@ -237,6 +239,7 @@ export function AdminReviewPage({ lang }: Props) {
   ) {
     setStatus('saving')
     setMessage('')
+    setDecisionError(null)
 
     try {
       if (entityType === 'payments') {
@@ -256,7 +259,9 @@ export function AdminReviewPage({ lang }: Props) {
       setStatus('ready')
     } catch (error) {
       setStatus('ready')
-      setMessage(error instanceof Error ? error.message : t.error)
+      const text = decisionErrorText(error, lang) || (error instanceof Error ? error.message : t.error)
+      setMessage(text)
+      setDecisionError({ id, text })
     }
   }
 
@@ -305,6 +310,7 @@ export function AdminReviewPage({ lang }: Props) {
       onBookingDecision={(id, decision) => void decide('bookings', id, decision)}
       onPaymentDecision={(id, decision, shamCashReconciliation) => void decide('payments', id, decision, { shamCashReconciliation })}
       onIdDocumentDecision={(id, decision) => void decide('iddocuments', id, decision)}
+      decisionError={decisionError}
       onListingDecision={(id, decision, extra) => void decide('listings', id, decision, extra)}
       onRerunAi={(id) => void rerunAi(id)}
       bookings={visibleBookings}
@@ -337,6 +343,7 @@ function ShortRentAdminCommandDashboard({
   onBookingDecision,
   onPaymentDecision,
   onIdDocumentDecision,
+  decisionError,
   onListingDecision,
   onRerunAi,
   payouts,
@@ -359,6 +366,7 @@ function ShortRentAdminCommandDashboard({
   onBookingDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
   onPaymentDecision: (id: string, decision: 'APPROVE' | 'REJECT', shamCashReconciliation?: ShamCashApprovalPayload) => void
   onIdDocumentDecision: (id: string, decision: 'APPROVE' | 'REJECT') => void
+  decisionError: { id: string; text: string } | null
   onListingDecision: (id: string, decision: 'APPROVE' | 'REJECT', extra?: { adminNote?: string; includeAiIssues?: boolean }) => void
   onRerunAi: (id: string) => void
   payouts: AdminPayout[]
@@ -1009,6 +1017,8 @@ function ShortRentAdminCommandDashboard({
                 onApprove={() => onListingDecision(listing.id, 'APPROVE')}
                 onReject={(adminNote, includeAiIssues) => onListingDecision(listing.id, 'REJECT', { adminNote, includeAiIssues })}
                 onRerunAi={() => onRerunAi(listing.id)}
+                onOwnerIdDecision={(decision) => listing.owner?.id && onIdDocumentDecision(listing.owner.id, decision)}
+                error={decisionError && (decisionError.id === listing.id || decisionError.id === listing.owner?.id) ? decisionError.text : ''}
               />
             ))}
           </div>
@@ -1082,6 +1092,12 @@ function ShortRentAdminCommandDashboard({
         <section style={styles.alert}>
           <strong>{isAr ? 'تعذر تحميل لوحة الإدارة' : 'Could not load admin dashboard'}</strong>
           <span>{message}</span>
+        </section>
+      )}
+      {status === 'ready' && decisionError && (
+        <section style={styles.alert} data-testid="admin-decision-error">
+          <strong>{isAr ? 'تعذر تنفيذ القرار' : 'Decision refused'}</strong>
+          <span>{decisionError.text}</span>
         </section>
       )}
 
@@ -1564,6 +1580,8 @@ function AdminListingLine({
   onApprove,
   onReject,
   onRerunAi,
+  onOwnerIdDecision,
+  error,
 }: {
   listing: PlatformListing
   disabled: boolean
@@ -1572,6 +1590,8 @@ function AdminListingLine({
   onApprove: () => void
   onReject: (adminNote: string, includeAiIssues: boolean) => void
   onRerunAi: () => void
+  onOwnerIdDecision: (decision: 'APPROVE' | 'REJECT') => void
+  error: string
 }) {
   const reviewable = listing.status === 'PENDING_REVIEW'
   const [sendingBack, setSendingBack] = useState(false)
@@ -1612,6 +1632,14 @@ function AdminListingLine({
           <button style={commandStyles.blueButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>{isAr ? 'تفاصيل' : 'Details'}</button>
         </div>
       </article>
+      {reviewable && listing.owner && (
+        <OwnerIdPanel owner={listing.owner} disabled={disabled} lang={lang} onDecision={onOwnerIdDecision} />
+      )}
+      {error && (
+        <div data-testid="admin-listing-decision-error" style={{ margin: '6px 0', padding: '8px 12px', borderRadius: 8, background: 'rgba(192,57,43,0.10)', color: '#c0392b', fontWeight: 700 }}>
+          {error}
+        </div>
+      )}
       {reviewable && <AiReportPanel review={listing.aiReview || null} isAr={isAr} disabled={disabled} onRerun={onRerunAi} />}
       {reviewable && sendingBack && !disabled && (
         <div style={commandStyles.sendBackBox}>
@@ -1644,6 +1672,79 @@ function AdminListingLine({
       )}
     </div>
   )
+}
+
+// Owner decision 2026-10-09: the host submits listing + ID together; the admin approves the ID
+// from the listing card first (the listing approval is refused with OWNER_ID_NOT_APPROVED until
+// then). Reuses PATCH /api/admin/review-queue/iddocuments/:userId and GET /api/admin/id-document/:userId/file.
+function OwnerIdPanel({
+  owner,
+  disabled,
+  lang,
+  onDecision,
+}: {
+  owner: NonNullable<PlatformListing['owner']>
+  disabled: boolean
+  lang: Lang
+  onDecision: (decision: 'APPROVE' | 'REJECT') => void
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'error'>('idle')
+  useEffect(() => () => { if (blobUrl) URL.revokeObjectURL(blobUrl) }, [blobUrl])
+  const status = owner.idDocumentStatus || null
+  const tone = status === 'APPROVED' ? '#2e7d32' : status === 'PENDING_REVIEW' ? '#b7791f' : '#c0392b'
+  const label =
+    status === 'APPROVED'
+      ? pick(lang, 'هوية المضيف: موافق عليها ✓', 'Host ID: approved ✓', 'Pièce d’identité de l’hôte : approuvée ✓')
+      : status === 'PENDING_REVIEW'
+        ? pick(lang, 'هوية المضيف: مرفوعة — بانتظار موافقتك (وافق عليها قبل الإعلان)', 'Host ID: uploaded — awaiting your approval (approve it before the listing)', 'Pièce d’identité de l’hôte : téléversée — à approuver avant l’annonce')
+        : status === 'REJECTED'
+          ? pick(lang, 'هوية المضيف: مرفوضة — بانتظار صورة جديدة', 'Host ID: rejected — waiting for a new photo', 'Pièce d’identité de l’hôte : refusée — en attente d’une nouvelle photo')
+          : pick(lang, 'هوية المضيف: غير مرفوعة', 'Host ID: not uploaded', 'Pièce d’identité de l’hôte : non téléversée')
+
+  async function view() {
+    setLoadState('loading')
+    try {
+      const url = await fetchIdDocumentBlobUrl(owner.id)
+      setBlobUrl(url)
+      setLoadState('idle')
+      window.open(url, '_blank', 'noopener')
+    } catch {
+      setLoadState('error')
+    }
+  }
+
+  return (
+    <div data-testid="admin-owner-id-panel" data-id-status={status || 'NONE'} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '6px 0', padding: '8px 12px', borderRadius: 8, border: `1px solid ${tone}` }}>
+      <strong style={{ color: tone }}>{label}</strong>
+      {(status === 'PENDING_REVIEW' || status === 'APPROVED' || status === 'REJECTED') && (
+        blobUrl ? (
+          <a href={blobUrl} target="_blank" rel="noreferrer" style={commandStyles.blueButton}>{pick(lang, 'فتح الهوية', 'Open ID', 'Ouvrir la pièce')}</a>
+        ) : (
+          <button style={commandStyles.secondaryCommand} disabled={loadState === 'loading'} onClick={() => void view()}>
+            {loadState === 'loading' ? '…' : loadState === 'error' ? pick(lang, 'إعادة المحاولة', 'Retry', 'Réessayer') : pick(lang, 'عرض الهوية', 'View ID', 'Voir la pièce')}
+          </button>
+        )
+      )}
+      {status === 'PENDING_REVIEW' && !disabled && (
+        <>
+          <button style={commandStyles.acceptButton} onClick={() => onDecision('APPROVE')}>{pick(lang, 'قبول الهوية', 'Approve ID', 'Approuver la pièce')}</button>
+          <button style={commandStyles.rejectButton} onClick={() => onDecision('REJECT')}>{pick(lang, 'رفض الهوية', 'Reject ID', 'Refuser la pièce')}</button>
+        </>
+      )}
+    </div>
+  )
+}
+
+function decisionErrorText(error: unknown, lang: Lang) {
+  const code = (error as { code?: string } | null)?.code
+  if (code === 'OWNER_ID_NOT_APPROVED') {
+    return pick(lang, 'وافق على هوية المضيف أولاً، ثم وافق على الإعلان.', "Approve the host's ID first, then approve the listing.", 'Approuvez d’abord la pièce d’identité de l’hôte, puis l’annonce.')
+  }
+  if (code === 'ID_DOCUMENT_NOT_REVIEWABLE') {
+    return pick(lang, 'لا توجد صورة هوية بانتظار المراجعة لهذا المستخدم.', 'There is no ID awaiting review for this user.', 'Aucune pièce d’identité en attente de vérification pour cet utilisateur.')
+  }
+  return ''
 }
 
 const AI_CHECK_LABELS: Record<AiReviewCheckKey, { en: string; ar: string }> = {

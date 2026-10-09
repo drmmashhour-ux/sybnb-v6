@@ -744,14 +744,19 @@ export async function handleListings(req, res, url, context) {
       error.expose = true
       throw error
     }
-    // Publish gate for EVERY division: the lister must (1) have a verified (admin-approved) ID and
-    // (2) have signed the platform listing agreement before a listing can go to review.
+    // Publish gate for EVERY division (owner decision 2026-10-09: submit everything first, checks at
+    // the end): the lister must (1) have UPLOADED an ID (PENDING_REVIEW or APPROVED -- the admin
+    // approves the ID before approving the listing) and (2) have signed the listing agreement.
     const publisher = await db().user.findUnique({
       where: { id: context.user.id },
       select: { idDocumentStatus: true },
     })
-    if (publisher?.idDocumentStatus !== 'APPROVED') {
-      const error = new Error('Verify your identity (upload your ID and get it approved) before publishing a listing.')
+    if (!['PENDING_REVIEW', 'APPROVED'].includes(publisher?.idDocumentStatus)) {
+      const error = new Error(
+        publisher?.idDocumentStatus === 'REJECTED'
+          ? 'Your ID was rejected — upload a new, clear photo.'
+          : 'Upload a photo of your ID before sending the listing for review.',
+      )
       error.statusCode = 403
       error.code = 'ID_VERIFICATION_REQUIRED'
       error.expose = true

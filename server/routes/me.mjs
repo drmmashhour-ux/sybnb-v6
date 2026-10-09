@@ -27,6 +27,8 @@ export async function handleMe(req, res, url, context) {
         status: context.user.status,
         roles: context.roles,
         hostVerifiedAt: context.user.hostVerifiedAt || null,
+        // Status only (never the storage ref): the listing wizard shows/gates the ID upload with it.
+        idDocumentStatus: context.user.idDocumentStatus || null,
       },
     })
   }

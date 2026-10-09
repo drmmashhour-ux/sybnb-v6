@@ -657,7 +657,7 @@ export async function becomeHost() {
 // stale until the next sign-in, so the menu kept hiding "Switch to hosting"/"Admin panel". GET
 // /api/me reads the roles live; this refreshes every stored session from it. Called on app load and
 // whenever the account menu opens. A revoked session answers 401 and apiRequest() already drops it.
-export type MeResponse = { ok: true; user: ApiUser & { locale?: string; status?: string; hostVerifiedAt?: string | null } }
+export type MeResponse = { ok: true; user: ApiUser & { locale?: string; status?: string; hostVerifiedAt?: string | null; idDocumentStatus?: IdDocumentStatus } }
 
 let lastRoleRefreshAt = 0
 let roleRefreshInFlight: Promise<boolean> | null = null
@@ -2154,10 +2154,22 @@ export async function fetchPrototypeHostEarnings(mode: HostDashboardMode = 'host
   return response.earnings
 }
 
-// The KYC gate on /api/listings/:id/submit requires idDocumentStatus === 'APPROVED' for every
-// division. This is the host/seller-side counterpart to submitGuestIdDocument() — same endpoint,
-// same one-document-per-user model, just resolved through the host/seller session instead of the
-// guest one so a host actually has a way to satisfy the gate.
+export type IdDocumentStatus = 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null
+
+// The listing wizard loads the signed-in host's ID status on open (GET /api/me returns only the
+// status, never the storage ref). 'seller' mode resolves the one-account session first.
+export async function fetchMyIdDocumentStatus(mode: HostDashboardMode = 'seller'): Promise<IdDocumentStatus> {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<MeResponse>('/api/me', { token: session.token })
+  return (response.user.idDocumentStatus as IdDocumentStatus) ?? null
+}
+
+// The KYC gate on /api/listings/:id/submit requires the ID to be UPLOADED (PENDING_REVIEW or
+// APPROVED) for every division; the admin approves the ID before approving the listing (owner
+// decision 2026-10-09). This is the host/seller-side counterpart to submitGuestIdDocument() — same
+// endpoint, same one-document-per-user model, resolved through the host/seller session (pass
+// 'seller' to use the one-account session: getStoredSellerSession falls back to a signed-in
+// guest/staff session that has HOST or SELLER).
 export async function submitHostIdDocument(file: File, mode: HostDashboardMode = 'host') {
   const session = await getHostDashboardSession(mode)
   const fileBase64 = await readFileAsBase64(file)

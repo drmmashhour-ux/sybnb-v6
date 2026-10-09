@@ -65,8 +65,8 @@ function onboardingOf(status: HostVerificationStatus): HostOnboarding {
 
 function stepLabels(lang: Lang) {
   return [
-    { title: pick(lang, 'أضف إعلانك', 'Add your listing', 'Ajoutez votre annonce'), hint: pick(lang, 'الصور والسعر والموقع', 'Photos, price and location', 'Photos, prix et emplacement') },
-    { title: pick(lang, 'المراجعة', 'Review', 'Vérification'), hint: pick(lang, 'فحص آلي + فريق SYBNB', 'Automatic check + SYBNB team', 'Contrôle automatique + équipe SYBNB') },
+    { title: pick(lang, 'أضف إعلانك', 'Add your listing', 'Ajoutez votre annonce'), hint: pick(lang, 'الصور والسعر والموقع وصورة الهوية', 'Photos, price, location and ID photo', 'Photos, prix, emplacement et pièce d’identité') },
+    { title: pick(lang, 'المراجعة', 'Review', 'Vérification'), hint: pick(lang, 'الإعلان + صورة الهوية: فحص آلي + فريق SYBNB', 'Listing + ID photo: automatic check + SYBNB team', 'Annonce + pièce d’identité : contrôle automatique + équipe SYBNB') },
     { title: pick(lang, 'رمز التفعيل بالبريد', 'Activation code by email', 'Code d’activation par e-mail'), hint: pick(lang, 'يصلك عند الموافقة', 'Sent when approved', 'Envoyé à l’approbation') },
     { title: pick(lang, 'إعلانك ظاهر للضيوف', 'Your listing is live for guests', 'Votre annonce est visible'), hint: pick(lang, 'جاهز للحجز', 'Ready to be booked', 'Prête à être réservée') },
   ]
@@ -178,9 +178,9 @@ export function HostVerificationCard({ lang, showVerified = false, onVerified, i
           <p style={styles.body}>
             {pick(
               lang,
-              'ابدأ بإضافة إعلانك: الصور والسعر والموقع. بعد الإرسال نراجعه ونرسل لك رمز التفعيل بالبريد عند الموافقة.',
-              'Start by adding your listing: photos, price and location. Once you submit it we review it and email you your activation code when it is approved.',
-              'Commencez par ajouter votre annonce : photos, prix et emplacement. Après l’envoi, nous la vérifions et vous envoyons votre code d’activation par e-mail à l’approbation.',
+              'ابدأ بإضافة إعلانك: الصور والسعر والموقع وصورة هويتك. بعد الإرسال نراجع الإعلان + صورة الهوية ونرسل لك رمز التفعيل بالبريد عند الموافقة.',
+              'Start by adding your listing: photos, price, location and a photo of your ID. Once you submit it we review the listing + ID photo and email you your activation code when it is approved.',
+              'Commencez par ajouter votre annonce : photos, prix, emplacement et une photo de votre pièce d’identité. Après l’envoi, nous vérifions l’annonce + la pièce d’identité et vous envoyons votre code d’activation par e-mail à l’approbation.',
             )}
           </p>
           <button style={styles.button} onClick={() => (window.location.hash = LISTING_WIZARD_PATH)}>
@@ -194,9 +194,9 @@ export function HostVerificationCard({ lang, showVerified = false, onVerified, i
           <p style={styles.body}>
             {pick(
               lang,
-              'إعلانك قيد المراجعة: فحص آلي للصور والعنوان والسعر، ثم يراجعه فريق SYBNB. عند الموافقة نرسل رمز التفعيل إلى بريدك.',
-              'Your listing is in review: an automatic check of photos, address and price, then the SYBNB team. When it is approved we email you your activation code.',
-              'Votre annonce est en cours de vérification : contrôle automatique des photos, de l’adresse et du prix, puis l’équipe SYBNB. À l’approbation, nous vous envoyons votre code par e-mail.',
+              'قيد المراجعة: الإعلان + صورة الهوية. فحص آلي للصور والعنوان والسعر، ثم يراجع فريق SYBNB هويتك وإعلانك. عند الموافقة نرسل رمز التفعيل إلى بريدك.',
+              'In review: your listing + ID photo. An automatic check of photos, address and price, then the SYBNB team reviews your ID and listing. When approved we email you your activation code.',
+              'En cours de vérification : l’annonce + la pièce d’identité. Contrôle automatique des photos, de l’adresse et du prix, puis l’équipe SYBNB vérifie votre pièce d’identité et votre annonce. À l’approbation, nous vous envoyons votre code par e-mail.',
             )}
           </p>
         </div>

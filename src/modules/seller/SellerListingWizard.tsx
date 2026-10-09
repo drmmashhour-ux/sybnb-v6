@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
-import { acceptListingAgreement, createAndSubmitPrototypeListing, getStoredSellerSession, uploadPaymentProofFile } from '../../shared/api/platformApi'
+import { acceptListingAgreement, createAndSubmitPrototypeListing, fetchMyIdDocumentStatus, getStoredSellerSession, submitHostIdDocument, uploadPaymentProofFile, type IdDocumentStatus } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGroups, sellerRealEstateFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
@@ -84,7 +84,7 @@ const STEPS: WizardStep[] = [
   {
     id: 'media',
     title: { ar: 'الصور والملفات', en: 'Photos and files', fr: 'Photos et fichiers' },
-    helper: { ar: 'صور العقار وإثبات الدفع والملكية أو التفويض.', en: 'Property photos, payment proof, and ownership or authorization files.', fr: 'Photos du bien, preuve de paiement et documents de propriété ou de mandat.' },
+    helper: { ar: 'صورة الهوية (مطلوبة)، صور العقار، وإثبات الملكية أو التفويض.', en: 'ID photo (required), property photos, and ownership or authorization files.', fr: 'Pièce d’identité (obligatoire), photos du bien et documents de propriété ou de mandat.' },
   },
   {
     id: 'review',
@@ -210,10 +210,75 @@ export function SellerListingWizard({ lang }: Props) {
     },
   )
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'error'>('idle')
-  // Required alongside ID verification before a listing can be published (server-enforced too —
-  // see /api/listings/:id/submit). ID verification itself happens on the seller's account page.
+  // Required alongside the ID upload before a listing can be sent for review (server-enforced too —
+  // see /api/listings/:id/submit).
   const [agreementAccepted, setAgreementAccepted] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  // Owner decision 2026-10-09: the host submits everything (listing + ID photo) from this wizard;
+  // the checks (AI pre-check, admin ID + listing review, activation code) happen at the end. The
+  // server only requires the ID to be UPLOADED here (PENDING_REVIEW or APPROVED).
+  const [idStatus, setIdStatus] = useState<IdDocumentStatus | 'UNKNOWN'>('UNKNOWN')
+  const [idUploading, setIdUploading] = useState(false)
+  const [idFileName, setIdFileName] = useState('')
+  const [idUploadError, setIdUploadError] = useState('')
+  const idUploaded = idStatus === 'PENDING_REVIEW' || idStatus === 'APPROVED'
+
+  useEffect(() => {
+    let cancelled = false
+    if (!getStoredSellerSession()) {
+      setIdStatus(null)
+      return
+    }
+    fetchMyIdDocumentStatus('seller')
+      .then((status) => { if (!cancelled) setIdStatus(status) })
+      .catch(() => { if (!cancelled) setIdStatus(null) })
+    return () => { cancelled = true }
+  }, [])
+
+  async function uploadIdDocument(fileList: FileList | null) {
+    const file = Array.from(fileList || [])[0]
+    if (!file) return
+    setIdUploadError('')
+    if (!ID_DOCUMENT_MIME_TYPES.includes(file.type)) {
+      setIdUploadError(pick(lang, 'الصيغة غير مدعومة. ارفع صورة JPG أو PNG أو ملف PDF.', 'Unsupported format. Upload a JPG or PNG photo or a PDF.', 'Format non pris en charge. Téléversez une photo JPG ou PNG, ou un PDF.'))
+      return
+    }
+    if (file.size > ID_DOCUMENT_MAX_BYTES) {
+      setIdUploadError(pick(lang, 'الملف أكبر من 8 ميغابايت.', 'The file is larger than 8 MB.', 'Le fichier dépasse 8 Mo.'))
+      return
+    }
+    if (!getStoredSellerSession()) {
+      setIdUploadError(pick(lang, 'سجّل الدخول أولاً لرفع صورة الهوية.', 'Sign in first to upload your ID.', 'Connectez-vous d’abord pour téléverser votre pièce d’identité.'))
+      return
+    }
+    setIdUploading(true)
+    try {
+      const user = await submitHostIdDocument(file, 'seller')
+      setIdStatus((user.idDocumentStatus as IdDocumentStatus) || 'PENDING_REVIEW')
+      setIdFileName(file.name)
+      if (submitState === 'error') {
+        setSubmitState('idle')
+        setSubmitError('')
+      }
+    } catch (error) {
+      setIdUploadError(error instanceof Error ? error.message : pick(lang, 'تعذر رفع صورة الهوية.', 'Could not upload the ID photo.', 'Impossible de téléverser la pièce d’identité.'))
+    } finally {
+      setIdUploading(false)
+    }
+  }
+
+  function submitErrorText(error: unknown) {
+    const code = (error as { code?: string } | null)?.code
+    if (code === 'ID_VERIFICATION_REQUIRED') {
+      return idStatus === 'REJECTED'
+        ? pick(lang, 'تم رفض صورة الهوية — ارفع صورة جديدة وواضحة في خطوة «الصور والملفات».', 'Your ID was rejected — upload a new, clear photo in the “Photos and files” step.', 'Votre pièce d’identité a été refusée — téléversez une nouvelle photo nette à l’étape « Photos et fichiers ».')
+        : pick(lang, 'ارفع صورة هويتك في خطوة «الصور والملفات» قبل إرسال الإعلان للمراجعة.', 'Upload a photo of your ID in the “Photos and files” step before sending the listing for review.', 'Téléversez une photo de votre pièce d’identité à l’étape « Photos et fichiers » avant d’envoyer l’annonce pour vérification.')
+    }
+    if (code === 'LISTING_AGREEMENT_REQUIRED') {
+      return pick(lang, 'وافق على اتفاقية النشر قبل الإرسال.', 'Accept the listing agreement before submitting.', 'Acceptez l’entente de publication avant l’envoi.')
+    }
+    return error instanceof Error ? error.message : 'Unable to submit listing.'
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -262,6 +327,15 @@ export function SellerListingWizard({ lang }: Props) {
 
   const next = async () => {
     if (isLast) {
+      if (!idUploaded) {
+        setSubmitState('error')
+        setSubmitError(
+          idStatus === 'REJECTED'
+            ? pick(lang, 'تم رفض صورة الهوية — ارجع إلى خطوة «الصور والملفات» وارفع صورة جديدة وواضحة.', 'Your ID was rejected — go back to “Photos and files” and upload a new, clear photo.', 'Votre pièce d’identité a été refusée — revenez à « Photos et fichiers » et téléversez une nouvelle photo nette.')
+            : pick(lang, 'صورة الهوية مطلوبة: ارجع إلى خطوة «الصور والملفات» وارفع صورة هويتك قبل الإرسال.', 'ID photo required: go back to “Photos and files” and upload your ID before submitting.', 'Pièce d’identité obligatoire : revenez à « Photos et fichiers » et téléversez-la avant l’envoi.'),
+        )
+        return
+      }
       if (isAdvertisingFlow && (!adFilesSent || !uploadedDocumentUrls.length)) {
         setSubmitState('error')
         setSubmitError(pick(lang, 'ارفع مستندات الإعلان وأرسل الصور والملفات للإدارة قبل المتابعة.', 'Upload ad documents and send photos/files to admin before continuing.', 'Téléversez les documents de l’annonce et envoyez les photos et fichiers à l’administration avant de continuer.'))
@@ -282,7 +356,7 @@ export function SellerListingWizard({ lang }: Props) {
       setSubmitError('')
 
       try {
-        // Record the agreement acceptance server-side. This — plus an admin-approved ID — is
+        // Record the agreement acceptance server-side. This — plus an uploaded ID — is
         // required by /api/listings/:id/submit before the listing can go to review.
         await acceptListingAgreement()
         // Real seller-uploaded photos only -- no hardcoded per-division stock image forced in.
@@ -334,7 +408,7 @@ export function SellerListingWizard({ lang }: Props) {
         navigate('/sell/submitted')
       } catch (error) {
         setSubmitState('error')
-        setSubmitError(error instanceof Error ? error.message : 'Unable to submit listing.')
+        setSubmitError(submitErrorText(error))
       }
       return
     }
@@ -634,6 +708,14 @@ export function SellerListingWizard({ lang }: Props) {
 
           {activeStep.id === 'media' && (
             <div className="seller-wizard-section">
+              <IdDocumentCard
+                error={idUploadError}
+                fileName={idFileName}
+                lang={lang}
+                onFile={(files) => void uploadIdDocument(files)}
+                status={idStatus}
+                uploading={idUploading}
+              />
               {isAdvertisingFlow && (
               <div className="seller-upload-grid">
                 {bannerSlots.map((item) => (
@@ -727,6 +809,13 @@ export function SellerListingWizard({ lang }: Props) {
                         ? pick(lang, `تم رفع ${uploadedDocumentUrls.length} مستند للبائع`, `${uploadedDocumentUrls.length} seller document uploaded`, `${uploadedDocumentUrls.length} document(s) du vendeur téléversé(s)`)
                         : pick(lang, 'ارفع مستندات البائع قبل الإرسال النهائي', 'Upload seller documents before final submission', 'Téléversez les documents du vendeur avant l’envoi final')}
                   </li>
+                  <li data-testid="wizard-review-id-item">
+                    {idUploaded
+                      ? pick(lang, 'صورة الهوية: مرفوعة ✓', 'ID photo: uploaded ✓', 'Pièce d’identité : téléversée ✓')
+                      : idStatus === 'REJECTED'
+                        ? pick(lang, 'صورة الهوية: مرفوضة — ارفع صورة جديدة', 'ID photo: rejected — upload a new one', 'Pièce d’identité : refusée — téléversez-en une nouvelle')
+                        : pick(lang, 'صورة الهوية: غير مرفوعة — مطلوبة قبل الإرسال', 'ID photo: not uploaded — required before submitting', 'Pièce d’identité : non téléversée — obligatoire avant l’envoi')}
+                  </li>
                   {!isAdvertisingFlow && <li>{selectedFilterLabels(sellerPropertyFilterGroups, visualFilters, lang).join(' · ')}</li>}
                 </ul>
               </div>
@@ -764,6 +853,90 @@ export function SellerListingWizard({ lang }: Props) {
         </div>
       </section>
     </main>
+  )
+}
+
+const ID_DOCUMENT_MIME_TYPES = ['image/jpeg', 'image/png', 'application/pdf'] // = server kyc bucket allowlist
+const ID_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024 // = server MAX_ID_DOCUMENT_BYTES
+
+function IdDocumentCard({
+  error,
+  fileName,
+  lang,
+  onFile,
+  status,
+  uploading,
+}: {
+  error: string
+  fileName: string
+  lang: Lang
+  onFile: (files: FileList | null) => void
+  status: IdDocumentStatus | 'UNKNOWN'
+  uploading: boolean
+}) {
+  const tone =
+    status === 'APPROVED' ? { color: '#1f9d55', bg: 'rgba(31,157,85,0.10)' }
+    : status === 'PENDING_REVIEW' ? { color: '#1f9d55', bg: 'rgba(31,157,85,0.08)' }
+    : status === 'REJECTED' ? { color: '#d93a55', bg: 'rgba(217,58,85,0.08)' }
+    : { color: '#b7791f', bg: 'rgba(213,169,21,0.10)' }
+  const statusText = uploading
+    ? pick(lang, 'جار رفع صورة الهوية…', 'Uploading your ID…', 'Téléversement de la pièce d’identité…')
+    : status === 'UNKNOWN'
+      ? pick(lang, 'جار التحقق من حالة الهوية…', 'Checking your ID status…', 'Vérification du statut de la pièce d’identité…')
+      : status === 'APPROVED'
+        ? pick(lang, 'تمت الموافقة على الهوية ✓', 'ID approved ✓', 'Pièce d’identité approuvée ✓')
+        : status === 'PENDING_REVIEW'
+          ? pick(lang, 'تم الرفع — قيد المراجعة ✓', 'Uploaded — under review ✓', 'Téléversée — en cours de vérification ✓')
+          : status === 'REJECTED'
+            ? pick(lang, 'تم رفض الصورة — ارفع صورة جديدة وواضحة', 'Rejected — upload a new, clear photo', 'Refusée — téléversez une nouvelle photo nette')
+            : pick(lang, 'لم تُرفع بعد', 'Not uploaded yet', 'Pas encore téléversée')
+  const canUpload = !uploading && status !== 'UNKNOWN' && status !== 'APPROVED'
+  return (
+    <div
+      className="payment-proof-upload seller-id-document-card"
+      data-testid="wizard-id-card"
+      data-id-status={status ?? 'NONE'}
+      style={{ border: `2px solid ${tone.color}`, background: tone.bg, marginBottom: 16 }}
+    >
+      <div className="payment-proof-upload-header">
+        <strong>
+          {pick(lang, 'صورة الهوية (مطلوبة)', 'ID photo (required)', 'Pièce d’identité (obligatoire)')}
+        </strong>
+        <p>
+          {pick(
+            lang,
+            'صورة واضحة لهويتك الشخصية أو جواز سفرك. تراجعها الإدارة مع الإعلان ولا تظهر للزوار أبداً. JPG أو PNG أو PDF، حتى 8 ميغابايت.',
+            'A clear photo of your national ID or passport. The admin reviews it together with the listing; visitors never see it. JPG, PNG or PDF, up to 8 MB.',
+            'Une photo nette de votre carte d’identité ou passeport. L’administration la vérifie avec l’annonce ; les visiteurs ne la voient jamais. JPG, PNG ou PDF, jusqu’à 8 Mo.',
+          )}
+        </p>
+      </div>
+      <p data-testid="wizard-id-status" style={{ color: tone.color, fontWeight: 700, margin: '8px 0' }}>
+        {statusText}
+        {fileName && (status === 'PENDING_REVIEW' || status === 'APPROVED') ? ` · ${fileName}` : ''}
+      </p>
+      {canUpload && (
+        <label className="payment-proof-dropzone">
+          <input
+            accept="image/jpeg,image/png,application/pdf,.jpg,.jpeg,.png,.pdf"
+            data-testid="wizard-id-input"
+            onChange={(event) => {
+              onFile(event.target.files)
+              event.target.value = ''
+            }}
+            type="file"
+          />
+          <span>
+            {status === 'PENDING_REVIEW'
+              ? pick(lang, 'استبدال صورة الهوية', 'Replace ID photo', 'Remplacer la pièce d’identité')
+              : status === 'REJECTED'
+                ? pick(lang, 'رفع صورة جديدة للهوية', 'Upload a new ID photo', 'Téléverser une nouvelle pièce d’identité')
+                : pick(lang, 'اضغط لرفع صورة الهوية', 'Tap to upload your ID photo', 'Touchez pour téléverser votre pièce d’identité')}
+          </span>
+        </label>
+      )}
+      {error && <p className="seller-note-line" style={{ color: '#ff5f7d' }}>{error}</p>}
+    </div>
   )
 }
 

@@ -18,6 +18,12 @@
 //      Tracker -> step 3 with hasPendingCode. A second approved stay does not replace the live code.
 //   5. Approving an already-verified host's stay issues nothing.
 //   6. POST /api/admin/listings/:id/ai-review: ADMIN only; ?wait=1 returns the stored record.
+//   0. (Owner decision 2026-10-09, "submit everything first, checks at the end") the submit gate
+//      needs the ID UPLOADED, not approved: no ID -> 403 ID_VERIFICATION_REQUIRED (upload message),
+//      REJECTED -> 403 (re-upload message), PENDING_REVIEW -> 200. GET /api/me exposes the status.
+//      The admin cannot approve the listing while the owner's ID is not APPROVED (409
+//      OWNER_ID_NOT_APPROVED, nothing changes, no code issued); after the ID is approved from the
+//      review queue the listing approval works and the activation code is issued.
 //
 // Needs the API running and DATABASE_URL + AUTH_SECRET in this process's env.
 // Run: node tests/e2e/listing-approval-activation.e2e.mjs
@@ -67,11 +73,17 @@ async function seedUser(label, roles, extra = {}) {
   return { ...user, token }
 }
 
-// A publisher must have an approved ID + the listing agreement before /submit (existing gate).
+// A publisher must have an uploaded ID + the listing agreement before /submit.
 async function makePublisher(user) {
   await db().user.update({ where: { id: user.id }, data: { idDocumentStatus: 'APPROVED' } })
   await db().legalConsent.create({ data: { userId: user.id, documentKey: 'listing-agreement', version: 'e2e' } })
 }
+// The new-host path: only the listing agreement; the ID is uploaded through the real endpoint below.
+async function signAgreementOnly(user) {
+  await db().legalConsent.create({ data: { userId: user.id, documentKey: 'listing-agreement', version: 'e2e' } })
+}
+// 1x1 transparent PNG.
+const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
 
 async function createAndSubmit(host, label) {
   const created = await call('POST', '/api/listings', host.token, {
@@ -104,14 +116,48 @@ async function main() {
   const host = await seedUser('host', ['HOST', 'GUEST'])
   const verifiedHost = await seedUser('vhost', ['HOST', 'GUEST'], { hostVerifiedAt: new Date() })
   const admin = await seedUser('admin', ['ADMIN'])
-  await makePublisher(host)
+  await signAgreementOnly(host)
   await makePublisher(verifiedHost)
   await clearBuckets([`admin-action:${admin.id}`, `ai-review-rerun:${admin.id}`])
 
-  // --- 1. submit -> AI row, listing untouched ---------------------------------------------------
-  console.log('\n--- 1. submit -> automatic AI pre-check (advisory) ---')
+  // --- 0. submit gate: ID uploaded (not approved) -----------------------------------------------
+  console.log('\n--- 0. submit gate needs the ID UPLOADED, not approved ---')
   const step0 = (await call('GET', '/api/host/verification', host.token)).j
   check('tracker before any listing -> step 1', step0?.onboarding?.step === 1, step0)
+  const me0 = await call('GET', '/api/me', host.token)
+  check('GET /api/me -> idDocumentStatus null before any upload (no storage ref leaked)', me0.status === 200 && me0.j?.user?.idDocumentStatus === null && !('idDocumentRef' in (me0.j?.user || {})), me0.j)
+  const noId = await createAndSubmit(host, 'NOID')
+  check('submit with NO ID -> 403 ID_VERIFICATION_REQUIRED (upload message)', noId.submitted.status === 403 && noId.submitted.j?.error?.code === 'ID_VERIFICATION_REQUIRED' && /Upload a photo of your ID/.test(noId.submitted.j?.error?.message || ''), noId.submitted)
+  check('refused submit leaves the listing DRAFT', (await db().listing.findUnique({ where: { id: noId.id } }))?.status === 'DRAFT', 'not draft')
+  await db().user.update({ where: { id: host.id }, data: { idDocumentStatus: 'REJECTED' } })
+  const rejectedId = await call('PATCH', `/api/listings/${noId.id}/submit`, host.token)
+  check('submit with REJECTED ID -> 403 ID_VERIFICATION_REQUIRED (re-upload message)', rejectedId.status === 403 && rejectedId.j?.error?.code === 'ID_VERIFICATION_REQUIRED' && /rejected/.test(rejectedId.j?.error?.message || ''), rejectedId)
+  await db().user.update({ where: { id: host.id }, data: { idDocumentStatus: null } })
+  const upload = await call('PATCH', '/api/me/id-document', host.token, { fileBase64: TINY_PNG, mimeType: 'image/png' })
+  check('host uploads the ID -> 200 PENDING_REVIEW', upload.status === 200 && upload.j?.user?.idDocumentStatus === 'PENDING_REVIEW', upload)
+  const me1 = await call('GET', '/api/me', host.token)
+  check('GET /api/me -> idDocumentStatus PENDING_REVIEW', me1.j?.user?.idDocumentStatus === 'PENDING_REVIEW', me1.j?.user)
+  const pendingIdSubmit = await call('PATCH', `/api/listings/${noId.id}/submit`, host.token)
+  check('submit with PENDING_REVIEW ID -> 200 PENDING_REVIEW', pendingIdSubmit.status === 200 && pendingIdSubmit.j?.listing?.status === 'PENDING_REVIEW', pendingIdSubmit)
+  await waitForAiRow(noId.id)
+  const queue0 = await call('GET', '/api/admin/review-queue', admin.token)
+  const queued0 = queue0.j?.queue?.listings?.find((l) => l.id === noId.id)
+  check('review queue: listing owner carries idDocumentStatus PENDING_REVIEW', queued0?.owner?.idDocumentStatus === 'PENDING_REVIEW', queued0?.owner)
+  check('review queue: the ID is also in the idDocuments queue', Boolean(queue0.j?.queue?.idDocuments?.find((d) => d.id === host.id)), 'missing')
+  const earlyApprove = await call('PATCH', `/api/admin/review-queue/listings/${noId.id}`, admin.token, { decision: 'APPROVE' })
+  check('approve listing while owner ID is unapproved -> 409 OWNER_ID_NOT_APPROVED', earlyApprove.status === 409 && earlyApprove.j?.error?.code === 'OWNER_ID_NOT_APPROVED', earlyApprove)
+  check('refused approval: listing still PENDING_REVIEW, no code issued', (await db().listing.findUnique({ where: { id: noId.id } }))?.status === 'PENDING_REVIEW' && (await db().hostActivationCode.count({ where: { hostId: host.id } })) === 0, 'changed')
+  // Sending back for fixes is never blocked by the ID state; park this listing so it does not
+  // interfere with the activation-code counts asserted below.
+  const parkReject = await call('PATCH', `/api/admin/review-queue/listings/${noId.id}`, admin.token, { decision: 'REJECT', adminNote: 'parked by e2e' })
+  check('REJECT (send back) is allowed while the ID is unapproved', parkReject.status === 200 && parkReject.j?.entity?.status === 'REJECTED', parkReject)
+  await db().listing.update({ where: { id: noId.id }, data: { status: 'PAUSED' } }) // out of the tracker counts
+  const idApprove = await call('PATCH', `/api/admin/review-queue/iddocuments/${host.id}`, admin.token, { decision: 'APPROVE' })
+  check('admin approves the host ID from the review queue -> 200 APPROVED', idApprove.status === 200 && idApprove.j?.entity?.idDocumentStatus === 'APPROVED', idApprove)
+  check('ID approval is audited', Boolean(await db().adminAuditLog.findFirst({ where: { entityId: host.id, action: 'REVIEW_APPROVED' } })), 'missing')
+
+  // --- 1. submit -> AI row, listing untouched ---------------------------------------------------
+  console.log('\n--- 1. submit -> automatic AI pre-check (advisory) ---')
   const a = await createAndSubmit(host, 'A')
   check('create 201 + submit 200 -> PENDING_REVIEW', a.created.status === 201 && a.submitted.status === 200 && a.submitted.j?.listing?.status === 'PENDING_REVIEW', a.submitted)
   const aiRow = await waitForAiRow(a.id)

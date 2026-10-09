@@ -164,7 +164,8 @@ export function HostJoinPage({ lang }: Props) {
               flow="generic"
               returnPath="/host/join"
               embedded
-              embeddedTitle={pick(lang, 'سجّل الدخول أو أنشئ حساباً للمتابعة', 'Log in or sign up to continue', 'Connectez-vous ou inscrivez-vous pour continuer')}
+              embeddedTitle={pick(lang, 'حساب المضيف', 'Host account', 'Compte hôte')}
+              initialMode="signup"
               onSignedIn={onSignedIn}
             />
           )}

@@ -23,6 +23,8 @@ type Props = {
   embedded?: boolean
   onSignedIn?: () => void
   embeddedTitle?: string
+  // Which door opens first: 'login' (returning user) or 'signup' (first time). Default login.
+  initialMode?: 'login' | 'signup'
 }
 
 type Step = 'email' | 'password' | 'finish' | 'reset'
@@ -33,6 +35,14 @@ const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 const copy = {
   ar: {
     forgot: 'نسيت كلمة المرور؟',
+    tabLogin: 'لدي حساب — تسجيل الدخول',
+    tabSignup: 'أول مرة؟ إنشاء حساب',
+    signupTitle: 'إنشاء حساب جديد',
+    signupBody: (masked: string) => `أرسلنا رمزاً من 6 أرقام إلى ${masked}. أدخله مع اسمك وكلمة مرور جديدة.`,
+    loginFailed: 'البريد أو كلمة المرور غير صحيحة. أول مرة على SYBNB؟ اختر «إنشاء حساب».',
+    emailTaken: 'هذا البريد لديه حساب بالفعل. سجّل الدخول، أو اختر «نسيت كلمة المرور؟».',
+    createAccount: 'إنشاء الحساب',
+    sendCode: 'أرسل رمز التحقق',
     resetTitle: 'إعادة تعيين كلمة المرور',
     resetBody: (masked: string) => `أرسلنا رمزاً من 6 أرقام إلى ${masked}. أدخله ثم اختر كلمة مرور جديدة.`,
     newPassword: 'كلمة المرور الجديدة',
@@ -70,6 +80,14 @@ const copy = {
   },
   en: {
     forgot: 'Forgot password?',
+    tabLogin: 'I have an account — Log in',
+    tabSignup: 'First time? Create account',
+    signupTitle: 'Create a new account',
+    signupBody: (masked: string) => `We sent a 6-digit code to ${masked}. Enter it with your name and a new password.`,
+    loginFailed: 'Email or password is incorrect. First time on SYBNB? Choose “Create account”.',
+    emailTaken: 'This email already has an account. Log in, or choose “Forgot password?”.',
+    createAccount: 'Create account',
+    sendCode: 'Send verification code',
     resetTitle: 'Reset your password',
     resetBody: (masked: string) => `We sent a 6-digit code to ${masked}. Enter it, then choose a new password.`,
     newPassword: 'New password',
@@ -107,6 +125,14 @@ const copy = {
   },
   fr: {
     forgot: 'Mot de passe oublié ?',
+    tabLogin: 'J’ai un compte — Connexion',
+    tabSignup: 'Première fois ? Créer un compte',
+    signupTitle: 'Créer un nouveau compte',
+    signupBody: (masked: string) => `Nous avons envoyé un code à 6 chiffres à ${masked}. Saisissez-le avec votre nom et un nouveau mot de passe.`,
+    loginFailed: 'Courriel ou mot de passe incorrect. Première fois sur SYBNB ? Choisissez « Créer un compte ».',
+    emailTaken: 'Ce courriel a déjà un compte. Connectez-vous ou choisissez « Mot de passe oublié ? ».',
+    createAccount: 'Créer le compte',
+    sendCode: 'Envoyer le code de vérification',
     resetTitle: 'Réinitialiser votre mot de passe',
     resetBody: (masked: string) => `Nous avons envoyé un code à 6 chiffres à ${masked}. Saisissez-le, puis choisissez un nouveau mot de passe.`,
     newPassword: 'Nouveau mot de passe',
@@ -144,10 +170,12 @@ const copy = {
   },
 }
 
-export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPath, embedded = false, onSignedIn, embeddedTitle }: Props) {
+export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPath, embedded = false, onSignedIn, embeddedTitle, initialMode = 'login' }: Props) {
   const t = copy[lang]
   const isAr = lang === 'ar'
   const [step, setStep] = useState<Step>('email')
+  // Two explicit doors (owner decision): first-time users create an account, returning users log in.
+  const [mode, setMode] = useState<'login' | 'signup'>(initialMode)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -221,23 +249,22 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
   function submitEmail() {
     if (!emailValid) return say(t.invalidEmail)
     say('')
-    setStep('password')
+    if (mode === 'login') void submitLogin()
+    else void startSignup()
   }
 
-  async function submitPassword() {
-    if (password.length < 8) return say(t.shortPassword)
+  // Returning user: email + password on one screen.
+  async function submitLogin() {
+    if (password.length < 8) return say(t.loginFailed)
     setBusy(true)
     say('')
     setKeepSignedIn(remember)
     try {
-      // Returning user: email + password is all the server needs.
       await signInGuestAccount(email, password)
       finishAndReturn()
-      return
     } catch (err) {
       // An admin account cannot sign in here (owner decision 2026-10-08): admin sign-in always
-      // needs a fresh email code, through the admin portal. Say so instead of treating it as a new
-      // account.
+      // needs a fresh email code, through the admin portal.
       if ((err as { code?: string } | null)?.code === 'ADMIN_LOGIN_CODE_REQUIRED') {
         say(
           isAr
@@ -246,20 +273,34 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
               ? 'Ceci est un compte administrateur. Connectez-vous via le portail admin (/admin) avec le code envoyé par courriel.'
               : 'This is an admin account. Sign in through the admin portal (/admin) with the code sent to your email.',
         )
-        setBusy(false)
-        return
+      } else {
+        const text = errText(err)
+        say(/invalid|credentials|401/i.test(text) ? t.loginFailed : text)
       }
-      // No match -> treat as a new account and email the verification code.
+    } finally {
+      setBusy(false)
     }
+  }
+
+  // First time: email -> 6-digit code -> name + new password.
+  async function startSignup() {
+    setBusy(true)
+    say('')
     try {
       await requestOtp({ email: email.trim(), purpose: 'account-verify' })
       setCode('')
+      setPassword('')
       setStep('finish')
     } catch (err) {
       say(errText(err))
     } finally {
       setBusy(false)
     }
+  }
+
+  // Kept for the legacy password step (no longer reachable from the two-door email screen).
+  async function submitPassword() {
+    return submitLogin()
   }
 
   async function resendCode() {
@@ -316,8 +357,10 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
   async function submitFinish() {
     if (firstName.trim().length < 2 || lastName.trim().length < 2) return say(t.missingName)
     if (code.trim().length !== 6) return say(t.missingCode)
+    if (password.length < 8) return say(t.shortPassword)
     setBusy(true)
     say('')
+    setKeepSignedIn(remember)
     try {
       const ok = await confirmOtp({ email: email.trim(), purpose: 'account-verify', code: code.trim() })
       if (!ok) {
@@ -329,10 +372,11 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
     } catch (err) {
       const text = errText(err)
       // The email already had an account and the password typed on step 2 was wrong.
-      if (/invalid login credentials/i.test(text)) {
+      if (/invalid login credentials|already|exists|taken|409/i.test(text)) {
         setPassword('')
-        setStep('password')
-        say(t.wrongPassword)
+        setMode('login')
+        setStep('email')
+        say(t.emailTaken)
       } else {
         say(text)
       }
@@ -341,7 +385,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
     }
   }
 
-  const title = step === 'email' ? t.emailTitle : step === 'password' ? t.passwordTitle : step === 'reset' ? t.resetTitle : t.finishTitle
+  const title = step === 'email' ? (mode === 'signup' ? t.signupTitle : t.emailTitle) : step === 'password' ? t.passwordTitle : step === 'reset' ? t.resetTitle : t.signupTitle
 
   const Wrapper = embedded ? 'div' : 'main'
   return (
@@ -355,7 +399,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
               ×
             </button>
           ) : (
-            <button style={styles.iconButton} onClick={() => { say(''); setStep(step === 'finish' || step === 'reset' ? 'password' : 'email') }} aria-label={t.back}>
+            <button style={styles.iconButton} onClick={() => { say(''); setStep('email') }} aria-label={t.back}>
               {isAr ? '›' : '‹'}
             </button>
           )}
@@ -381,6 +425,26 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
           {step === 'email' ? (
             <>
               {!embedded && <h2 style={styles.welcome}>{t.welcome}</h2>}
+              <div role="tablist" style={styles.modeTabs}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === 'login'}
+                  style={{ ...styles.modeTab, ...(mode === 'login' ? styles.modeTabActive : null) }}
+                  onClick={() => { say(''); setMode('login') }}
+                >
+                  {t.tabLogin}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === 'signup'}
+                  style={{ ...styles.modeTab, ...(mode === 'signup' ? styles.modeTabActive : null) }}
+                  onClick={() => { say(''); setMode('signup') }}
+                >
+                  {t.tabSignup}
+                </button>
+              </div>
               <input
                 ref={focusRef}
                 dir="ltr"
@@ -392,6 +456,43 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
                 placeholder={t.email}
                 aria-label={t.email}
               />
+              {mode === 'login' ? (
+                <>
+                  <div style={styles.passwordWrap}>
+                    <input
+                      dir="ltr"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      style={{ ...styles.input, ...styles.passwordInput }}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder={t.password}
+                      aria-label={t.password}
+                    />
+                    <button type="button" style={styles.showButton} onClick={() => setShowPassword((v) => !v)}>
+                      {showPassword ? t.hide : t.show}
+                    </button>
+                  </div>
+                  <button type="button" style={styles.linkButton} onClick={() => void startReset()} disabled={busy}>
+                    {t.forgot}
+                  </button>
+                  <label style={styles.rememberRow} htmlFor="guest-keep-signed-in">
+                    <input
+                      id="guest-keep-signed-in"
+                      type="checkbox"
+                      name="keepSignedIn"
+                      checked={remember}
+                      aria-label={t.keepSignedIn}
+                      aria-describedby="guest-keep-signed-in-hint"
+                      onChange={(event) => setRemember(event.target.checked)}
+                    />
+                    <span>
+                      {t.keepSignedIn}
+                      <small id="guest-keep-signed-in-hint" style={styles.rememberHint}>{t.keepSignedInHint}</small>
+                    </span>
+                  </label>
+                </>
+              ) : null}
             </>
           ) : null}
 
@@ -485,7 +586,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
 
           {step === 'finish' ? (
             <>
-              <p style={styles.hint}>{t.finishBody(maskEmail(email))}</p>
+              <p style={styles.hint}>{t.signupBody(maskEmail(email))}</p>
               <input
                 ref={focusRef}
                 dir="ltr"
@@ -505,6 +606,22 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
                 <input style={styles.input} autoComplete="given-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder={t.firstName} aria-label={t.firstName} />
                 <input style={styles.input} autoComplete="family-name" value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder={t.lastName} aria-label={t.lastName} />
               </div>
+              <div style={styles.passwordWrap}>
+                <input
+                  dir="ltr"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  style={{ ...styles.input, ...styles.passwordInput }}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={t.newPassword}
+                  aria-label={t.newPassword}
+                />
+                <button type="button" style={styles.showButton} onClick={() => setShowPassword((v) => !v)}>
+                  {showPassword ? t.hide : t.show}
+                </button>
+              </div>
+              <p style={styles.hint}>{t.shortPassword}</p>
               <p style={styles.terms}>{t.terms}</p>
             </>
           ) : null}
@@ -516,7 +633,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
           ) : null}
 
           <button type="submit" style={{ ...styles.primaryButton, opacity: busy ? 0.7 : 1 }} disabled={busy}>
-            {busy ? '…' : step === 'finish' ? t.agree : step === 'reset' ? t.resetSave : t.continue}
+            {busy ? '…' : step === 'finish' ? t.createAccount : step === 'reset' ? t.resetSave : step === 'email' && mode === 'signup' ? t.sendCode : t.continue}
           </button>
         </form>
       </section>
@@ -548,6 +665,9 @@ function sanitizeReturnPath(value?: string | null) {
 const styles: Record<string, CSSProperties> = {
   page: { minHeight: 'calc(100vh - 160px)', background: '#08090e', color: '#fff', padding: '24px 16px 90px', display: 'grid', alignContent: 'start', justifyItems: 'center' },
   embeddedPage: { color: '#fff' },
+  modeTabs: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, background: '#0b0d14', border: '1px solid #232638', borderRadius: 12, padding: 4 },
+  modeTab: { minHeight: 44, border: 0, borderRadius: 9, background: 'transparent', color: '#aab3c8', fontWeight: 800, fontSize: 13, cursor: 'pointer', padding: '6px 8px' },
+  modeTabActive: { background: '#5268ff', color: '#fff' },
   embeddedCard: { width: '100%', border: '1px solid #232638', borderRadius: 16, background: '#0e0f16', overflow: 'hidden' },
   card: { width: '100%', maxWidth: 520, border: '1px solid #232638', borderRadius: 16, background: '#0e0f16', overflow: 'hidden' },
   header: { display: 'grid', gridTemplateColumns: '44px 1fr 44px', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid #232638' },

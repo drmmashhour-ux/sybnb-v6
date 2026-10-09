@@ -386,9 +386,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             </button>
           )}
         </div>
-        <div className="search-hero-metrics" aria-label={pick(lang, 'حالة البحث', 'Search status', 'État de la recherche')}>
+        <div className="search-hero-photo" aria-hidden="true">
+          <img src={HERO_PHOTOS[effectiveInitialDivision] || HERO_PHOTOS.stays} alt="" />
           {hasSearched ? <strong>{countText}</strong> : null}
-          <small>{isSampleMode ? t.sampleResults : t.liveResults}</small>
         </div>
       </section>
 
@@ -522,6 +522,16 @@ function searchSummary(value: UnifiedSearchValue, lang: Lang) {
 // real bedroom/bathroom metadata via SellerListingWizard) -- the correct
 // long-term fix is real stepper UI for this division, not yet authorized;
 // this closes the invisible-default bug without building that UI.
+// Photo shown beside each division's search title (replaces the old "live database results" box).
+const HERO_PHOTOS: Record<string, string> = {
+  stays: '/assets/divisions/daily-rental.webp',
+  rentals: '/assets/divisions/monthly-rental.webp',
+  buy: '/assets/divisions/buy-property.webp',
+  newConstruction: '/assets/divisions/new-construction.webp',
+  cars: '/assets/divisions/cars.webp',
+  marketplace: '/assets/divisions/marketplace.webp',
+}
+
 const HAS_BEDROOM_BATHROOM_FILTERS = new Set<UnifiedSearchValue['division']>(['stays', 'rentals', 'buy'])
 
 function toApiDivision(division: UnifiedSearchValue['division']) {

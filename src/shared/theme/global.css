@@ -7924,3 +7924,35 @@ a {
 .landing-movie-caption b {
   color: #fff;
 }
+
+/* Division photo beside the search title (rooms for stays, cars for cars, ...). */
+.search-hero-photo {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  height: 150px;
+  overflow: hidden;
+  position: relative;
+  width: 220px;
+  flex-shrink: 0;
+}
+.search-hero-photo img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+.search-hero-photo strong {
+  background: rgba(8, 9, 14, 0.78);
+  border-radius: 10px;
+  bottom: 8px;
+  color: #20d29b;
+  font-size: 15px;
+  inset-inline-start: 8px;
+  padding: 4px 10px;
+  position: absolute;
+}
+@media (max-width: 640px) {
+  .search-hero-photo {
+    height: 140px;
+    width: 100%;
+  }
+}

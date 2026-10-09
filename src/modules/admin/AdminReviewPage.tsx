@@ -543,9 +543,9 @@ function ShortRentAdminCommandDashboard({
     { label: isAr ? 'بانتظار مراجعة الدفع' : 'Payment review', value: String(pendingPayments), tone: 'gold' },
     { label: isAr ? 'حجوزات مؤكدة (المنصة)' : 'Confirmed bookings (platform-wide)', value: String(metrics?.bookingsByStatus.CONFIRMED || 0), tone: 'green' },
     { label: isAr ? 'حالات نزاع' : 'Disputes', value: String(disputeBookingRows.length), tone: 'red' },
-    { label: isAr ? 'مبالغ محجوزة' : 'Held funds', value: moneyText(heldTotal, 'SYP', lang), tone: 'gold' },
-    { label: isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout', value: moneyText(readyPayout, 'SYP', lang), tone: 'green' },
-    { label: isAr ? 'عمولة المنصة' : 'Platform commission', value: moneyText(totalAdminCommission, 'SYP', lang), tone: 'blue' },
+    { label: isAr ? 'مبالغ محجوزة (تقديري)' : 'Held funds (est.)', value: moneyText(heldTotal, 'SYP', lang), tone: 'gold' },
+    { label: isAr ? 'جاهز للصرف (تقديري)' : 'Ready payout (est.)', value: moneyText(readyPayout, 'SYP', lang), tone: 'green' },
+    { label: isAr ? 'عمولة المنصة (تقديري)' : 'Platform commission (est.)', value: moneyText(totalAdminCommission, 'SYP', lang), tone: 'blue' },
     { label: isAr ? 'إعلانات معتمدة (المنصة)' : 'Approved listings (platform-wide)', value: String(metrics?.listingsByStatus.APPROVED || 0), tone: 'white' },
   ]
   const adminGroups = [
@@ -942,13 +942,13 @@ function ShortRentAdminCommandDashboard({
         {activeCommandView === 'finance' && (
           <div style={commandStyles.moneyCommandGrid}>
             <div style={commandStyles.moneyCommandCard}>
-              <small>{isAr ? 'مبالغ جاهزة للصرف' : 'Ready payout'}</small>
+              <small>{isAr ? 'جاهز للصرف (تقديري)' : 'Ready payout (est.)'}</small>
               <strong style={commandTone('green')}>{moneyText(readyPayout, 'SYP', lang)}</strong>
               <span style={commandStyles.payoutState}>{selectedPayoutState === 'RELEASE_STAGED' ? (isAr ? 'جاهز للصرف' : 'Release staged') : selectedPayoutState === 'HELD' ? (isAr ? 'معلق' : 'Held') : (isAr ? 'اختر حجزا' : 'Select booking')}</span>
               <button style={commandStyles.acceptButton} onClick={() => stagePayoutDecision('RELEASE_STAGED')}>{isAr ? 'إطلاق الدفعة للمضيف' : 'Release payout'}</button>
             </div>
             <div style={commandStyles.moneyCommandCard}>
-              <small>{isAr ? 'عمولة المنصة' : 'Platform commission'}</small>
+              <small>{isAr ? 'عمولة المنصة (تقديري)' : 'Platform commission (est.)'}</small>
               <strong style={commandTone('blue')}>{moneyText(totalAdminCommission, 'SYP', lang)}</strong>
               <button style={commandStyles.secondaryCommand} onClick={() => {
                 setActiveCommandView('finance')
@@ -956,7 +956,7 @@ function ShortRentAdminCommandDashboard({
               }}>{isAr ? 'عرض السجل المالي' : 'View ledger'}</button>
             </div>
             <div style={commandStyles.moneyCommandCard}>
-              <small>{isAr ? 'مبالغ محجوزة' : 'Held funds'}</small>
+              <small>{isAr ? 'مبالغ محجوزة (تقديري)' : 'Held funds (est.)'}</small>
               <strong style={commandTone('gold')}>{moneyText(heldTotal, 'SYP', lang)}</strong>
               <button style={commandStyles.outlineGold} onClick={() => stagePayoutDecision('HELD')}>{isAr ? 'تعليق الدفعة' : 'Hold payout'}</button>
             </div>

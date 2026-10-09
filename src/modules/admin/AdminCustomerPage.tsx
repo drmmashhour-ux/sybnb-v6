@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { moneyText } from '../../shared/i18n/display'
 import {
-  lookupAdminUserByEmail,
+  lookupAdminUser,
   fetchAdminUserOverview,
   getStoredStaffSession,
   type PlatformAdminUserOverview,
@@ -53,10 +53,10 @@ export function AdminCustomerPage({ lang }: Props) {
     title: pick(lang, 'ملف العميل الشامل', 'Customer 360', 'Client 360'),
     subtitle: pick(lang, 'كل سجل الحساب في مكان واحد: الإعلانات، الحجوزات، المدفوعات، الصرف، المحفظة، والهدايا.', 'Everything about one account in one place: listings, bookings, payments, payouts, wallet, and gifts.', 'Tout un compte au même endroit : annonces, réservations, paiements, versements, portefeuille et cadeaux.'),
     back: pick(lang, 'لوحة الإدارة', 'Admin dashboard', 'Tableau de bord'),
-    searchLabel: pick(lang, 'ابحث عن عميل بالبريد الإلكتروني', 'Find a customer by email', 'Rechercher un client par e-mail'),
+    searchLabel: pick(lang, 'ابحث عن عميل بالبريد أو الهاتف أو الاسم', 'Find a customer by email, phone, or name', 'Rechercher un client par e-mail, téléphone ou nom'),
     search: pick(lang, 'بحث', 'Search', 'Rechercher'),
     loading: pick(lang, 'جار التحميل…', 'Loading…', 'Chargement…'),
-    notFound: pick(lang, 'لا يوجد حساب بهذا البريد.', 'No account found for that email.', 'Aucun compte trouvé pour cet e-mail.'),
+    notFound: pick(lang, 'لا يوجد حساب بهذا البريد أو الهاتف أو الاسم.', 'No account found for that email, phone, or name.', 'Aucun compte trouvé pour cet e-mail, téléphone ou nom.'),
     member: pick(lang, 'عضو منذ', 'Member since', 'Membre depuis'),
     spent: pick(lang, 'إجمالي ما دفعه', 'Lifetime spent', 'Total dépensé'),
     earned: pick(lang, 'إجمالي المصروف له', 'Lifetime payouts', 'Versements totaux'),
@@ -95,12 +95,13 @@ export function AdminCustomerPage({ lang }: Props) {
   }, [])
 
   async function onSearch() {
-    const trimmed = email.trim().toLowerCase()
+    // Don't lowercase — the value may be a name or phone; the server lowercases email itself.
+    const trimmed = email.trim()
     if (!trimmed) return
     setStatus('loading')
     setMessage('')
     try {
-      const user = await lookupAdminUserByEmail(trimmed)
+      const user = await lookupAdminUser(trimmed)
       await loadById(user.id)
     } catch (error) {
       setStatus('error')
@@ -137,8 +138,8 @@ export function AdminCustomerPage({ lang }: Props) {
         <div style={styles.searchRow}>
           <input
             style={styles.input}
-            type="email"
-            placeholder="name@example.com"
+            type="text"
+            placeholder={pick(lang, 'بريد، هاتف، أو اسم', 'Email, phone, or name', 'E-mail, téléphone ou nom')}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') void onSearch() }}

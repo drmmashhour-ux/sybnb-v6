@@ -1683,13 +1683,16 @@ export async function fetchAdminPaymentProofUrl(proofAssetUrl: string) {
 
 // Supports the WhatsApp/email ID-submission channel: an admin who received a document outside
 // the platform looks the customer up by their account email, then attaches the file for them.
-export async function lookupAdminUserByEmail(email: string) {
+// Look up a customer by email, phone, or display name (the server tries each in that order).
+export async function lookupAdminUser(query: string) {
   const response = await runAdminRequest((token) => apiRequest<{ ok: true; user: PlatformIdDocumentReview }>(
-    `/api/admin/users/lookup?email=${encodeURIComponent(email)}`,
+    `/api/admin/users/lookup?q=${encodeURIComponent(query)}`,
     { token },
   ))
   return response.user
 }
+/** @deprecated use lookupAdminUser — kept as an alias so existing callers keep working. */
+export const lookupAdminUserByEmail = lookupAdminUser
 
 export async function fetchAdminUserOverview(userId: string) {
   const response = await runAdminRequest((token) => apiRequest<{ ok: true } & PlatformAdminUserOverview>(

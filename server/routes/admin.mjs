@@ -7,7 +7,7 @@ import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
-import { idempotencyKey } from '../lib/security.mjs'
+import { idempotencyKey, hashPhone } from '../lib/security.mjs'
 import { applyRoleChange, setAccountStatus, REVOCATION_REASONS } from '../lib/session-store.mjs'
 import { runBoundedRevocation } from '../lib/revocation-contention.mjs'
 // SEC-002R (finding N4): getAuthContext() runs ONCE, in server/index.mjs, before the route handler
@@ -372,8 +372,13 @@ export async function handleAdmin(req, res, url, context) {
 
     const result = await runAdminAiAssist({ kind, facts })
 
+    // Persist the actual advice (not just that advice was requested) so a later decision can be
+    // reconciled against what the AI recommended. Advisory only — this records, it never decides.
+    const assistAudit = result?.recommendation
+      ? { recommendation: result.recommendation.recommendation, confidence: result.recommendation.confidence, summary: result.recommendation.summary }
+      : { configured: result?.configured ?? false, ok: result?.ok ?? null }
     await db().adminAuditLog.create({
-      data: { actorUserId: context.user.id, action: 'ADMIN_AI_ASSIST', entityType: kind === 'payment' ? 'payment_proofs' : 'bookings', entityId, before: null, after: null },
+      data: { actorUserId: context.user.id, action: 'ADMIN_AI_ASSIST', entityType: kind === 'payment' ? 'payment_proofs' : 'bookings', entityId, before: null, after: assistAudit },
     })
 
     return json(res, 200, { ok: true, ...result })
@@ -1368,21 +1373,35 @@ export async function handleAdmin(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
 
-    const email = String(url.searchParams.get('email') || '').trim().toLowerCase()
-    if (!email) {
-      const error = new Error('An email is required to look up a customer.')
+    // Generic lookup: a single `q` can be an email, a phone, or a display name. `email` is kept as a
+    // legacy alias. Many Syrian accounts are phone/OTP-only with NO email, so email-only search left
+    // them unfindable — name and phone search reach them. Order: exact email, then exact phone (by
+    // the same keyed hash used at registration), then a case-insensitive display-name match.
+    const raw = String(url.searchParams.get('q') || url.searchParams.get('email') || '').trim()
+    if (!raw) {
+      const error = new Error('Enter an email, phone, or name to look up a customer.')
       error.statusCode = 400
-      error.code = 'USER_LOOKUP_EMAIL_REQUIRED'
+      error.code = 'USER_LOOKUP_QUERY_REQUIRED'
       error.expose = true
       throw error
     }
 
-    const foundUser = await db().user.findUnique({
-      where: { email },
-      select: ID_DOCUMENT_SAFE_SELECT,
-    })
+    let foundUser = null
+    if (raw.includes('@')) {
+      foundUser = await db().user.findUnique({ where: { email: raw.toLowerCase() }, select: ID_DOCUMENT_SAFE_SELECT })
+    }
+    if (!foundUser && /[0-9]/.test(raw) && /^[+0-9()\s-]+$/.test(raw)) {
+      foundUser = await db().user.findFirst({ where: { phoneHash: hashPhone(raw) }, select: ID_DOCUMENT_SAFE_SELECT })
+    }
     if (!foundUser) {
-      const error = new Error('No account found with this email.')
+      foundUser = await db().user.findFirst({
+        where: { displayName: { contains: raw, mode: 'insensitive' } },
+        orderBy: { createdAt: 'desc' },
+        select: ID_DOCUMENT_SAFE_SELECT,
+      })
+    }
+    if (!foundUser) {
+      const error = new Error('No account found for that email, phone, or name.')
       error.statusCode = 404
       error.code = 'USER_NOT_FOUND'
       error.expose = true

@@ -36,7 +36,7 @@ const AdminMoneyFlowPage = lazyNamed(() => import('../modules/admin/AdminMoneyFl
 const HostInquiriesPage = lazyNamed(() => import('../modules/host/HostInquiriesPage'), 'HostInquiriesPage')
 const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/ImmocontactPage'), 'ImmocontactPage')
 const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'LandingPage')
-const LegalPlaceholderPage = lazyNamed(() => import('../modules/legal/LegalPlaceholderPage'), 'LegalPlaceholderPage')
+const LegalDocumentPage = lazyNamed(() => import('../modules/legal/LegalDocumentPage'), 'LegalDocumentPage')
 const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDetailPage'), 'ListingDetailPage')
 const OperationsCalendarPage = lazyNamed(() => import('../modules/operations/OperationsCalendarPage'), 'OperationsCalendarPage')
 const PaymentReceiptPage = lazyNamed(() => import('../modules/payments/PaymentReceiptPage'), 'PaymentReceiptPage')
@@ -255,9 +255,11 @@ export function App() {
         ) : path === '/status' ? (
           <PlatformStatusPage lang={lang} />
         ) : path === '/terms' ? (
-          <LegalPlaceholderPage lang={lang} page="terms" />
+          <LegalDocumentPage lang={lang} page="terms" />
         ) : path === '/privacy' ? (
-          <LegalPlaceholderPage lang={lang} page="privacy" />
+          <LegalDocumentPage lang={lang} page="privacy" />
+        ) : path === '/listing-agreement' ? (
+          <LegalDocumentPage lang={lang} page="listing-agreement" />
         ) : bookingMatch ? (
           <BookingDetailPage bookingId={bookingMatch[1]} lang={lang} />
         ) : checkoutMatch ? (

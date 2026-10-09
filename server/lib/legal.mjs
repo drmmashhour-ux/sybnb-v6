@@ -1,33 +1,44 @@
-// Legal document manifest + versioning. The DOCUMENT TEXT is owner/legal-supplied and is NOT
-// invented here. Each entry carries a version and a status:
+// Legal document manifest + versioning. The DOCUMENT TEXT lives in the frontend
+// (src/modules/legal/legalContent.ts) and is rendered by the legal pages. Each entry here carries a
+// version and a status:
 //   'DRAFT'     — placeholder; owner/legal content required. LAUNCH-BLOCKING.
 //   'PUBLISHED' — owner-approved content is in place at the given version.
 //
-// To publish real content, the owner sets status:'PUBLISHED', bumps the version, and supplies the
-// rendered text (served by the frontend legal pages / a CMS). Consent is recorded against the
-// version (see LegalConsent), so republishing a document can require re-consent.
+// Consent is recorded against the version (see LegalConsent), so republishing a document at a new
+// version can require re-consent. Keep version + effectiveDate in sync with legalContent.ts
+// (LEGAL_VERSION / LEGAL_EFFECTIVE_DATE).
+//
+// v1.0.0 (2026-10-09): initial published content drafted to fit how SYBNB actually operates. This
+// text is a strong starting point and should still be reviewed by a lawyer licensed in the Syrian
+// Arab Republic; a review changes nothing here until the version is bumped on a content change.
+const LEGAL_VERSION = '1.0.0'
+const LEGAL_EFFECTIVE_DATE = '2026-10-09'
+
 export const LEGAL_DOCUMENTS = {
   terms: {
     key: 'terms',
-    title: { en: 'Terms of Service', ar: 'شروط الخدمة' },
-    version: '0.0.0-draft',
-    status: 'DRAFT',
+    title: { en: 'Terms of Service', ar: 'شروط الخدمة', fr: 'Conditions d’utilisation' },
+    version: LEGAL_VERSION,
+    effectiveDate: LEGAL_EFFECTIVE_DATE,
+    status: 'PUBLISHED',
     ownerApprovalRequired: true,
   },
   privacy: {
     key: 'privacy',
-    title: { en: 'Privacy Policy', ar: 'سياسة الخصوصية' },
-    version: '0.0.0-draft',
-    status: 'DRAFT',
+    title: { en: 'Privacy Policy', ar: 'سياسة الخصوصية', fr: 'Politique de confidentialité' },
+    version: LEGAL_VERSION,
+    effectiveDate: LEGAL_EFFECTIVE_DATE,
+    status: 'PUBLISHED',
     ownerApprovalRequired: true,
   },
   // The lister's understanding agreement: every host/seller must accept this (and pass ID verification)
-  // before a listing can be published, in any division. Text is owner/legal-supplied.
+  // before a listing can be published, in any division.
   'listing-agreement': {
     key: 'listing-agreement',
-    title: { en: 'Listing Agreement', ar: 'اتفاقية النشر' },
-    version: '0.0.0-draft',
-    status: 'DRAFT',
+    title: { en: 'Listing Agreement', ar: 'اتفاقية النشر', fr: 'Accord de publication' },
+    version: LEGAL_VERSION,
+    effectiveDate: LEGAL_EFFECTIVE_DATE,
+    status: 'PUBLISHED',
     ownerApprovalRequired: true,
   },
 }
@@ -41,6 +52,7 @@ export function legalManifest() {
     key: d.key,
     title: d.title,
     version: d.version,
+    effectiveDate: d.effectiveDate,
     status: d.status,
     ownerApprovalRequired: d.ownerApprovalRequired,
   }))

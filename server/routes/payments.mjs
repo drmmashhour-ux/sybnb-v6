@@ -65,6 +65,13 @@ function paymentReferenceDuplicate() {
 const PLAN_PRICE_CATALOG = {
   'advertising-plus': { amountMinor: 1900, currency: 'USD' },
   'advertising-premium': { amountMinor: 4900, currency: 'USD' },
+  // Dealer-tier seller plans (CARS / MARKETPLACE / NEW_CONSTRUCTION publishing entitlement).
+  // The production seller flow (src/modules/seller/SellerAccountPage.tsx) submits these at a fixed
+  // price in USD -- plus $19, premium $49 -- so the server now validates the submitted amount
+  // against that real price instead of trusting the client and leaving it for an admin to eyeball.
+  // Same fail-closed-for-known posture as the advertising codes above.
+  'plus': { amountMinor: 1900, currency: 'USD' },
+  'premium': { amountMinor: 4900, currency: 'USD' },
 }
 
 // An independent revenue audit found both no-booking/no-ride payment-proof paths below accepted a

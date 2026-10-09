@@ -3,7 +3,7 @@ import { dateBlockingBookingWhere } from '../lib/booking-policy.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
-import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
+import { expireOldListings, listingExpiryDate, PLAN_DURATION_DAYS } from '../lib/listing-lifecycle.mjs'
 import { normalizeBrowseCity, resolveListingCityName } from '../lib/listing-location.mjs'
 import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 // Host verification (2026-10-08): stays of an owner without users.host_verified_at are not public.
@@ -448,7 +448,16 @@ export async function handleListings(req, res, url, context) {
         // trusted for authorization -- this looks for a real, dealer-tier-specific APPROVED
         // payment instead. An advertising payment (planCode advertising-plus/-premium) can never
         // satisfy this, by construction.
-        const dealerEntitlement = await db().paymentProof.findFirst({
+        // Revenue-integrity fix (2026-10-09): a dealer plan is a TIME-BOUNDED subscription, not a
+        // one-time unlock. Previously this accepted ANY approved plus/premium payment the account
+        // had ever made, with no time bound -- so a single $19/$49 payment let a dealer publish
+        // unlimited listings forever, with no renewal. Now the entitlement is only valid inside its
+        // own plan window (PLAN_DURATION_DAYS: plus 30d / premium 60d) measured from the payment's
+        // approval time (reviewedAt, falling back to createdAt). Once every approved payment has
+        // aged past its window the dealer must renew before publishing again -- the same expiry
+        // the published listing itself already carries via listingExpiryDate().
+        const now = Date.now()
+        const dealerCandidates = await db().paymentProof.findMany({
           where: {
             userId: context.user.id,
             provider: 'seller_plan',
@@ -456,9 +465,16 @@ export async function handleListings(req, res, url, context) {
             planCode: { in: ['plus', 'premium'] },
           },
           orderBy: { createdAt: 'desc' },
+          select: { planCode: true, reviewedAt: true, createdAt: true },
+          take: 20,
+        })
+        const dealerEntitlement = dealerCandidates.find((proof) => {
+          const start = proof.reviewedAt || proof.createdAt
+          const days = PLAN_DURATION_DAYS[proof.planCode] ?? PLAN_DURATION_DAYS.plus
+          return new Date(start).getTime() + days * 24 * 60 * 60 * 1000 > now
         })
         if (!dealerEntitlement) {
-          const error = new Error('A paid, admin-approved seller plan is required before publishing this listing.')
+          const error = new Error('A current, admin-approved seller plan is required before publishing this listing. Your plan may have expired — please renew it.')
           error.statusCode = 403
           error.code = 'SELLER_PLAN_REQUIRED'
           error.expose = true

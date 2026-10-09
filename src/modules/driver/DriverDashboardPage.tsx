@@ -9,6 +9,7 @@ import {
   fetchPrototypeDriverOverview,
   fetchPrototypeSrRideThread,
   reportPrototypeDriverLocation,
+  saveDriverVehicle,
   sendPrototypeSrRideMessage,
   submitDriverPhoto,
   updatePrototypeDriverAccessibility,
@@ -83,7 +84,7 @@ const copy = {
     available: 'متاح',
     accept: 'قبول',
     pendingEmpty: 'لا توجد طلبات رحلات بانتظار سائق الآن.',
-    pendingLoading: 'جار البحث عن طلبات قريبة...',
+    pendingLoading: 'جار البحث عن الطلبات المتاحة...',
     claiming: 'جار القبول...',
     claimError: 'تعذر قبول الرحلة، ربما قبلها سائق آخر للتو.',
     distance: 'المسافة',
@@ -98,6 +99,14 @@ const copy = {
     uploading: 'جار الرفع...',
     photoSubmitted: 'تم حفظ صورتك.',
     photoError: 'تعذر رفع الصورة.',
+    vehicleTitle: 'مركبتك',
+    vehicleCopy: 'سجّل مركبتك ليتعرف عليها الراكب. مطلوب قبل قبول الرحلات.',
+    vehicleMakeL: 'الماركة',
+    vehicleModelL: 'الموديل',
+    vehiclePlateL: 'رقم اللوحة',
+    vehicleSave: 'حفظ المركبة',
+    vehicleSaved: 'تم حفظ المركبة.',
+    vehicleErr: 'تعذر حفظ بيانات المركبة.',
     reportIssue: 'إبلاغ عن مشكلة',
     sos: 'طوارئ SOS',
   },
@@ -151,7 +160,7 @@ const copy = {
     available: 'Available',
     accept: 'Accept',
     pendingEmpty: 'No ride requests waiting for a driver right now.',
-    pendingLoading: 'Looking for nearby requests...',
+    pendingLoading: 'Looking for open requests...',
     claiming: 'Claiming...',
     claimError: 'Could not claim this ride, another driver may have just accepted it.',
     distance: 'Distance',
@@ -166,6 +175,14 @@ const copy = {
     uploading: 'Uploading...',
     photoSubmitted: 'Your photo was saved.',
     photoError: 'Could not upload the photo.',
+    vehicleTitle: 'Your vehicle',
+    vehicleCopy: 'Register your car so riders can recognize it. Required before you can accept rides.',
+    vehicleMakeL: 'Make',
+    vehicleModelL: 'Model',
+    vehiclePlateL: 'Plate number',
+    vehicleSave: 'Save vehicle',
+    vehicleSaved: 'Vehicle saved.',
+    vehicleErr: 'Could not save the vehicle.',
     reportIssue: 'Report issue',
     sos: 'SOS emergency',
   },
@@ -219,7 +236,7 @@ const copy = {
     available: 'Disponibles',
     accept: 'Accepter',
     pendingEmpty: 'Aucune demande de course en attente de chauffeur pour le moment.',
-    pendingLoading: 'Recherche de demandes à proximité...',
+    pendingLoading: 'Recherche de demandes disponibles...',
     claiming: 'Acceptation...',
     claimError: 'Impossible d’accepter cette course; un autre chauffeur l’a peut-être déjà acceptée.',
     distance: 'Distance',
@@ -234,6 +251,14 @@ const copy = {
     uploading: 'Téléversement...',
     photoSubmitted: 'Votre photo a été enregistrée.',
     photoError: 'Impossible de téléverser la photo.',
+    vehicleTitle: 'Votre véhicule',
+    vehicleCopy: 'Enregistrez votre voiture pour que les passagers la reconnaissent. Requis avant d’accepter des courses.',
+    vehicleMakeL: 'Marque',
+    vehicleModelL: 'Modèle',
+    vehiclePlateL: 'Plaque',
+    vehicleSave: 'Enregistrer',
+    vehicleSaved: 'Véhicule enregistré.',
+    vehicleErr: 'Impossible d’enregistrer le véhicule.',
     reportIssue: 'Signaler un problème',
     sos: 'Urgence SOS',
   },
@@ -253,6 +278,10 @@ export function DriverDashboardPage({ lang }: Props) {
   const [idDocumentStatus, setIdDocumentStatus] = useState<'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null>(null)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoStatus, setPhotoStatus] = useState<'idle' | 'uploading' | 'submitted' | 'error'>('idle')
+  const [vehicleMake, setVehicleMake] = useState('')
+  const [vehicleModel, setVehicleModel] = useState('')
+  const [vehiclePlate, setVehiclePlate] = useState('')
+  const [vehicleStatus, setVehicleStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [pushStatus, setPushStatus] = useState<'idle' | 'enabling' | 'enabled' | 'error'>('idle')
 
   useEffect(() => {
@@ -347,11 +376,27 @@ export function DriverDashboardPage({ lang }: Props) {
     setMessage('')
 
     try {
-      setOverview(await fetchPrototypeDriverOverview())
+      const ov = await fetchPrototypeDriverOverview()
+      setOverview(ov)
+      // Seed the vehicle form from the saved profile (once), so the driver sees their registered car.
+      setVehicleMake((v) => v || ov.driver.vehicleMake || '')
+      setVehicleModel((v) => v || ov.driver.vehicleModel || '')
+      setVehiclePlate((v) => v || ov.driver.vehiclePlate || '')
       setStatus('ready')
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function saveVehicle() {
+    if (!vehicleMake.trim() || !vehicleModel.trim() || !vehiclePlate.trim()) return
+    setVehicleStatus('saving')
+    try {
+      await saveDriverVehicle({ vehicleMake: vehicleMake.trim(), vehicleModel: vehicleModel.trim(), vehiclePlate: vehiclePlate.trim() })
+      setVehicleStatus('saved')
+    } catch {
+      setVehicleStatus('error')
     }
   }
 
@@ -481,6 +526,38 @@ export function DriverDashboardPage({ lang }: Props) {
               onClick={() => void submitPhoto()}
             >
               {photoStatus === 'uploading' ? t.uploading : t.uploadPhoto}
+            </button>
+          </div>
+          <div style={styles.photoUpload}>
+            <strong>{t.vehicleTitle}</strong>
+            <span>{t.vehicleCopy}</span>
+            <input
+              style={styles.vehicleInput}
+              placeholder={t.vehicleMakeL}
+              value={vehicleMake}
+              onChange={(event) => { setVehicleMake(event.target.value); setVehicleStatus('idle') }}
+            />
+            <input
+              style={styles.vehicleInput}
+              placeholder={t.vehicleModelL}
+              value={vehicleModel}
+              onChange={(event) => { setVehicleModel(event.target.value); setVehicleStatus('idle') }}
+            />
+            <input
+              style={styles.vehicleInput}
+              dir="ltr"
+              placeholder={t.vehiclePlateL}
+              value={vehiclePlate}
+              onChange={(event) => { setVehiclePlate(event.target.value); setVehicleStatus('idle') }}
+            />
+            {vehicleStatus === 'saved' && <p style={styles.photoNote}>✓ {t.vehicleSaved}</p>}
+            {vehicleStatus === 'error' && <p style={styles.photoNote}>{t.vehicleErr}</p>}
+            <button
+              style={styles.photoSubmitButton}
+              disabled={vehicleStatus === 'saving' || !vehicleMake.trim() || !vehicleModel.trim() || !vehiclePlate.trim()}
+              onClick={() => void saveVehicle()}
+            >
+              {vehicleStatus === 'saving' ? t.uploading : t.vehicleSave}
             </button>
           </div>
         </article>
@@ -746,6 +823,7 @@ const styles: Record<string, CSSProperties> = {
   photoInputLabel: { border: '1px dashed #2f3b52', borderRadius: 10, padding: 12, textAlign: 'center', color: '#9aa6ba', cursor: 'pointer', fontWeight: 800 },
   photoNote: { margin: 0, color: '#9aa6ba', fontSize: 13 },
   photoSubmitButton: { minHeight: 44, border: 0, borderRadius: 10, background: '#19d7ff', color: '#051014', fontWeight: 950 },
+  vehicleInput: { minHeight: 44, border: '1px solid #2f3b52', borderRadius: 10, background: '#0c1220', color: '#fff', padding: '0 12px', fontSize: 15, fontFamily: 'inherit' },
   insuranceWarning: { borderRadius: 10, background: 'rgba(255,82,116,.18)', color: '#ff8aa0', padding: 14, margin: 0, fontWeight: 900 },
   earningsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 22, gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center' },
   driverCtas: { display: 'grid', gap: 28, gridTemplateColumns: '1fr 1fr 1fr' },

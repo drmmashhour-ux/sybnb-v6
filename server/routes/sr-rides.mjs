@@ -500,6 +500,33 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
+    // Pilot-safety gate: a driver may only pick up a passenger once (1) their identity is verified
+    // via the same ID-review pipeline as hosts/guests, and (2) they have registered a vehicle, so
+    // the rider can see and trust who/what is collecting them. Previously any DRIVER-role account
+    // with no approved ID, no photo and no vehicle could accept a live passenger.
+    const claimingUser = await db().user.findUnique({
+      where: { id: context.user.id },
+      select: { idDocumentStatus: true },
+    })
+    if (claimingUser?.idDocumentStatus !== 'APPROVED') {
+      const error = new Error('Verify your identity (an approved ID document) before accepting rides.')
+      error.statusCode = 403
+      error.code = 'DRIVER_NOT_VERIFIED'
+      error.expose = true
+      throw error
+    }
+    const claimingVehicle = await db().driverProfile.findUnique({
+      where: { userId: context.user.id },
+      select: { vehiclePlate: true },
+    })
+    if (!claimingVehicle?.vehiclePlate) {
+      const error = new Error('Register your vehicle (make, model and plate) before accepting rides.')
+      error.statusCode = 403
+      error.code = 'DRIVER_VEHICLE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+
     // Ride-pooling: real eligibility, not a decorative "Share" label. Also closes a genuine
     // pre-existing gap -- nothing previously stopped a driver from claiming any number of
     // unrelated active rides at once; a normal (non-shareable) ride now correctly enforces one

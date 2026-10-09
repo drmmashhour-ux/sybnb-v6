@@ -431,12 +431,18 @@ export type PlatformHostOverview = {
 }
 
 export type PlatformDriverOverview = {
-  driver: ApiUser & { accessibilityCapable: boolean }
+  driver: ApiUser & {
+    accessibilityCapable: boolean
+    vehicleMake?: string | null
+    vehicleModel?: string | null
+    vehiclePlate?: string | null
+  }
   totals: {
     assigned: number
     active: number
     completed: number
     earningsMinor: number
+    billedMinor?: number
   }
   rating: { averageRating: number | null; ratingCount: number }
   rides: PlatformRideRequest[]
@@ -2259,6 +2265,16 @@ export async function updatePrototypeDriverAccessibility(accessibilityCapable: b
     method: 'PATCH',
     token: session.token,
     body: { accessibilityCapable },
+  })
+  return response.driverProfile
+}
+
+export async function saveDriverVehicle(vehicle: { vehicleMake: string; vehicleModel: string; vehiclePlate: string }) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; driverProfile: { vehicleMake: string; vehicleModel: string; vehiclePlate: string } }>('/api/driver/vehicle', {
+    method: 'PUT',
+    token: session.token,
+    body: vehicle,
   })
   return response.driverProfile
 }

@@ -59,6 +59,41 @@ export async function handleDriver(req, res, url, context) {
     })
     return json(res, 200, { ok: true, driverProfile: profile })
   }
+
+  // Vehicle registration. The DriverProfile has make/model/plate columns and riders are shown them,
+  // but nothing wrote them — so every driver card was blank. A registered vehicle (plate) is now
+  // required before a driver can claim a ride (enforced in server/routes/sr-rides.mjs).
+  if (url.pathname === '/api/driver/vehicle') {
+    requireAuth(context, ['DRIVER'])
+    if (req.method === 'GET') {
+      const profile = await db().driverProfile.findUnique({
+        where: { userId: context.user.id },
+        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true },
+      })
+      return json(res, 200, { ok: true, driverProfile: profile || null })
+    }
+    if (req.method === 'PUT') {
+      const body = await readJson(req)
+      const vehicleMake = String(body.vehicleMake || '').trim().slice(0, 60)
+      const vehicleModel = String(body.vehicleModel || '').trim().slice(0, 60)
+      const vehiclePlate = String(body.vehiclePlate || '').trim().slice(0, 20)
+      if (!vehicleMake || !vehicleModel || !vehiclePlate) {
+        const error = new Error('Vehicle make, model and plate are all required.')
+        error.statusCode = 400
+        error.code = 'VEHICLE_FIELDS_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      const profile = await db().driverProfile.upsert({
+        where: { userId: context.user.id },
+        create: { userId: context.user.id, vehicleMake, vehicleModel, vehiclePlate },
+        update: { vehicleMake, vehicleModel, vehiclePlate },
+        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true },
+      })
+      return json(res, 200, { ok: true, driverProfile: profile })
+    }
+    return methodNotAllowed(res, ['GET', 'PUT'])
+  }
   // SR Ride vs. Uber gap-closure: a driver's own photo, so a rider can actually recognize who
   // they're getting into a car with (previously nothing beyond name + vehicle text existed).
   // Mirrors PATCH /api/me/id-document exactly -- same validation shape, same storage discipline.
@@ -143,8 +178,16 @@ export async function handleDriver(req, res, url, context) {
     const ratingSummary = await getDriverRatingSummary(context.user.id)
     const driverProfile = await db().driverProfile.findUnique({
       where: { userId: context.user.id },
-      select: { accessibilityCapable: true },
+      select: { accessibilityCapable: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true },
     })
+    // Honest earnings: COLLECTED money — the driver's actual ride-fare wallet credits — not merely
+    // the BILLED fares of completed rides, which overstated earnings whenever a rider never paid.
+    const collected = await db().walletEntry.aggregate({
+      where: { wallet: { userId: context.user.id }, type: 'CREDIT', referenceType: { in: ['ride_fare', 'ride_cancellation_fee'] } },
+      _sum: { amountMinor: true },
+    })
+    const collectedMinor = collected._sum.amountMinor || 0
+    const billedMinor = rides.filter((ride) => ride.status === 'COMPLETED').reduce((sum, ride) => sum + (ride.fareMinor || 0), 0)
     return json(res, 200, {
       ok: true,
       overview: {
@@ -154,14 +197,17 @@ export async function handleDriver(req, res, url, context) {
           displayName: context.user.displayName,
           roles: context.roles,
           accessibilityCapable: driverProfile?.accessibilityCapable || false,
+          vehicleMake: driverProfile?.vehicleMake || null,
+          vehicleModel: driverProfile?.vehicleModel || null,
+          vehiclePlate: driverProfile?.vehiclePlate || null,
         },
         totals: {
           assigned: rides.length,
           active: rides.filter((ride) => ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(ride.status)).length,
           completed: rides.filter((ride) => ride.status === 'COMPLETED').length,
-          earningsMinor: rides
-            .filter((ride) => ride.status === 'COMPLETED')
-            .reduce((sum, ride) => sum + (ride.fareMinor || 0), 0),
+          // earningsMinor is money actually COLLECTED; billedMinor is the fare value of completed rides.
+          earningsMinor: collectedMinor,
+          billedMinor,
         },
         rating: ratingSummary,
         rides,

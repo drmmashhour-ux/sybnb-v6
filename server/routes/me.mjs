@@ -2,8 +2,9 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
+import { bookingExpiresAt } from '../lib/booking-policy.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
-import { defaultCurrency } from '../lib/country.mjs'
+import { bookingPolicySettings, defaultCurrency } from '../lib/country.mjs'
 // SEC-002R round 3, item 1: the self-service half of finding G1 -- see the id-document handler below.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
@@ -257,7 +258,12 @@ export async function handleMe(req, res, url, context) {
         idDocumentSubmittedAt: context.user.idDocumentSubmittedAt,
         idDocumentStatus: context.user.idDocumentStatus,
       },
-      bookings,
+      // expiresAt (createdAt + the unpaid window) on each still-unpaid request, same as
+      // GET /api/bookings/:id, so the guest dashboard can show the pay-by deadline.
+      bookings: bookings.map((booking) => {
+        const expiresAt = bookingExpiresAt(booking, bookingPolicySettings())
+        return expiresAt ? { ...booking, expiresAt } : booking
+      }),
       listings,
       payments,
       rides,

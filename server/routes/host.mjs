@@ -1,11 +1,18 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { resolveListingCityName } from '../lib/listing-location.mjs'
-import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
+import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed, payoutMethodConfig } from '../lib/country.mjs'
 import {
+  CANCELLATION_POLICY_VERSION,
+  bookingFinanceSplit,
   buildPayoutRow,
+  createPayoutRequest,
   createRefundRequest,
+  hostPayoutBalances,
 } from '../lib/finance-ledger.mjs'
+import { computeCancellation } from '../lib/booking-policy.mjs'
+import { formatMoney, notifyAdmin, notifyBooking } from '../lib/notifications.mjs'
+import { isRateLimited } from '../lib/rateLimit.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
@@ -114,8 +121,13 @@ export async function handleHost(req, res, url, context) {
       take: 50,
     })
 
+    // Unpaid requests are hidden from the host while PAYMENT_PENDING; keep them hidden once they end
+    // unpaid (expired by the unpaid sweep, or cancelled by the guest before paying).
+    const endedUnpaid = (booking) =>
+      booking.status === 'CANCELLED' &&
+      (booking.metadata?.cancellationReason === 'EXPIRED_UNPAID' || booking.metadata?.cancellation?.rule === 'UNPAID')
     const requests = listings.flatMap((listing) =>
-      listing.bookings.map((booking) => ({
+      listing.bookings.filter((booking) => !endedUnpaid(booking)).map((booking) => ({
         ...booking,
         listing: {
           id: listing.id,
@@ -281,9 +293,47 @@ export async function handleHost(req, res, url, context) {
       // booking; the payout stays held until the stay completes, the 2-week hold passes, and an
       // admin explicitly releases it via /api/admin/payouts (see host-payout-release.mjs).
 
+      // Decision 3 (2026-10-08): a host cancel/decline refunds the guest 100% incl. the protection
+      // fee. Snapshot the rule on the booking so admin finalize-cancellation also reverses the
+      // protection-fee credit (the legacy path never did, although the refund already included it).
+      const hostCancellation = status === 'CANCELLED'
+        ? {
+            policyVersion: CANCELLATION_POLICY_VERSION,
+            cancelledBy: 'HOST',
+            cancelledAt: new Date().toISOString(),
+            declined: existing.status === 'REQUESTED',
+            ...computeCancellation({
+              paidMinor: approvedPayment?.amountMinor || 0,
+              protectionPurchased: bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor).cancellationProtectionPurchased,
+              protectionMinor: bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor).cancellationProtectionFeeMinor,
+              checkIn: existing.checkIn,
+              cancelledBy: 'HOST',
+              isShortStay: existing.listing.division === 'STAYS',
+              policy: bookingPolicySettings(),
+            }),
+            paidMinor: approvedPayment?.amountMinor || 0,
+          }
+        : null
+
+      // Guarded on the status read before the transaction so two concurrent decisions (host
+      // double-click, or a guest cancelling at the same moment) cannot both apply.
+      const claimed = await tx.booking.updateMany({
+        where: { id: existing.id, status: existing.status },
+        data: { status },
+      })
+      if (claimed.count !== 1) {
+        const error = new Error('This booking changed while you were deciding. Refresh and try again.')
+        error.statusCode = 409
+        error.code = 'BOOKING_STATE_CHANGED'
+        error.expose = true
+        throw error
+      }
+
       return tx.booking.update({
         where: { id: existing.id },
-        data: { status },
+        data: hostCancellation
+          ? { status, metadata: { ...(existing.metadata || {}), cancellation: hostCancellation } }
+          : { status },
         include: {
           guest: {
             select: {
@@ -319,7 +369,112 @@ export async function handleHost(req, res, url, context) {
       },
     })
 
+    if (status === 'CONFIRMED') {
+      notifyBooking('guest_host_accepted', booking.id)
+    } else {
+      const refundMinor = booking.metadata?.cancellation?.refundMinor || 0
+      notifyBooking(existing.status === 'REQUESTED' ? 'guest_host_declined' : 'guest_booking_cancelled', booking.id, {
+        refund: refundMinor ? formatMoney(refundMinor, booking.currency) : '',
+      })
+    }
+
     return json(res, 200, { ok: true, booking })
+  }
+
+  // --- Decision 2 (2026-10-08): host payout method + withdrawal requests ---------------------------
+  if (url.pathname === '/api/host/payout-method') {
+    requireAuth(context, ['HOST', 'SELLER'])
+    if (req.method === 'GET') {
+      const row = await db().hostPayoutMethod.findUnique({ where: { userId: context.user.id } })
+      return json(res, 200, { ok: true, method: toPayoutMethodShape(row) })
+    }
+    if (req.method === 'PUT') {
+      const body = await readJson(req)
+      const { type, details } = normalizePayoutMethod(body)
+      const before = await db().hostPayoutMethod.findUnique({ where: { userId: context.user.id } })
+      const row = await db().hostPayoutMethod.upsert({
+        where: { userId: context.user.id },
+        create: { userId: context.user.id, type, details },
+        update: { type, details },
+      })
+      await db().adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'HOST_PAYOUT_METHOD_SAVED',
+          entityType: 'host_payout_methods',
+          entityId: row.id,
+          before: before ? maskPayoutMethod(toPayoutMethodShape(before)) : null,
+          after: maskPayoutMethod(toPayoutMethodShape(row)),
+        },
+      })
+      return json(res, 200, { ok: true, method: toPayoutMethodShape(row) })
+    }
+    return methodNotAllowed(res, ['GET', 'PUT'])
+  }
+
+  if (url.pathname === '/api/host/payouts') {
+    requireAuth(context, ['HOST', 'SELLER'])
+    const currency = resolvePayoutCurrency(url.searchParams.get('currency'))
+    if (req.method === 'GET') {
+      const balances = await db().$transaction((tx) => hostPayoutBalances(tx, { userId: context.user.id, currency }))
+      const requests = await db().payoutRequest.findMany({
+        where: { hostId: context.user.id },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      })
+      return json(res, 200, {
+        ok: true,
+        availableMinor: balances.availableMinor,
+        pendingMinor: balances.pendingMinor,
+        currency,
+        requests: requests.map(toPayoutRequestShape),
+      })
+    }
+    if (req.method === 'POST') {
+      if (await isRateLimited(`host-payout-request:${context.user.id}`, 60 * 60 * 1000, Number(process.env.HOST_PAYOUT_REQUEST_RATE_MAX || 10))) {
+        return json(res, 429, { ok: false, error: { code: 'RATE_LIMITED', message: 'Too many payout requests. Try again later.' } })
+      }
+      const body = await readJson(req)
+      const amountMinor = Number(body.amountMinor)
+      if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+        const error = new Error('amountMinor must be a positive whole number.')
+        error.statusCode = 400
+        error.code = 'PAYOUT_AMOUNT_INVALID'
+        error.expose = true
+        throw error
+      }
+      const requestCurrency = resolvePayoutCurrency(body.currency || url.searchParams.get('currency'))
+      const methodRow = await db().hostPayoutMethod.findUnique({ where: { userId: context.user.id } })
+      if (!methodRow) {
+        const error = new Error('Add a payout method before requesting a withdrawal.')
+        error.statusCode = 409
+        error.code = 'PAYOUT_METHOD_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      const method = toPayoutMethodShape(methodRow)
+      const request = await db().$transaction(async (tx) => {
+        const created = await createPayoutRequest(tx, { hostId: context.user.id, amountMinor, currency: requestCurrency, method })
+        await tx.adminAuditLog.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'HOST_PAYOUT_REQUESTED',
+            entityType: 'payout_requests',
+            entityId: created.id,
+            before: null,
+            after: { ...created, method: maskPayoutMethod(method) },
+          },
+        })
+        return created
+      })
+      notifyAdmin('admin_payout_request', {
+        amount: formatMoney(amountMinor, requestCurrency),
+        method: method.type,
+        hostName: context.user.displayName || context.user.id,
+      }, `admin_payout_request:${request.id}`)
+      return json(res, 201, { ok: true, request: toPayoutRequestShape(request) })
+    }
+    return methodNotAllowed(res, ['GET', 'POST'])
   }
 
   const checkinMatch = url.pathname.match(/^\/api\/host\/requests\/([^/]+)\/checkin$/)
@@ -761,4 +916,77 @@ function normalizeHostListingStatus(value) {
   error.code = 'INVALID_HOST_LISTING_STATUS'
   error.expose = true
   throw error
+}
+
+// --- payout helpers -----------------------------------------------------------------------------
+
+const PAYOUT_FIELDS = ['shamCashNumber', 'accountName', 'bankName', 'accountNumber', 'officeCity']
+const PAYOUT_FIELD_MAX = 120
+
+function payoutError(statusCode, code, message) {
+  const error = new Error(message)
+  error.statusCode = statusCode
+  error.code = code
+  error.expose = true
+  return error
+}
+
+// Validates against the ACTIVE country profile's payoutMethods (countries/<country>/profile.mjs):
+// the type must be one the country offers, and exactly that type's required fields are stored.
+export function normalizePayoutMethod(body = {}) {
+  const config = payoutMethodConfig()
+  const type = String(body.type || '').trim().toUpperCase()
+  const spec = config[type]
+  if (!spec) {
+    throw payoutError(400, 'PAYOUT_METHOD_TYPE_INVALID', `type must be one of: ${Object.keys(config).join(', ') || '(none configured)'}.`)
+  }
+  const details = {}
+  for (const field of spec.required || []) {
+    const value = typeof body[field] === 'string' || typeof body[field] === 'number' ? String(body[field]).trim() : ''
+    if (!value) throw payoutError(400, 'PAYOUT_METHOD_FIELD_REQUIRED', `${field} is required for ${type}.`)
+    if (value.length > PAYOUT_FIELD_MAX) throw payoutError(400, 'PAYOUT_METHOD_FIELD_TOO_LONG', `${field} is too long.`)
+    if ((field === 'shamCashNumber' || field === 'accountNumber') && !/^[A-Za-z0-9 +\-]{4,}$/.test(value)) {
+      throw payoutError(400, 'PAYOUT_METHOD_FIELD_INVALID', `${field} has invalid characters.`)
+    }
+    details[field] = value
+  }
+  return { type, details }
+}
+
+function toPayoutMethodShape(row) {
+  if (!row) return null
+  const details = row.details && typeof row.details === 'object' ? row.details : {}
+  const shape = { type: row.type }
+  for (const field of PAYOUT_FIELDS) if (details[field]) shape[field] = details[field]
+  return shape
+}
+
+// Audit rows never carry a full wallet/account number -- last 4 characters only.
+export function maskPayoutMethod(method) {
+  if (!method) return method
+  const masked = { ...method }
+  for (const field of ['shamCashNumber', 'accountNumber']) {
+    if (masked[field]) masked[field] = `****${String(masked[field]).slice(-4)}`
+  }
+  return masked
+}
+
+function resolvePayoutCurrency(raw) {
+  const currency = String(raw || defaultCurrency() || '').toUpperCase()
+  if (!isCurrencyAllowed(currency)) throw payoutError(400, 'PAYOUT_CURRENCY_INVALID', `Currency '${currency}' is not supported.`)
+  return currency
+}
+
+export function toPayoutRequestShape(row) {
+  return {
+    id: row.id,
+    amountMinor: row.amountMinor,
+    currency: row.currency,
+    status: row.status,
+    method: row.method,
+    ...(row.reference ? { reference: row.reference } : {}),
+    ...(row.note ? { note: row.note } : {}),
+    createdAt: row.createdAt,
+    ...(row.decidedAt ? { decidedAt: row.decidedAt } : {}),
+  }
 }

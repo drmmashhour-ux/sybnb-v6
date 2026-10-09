@@ -115,6 +115,9 @@ export function HostEarningsPage({ lang, mode = 'host' }: Props) {
       <section style={styles.hero}>
         <h1 style={styles.title}>{t.title}</h1>
         <p style={styles.body}>{t.subtitle}</p>
+        <button style={styles.payoutsLink} onClick={() => (window.location.hash = '/host/payouts')}>
+          {pick(lang, 'السحب وطريقة الاستلام ←', 'Payouts & withdrawals →', 'Versements et retraits →')}
+        </button>
       </section>
 
       {status === 'loading' && <p style={styles.body}>{t.loading}</p>}
@@ -188,6 +191,7 @@ const styles: Record<string, CSSProperties> = {
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
   hero: { border: '1px solid #1e1e2a', borderRadius: 8, padding: 18, background: '#111118', display: 'grid', gap: 10 },
   title: { margin: 0, fontSize: 28 },
+  payoutsLink: { justifySelf: 'start', border: 0, background: 'transparent', color: '#8ea0ff', fontWeight: 900, padding: 0, cursor: 'pointer' },
   body: { color: '#9aa6ba', margin: 0, lineHeight: 1.6 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
   stats: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },

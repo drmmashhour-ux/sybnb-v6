@@ -58,6 +58,11 @@ export const PAYMENT_POLICY_ROUTES = Object.freeze([
   // --- admin.mjs (Item 2 Phase 2b round 3, guest-refund gap closure — executes a real, non-legacy
   // refund as an internal wallet credit; also under the existing 'refund' operation, ADMIN-only) ---
   { method: 'PATCH', pathPattern: '^/api/admin/refunds/[^/]+/execute$', operation: 'refund', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
+
+  // --- admin.mjs (money-flow decision 2, 2026-10-08 — marking a host withdrawal PAID posts the one
+  // DEBIT on the host's wallet for money paid outside the platform; same operation class as
+  // releasing a booking payout to the host, ADMIN-only. The 'reject' action moves no money.) ---
+  { method: 'PATCH', pathPattern: '^/api/admin/payout-requests/[^/]+$', operation: 'payout_release', file: 'server/routes/admin.mjs', rail: 'manual_proof', note: "action='paid' branch" },
 ])
 
 // Routes deliberately excluded from the registry — documented so the enforcement audit's static
@@ -70,6 +75,7 @@ export const PAYMENT_POLICY_EXCLUDED_ROUTES = Object.freeze([
   { method: 'PATCH', pathPattern: '^/api/admin/review-queue/iddocument/[^/]+$', file: 'server/routes/admin.mjs', reason: 'same dispatcher; KYC decisions never touch payment/wallet state' },
   { method: '*', pathPattern: '^/api/wallet', file: 'server/routes/wallet.mjs', reason: 'WalletGift is a separate, provider-independent domain (platform-funded promotional credit); out of scope for a payment-PROVIDER capability policy' },
   { method: '*', pathPattern: '^/api/admin/id-document', file: 'server/routes/admin.mjs', reason: 'KYC documents, unrelated to payments' },
+  { method: 'POST', pathPattern: '^/api/host/payouts$', file: 'server/routes/host.mjs', reason: 'files a withdrawal REQUEST only; no wallet entry or provider call until an admin marks it paid (declared above)' },
 ])
 
 // No known gaps remain — payout_release (below) closed the one previously-documented gap. Kept as

@@ -149,6 +149,10 @@ export type PlatformBooking = {
   guestCheckedOutAt?: string | null
   createdAt: string
   updatedAt: string
+  // PAYMENT_PENDING bookings expire 48h after creation (createdAt + 48h) when unpaid.
+  expiresAt?: string | null
+  // e.g. 'EXPIRED_UNPAID' when the 48h unpaid sweep cancelled the booking (if exposed).
+  cancellationReason?: string | null
   guest?: {
     id: string
     displayName: string
@@ -2245,4 +2249,198 @@ function isAuthApiError(error: unknown) {
 function isAccountExistsError(error: unknown) {
   const e = error as { status?: number; code?: string } | null
   return Boolean(e && typeof e === 'object' && (e.code === 'ACCOUNT_ALREADY_EXISTS' || e.status === 409))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Short-stay money flow (owner decisions Oct 8, 2026): quote, guest cancel, host payouts, admin
+// payout requests + refunds. Shapes follow the agreed API contract exactly.
+// ---------------------------------------------------------------------------------------------
+
+export type BookingQuote = {
+  nights: number
+  stayMinor: number
+  cleaningMinor: number
+  taxesMinor: number
+  otherFeesMinor: number
+  protectionMinor: number
+  totalMinor: number
+  commissionMinor: number
+  hostShareMinor: number
+  currency: string
+  bookable: boolean
+  reason?: string
+}
+
+// Public. `protection` adds the 3%-of-the-full-stay protection fee into totalMinor.
+export async function fetchBookingQuote(input: { listingId: string; checkIn: string; checkOut: string; protection: boolean }) {
+  const params = new URLSearchParams({
+    listingId: input.listingId,
+    checkIn: input.checkIn,
+    checkOut: input.checkOut,
+    protection: input.protection ? '1' : '0',
+  })
+  const response = await apiRequest<{ ok: true; quote: BookingQuote }>(`/api/bookings/quote?${params.toString()}`)
+  return response.quote
+}
+
+export type CancelQuoteRule = 'FULL' | 'HALF' | 'FULL_MINUS_PROTECTION' | 'HALF_MINUS_PROTECTION' | 'UNPAID'
+
+export type BookingCancelQuote = {
+  refundMinor: number
+  retainedMinor: number
+  rule: CancelQuoteRule
+  deadline: string
+  currency: string
+}
+
+export async function fetchBookingCancelQuote(bookingId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; cancelQuote: BookingCancelQuote }>(`/api/bookings/${bookingId}/cancel-quote`, {
+    token: session.token,
+  })
+  return response.cancelQuote
+}
+
+export async function cancelGuestBooking(bookingId: string, reason?: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{
+    ok: true
+    booking: PlatformBooking
+    refund?: { rule?: CancelQuoteRule; refundMinor?: number; retainedMinor?: number; amountMinor?: number; currency?: string } | null
+  }>(`/api/bookings/${bookingId}/cancel`, {
+    method: 'PATCH',
+    token: session.token,
+    body: reason ? { reason } : {},
+  })
+  return response
+}
+
+export type PayoutMethodType = 'SHAM_CASH' | 'BANK' | 'CASH_OFFICE'
+
+export type HostPayoutMethod = {
+  type: PayoutMethodType
+  shamCashNumber?: string
+  accountName?: string
+  bankName?: string
+  accountNumber?: string
+  officeCity?: string
+}
+
+export type PayoutRequestStatus = 'REQUESTED' | 'PAID' | 'REJECTED'
+
+export type HostPayoutRequest = {
+  id: string
+  amountMinor: number
+  currency: string
+  status: PayoutRequestStatus
+  method: HostPayoutMethod | null
+  reference?: string | null
+  note?: string | null
+  createdAt: string
+  decidedAt?: string | null
+}
+
+export type HostPayoutsSummary = {
+  availableMinor: number
+  pendingMinor: number
+  currency: string
+  requests: HostPayoutRequest[]
+}
+
+export async function fetchHostPayoutMethod(mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; method: HostPayoutMethod | null }>('/api/host/payout-method', { token: session.token })
+  return response.method
+}
+
+export async function saveHostPayoutMethod(method: HostPayoutMethod, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; method: HostPayoutMethod }>('/api/host/payout-method', {
+    method: 'PUT',
+    token: session.token,
+    body: method,
+  })
+  return response.method
+}
+
+export async function fetchHostPayouts(mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true } & HostPayoutsSummary>('/api/host/payouts', { token: session.token })
+  return {
+    availableMinor: response.availableMinor,
+    pendingMinor: response.pendingMinor,
+    currency: response.currency,
+    requests: response.requests || [],
+  } satisfies HostPayoutsSummary
+}
+
+export async function requestHostPayout(amountMinor: number, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; request: HostPayoutRequest }>('/api/host/payouts', {
+    method: 'POST',
+    token: session.token,
+    body: { amountMinor },
+  })
+  return response.request
+}
+
+export type AdminPayoutRequest = HostPayoutRequest & {
+  host?: { id: string; displayName: string; email: string | null } | null
+}
+
+export async function fetchAdminPayoutRequests(status?: PayoutRequestStatus | '') {
+  const query = status ? `?status=${encodeURIComponent(status)}` : ''
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; requests: AdminPayoutRequest[] }>(`/api/admin/payout-requests${query}`, { token }),
+  )
+  return response.requests || []
+}
+
+export async function decideAdminPayoutRequest(
+  requestId: string,
+  input: { action: 'paid'; reference: string; note?: string } | { action: 'reject'; note: string },
+) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; request: AdminPayoutRequest }>(`/api/admin/payout-requests/${requestId}`, {
+      method: 'PATCH',
+      token,
+      body: input,
+    }),
+  )
+  return response.request
+}
+
+export type AdminRefund = {
+  id: string
+  bookingId: string | null
+  amountMinor: number
+  currency: string
+  status: string
+  createdAt: string
+  guest?: { id?: string; displayName?: string; email?: string | null } | null
+  bookingStatus?: string | null
+  executedAt?: string | null
+}
+
+export async function fetchAdminRefunds(status?: string) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : ''
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; refunds: AdminRefund[] }>(`/api/admin/refunds${query}`, { token }),
+  )
+  return response.refunds || []
+}
+
+export async function executeAdminRefund(refundId: string) {
+  return runAdminRequest((token) =>
+    apiRequest<{ ok: true } & Record<string, unknown>>(`/api/admin/refunds/${refundId}/execute`, { method: 'PATCH', token }),
+  )
+}
+
+export async function finalizeAdminBookingCancellation(bookingId: string) {
+  return runAdminRequest((token) =>
+    apiRequest<{ ok: true; cancelledBy?: 'GUEST' | 'HOST' } & Record<string, unknown>>(
+      `/api/admin/bookings/${bookingId}/finalize-cancellation`,
+      { method: 'PATCH', token },
+    ),
+  )
 }

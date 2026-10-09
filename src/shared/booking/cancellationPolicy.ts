@@ -33,3 +33,22 @@ export function freeCancellationLabel(checkIn: string | undefined, protectedPlan
   const dateText = formatCancellationDate(cutoff, lang)
   return pick(lang, `إلغاء مجاني حتى ${dateText}`, `Free cancellation until ${dateText}`, `Annulation gratuite jusqu’au ${dateText}`)
 }
+
+// Owner decision (Oct 8, 2026) -- plain-words cancellation rule shown before booking.
+// Regular: full refund until 3 days before check-in, then 50%. Protected: full refund minus the
+// protection fee until check-in day, then 50% (of the amount paid minus the protection fee).
+export function cancellationRuleText(protectedPlan: boolean, lang: Lang) {
+  return protectedPlan
+    ? pick(
+        lang,
+        'استرداد كامل (عدا رسوم الحماية) حتى يوم الدخول، بعدها 50%',
+        'Full refund (minus the protection fee) until check-in day, then 50%',
+        'Remboursement complet (hors frais de protection) jusqu’au jour de l’arrivée, puis 50 %',
+      )
+    : pick(
+        lang,
+        'إلغاء مجاني حتى 3 أيام قبل الدخول، بعدها يُسترد 50%',
+        'Free cancellation until 3 days before check-in, then 50% refund',
+        'Annulation gratuite jusqu’à 3 jours avant l’arrivée, puis remboursement de 50 %',
+      )
+}

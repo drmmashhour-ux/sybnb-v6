@@ -30,6 +30,23 @@ export const profile = {
   // (SMS remains a neutral adapter, reachable only if a future certified country sets sms:true.)
   communications: { email: true, sms: false },
 
+  // Short-stay booking money policy (owner decisions 2026-10-08). Read by the country-neutral
+  // server/lib/booking-policy.mjs through server/lib/country.mjs's bookingPolicySettings(); env
+  // BOOKING_FULL_REFUND_CUTOFF_HOURS / BOOKING_UNPAID_EXPIRY_HOURS override the two windows.
+  //   timezoneOffsetMinutes: "check-in date 00:00" is Syria time (UTC+3, no DST).
+  //   fullRefundCutoffHours: a regular-price guest cancellation >= 72h before check-in 00:00 gets
+  //     100% back; later gets 50%.
+  //   unpaidExpiryHours: an unpaid PAYMENT_PENDING request with no live proof expires after 48h.
+  bookingPolicy: { timezoneOffsetMinutes: 180, fullRefundCutoffHours: 72, unpaidExpiryHours: 48 },
+
+  // Host payout (withdrawal) methods available in this country, with the fields each requires.
+  // Admin pays these outside the platform and marks the request PAID; nothing moves automatically.
+  payoutMethods: {
+    SHAM_CASH: { required: ['shamCashNumber', 'accountName'] },
+    BANK: { required: ['bankName', 'accountName', 'accountNumber'] },
+    CASH_OFFICE: { required: ['officeCity'] },
+  },
+
   // Per-country launch gates — all remain closed until Syria-specific review passes:
   gates: {
     legal: 'DRAFT',            // countries/syria legal versions (counsel-approved) required

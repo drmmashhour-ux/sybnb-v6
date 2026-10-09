@@ -169,6 +169,25 @@ const APPROVED_PROVIDER_CONFIGS = {
 // directly rather than needing one live server process per environment/override-value combination.
 export function resolveApprovedProviderConfig(provider, environment) {
   if (APPROVED_PROVIDER_CONFIGS[provider]) return APPROVED_PROVIDER_CONFIGS[provider]
+  // Owner money-flow decision 1 (2026-10-08): Stripe card payments are an ALLOWED provider for
+  // guests paying from abroad -- but only once an operator explicitly sets
+  // PAYMENT_PROVIDER_STRIPE_APPROVED=true (exact string; default unset = not approved, exactly as
+  // before). This only answers Gate 4 ("is this provider approved"); every other gate still applies
+  // unchanged on top of it -- emergency stop, the country's gates.payments (Syria: 'disabled'),
+  // the eligible-divisions list, PAYMENTS_ENABLED for the stripe_checkout rail, the per-operation
+  // PAYMENT_OPERATION_STRIPE_CHECKOUT_*_ENABLED flags, and actor roles.
+  if (provider === 'stripe' && process.env.PAYMENT_PROVIDER_STRIPE_APPROVED === 'true') {
+    return {
+      providerAccount: 'stripe-owner-approved',
+      environments: ['development', 'test', 'staging', 'production'],
+      businessCountry: 'CA',
+      permittedCustomerCountries: ['SY'],
+      permittedPayoutCountries: ['CA'],
+      supportedDivisions: DIVISIONS,
+      approvalReference: 'owner-decision-2026-10-08-guest-card-payments-abroad (env PAYMENT_PROVIDER_STRIPE_APPROVED)',
+      effectiveDate: '2026-10-08',
+    }
+  }
   if (provider === 'stripe' && environment === 'test' && process.env.PAYMENT_POLICY_TEST_STRIPE_APPROVED === 'true') {
     return {
       providerAccount: 'stripe-test-approved',

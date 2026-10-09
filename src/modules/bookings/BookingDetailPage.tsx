@@ -2,19 +2,24 @@ import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
+  cancelGuestBooking,
   confirmStripePayment,
+  fetchBookingCancelQuote,
   createStripeCheckoutSession,
   fetchPrototypeBooking,
   fetchStripePaymentStatus,
   submitGuestIdDocument,
   submitPrototypeReview,
+  type BookingCancelQuote,
+  type CancelQuoteRule,
   type PlatformBooking,
   type PlatformListing,
   type PlatformListingReview,
   type PlatformPaymentProof,
 } from '../../shared/api/platformApi'
 import { listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
-import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
+import { cancellationRuleText } from '../../shared/booking/cancellationPolicy'
+import { localeForLang } from '../../shared/country/presentation'
 import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
 import { guestFeeSummary } from './guestFeeSummary'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
@@ -230,6 +235,10 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   const [idFiles, setIdFiles] = useState<string[]>([])
   const [idFile, setIdFile] = useState<File | null>(null)
   const [idSaveState, setIdSaveState] = useState<'idle' | 'saving' | 'error'>('idle')
+  const [cancelStep, setCancelStep] = useState<'idle' | 'loading' | 'confirm' | 'saving' | 'done' | 'error'>('idle')
+  const [cancelQuote, setCancelQuote] = useState<BookingCancelQuote | null>(null)
+  const [cancelRefundMinor, setCancelRefundMinor] = useState<number | null>(null)
+  const [cancelError, setCancelError] = useState('')
 
   useEffect(() => {
     void loadBooking()
@@ -305,6 +314,34 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
     }
   }
 
+  async function startCancel() {
+    if (!booking) return
+    setCancelStep('loading')
+    setCancelError('')
+    try {
+      setCancelQuote(await fetchBookingCancelQuote(booking.id))
+      setCancelStep('confirm')
+    } catch (error) {
+      setCancelStep('error')
+      setCancelError(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function confirmCancel() {
+    if (!booking) return
+    setCancelStep('saving')
+    setCancelError('')
+    try {
+      const result = await cancelGuestBooking(booking.id)
+      setCancelRefundMinor(result.refund?.refundMinor ?? result.refund?.amountMinor ?? cancelQuote?.refundMinor ?? 0)
+      setCancelStep('done')
+      await loadBooking()
+    } catch (error) {
+      setCancelStep('error')
+      setCancelError(error instanceof Error ? error.message : t.error)
+    }
+  }
+
   async function submitReview() {
     if (!booking || reviewRating < 1) return
     setReviewStatus('saving')
@@ -339,6 +376,10 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
     ? `/payment/local-wallet/${booking.id}/${fees?.totalMinor ?? booking.amountMinor}/${encodeURIComponent(booking.currency)}`
     : '/dashboard'
   const hasIdDocument = Boolean(booking?.guest?.idDocumentRef)
+  const canCancel = Boolean(booking && ['REQUESTED', 'CONFIRMED', 'PAYMENT_PENDING'].includes(booking.status))
+  const cancellationReason = booking ? bookingCancellationReason(booking) : null
+  const isExpiredUnpaid = booking?.status === 'CANCELLED' && cancellationReason === 'EXPIRED_UNPAID'
+  const paymentDeadline = booking?.status === 'PAYMENT_PENDING' ? paymentDeadlineDate(booking) : null
 
   function saveBookingCopy() {
     if (!booking) return
@@ -458,6 +499,38 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
           {cardState === 'confirming' && <section style={styles.panel}>{t.stripeConfirming}</section>}
           {cardState === 'error' && <section style={styles.alert}>{cardError}</section>}
 
+          {paymentDeadline && (
+            <section style={styles.deadlineBanner} role="status">
+              <strong>{pick(lang, 'ادفع خلال 48 ساعة من إرسال الطلب', 'Pay within 48 hours of sending the request', 'Payez dans les 48 heures suivant l’envoi de la demande')}</strong>
+              <span>
+                {pick(lang, 'آخر موعد للدفع: ', 'Payment deadline: ', 'Date limite de paiement : ')}
+                <b>{formatDateTime(paymentDeadline, lang)}</b>
+              </span>
+              <small>
+                {pick(
+                  lang,
+                  'بعد هذا الموعد يُلغى الطلب تلقائياً إذا لم يُرفع إيصال الدفع، وتعود التواريخ متاحة.',
+                  'After this time the request is cancelled automatically if no payment receipt was uploaded, and the dates open up again.',
+                  'Passé ce délai, la demande est annulée automatiquement si aucun reçu de paiement n’a été téléversé, et les dates redeviennent disponibles.',
+                )}
+              </small>
+            </section>
+          )}
+
+          {isExpiredUnpaid && (
+            <section style={styles.expiredBanner} role="status">
+              <strong>{pick(lang, 'انتهت مهلة الدفع', 'Expired', 'Expirée')}</strong>
+              <span>
+                {pick(
+                  lang,
+                  'لم يصل الدفع خلال 48 ساعة، فأُلغي الطلب تلقائياً. لم يُخصم منك أي مبلغ ويمكنك إرسال طلب جديد.',
+                  'Payment did not arrive within 48 hours, so the request was cancelled automatically. Nothing was charged; you can send a new request.',
+                  'Le paiement n’est pas arrivé dans les 48 heures : la demande a été annulée automatiquement. Rien n’a été débité ; vous pouvez envoyer une nouvelle demande.',
+                )}
+              </span>
+            </section>
+          )}
+
           {isPaymentDraft && (
             <section style={styles.aiBrainPanel}>
               <div style={styles.aiBrainIcon}>✣</div>
@@ -513,7 +586,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
             </article>
             <article style={styles.guaranteeCard}>
               <h2>{t.protectedFunds}</h2>
-              <p>✓ {freeCancellationLabel(booking.checkIn || undefined, Boolean(fees?.cancellationProtectionPurchased), lang)}</p>
+              <p>✓ {cancellationRuleText(Boolean(fees?.cancellationProtectionPurchased), lang)}</p>
               {t.guaranteeRows.map((row) => (
                 <p key={row}>✓ {row}</p>
               ))}
@@ -567,6 +640,73 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
             )}
           </section>
 
+          {(canCancel || cancelStep === 'done') && (
+            <section style={styles.cancelPanel} aria-live="polite">
+              {cancelStep === 'done' ? (
+                <>
+                  <strong>{pick(lang, 'تم إلغاء الحجز', 'Booking cancelled', 'Réservation annulée')}</strong>
+                  <span>
+                    {(cancelRefundMinor ?? 0) > 0
+                      ? pick(
+                          lang,
+                          `سيُسترد لك ${moneyText(cancelRefundMinor, booking.currency, lang)} بعد مراجعة فريق SYBNB.`,
+                          `${moneyText(cancelRefundMinor, booking.currency, lang)} will be refunded to you after the SYBNB team reviews it.`,
+                          `${moneyText(cancelRefundMinor, booking.currency, lang)} vous seront remboursés après vérification par l’équipe SYBNB.`,
+                        )
+                      : pick(lang, 'لا يوجد مبلغ للاسترداد.', 'There is nothing to refund.', 'Aucun montant à rembourser.')}
+                  </span>
+                </>
+              ) : cancelStep === 'confirm' && cancelQuote ? (
+                <>
+                  <strong>{pick(lang, 'تأكيد إلغاء الحجز', 'Confirm cancellation', 'Confirmer l’annulation')}</strong>
+                  <span>{cancelRuleWords(cancelQuote.rule, lang)}</span>
+                  {cancelQuote.rule !== 'UNPAID' && (
+                    <div style={styles.cancelNumbers}>
+                      <Info
+                        label={pick(lang, 'المبلغ المسترد', 'Refund', 'Remboursement')}
+                        value={moneyText(cancelQuote.refundMinor, cancelQuote.currency || booking.currency, lang)}
+                        dir={isAr ? 'rtl' : 'ltr'}
+                        strong
+                      />
+                      <Info
+                        label={pick(lang, 'المبلغ غير المسترد', 'Not refunded', 'Non remboursé')}
+                        value={moneyText(cancelQuote.retainedMinor, cancelQuote.currency || booking.currency, lang)}
+                        dir={isAr ? 'rtl' : 'ltr'}
+                      />
+                    </div>
+                  )}
+                  {cancelQuote.deadline && cancelQuote.rule !== 'UNPAID' && (
+                    <small style={{ color: '#9aa6ba' }}>
+                      {cancelQuote.rule === 'FULL' || cancelQuote.rule === 'FULL_MINUS_PROTECTION'
+                        ? pick(lang, 'ينطبق هذا إذا ألغيت قبل: ', 'This applies if you cancel before: ', 'Ceci s’applique si vous annulez avant : ')
+                        : pick(lang, 'انتهى موعد الاسترداد الكامل في: ', 'The full-refund deadline was: ', 'La date limite de remboursement complet était : ')}
+                      {formatDateTime(new Date(cancelQuote.deadline), lang)}
+                    </small>
+                  )}
+                  <div style={styles.actions}>
+                    <button style={styles.dangerButton} onClick={() => void confirmCancel()}>
+                      {pick(lang, 'نعم، ألغِ الحجز', 'Yes, cancel booking', 'Oui, annuler la réservation')}
+                    </button>
+                    <button style={styles.secondaryButton} onClick={() => setCancelStep('idle')}>
+                      {pick(lang, 'تراجع', 'Keep booking', 'Garder la réservation')}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {cancelStep === 'error' && <p style={styles.alert}>{cancelError}</p>}
+                  <button
+                    style={styles.dangerButton}
+                    disabled={cancelStep === 'loading' || cancelStep === 'saving'}
+                    onClick={() => void startCancel()}
+                  >
+                    {cancelStep === 'loading' || cancelStep === 'saving' ? t.saving : pick(lang, 'إلغاء الحجز', 'Cancel booking', 'Annuler la réservation')}
+                  </button>
+                </>
+              )}
+            </section>
+          )}
+
           {booking.review && (
             <section style={styles.actions}>
               <Info label={t.yourReview} value={`${'★'.repeat(booking.review.rating)}${booking.review.comment ? ` · ${booking.review.comment}` : ''}`} dir={isAr ? 'rtl' : 'ltr'} />
@@ -608,6 +748,67 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
       )}
     </main>
   )
+}
+
+function cancelRuleWords(rule: CancelQuoteRule, lang: Lang) {
+  switch (rule) {
+    case 'FULL':
+      return pick(lang, 'تسترد كامل المبلغ المدفوع.', 'You get the full amount you paid back.', 'Vous récupérez la totalité du montant payé.')
+    case 'HALF':
+      return pick(
+        lang,
+        'فات موعد الإلغاء المجاني (3 أيام قبل الدخول)، لذلك تسترد 50% من المبلغ المدفوع.',
+        'The free-cancellation deadline (3 days before check-in) has passed, so you get 50% of the amount paid back.',
+        'Le délai d’annulation gratuite (3 jours avant l’arrivée) est dépassé : vous récupérez 50 % du montant payé.',
+      )
+    case 'FULL_MINUS_PROTECTION':
+      return pick(
+        lang,
+        'حجزك محمي: تسترد كامل المبلغ المدفوع عدا رسوم الحماية.',
+        'Your booking is protected: you get everything you paid back except the protection fee.',
+        'Votre réservation est protégée : vous récupérez tout le montant payé, sauf les frais de protection.',
+      )
+    case 'HALF_MINUS_PROTECTION':
+      return pick(
+        lang,
+        'بدأ يوم الدخول، لذلك تسترد 50% من المبلغ المدفوع بعد خصم رسوم الحماية.',
+        'Check-in day has started, so you get 50% of the amount paid (minus the protection fee) back.',
+        'Le jour de l’arrivée est commencé : vous récupérez 50 % du montant payé (hors frais de protection).',
+      )
+    case 'UNPAID':
+    default:
+      return pick(
+        lang,
+        'لم تدفع بعد، لذلك يُلغى الطلب دون أي مبلغ للاسترداد.',
+        'You have not paid yet, so the request is simply cancelled — nothing to refund.',
+        'Vous n’avez pas encore payé : la demande est simplement annulée, sans remboursement.',
+      )
+  }
+}
+
+function bookingCancellationReason(booking: PlatformBooking) {
+  const metadata = booking.metadata || {}
+  const candidates = [booking.cancellationReason, metadata.cancellationReason, metadata.cancelReason, metadata.cancelledReason]
+  const found = candidates.find((value) => typeof value === 'string' && value)
+  return typeof found === 'string' ? found : null
+}
+
+function paymentDeadlineDate(booking: PlatformBooking) {
+  const raw = booking.expiresAt || (booking.createdAt ? new Date(new Date(booking.createdAt).getTime() + 48 * 60 * 60 * 1000).toISOString() : null)
+  if (!raw) return null
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatDateTime(date: Date, lang: Lang) {
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString(pick(lang, localeForLang('ar'), localeForLang('en'), 'fr-CA'), {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 function Info({ label, value, dir = 'ltr', strong = false }: { label: string; value: string; dir?: 'ltr' | 'rtl'; strong?: boolean }) {
@@ -655,5 +856,9 @@ const styles: Record<string, CSSProperties> = {
   textarea: { minHeight: 80, border: '1px solid #30384d', borderRadius: 8, background: '#0c1220', color: '#fff', padding: 12, fontFamily: 'inherit' },
   dangerButton: { minHeight: 48, border: '1px solid rgba(255,96,96,.5)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ffd1d1', fontWeight: 900, padding: '0 14px' },
   panel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', color: '#9aa6ba', padding: 14 },
+  deadlineBanner: { border: '1px solid rgba(229,184,11,.55)', borderRadius: 10, background: 'rgba(229,184,11,.1)', color: '#ffe9a6', padding: 16, display: 'grid', gap: 6, lineHeight: 1.6 },
+  expiredBanner: { border: '1px solid rgba(255,96,96,.5)', borderRadius: 10, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 16, display: 'grid', gap: 6, lineHeight: 1.6 },
+  cancelPanel: { border: '1px solid #30384d', borderRadius: 10, background: '#111118', color: '#fff', padding: 16, display: 'grid', gap: 12, lineHeight: 1.6 },
+  cancelNumbers: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
 }

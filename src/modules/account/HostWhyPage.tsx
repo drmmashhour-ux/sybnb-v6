@@ -69,7 +69,7 @@ const copy: Record<Lang, Copy> = {
     ],
     feesTitle: 'الرسوم',
     fees: [
-      `الإيجار اليومي: عمولة خدمة ${STR_COMMISSION_PERCENT}% على كل حجز، تُخصم من مستحقاتك.`,
+      `الإيجار اليومي: عمولة خدمة ${STR_COMMISSION_PERCENT}% من إجمالي قيمة الحجز (عدا رسوم الحماية)، تُخصم من مستحقاتك.`,
       'الإيجار الشهري، المركبات، السوق، والمشاريع الجديدة: لا عمولة على الحجز. قد تتطلب خطة نشر مدفوعة يظهر سعرها قبل الدفع.',
       `بيع عقار عبر المنصة: عمولة ${PLATFORM_SALE_COMMISSION_PERCENT}% عند إتمام البيع. البيع بنفسك يتم بخطة نشر.`,
     ],
@@ -85,7 +85,7 @@ const copy: Record<Lang, Copy> = {
     faq: [
       { q: 'هل أحتاج إلى حساب ثانٍ؟', a: 'لا. نفس الحساب يصلح للحجز وللاستضافة، وتفعّل الاستضافة بنقرة واحدة.' },
       { q: 'هل يجب أن أقبل كل طلب؟', a: 'لا. تراجع كل طلب وتقبله أو ترفضه.' },
-      { q: 'متى تُخصم العمولة؟', a: `في الإيجار اليومي تُخصم ${STR_COMMISSION_PERCENT}% من مستحقاتك عن كل حجز. لا تُدفع مقدماً.` },
+      { q: 'متى تُخصم العمولة؟', a: `في الإيجار اليومي تُخصم ${STR_COMMISSION_PERCENT}% من إجمالي قيمة الحجز (عدا رسوم الحماية) من مستحقاتك عن كل حجز. لا تُدفع مقدماً.` },
       { q: 'هل يظهر إعلاني فوراً؟', a: 'قد يراجع فريق SYBNB الإعلانات والمستندات قبل نشرها.' },
       { q: 'أين الشروط؟', a: 'شروط المضيف ما زالت مسودة غير نهائية. يمكنك قراءة المسودة الحالية.' },
     ],
@@ -116,7 +116,7 @@ const copy: Record<Lang, Copy> = {
     ],
     feesTitle: 'Fees',
     fees: [
-      `Short-term stays: a ${STR_COMMISSION_PERCENT}% service commission on each booking, deducted from your payout.`,
+      `Short-term stays: a ${STR_COMMISSION_PERCENT}% service commission of the total booking amount (excluding the protection fee), deducted from your payout.`,
       'Monthly rentals, cars, marketplace, and new construction: no per-booking commission. A paid publishing plan may apply; its price is shown before you pay.',
       `Selling property through the platform: ${PLATFORM_SALE_COMMISSION_PERCENT}% commission when the sale closes. Selling it yourself uses a publishing plan.`,
     ],
@@ -132,7 +132,7 @@ const copy: Record<Lang, Copy> = {
     faq: [
       { q: 'Do I need a second account?', a: 'No. The same account works for booking and hosting; you turn on hosting with one tap.' },
       { q: 'Do I have to accept every request?', a: 'No. You review each request and accept or decline it.' },
-      { q: 'When is the commission charged?', a: `For stays, ${STR_COMMISSION_PERCENT}% is deducted from your payout for each booking. Nothing is paid upfront.` },
+      { q: 'When is the commission charged?', a: `For stays, ${STR_COMMISSION_PERCENT}% of the total booking amount (excluding the protection fee) is deducted from your payout for each booking. Nothing is paid upfront.` },
       { q: 'Does my listing go live right away?', a: 'The SYBNB team may review listings and documents before they are published.' },
       { q: 'Where are the terms?', a: 'The host terms are still a draft and not final. You can read the current draft.' },
     ],
@@ -163,7 +163,7 @@ const copy: Record<Lang, Copy> = {
     ],
     feesTitle: 'Frais',
     fees: [
-      `Séjours courte durée : une commission de service de ${STR_COMMISSION_PERCENT} % sur chaque réservation, déduite de votre versement.`,
+      `Séjours courte durée : une commission de service de ${STR_COMMISSION_PERCENT} % du montant total de la réservation (hors frais de protection), déduite de votre versement.`,
       'Location au mois, véhicules, marché et projets neufs : aucune commission par réservation. Un forfait de publication payant peut s’appliquer ; son prix est affiché avant le paiement.',
       `Vente d’un bien par la plateforme : commission de ${PLATFORM_SALE_COMMISSION_PERCENT} % à la conclusion de la vente. La vente par vous-même passe par un forfait de publication.`,
     ],
@@ -179,7 +179,7 @@ const copy: Record<Lang, Copy> = {
     faq: [
       { q: 'Ai-je besoin d’un deuxième compte ?', a: 'Non. Le même compte sert à réserver et à accueillir ; vous activez l’accueil en un geste.' },
       { q: 'Dois-je accepter toutes les demandes ?', a: 'Non. Vous examinez chaque demande et l’acceptez ou la refusez.' },
-      { q: 'Quand la commission est-elle prélevée ?', a: `Pour les séjours, ${STR_COMMISSION_PERCENT} % sont déduits de votre versement pour chaque réservation. Rien n’est payé d’avance.` },
+      { q: 'Quand la commission est-elle prélevée ?', a: `Pour les séjours, ${STR_COMMISSION_PERCENT} % du montant total de la réservation (hors frais de protection) sont déduits de votre versement pour chaque réservation. Rien n’est payé d’avance.` },
       { q: 'Mon annonce est-elle publiée immédiatement ?', a: 'L’équipe SYBNB peut vérifier les annonces et les documents avant leur publication.' },
       { q: 'Où sont les conditions ?', a: 'Les conditions d’hôte sont encore une ébauche non définitive. Vous pouvez lire l’ébauche actuelle.' },
     ],

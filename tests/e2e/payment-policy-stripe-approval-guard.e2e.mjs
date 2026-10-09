@@ -26,6 +26,13 @@
 
 import { resolveApprovedProviderConfig } from '../../server/lib/payment-policy.mjs'
 
+// This suite proves the TEST-ONLY override (PAYMENT_POLICY_TEST_STRIPE_APPROVED). The separate,
+// owner-authorized real approval switch (PAYMENT_PROVIDER_STRIPE_APPROVED, decision 1 of
+// 2026-10-08) would legitimately approve stripe in every environment, so it is cleared here to keep
+// this suite hermetic; its own default-off behaviour is asserted at the end.
+const priorRealStripeApproval = process.env.PAYMENT_PROVIDER_STRIPE_APPROVED
+delete process.env.PAYMENT_PROVIDER_STRIPE_APPROVED
+
 let passed = 0
 let failed = 0
 function check(name, condition) {
@@ -112,6 +119,22 @@ for (const env of ['staging', 'development']) {
 // meaning section 1's "denies" assertions for those two environments would themselves start failing.
 // This is demonstrated here by literally computing the weakened shapes' decisions on the same inputs
 // and showing they disagree with the real guard's current (correct) denial, not merely asserted.
+
+console.log('\n=== 6. Owner approval switch PAYMENT_PROVIDER_STRIPE_APPROVED (decision 1, 2026-10-08) ===')
+{
+  const priorTest = process.env.PAYMENT_POLICY_TEST_STRIPE_APPROVED
+  delete process.env.PAYMENT_POLICY_TEST_STRIPE_APPROVED
+  for (const value of [undefined, '', 'false', 'TRUE', 'True', ' true', '1', 'yes']) {
+    if (value === undefined) delete process.env.PAYMENT_PROVIDER_STRIPE_APPROVED
+    else process.env.PAYMENT_PROVIDER_STRIPE_APPROVED = value
+    check(`PAYMENT_PROVIDER_STRIPE_APPROVED=${JSON.stringify(value)} does NOT approve stripe in production`, resolveApprovedProviderConfig('stripe', 'production') === null)
+  }
+  process.env.PAYMENT_PROVIDER_STRIPE_APPROVED = 'true'
+  check('PAYMENT_PROVIDER_STRIPE_APPROVED=true approves stripe at the provider gate (all other gates still apply)', resolveApprovedProviderConfig('stripe', 'production') !== null)
+  delete process.env.PAYMENT_PROVIDER_STRIPE_APPROVED
+  if (priorTest !== undefined) process.env.PAYMENT_POLICY_TEST_STRIPE_APPROVED = priorTest
+}
+if (priorRealStripeApproval !== undefined) process.env.PAYMENT_PROVIDER_STRIPE_APPROVED = priorRealStripeApproval
 
 console.log(`\n==== STRIPE APPROVAL GUARD (ENVIRONMENT + OVERRIDE ADVERSARIAL MATRIX): ${passed} passed, ${failed} failed ====`)
 process.exit(failed > 0 ? 1 : 0)

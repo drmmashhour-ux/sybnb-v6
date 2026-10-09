@@ -1,5 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { db } from '../lib/prisma.mjs'
+import { expireUnpaidBookings } from '../lib/booking-lifecycle.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
@@ -359,6 +360,9 @@ export async function handlePaymentIntents(req, res, url, context) {
       // Booking-linked: the guest total is server-derived (expectedTotalMinor, the same function
       // the Stripe/local-wallet rails use), never trusted from the client — and the booking must
       // genuinely belong to this guest and be awaiting payment.
+      // Decision 6 (2026-10-08): a request past its unpaid window is expired first, so the
+      // PAYMENT_PENDING check below refuses paying for dates that were already released.
+      await expireUnpaidBookings({ id: String(body.bookingId), guestId: context.user.id })
       const booking = await db().booking.findFirst({
         where: { id: body.bookingId, guestId: context.user.id },
         include: { listing: true },

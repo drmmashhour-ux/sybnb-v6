@@ -1,13 +1,24 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import {
+  CANCELLATION_POLICY_VERSION,
   bookingFinanceSplit,
-  cancellationAdminFee,
   createRefundRequest,
+  expectedTotalMinor,
   readListingFees,
 } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
+import { bookingPolicySettings } from '../lib/country.mjs'
+import {
+  bookingExpiresAt,
+  computeCancellation,
+  computeGuestTotals,
+  dateBlockingBookingWhere,
+  protectionFeeMinor,
+} from '../lib/booking-policy.mjs'
+import { formatMoney, notifyBooking } from '../lib/notifications.mjs'
+import { clientIp, isRateLimited } from '../lib/rateLimit.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 // SEC-002R round 2. The fresh, from-scratch mutation sweep this round required classified guest
 // cancellation as Class A: it marks real payment proofs REFUNDED and calls createRefundRequest(),
@@ -16,35 +27,109 @@ import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } 
 // long before the transaction opens. See server/lib/commit-authorization.mjs.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 
+// Public quote rate limit: generous (a guest flipping dates/protection on a listing page), keyed per
+// IP, same shared bucket store as the other public routes.
+const QUOTE_RATE_WINDOW_MS = 60_000
+const QUOTE_RATE_MAX = Number(process.env.BOOKING_QUOTE_RATE_MAX || 120)
+
 export async function handleBookings(req, res, url, context) {
+  // Money-flow decision 5 (2026-10-08): the single source of the numbers a guest sees before
+  // booking. Same arithmetic as booking creation + every payment rail (computeGuestTotals via
+  // expectedTotalMinor), so the quoted total is exactly what will be charged.
+  if (url.pathname === '/api/bookings/quote') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    if (await isRateLimited(`booking-quote:${clientIp(req)}`, QUOTE_RATE_WINDOW_MS, QUOTE_RATE_MAX)) {
+      return json(res, 429, { ok: false, error: { code: 'RATE_LIMITED', message: 'Too many quote requests. Try again shortly.' } })
+    }
+    const listingId = String(url.searchParams.get('listingId') || '')
+    const { checkIn, checkOut } = parseStayDates(url.searchParams.get('checkIn'), url.searchParams.get('checkOut'))
+    const protection = ['1', 'true'].includes(String(url.searchParams.get('protection') || '0').toLowerCase())
+    const listing = listingId ? await db().listing.findFirst({ where: { id: listingId, status: 'APPROVED' } }) : null
+    if (!listing) {
+      const error = new Error('Listing is not available for booking.')
+      error.statusCode = 404
+      error.code = 'LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const isShortStay = listing.division === 'STAYS'
+    const stay = isShortStay && checkIn && checkOut
+      ? await computeStayTotalMinor(listing, checkIn, checkOut)
+      : { totalMinor: listing.priceMinor, nights: 0 }
+    const totals = computeGuestTotals({
+      stayMinor: stay.totalMinor,
+      fees: readListingFees(listing.metadata || {}),
+      extraFeesMinor: metadataMinor(listing.metadata, 'extraFeesMinor'),
+      isShortStay,
+      protection,
+    })
+    let reason
+    if (isDemoListing(listing)) reason = 'LISTING_NOT_BOOKABLE'
+    else if (context?.user?.id && listing.ownerId === context.user.id) reason = 'OWN_LISTING'
+    else if (checkIn && checkOut && (await datesUnavailable(db(), listing.id, checkIn, checkOut))) reason = 'BOOKING_DATES_UNAVAILABLE'
+    return json(res, 200, {
+      ok: true,
+      quote: {
+        nights: stay.nights,
+        stayMinor: totals.stayMinor,
+        cleaningMinor: totals.cleaningMinor,
+        taxesMinor: totals.taxesMinor,
+        otherFeesMinor: totals.otherFeesMinor,
+        protectionMinor: totals.protectionMinor,
+        totalMinor: totals.totalMinor,
+        commissionMinor: totals.commissionMinor,
+        hostShareMinor: totals.hostShareMinor,
+        currency: listing.currency,
+        bookable: !reason,
+        ...(reason ? { reason } : {}),
+      },
+    })
+  }
+
+  const cancelQuoteMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/cancel-quote$/)
+  if (cancelQuoteMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['GUEST'])
+    const existing = await findGuestBooking(cancelQuoteMatch[1], context.user.id)
+    const { cancellation } = guestCancellationFor(existing)
+    return json(res, 200, {
+      ok: true,
+      cancelQuote: {
+        refundMinor: cancellation.refundMinor,
+        retainedMinor: cancellation.retainedMinor,
+        rule: cancellation.rule,
+        deadline: cancellation.deadline,
+        currency: existing.currency,
+      },
+    })
+  }
+
   const cancelMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/cancel$/)
   if (cancelMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context, ['GUEST'])
     const body = await readJson(req)
-    const existing = await db().booking.findFirst({
-      where: {
-        id: cancelMatch[1],
-        guestId: context.user.id,
-      },
-      include: { listing: true, payments: true },
-    })
+    const existing = await findGuestBooking(cancelMatch[1], context.user.id)
 
-    if (!existing) {
-      const error = new Error('Booking not found for this guest account.')
-      error.statusCode = 404
-      error.code = 'BOOKING_NOT_FOUND'
-      error.expose = true
-      throw error
-    }
-
-    if (!['REQUESTED', 'CONFIRMED'].includes(existing.status)) {
-      const error = new Error('Only requested or confirmed bookings can be cancelled by the guest.')
+    // Decision 3: an unpaid request (PAYMENT_PENDING) can now also be cancelled by its guest --
+    // nothing to refund. REQUESTED/CONFIRMED follow the refund rules below.
+    if (!['PAYMENT_PENDING', 'REQUESTED', 'CONFIRMED'].includes(existing.status)) {
+      const error = new Error('Only unpaid, requested or confirmed bookings can be cancelled by the guest.')
       error.statusCode = 400
       error.code = 'BOOKING_NOT_CANCELLABLE'
       error.expose = true
       throw error
     }
+    // A transfer receipt already under admin review means money may have been sent but is not yet
+    // verified -- cancelling now would leave that transfer with no refund path. Wait for the review.
+    if (existing.status === 'PAYMENT_PENDING' && existing.payments.some((payment) => payment.status === 'PENDING_ADMIN_REVIEW')) {
+      const error = new Error('Your payment receipt is being reviewed. You can cancel once the review is done.')
+      error.statusCode = 409
+      error.code = 'PAYMENT_UNDER_REVIEW'
+      error.expose = true
+      throw error
+    }
+    const { cancellation, approvedPayment: approvedAtRead } = guestCancellationFor(existing)
 
     // Item 2 Phase 2b round 3: creating the refund REQUEST (createRefundRequest, below) moves zero
     // money -- verified exhaustively since round 2 -- so it is genuinely safe for the booking's own
@@ -76,14 +161,35 @@ export async function handleBookings(req, res, url, context) {
         action: 'BOOKING_GUEST_CANCELLED',
         requiredRoles: ['GUEST'],
       })
-      const approvedPayment = existing.payments.find((payment) => payment.status === 'APPROVED')
-      const split = bookingFinanceSplit(existing, approvedPayment?.amountMinor || existing.amountMinor)
+      // Re-read the booking's status inside the transaction and claim it with a conditional update
+      // first: two concurrent cancels (or a cancel racing the expiry sweep / a host decision) must
+      // not both create refund requests or both rewrite the proofs.
+      const claimed = await tx.booking.updateMany({
+        where: { id: existing.id, status: existing.status },
+        data: { status: 'CANCELLED' },
+      })
+      if (claimed.count !== 1) {
+        const error = new Error('This booking changed while you were cancelling it. Refresh and try again.')
+        error.statusCode = 409
+        error.code = 'BOOKING_STATE_CHANGED'
+        error.expose = true
+        throw error
+      }
+      const approvedPayment = approvedAtRead
+
+      if (!approvedPayment) {
+        // Unpaid: just cancel. A never-uploaded placeholder proof (PENDING_PROOF) is closed out.
+        await tx.paymentProof.updateMany({
+          where: { bookingId: existing.id, status: 'PENDING_PROOF' },
+          data: { status: 'REJECTED', adminNote: 'Booking cancelled by the guest before payment.' },
+        })
+      }
 
       if (approvedPayment) {
-        const protectedByAddOn = split.cancellationProtectionPurchased
-        const guestRefundAmountMinor = protectedByAddOn
-          ? Math.max(0, approvedPayment.amountMinor - split.cancellationProtectionFeeMinor)
-          : approvedPayment.amountMinor
+        // Decision 3 (owner, 2026-10-08): the refund is whatever the cancellation rule says --
+        // regular price: 100% if >= 72h before check-in 00:00 (country time), else 50%; protected
+        // price: 100% minus the protection fee until check-in 00:00, else 50% of (paid - fee).
+        const guestRefundAmountMinor = cancellation.refundMinor
 
         await tx.paymentProof.updateMany({
           where: {
@@ -113,7 +219,7 @@ export async function handleBookings(req, res, url, context) {
             requestedByUserId: context.user.id,
             amountMinor: guestRefundAmountMinor,
             currency: existing.currency,
-            reason: 'Guest refund after guest cancelled a protected booking.',
+            reason: `Guest refund after guest cancelled the booking (${cancellation.rule}).`,
             reasonCode: 'GUEST_CANCELLED',
           })
         }
@@ -125,9 +231,23 @@ export async function handleBookings(req, res, url, context) {
         // by this transaction; that is the whole point of the actor-policy split above.
       }
 
+      // The rule this cancellation was decided under is snapshotted server-side on the booking:
+      // admin finalize-cancellation reads it to post the retained-amount split (12% commission /
+      // 88% host on the retained stay part) instead of a full reversal.
       return tx.booking.update({
         where: { id: existing.id },
-        data: { status: 'CANCELLED' },
+        data: {
+          metadata: {
+            ...(existing.metadata || {}),
+            cancellation: {
+              policyVersion: CANCELLATION_POLICY_VERSION,
+              cancelledBy: 'GUEST',
+              cancelledAt: new Date().toISOString(),
+              ...cancellation,
+              paidMinor: approvedPayment?.amountMinor || 0,
+            },
+          },
+        },
         include: {
           guest: {
             select: {
@@ -152,20 +272,34 @@ export async function handleBookings(req, res, url, context) {
         after: {
           ...booking,
           cancellationNote: body.note || body.reason || undefined,
-          cancellationFee: {
-            amountMinor: booking.metadata?.cancellationProtectionPurchased === true ? 0 : cancellationAdminFee(booking.currency).amountMinor,
-            currency: cancellationAdminFee(booking.currency).currency,
-            chargedTo: 'GUEST',
-            waivedByProtection: booking.metadata?.cancellationProtectionPurchased === true,
-            // Item 2 Phase 2b round 3: this amount is no longer charged inline here -- it (and the
-            // admin-share reversal) now posts only via a separate ADMIN-only finalize action.
-            status: 'PENDING_ADMIN_FINALIZATION',
+          // Decision 3 replaces the legacy guest cancellation fee for cancellations made under the
+          // new rules: the refund amount below is the whole consequence for the guest.
+          cancellationRule: {
+            rule: cancellation.rule,
+            refundMinor: cancellation.refundMinor,
+            retainedMinor: cancellation.retainedMinor,
+            deadline: cancellation.deadline,
+            status: approvedAtRead ? 'PENDING_ADMIN_FINALIZATION' : 'NOTHING_TO_SETTLE',
           },
         },
       },
     })
 
-    return json(res, 200, { ok: true, booking })
+    notifyBooking('guest_booking_cancelled', booking.id, {
+      refund: cancellation.refundMinor ? formatMoney(cancellation.refundMinor, booking.currency) : '',
+    })
+    if (existing.status !== 'PAYMENT_PENDING') notifyBooking('host_booking_cancelled', booking.id)
+
+    return json(res, 200, {
+      ok: true,
+      booking: withExpiry(booking),
+      refund: {
+        rule: cancellation.rule,
+        refundMinor: cancellation.refundMinor,
+        retainedMinor: cancellation.retainedMinor,
+        currency: booking.currency,
+      },
+    })
   }
 
   const disputeMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/dispute$/)
@@ -304,7 +438,7 @@ export async function handleBookings(req, res, url, context) {
         ? booking
         : { ...booking, guest: { ...booking.guest, idDocumentRef: 'submitted' } }
 
-    return json(res, 200, { ok: true, booking: sanitized })
+    return json(res, 200, { ok: true, booking: withExpiry(sanitized) })
   }
 
   if (url.pathname !== '/api/bookings') return false
@@ -312,15 +446,7 @@ export async function handleBookings(req, res, url, context) {
 
   requireAuth(context, ['GUEST'])
   const body = await readJson(req)
-  const checkIn = body.checkIn ? new Date(body.checkIn) : undefined
-  const checkOut = body.checkOut ? new Date(body.checkOut) : undefined
-  if ((checkIn && Number.isNaN(checkIn.getTime())) || (checkOut && Number.isNaN(checkOut.getTime())) || (checkIn && checkOut && checkOut <= checkIn)) {
-    const error = new Error('Booking dates must be valid and check-out must be after check-in.')
-    error.statusCode = 400
-    error.code = 'BOOKING_DATES_INVALID'
-    error.expose = true
-    throw error
-  }
+  const { checkIn, checkOut } = parseStayDates(body.checkIn, body.checkOut)
 
   const listing = await db().listing.findFirst({
     where: {
@@ -337,6 +463,22 @@ export async function handleBookings(req, res, url, context) {
     throw error
   }
 
+  // Decision 7: demo/sample inventory is never bookable, and a host cannot book their own listing.
+  if (isDemoListing(listing)) {
+    const error = new Error('This is a demo listing and cannot be booked.')
+    error.statusCode = 409
+    error.code = 'LISTING_NOT_BOOKABLE'
+    error.expose = true
+    throw error
+  }
+  if (listing.ownerId === context.user.id) {
+    const error = new Error('You cannot book your own listing.')
+    error.statusCode = 409
+    error.code = 'OWN_LISTING'
+    error.expose = true
+    throw error
+  }
+
   const isShortStay = listing.division === 'STAYS'
 
   // The overlap check and the create used to be two separate, unguarded round-trips: two guests
@@ -348,32 +490,14 @@ export async function handleBookings(req, res, url, context) {
   const booking = await db().$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${listing.id}))`
 
-    if (checkIn && checkOut) {
-      const [overlappingBooking, blockedDate] = await Promise.all([
-        tx.booking.findFirst({
-          where: {
-            listingId: listing.id,
-            status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] },
-            checkIn: { lt: checkOut },
-            checkOut: { gt: checkIn },
-          },
-        }),
-        tx.listingAvailability.findFirst({
-          where: {
-            listingId: listing.id,
-            status: 'BLOCKED',
-            date: { gte: checkIn, lt: checkOut },
-          },
-        }),
-      ])
-
-      if (overlappingBooking || blockedDate) {
-        const error = new Error('These dates are no longer available for this listing.')
-        error.statusCode = 409
-        error.code = 'BOOKING_DATES_UNAVAILABLE'
-        error.expose = true
-        throw error
-      }
+    // Decision 6: a stale unpaid request (PAYMENT_PENDING past the expiry window with no live
+    // proof) no longer blocks these dates, even before the expiry sweep has marked it CANCELLED.
+    if (checkIn && checkOut && (await datesUnavailable(tx, listing.id, checkIn, checkOut))) {
+      const error = new Error('These dates are no longer available for this listing.')
+      error.statusCode = 409
+      error.code = 'BOOKING_DATES_UNAVAILABLE'
+      error.expose = true
+      throw error
     }
 
     const quote = isShortStay && checkIn && checkOut
@@ -389,13 +513,108 @@ export async function handleBookings(req, res, url, context) {
         checkOut,
         amountMinor: quote.totalMinor,
         currency: listing.currency,
-        metadata: buildBookingMetadata(body, listing),
+        metadata: buildBookingMetadata(body, listing, quote.totalMinor),
       },
     })
   })
 
-  return json(res, 201, { ok: true, booking })
+  notifyBooking('guest_request_received', booking.id, {
+    total: formatMoney(expectedTotalMinor({ ...booking, listing }), booking.currency),
+    expiryHours: bookingPolicySettings().unpaidExpiryHours,
+    expiresAt: bookingExpiresAt(booking, bookingPolicySettings()) || '',
+  })
+
+  return json(res, 201, { ok: true, booking: withExpiry(booking) })
 }
+
+// --- helpers ------------------------------------------------------------------------------------
+
+function isDemoListing(listing) {
+  return listing?.metadata?.demo === true
+}
+
+function metadataMinor(metadata, key) {
+  const value = metadata?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+}
+
+function parseStayDates(rawCheckIn, rawCheckOut) {
+  const checkIn = rawCheckIn ? new Date(rawCheckIn) : undefined
+  const checkOut = rawCheckOut ? new Date(rawCheckOut) : undefined
+  if ((checkIn && Number.isNaN(checkIn.getTime())) || (checkOut && Number.isNaN(checkOut.getTime())) || (checkIn && checkOut && checkOut <= checkIn)) {
+    const error = new Error('Booking dates must be valid and check-out must be after check-in.')
+    error.statusCode = 400
+    error.code = 'BOOKING_DATES_INVALID'
+    error.expose = true
+    throw error
+  }
+  return { checkIn, checkOut }
+}
+
+// True when an active booking or a host-blocked day overlaps [checkIn, checkOut). Active = REQUESTED
+// / CONFIRMED, or PAYMENT_PENDING still inside its payment window or with a live proof/intent.
+async function datesUnavailable(client, listingId, checkIn, checkOut) {
+  const [overlappingBooking, blockedDate] = await Promise.all([
+    client.booking.findFirst({
+      where: {
+        listingId,
+        checkIn: { lt: checkOut },
+        checkOut: { gt: checkIn },
+        ...dateBlockingBookingWhere(new Date(), bookingPolicySettings()),
+      },
+      select: { id: true },
+    }),
+    client.listingAvailability.findFirst({
+      where: {
+        listingId,
+        status: 'BLOCKED',
+        date: { gte: checkIn, lt: checkOut },
+      },
+      select: { id: true },
+    }),
+  ])
+  return Boolean(overlappingBooking || blockedDate)
+}
+
+// Adds `expiresAt` (createdAt + the unpaid-expiry window) while a booking is PAYMENT_PENDING.
+function withExpiry(booking) {
+  if (!booking) return booking
+  const expiresAt = bookingExpiresAt(booking, bookingPolicySettings())
+  return expiresAt ? { ...booking, expiresAt } : booking
+}
+
+async function findGuestBooking(id, guestId) {
+  const existing = await db().booking.findFirst({
+    where: { id, guestId },
+    include: { listing: true, payments: true, paymentIntents: { select: { status: true } } },
+  })
+  if (!existing) {
+    const error = new Error('Booking not found for this guest account.')
+    error.statusCode = 404
+    error.code = 'BOOKING_NOT_FOUND'
+    error.expose = true
+    throw error
+  }
+  return existing
+}
+
+// Decision 3 applied to a guest's own cancellation of `booking` right now.
+function guestCancellationFor(booking, now = new Date()) {
+  const approvedPayment = booking.payments.find((payment) => payment.status === 'APPROVED')
+  const split = bookingFinanceSplit(booking, approvedPayment?.amountMinor || booking.amountMinor)
+  const cancellation = computeCancellation({
+    paidMinor: approvedPayment?.amountMinor || 0,
+    protectionPurchased: split.cancellationProtectionPurchased,
+    protectionMinor: split.cancellationProtectionFeeMinor,
+    checkIn: booking.checkIn,
+    now,
+    cancelledBy: 'GUEST',
+    isShortStay: !booking.listing || booking.listing.division === 'STAYS',
+    policy: bookingPolicySettings(),
+  })
+  return { cancellation, approvedPayment, split }
+}
+
 
 export function isBookingViewable(booking, context) {
   return (
@@ -406,15 +625,17 @@ export function isBookingViewable(booking, context) {
   )
 }
 
-function buildBookingMetadata(body, listing) {
+function buildBookingMetadata(body, listing, stayTotalMinor) {
   const protection = body.cancellationProtectionPurchased === true || body.cancellationProtection === true
   const metadata = {}
   if (protection) {
-    // Always compute the protection fee server-side (3% of listing price). Never trust a client-
-    // submitted premium — it flows into the charge and the ledger, so a guest could otherwise set
-    // their own add-on amount.
+    // Always compute the protection fee server-side. Never trust a client-submitted premium — it
+    // flows into the charge and the ledger, so a guest could otherwise set their own add-on amount.
+    // Decision 5 (2026-10-08): 3% of the FULL stay amount (all nights, before cleaning/taxes) --
+    // previously 3% of ONE night's listing price, which under-charged every multi-night stay and
+    // disagreed with the frontend. Same figure as GET /api/bookings/quote's protectionMinor.
     metadata.cancellationProtectionPurchased = true
-    metadata.cancellationProtectionFeeMinor = Math.round(Number(listing.priceMinor || 0) * 0.03)
+    metadata.cancellationProtectionFeeMinor = protectionFeeMinor(stayTotalMinor)
     metadata.cancellationProtectionVersion = 'SYBNB_GUEST_CANCELLATION_PROTECTION_V1'
   }
   // Snapshot the listing's itemized fees as they stand right now, at booking-creation time — see

@@ -196,6 +196,9 @@ run "payment-seller-plan-fee" seller-plan-fee-ledger.e2e.mjs
 run "payment-refund-req" refund-request-creation.e2e.mjs
 run "payment-refund-policy" refund-actor-policy-split.e2e.mjs
 run "payment-refund-execute" refund-execution-wallet-credit.e2e.mjs
+# Owner money-flow decisions of 2026-10-08 (quote, demo/own-listing refusal, cancellation rules +
+# retained split, unpaid expiry, host withdrawals). Self-contained: seeds its own users/listings.
+run "booking-money-flow" booking-money-flow.e2e.mjs
 run_full "marketplace"      marketplace.e2e.mjs      reset
 run_full "cars"             cars.e2e.mjs             reset
 run_full "buy"              buy.e2e.mjs              reset

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties } from 'react'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminPayouts,
   fetchAdminPaymentProofUrl,
@@ -906,6 +906,9 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.managementList}>
             <div style={commandStyles.sectionHeadRow}>
               <strong>{isAr ? 'صرف المضيفين (حقيقي)' : 'Host payouts (real)'}</strong>
+              <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/money')}>
+                {pick(lang, 'طلبات السحب والاستردادات ←', 'Payout requests & refunds →', 'Demandes de versement et remboursements →')}
+              </button>
               <small>
                 {isAr ? `يبقى الصرف معلقا حتى ${payoutHoldDays} يوما بعد انتهاء الإقامة، ولا يظهر هنا إلا بعد اكتمال الحجز وعدم وجود نزاع مفتوح.` : `Payout stays held for ${payoutHoldDays} days after the stay ends, and only appears here once the booking is completed with no open dispute.`}
               </small>

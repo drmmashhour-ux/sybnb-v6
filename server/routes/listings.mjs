@@ -1,10 +1,11 @@
 import { db } from '../lib/prisma.mjs'
+import { dateBlockingBookingWhere } from '../lib/booking-policy.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { expireOldListings, listingExpiryDate } from '../lib/listing-lifecycle.mjs'
 import { normalizeBrowseCity, resolveListingCityName } from '../lib/listing-location.mjs'
-import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
+import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
 // Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
@@ -586,9 +587,11 @@ export async function handleListings(req, res, url, context) {
       db().booking.findMany({
         where: {
           listingId,
-          status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'] },
           checkIn: { not: null },
           checkOut: { not: null },
+          // Decision 6 (2026-10-08): stale unpaid requests past their payment window (no live
+          // proof) no longer show as booked, matching the booking-creation overlap check.
+          ...dateBlockingBookingWhere(new Date(), bookingPolicySettings()),
         },
         select: { checkIn: true, checkOut: true },
       }),

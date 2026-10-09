@@ -177,6 +177,9 @@ model User {
   adminOfBusinessAccounts    BusinessAccount[]        @relation("BusinessAccountAdmin")
   refundsRequested             Refund[]        @relation("RefundRequestedBy")
   refundAttemptsLegacyAccepted RefundAttempt[] @relation("RefundAttemptLegacyAcceptedBy")
+  payoutMethod                 HostPayoutMethod?
+  payoutRequests               PayoutRequest[] @relation("PayoutRequestHost")
+  payoutRequestsDecided        PayoutRequest[] @relation("PayoutRequestDecidedBy")
 
   @@map("users")
 }
@@ -244,6 +247,59 @@ model HostProfile {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("host_profiles")
+}
+
+// Host withdrawal destination (money-flow decision 2, migration 048). One per host. `type` is one of
+// the active country profile's payoutMethods keys (countries/<country>/profile.mjs), validated in
+// server/routes/host.mjs -- kept a plain string so the master schema stays country-neutral; the
+// per-type fields (wallet number, bank, office city...) live in `details` with only the keys that
+// type requires.
+model HostPayoutMethod {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  type      String
+  details   Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("host_payout_methods")
+}
+
+enum PayoutRequestStatus {
+  REQUESTED
+  PAID
+  REJECTED
+
+  @@map("payout_request_status")
+}
+
+// A host's request to withdraw released wallet earnings (decision 2). Creating one moves no money.
+// An admin pays the host OUTSIDE the platform and marks it PAID (one DEBIT wallet entry, linked via
+// walletEntryId) or REJECTED with a note. `method` is a snapshot of the payout method at request time.
+model PayoutRequest {
+  id            String              @id @default(uuid())
+  hostId        String              @map("host_id")
+  amountMinor   Int                 @map("amount_minor")
+  currency      String
+  status        PayoutRequestStatus @default(REQUESTED)
+  method        Json                @default("{}")
+  reference     String?
+  note          String?
+  decidedById   String?             @map("decided_by_id")
+  decidedAt     DateTime?           @map("decided_at")
+  walletEntryId String?             @unique @map("wallet_entry_id")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  host        User         @relation("PayoutRequestHost", fields: [hostId], references: [id], onDelete: Restrict)
+  decidedBy   User?        @relation("PayoutRequestDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict)
+  walletEntry WalletEntry? @relation(fields: [walletEntryId], references: [id], onDelete: Restrict)
+
+  @@index([hostId, status])
+  @@index([status, createdAt])
+  @@map("payout_requests")
 }
 
 model DriverProfile {
@@ -535,6 +591,7 @@ model WalletEntry {
 
   wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Restrict)
   refundAttemptsLegacy RefundAttempt[]
+  payoutRequest PayoutRequest?
 
   @@index([walletId, createdAt])
   @@index([referenceType, referenceId])

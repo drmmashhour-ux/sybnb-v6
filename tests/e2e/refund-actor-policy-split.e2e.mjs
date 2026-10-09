@@ -166,18 +166,20 @@ async function main() {
     hostCancelledBookingForRepeat = booking.id
   }
 
-  // --- 4. Admin finalize-cancellation after a GUEST cancel WITHOUT protection: fee charged. ---
+  // --- 4. Admin finalize-cancellation after a GUEST cancel WITHOUT protection. Owner money-flow
+  // decision 3 (2026-10-08) replaced the legacy guest cancellation fee for cancellations made under
+  // the new rules: the rule-defined refund (here 100%, >= 72h before check-in) is the guest's whole
+  // consequence, so NO guest fee is charged. (Legacy cancellations recorded before the change keep
+  // the fee -- see finalizeCancellationLedgerEffects.) ---
   {
     const booking = await makeBooking(listingId)
-    const { amountMinor } = await payAndApprove(booking.id)
+    await payAndApprove(booking.id)
     await call('PATCH', `/api/bookings/${booking.id}/cancel`, G, {})
-    const fresh = await db().booking.findUnique({ where: { id: booking.id }, include: { listing: true } })
-    const expectedFee = cancellationAdminFee(fresh.currency)
 
     const finalize = await call('PATCH', `/api/admin/bookings/${booking.id}/finalize-cancellation`, A, {})
-    check('finalize (guest-cancel, no protection): admin succeeds, cancelledBy=GUEST, feeCharged=true', finalize.status === 200 && finalize.j?.cancelledBy === 'GUEST' && finalize.j?.feeCharged === true, JSON.stringify(finalize.j))
-    const guestFeeDebit = await db().walletEntry.findFirst({ where: { referenceId: booking.id, referenceType: 'booking_guest_cancel_fee', type: 'DEBIT' } })
-    check('finalize (guest-cancel, no protection): guest cancellation-fee DEBIT posted with the exact fee amount', guestFeeDebit?.amountMinor === expectedFee.amountMinor, JSON.stringify({ got: guestFeeDebit?.amountMinor, expected: expectedFee.amountMinor }))
+    check('finalize (guest-cancel, no protection): admin succeeds, cancelledBy=GUEST, feeCharged=false (decision 3)', finalize.status === 200 && finalize.j?.cancelledBy === 'GUEST' && finalize.j?.feeCharged === false, JSON.stringify(finalize.j))
+    const guestFeeDebit = await db().walletEntry.findFirst({ where: { referenceId: booking.id, referenceType: 'booking_guest_cancel_fee' } })
+    check('finalize (guest-cancel, no protection): no guest cancellation-fee entry under the 2026-10-08 rules', !guestFeeDebit, JSON.stringify(guestFeeDebit))
   }
 
   // --- 5. Admin finalize-cancellation after a GUEST cancel WITH protection: fee waived, matching
@@ -269,7 +271,7 @@ async function main() {
     const reversalCount = await db().walletEntry.count({ where: { referenceId: booking.id, referenceType: 'booking_admin_share_reversal' } })
     check('finalize race: exactly ONE admin-share-reversal entry, not two', reversalCount === 1, reversalCount)
     const feeDebitCount = await db().walletEntry.count({ where: { referenceId: booking.id, referenceType: 'booking_guest_cancel_fee', type: 'DEBIT' } })
-    check('finalize race: exactly ONE guest-fee DEBIT entry, not two', feeDebitCount === 1, feeDebitCount)
+    check('finalize race: ZERO guest-fee DEBIT entries (decision 3 removed the guest fee)', feeDebitCount === 0, feeDebitCount)
   }
 
   // --- 12. Default-deny: the refund_request operation's own flag genuinely gates it, proven

@@ -629,6 +629,9 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           <button style={styles.earningsLink} onClick={() => (window.location.hash = '/host/earnings')}>
             {t.viewEarningsReport}
           </button>
+          <button style={styles.earningsLink} onClick={() => (window.location.hash = '/host/payouts')}>
+            {pick(lang, 'السحب وطريقة الاستلام ←', 'Payouts & withdrawals →', 'Versements et retraits →')}
+          </button>
         </div>
         <div style={styles.hostMetric}>
           <span>{t.qualityScore}</span>
@@ -924,6 +927,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           [t.trustCenter, '/trust-center', '♢'],
           [t.opsSupport, '/operations', '?'],
           [t.clientMessages, '/host/inquiries', '✉'],
+          [pick(lang, 'السحب والدفعات', 'Payouts', 'Versements'), '/host/payouts', '⇄'],
         ].map(([label, route, icon]) => (
           <button key={label} style={styles.quickLink} onClick={() => (window.location.hash = String(route))}>
             <strong>{label}</strong>

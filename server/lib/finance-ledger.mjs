@@ -1,5 +1,14 @@
 import { idempotencyKey } from './security.mjs'
 import { isPayoutEligible, payoutEligibleAt } from './booking-lifecycle.mjs'
+import {
+  PROTECTION_RATE,
+  STR_COMMISSION_RATE,
+  STR_CLEANING_RATE as POLICY_STR_CLEANING_RATE,
+  STR_TAX_RATE as POLICY_STR_TAX_RATE,
+  cancellationLedgerDeltas,
+  computeGuestTotals,
+  payoutAvailability,
+} from './booking-policy.mjs'
 
 // The cancellation admin fee is charged against a guest/host wallet, and every wallet in this
 // platform is created SYP-denominated (single-currency-per-country; see server/lib/country.mjs) —
@@ -51,11 +60,13 @@ export function giftReviewThresholdMinor(currency) {
   return GIFT_REVIEW_THRESHOLD_SYP_MINOR
 }
 
-export const CANCELLATION_PROTECTION_RATE = 0.03
+// Single source of truth for these rates is server/lib/booking-policy.mjs (pure, unit-tested);
+// re-exported here under their historical names so existing importers keep working unchanged.
+export const CANCELLATION_PROTECTION_RATE = PROTECTION_RATE
 // Contractual STR (STAYS/short-term-rental) platform commission — owner-confirmed at 12%.
-export const STR_ADMIN_COMMISSION_RATE = 0.12
-export const STR_CLEANING_RATE = 0.05
-export const STR_TAX_RATE = 0.02
+export const STR_ADMIN_COMMISSION_RATE = STR_COMMISSION_RATE
+export const STR_CLEANING_RATE = POLICY_STR_CLEANING_RATE
+export const STR_TAX_RATE = POLICY_STR_TAX_RATE
 
 function metadataNumber(metadata, key) {
   const value = metadata?.[key]
@@ -291,6 +302,19 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     const error = new Error('This payment proof is not awaiting review.')
     error.statusCode = 409
     error.code = 'PAYMENT_NOT_REVIEWABLE'
+    error.expose = true
+    throw error
+  }
+
+  // Money-flow decision 6 (2026-10-08): an unpaid request can now be CANCELLED by the expiry sweep
+  // (EXPIRED_UNPAID) or by the guest while unpaid, releasing its dates to other guests. Approving a
+  // proof that reached such a booking (submitted in the instant before the sweep, or by a stale tab)
+  // would silently resurrect it to REQUESTED/CONFIRMED over dates that may already be re-booked.
+  // Refuse instead; the admin rejects the proof and settles the guest's transfer manually.
+  if (existing.booking && existing.booking.status === 'CANCELLED') {
+    const error = new Error('This payment proof belongs to a cancelled booking and cannot be approved; reject it and settle the transfer manually.')
+    error.statusCode = 409
+    error.code = 'BOOKING_CANCELLED'
     error.expose = true
     throw error
   }
@@ -531,6 +555,13 @@ export async function finalizeCancellationLedgerEffects(tx, {
   cancelledBy, // 'GUEST' | 'HOST' -- who initiated the original cancellation
 }) {
   const keyPrefix = cancelledBy === 'GUEST' ? 'booking-guest-cancel' : 'booking-host-cancel'
+  // Money-flow decision 3 (2026-10-08): cancellations made since then carry the rule they were
+  // decided under on booking.metadata.cancellation (written server-side by the cancel handlers).
+  // Those finalize by the rule-based split below. Cancellations recorded before this change have no
+  // such snapshot and keep the exact legacy behaviour that follows it (full reversal + legacy fee).
+  if (booking.metadata?.cancellation?.policyVersion) {
+    return finalizeRuleBasedCancellation(tx, { booking, approvedPayment, cancelledBy, keyPrefix })
+  }
   const { split, adminRecipientId, hostClawedBack } = await reverseBookingPlatformShare(tx, {
     booking,
     approvedPayment,
@@ -597,6 +628,253 @@ export async function finalizeCancellationLedgerEffects(tx, {
   }
 
   return { split, adminRecipientId, hostClawedBack, feeCharged }
+}
+
+export const CANCELLATION_POLICY_VERSION = 'SYBNB_CANCELLATION_RULES_2026_10_08'
+
+// Rule-based finalize (decision 3). Given the split posted at approval -- admin share A CREDITed to
+// the commission recipient, host share Hg HELD (or RELEASEd), protection fee F CREDITed -- and the
+// cancellation snapshot (refund R to the guest, retained T = paid - R), this posts:
+//   1. DEBIT  commission recipient: A - commission(retained stay)   [commission on the REFUNDED part
+//      is reversed; 12% of the retained stay part stays with SYBNB]
+//   2. host:  if the payout was already RELEASED -> DEBIT clawback of Hg - hostShare(retained stay);
+//             otherwise                           -> RELEASE hostShare(retained stay) to the host now
+//             (the stay will not happen, so there is no completion/hold window left to wait for;
+//             this admin-only finalize IS the human release gate)
+//   3. HOST cancellations only: DEBIT the protection-fee credit F back (the guest's refund includes
+//      it). Guest cancellations keep F (non-refundable premium, unchanged).
+//   4. Fees: HOST cancellations keep the legacy host cancellation fee (unchanged). GUEST
+//      cancellations under the new rule are charged NO separate cancellation fee: the owner's rule
+//      defines the guest's refund exactly (100% / 50% / minus protection), and an extra wallet fee
+//      would make the quoted refund untrue.
+// Idempotency keys for (1) and the clawback in (2) are identical to the legacy path's, so a booking
+// can never be finalized under both paths.
+async function finalizeRuleBasedCancellation(tx, { booking, approvedPayment, cancelledBy, keyPrefix }) {
+  const cancellation = booking.metadata.cancellation
+  if (Math.round(cancellation.refundMinor) + Math.round(cancellation.retainedMinor) !== approvedPayment.amountMinor) {
+    const error = new Error('Anomaly: the recorded cancellation split does not add up to the approved payment.')
+    error.statusCode = 500
+    error.code = 'CANCELLATION_SPLIT_ANOMALY'
+    throw error
+  }
+  const split = bookingFinanceSplit(booking, approvedPayment.amountMinor)
+  const adminRecipientId = await originalAdminShareRecipient(tx, booking.id)
+  const deltas = cancellationLedgerDeltas({
+    originalAdminShareMinor: split.adminShareMinor,
+    originalHostGrossMinor: split.hostGrossMinor,
+    originalProtectionMinor: split.cancellationProtectionFeeMinor,
+    cancellation,
+  })
+  const who = cancelledBy.toLowerCase()
+
+  await recordWalletEntry(tx, {
+    userId: adminRecipientId,
+    type: 'DEBIT',
+    amountMinor: deltas.commissionReversalMinor,
+    currency: booking.currency,
+    referenceType: 'booking_admin_share_reversal',
+    referenceId: booking.id,
+    keyParts: [`${keyPrefix}-admin-share-reversal`, booking.id, approvedPayment.id],
+    note: `Commission on the refunded part reversed (${cancellation.rule}, ${who}-cancelled); commission on the retained ${cancellation.retainedStayMinor} kept.`,
+  })
+
+  const priorRelease = await tx.walletEntry.findFirst({
+    where: { referenceType: 'booking_payout', type: 'RELEASE', referenceId: booking.id },
+  })
+  let hostClawedBack = false
+  let hostReleasedMinor = 0
+  if (priorRelease) {
+    await recordWalletEntry(tx, {
+      userId: booking.listing.ownerId,
+      type: 'DEBIT',
+      amountMinor: deltas.hostShareReversalMinor,
+      currency: booking.currency,
+      referenceType: 'booking_payout_clawback',
+      referenceId: booking.id,
+      keyParts: [`${keyPrefix}-payout-clawback`, booking.id, approvedPayment.id],
+      note: `Host payout clawed back for the refunded part (${cancellation.rule}, ${who}-cancelled).`,
+    })
+    hostClawedBack = deltas.hostShareReversalMinor > 0
+  } else if (deltas.hostRetainedReleaseMinor > 0) {
+    await recordWalletEntry(tx, {
+      userId: booking.listing.ownerId,
+      type: 'RELEASE',
+      amountMinor: deltas.hostRetainedReleaseMinor,
+      currency: booking.currency,
+      referenceType: 'booking_payout',
+      referenceId: booking.id,
+      keyParts: ['booking-host-cancel-retained-release', booking.id, approvedPayment.id],
+      note: `Host share of the amount retained after a ${who}-cancelled booking (${cancellation.rule}).`,
+    })
+    hostReleasedMinor = deltas.hostRetainedReleaseMinor
+  }
+
+  let protectionReversedMinor = 0
+  if (deltas.protectionReversalMinor > 0) {
+    const protectionCredit = await tx.walletEntry.findFirst({
+      where: { referenceType: 'booking_protection_fee', referenceId: booking.id, type: 'CREDIT' },
+      include: { wallet: true },
+    })
+    if (protectionCredit?.wallet?.userId) {
+      await recordWalletEntry(tx, {
+        userId: protectionCredit.wallet.userId,
+        type: 'DEBIT',
+        amountMinor: Math.min(deltas.protectionReversalMinor, protectionCredit.amountMinor),
+        currency: protectionCredit.currency,
+        referenceType: 'booking_protection_fee_reversal',
+        referenceId: booking.id,
+        keyParts: ['booking-protection-fee-reversal', booking.id, approvedPayment.id],
+        note: 'Protection fee reversed: the host cancelled/declined, so the guest is refunded everything incl. the protection fee.',
+      })
+      protectionReversedMinor = Math.min(deltas.protectionReversalMinor, protectionCredit.amountMinor)
+    }
+  }
+
+  let feeCharged = false
+  if (cancelledBy !== 'GUEST') {
+    const fee = cancellationAdminFee(booking.currency)
+    await recordWalletEntry(tx, {
+      userId: booking.listing.ownerId,
+      type: 'DEBIT',
+      amountMinor: fee.amountMinor,
+      currency: fee.currency,
+      referenceType: 'booking_host_cancel_fee',
+      referenceId: booking.id,
+      keyParts: ['booking-host-cancel-fee-host', booking.id, approvedPayment.id],
+      note: 'Host cancellation admin fee after cancelling a paid booking.',
+    })
+    await recordWalletEntry(tx, {
+      userId: adminRecipientId,
+      type: 'CREDIT',
+      amountMinor: fee.amountMinor,
+      currency: fee.currency,
+      referenceType: 'booking_host_cancel_fee',
+      referenceId: booking.id,
+      keyParts: ['booking-host-cancel-fee-admin', booking.id, approvedPayment.id],
+      note: 'Admin received host cancellation fee for a paid booking.',
+    })
+    feeCharged = true
+  }
+
+  return {
+    split,
+    adminRecipientId,
+    hostClawedBack,
+    feeCharged,
+    rule: cancellation.rule,
+    refundMinor: cancellation.refundMinor,
+    retainedMinor: cancellation.retainedMinor,
+    ledger: { ...deltas, hostReleasedMinor, protectionReversedMinor },
+  }
+}
+
+// --- Host withdrawals (decision 2) ---------------------------------------------------------------
+
+async function sumEntries(tx, walletId, type, referenceType) {
+  const result = await tx.walletEntry.aggregate({
+    where: { walletId, type, referenceType },
+    _sum: { amountMinor: true },
+  })
+  return result._sum.amountMinor || 0
+}
+
+// What a host may withdraw: released booking earnings net of clawbacks, host cancellation fees and
+// prior withdrawals, never more than the wallet's actual balance (so promotional gift credit or
+// refund credit sitting in the same wallet is never withdrawable as cash). pendingMinor = open
+// (REQUESTED) payout requests. Pass excludeRequestId to leave one request out of the pending sum.
+export async function hostPayoutBalances(tx, { userId, currency, excludeRequestId }) {
+  const wallet = await tx.wallet.findUnique({ where: { userId_currency: { userId, currency } } })
+  const pending = await tx.payoutRequest.aggregate({
+    where: { hostId: userId, currency, status: 'REQUESTED', ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}) },
+    _sum: { amountMinor: true },
+  })
+  const pendingMinor = pending._sum.amountMinor || 0
+  if (!wallet) return { ...payoutAvailability({ pendingMinor }), currency }
+  const [releasedMinor, clawbackMinor, hostFeesMinor, withdrawnMinor] = await Promise.all([
+    sumEntries(tx, wallet.id, 'RELEASE', 'booking_payout'),
+    sumEntries(tx, wallet.id, 'DEBIT', 'booking_payout_clawback'),
+    sumEntries(tx, wallet.id, 'DEBIT', 'booking_host_cancel_fee'),
+    sumEntries(tx, wallet.id, 'DEBIT', 'host_payout_withdrawal'),
+  ])
+  return {
+    ...payoutAvailability({
+      releasedMinor, clawbackMinor, hostFeesMinor, withdrawnMinor,
+      walletBalanceMinor: wallet.cachedBalanceMinor, pendingMinor,
+    }),
+    currency,
+  }
+}
+
+function payoutError(statusCode, code, message) {
+  const error = new Error(message)
+  error.statusCode = statusCode
+  error.code = code
+  error.expose = true
+  return error
+}
+
+// Serializes every withdrawal decision for one host (request creation and admin PAID) so two
+// concurrent requests cannot both pass the available-minus-pending check.
+export async function lockHostPayouts(tx, hostId) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`host-payout:${hostId}`}))`
+}
+
+// Host files a withdrawal request. Moves NO money (no wallet entry): it only reserves the amount
+// against future requests via pendingMinor.
+export async function createPayoutRequest(tx, { hostId, amountMinor, currency, method }) {
+  await lockHostPayouts(tx, hostId)
+  const balances = await hostPayoutBalances(tx, { userId: hostId, currency })
+  if (amountMinor > balances.requestableMinor) {
+    throw payoutError(409, 'PAYOUT_AMOUNT_EXCEEDS_AVAILABLE', 'The requested amount is more than your available balance minus pending requests.')
+  }
+  return tx.payoutRequest.create({
+    data: { hostId, amountMinor, currency, status: 'REQUESTED', method },
+  })
+}
+
+// Admin marks a request PAID after paying the host OUTSIDE the platform. This is the only place a
+// withdrawal touches the ledger: one DEBIT of exactly the request amount on the host's wallet
+// (balance decreases), guarded by recordWalletEntry's no-overdraw check and a re-check of the
+// withdrawable amount inside the same serialized transaction.
+export async function markPayoutRequestPaid(tx, { requestId, actorUserId, reference, note }) {
+  const request = await tx.payoutRequest.findUnique({ where: { id: requestId } })
+  if (!request) throw payoutError(404, 'PAYOUT_REQUEST_NOT_FOUND', 'Payout request not found.')
+  await lockHostPayouts(tx, request.hostId)
+  const balances = await hostPayoutBalances(tx, { userId: request.hostId, currency: request.currency, excludeRequestId: request.id })
+  if (request.amountMinor > balances.availableMinor) {
+    throw payoutError(409, 'PAYOUT_AMOUNT_EXCEEDS_AVAILABLE', 'The host no longer has enough available balance for this payout.')
+  }
+  const claimed = await tx.payoutRequest.updateMany({
+    where: { id: request.id, status: 'REQUESTED' },
+    data: { status: 'PAID', reference, note: note || null, decidedById: actorUserId, decidedAt: new Date() },
+  })
+  if (claimed.count !== 1) {
+    throw payoutError(409, 'PAYOUT_REQUEST_NOT_PENDING', 'This payout request was already decided.')
+  }
+  const walletEntry = await recordWalletEntry(tx, {
+    userId: request.hostId,
+    type: 'DEBIT',
+    amountMinor: request.amountMinor,
+    currency: request.currency,
+    referenceType: 'host_payout_withdrawal',
+    referenceId: request.id,
+    keyParts: ['host-payout-withdrawal', request.id],
+    note: `Host withdrawal paid outside the platform (reference ${reference}).`,
+  })
+  return tx.payoutRequest.update({ where: { id: request.id }, data: { walletEntryId: walletEntry?.id || null } })
+}
+
+export async function rejectPayoutRequest(tx, { requestId, actorUserId, note }) {
+  const claimed = await tx.payoutRequest.updateMany({
+    where: { id: requestId, status: 'REQUESTED' },
+    data: { status: 'REJECTED', note, decidedById: actorUserId, decidedAt: new Date() },
+  })
+  if (claimed.count !== 1) {
+    const exists = await tx.payoutRequest.findUnique({ where: { id: requestId }, select: { id: true } })
+    if (!exists) throw payoutError(404, 'PAYOUT_REQUEST_NOT_FOUND', 'Payout request not found.')
+    throw payoutError(409, 'PAYOUT_REQUEST_NOT_PENDING', 'This payout request was already decided.')
+  }
+  return tx.payoutRequest.findUnique({ where: { id: requestId } })
 }
 
 // Translates a DB unique-constraint violation on (provider, provider_ref) into a recognizable
@@ -899,35 +1177,24 @@ export async function firstAdminId(tx) {
 // so every payment rail (Stripe, local wallet, PaymentIntent) charges the same figure the guest saw,
 // and never trusts a client-supplied amount for a booking-linked payment.
 export function expectedTotalMinor(booking) {
-  const stayAmountMinor = Math.max(0, Math.round(booking.amountMinor || 0))
   const listingMetadata = booking.listing?.metadata || {}
   const bookingMetadata = booking.metadata || {}
   const isShortStay = !booking.listing || booking.listing.division === 'STAYS'
 
   // Prefer the fee breakdown snapshotted at booking-creation time over the listing's current
   // metadata — see the matching comment in bookingFinanceSplit for why (a later fee edit must
-  // never change what an already-created booking charges).
-  const feeSnapshot = bookingMetadata.feeSnapshot
-  const fees = feeSnapshot || readListingFees(listingMetadata)
-  const cleaningFeeMinor = fees.cleaningFeeMinor || (isShortStay ? Math.round(stayAmountMinor * STR_CLEANING_RATE) : 0)
-  const taxesMinor = fees.taxesMinor || (isShortStay ? Math.round(stayAmountMinor * STR_TAX_RATE) : 0)
-  const serviceFeeMinor = fees.serviceFeeMinor || 0
-  const parkingFeeMinor = fees.parkingFeeMinor || 0
-  const extraFeesMinor = metadataNumber(listingMetadata, 'extraFeesMinor')
-  const cancellationProtectionPurchased = bookingMetadata.cancellationProtectionPurchased === true
-  const cancellationProtectionFeeMinor = cancellationProtectionPurchased
-    ? metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor') || Math.round(stayAmountMinor * CANCELLATION_PROTECTION_RATE)
-    : 0
-
-  return (
-    stayAmountMinor +
-    cleaningFeeMinor +
-    taxesMinor +
-    serviceFeeMinor +
-    parkingFeeMinor +
-    extraFeesMinor +
-    cancellationProtectionFeeMinor
-  )
+  // never change what an already-created booking charges). The arithmetic itself lives in
+  // booking-policy.mjs's computeGuestTotals() -- the same function the public quote endpoint uses,
+  // so the figure a guest is quoted and the figure every rail charges cannot drift apart.
+  const fees = bookingMetadata.feeSnapshot || readListingFees(listingMetadata)
+  return computeGuestTotals({
+    stayMinor: booking.amountMinor,
+    fees,
+    extraFeesMinor: metadataNumber(listingMetadata, 'extraFeesMinor'),
+    isShortStay,
+    protection: bookingMetadata.cancellationProtectionPurchased === true,
+    protectionFeeOverrideMinor: metadataNumber(bookingMetadata, 'cancellationProtectionFeeMinor'),
+  }).totalMinor
 }
 
 // Shared by admin's payout queue and the host earnings report so both read the same numbers

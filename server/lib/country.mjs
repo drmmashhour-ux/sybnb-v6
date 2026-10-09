@@ -8,6 +8,7 @@
 // single country's values into this module.
 
 import { profile as syria } from '../../countries/syria/profile.mjs'
+import { resolveBookingPolicy } from './booking-policy.mjs'
 
 // Registry of supported country profiles (this release ships Syria only).
 const REGISTRY = { syria }
@@ -100,4 +101,19 @@ export function channelEnabled(channel, env = process.env) {
   const { profile } = loadCountryProfile(env)
   if (!profile) return false
   return Boolean(profile.communications && profile.communications[channel] === true)
+}
+
+// The active country's short-stay booking money policy (check-in timezone, full-refund cutoff,
+// unpaid-request expiry window), merged with the neutral defaults and env overrides by the pure
+// server/lib/booking-policy.mjs. Neutral defaults apply when no profile is loaded.
+export function bookingPolicySettings(env = process.env) {
+  const { profile } = loadCountryProfile(env)
+  return resolveBookingPolicy(profile?.bookingPolicy || {}, env)
+}
+
+// The active country's host payout methods: { TYPE: { required: [field, ...] } }. Empty (no method
+// accepted, fail-closed) when the profile defines none.
+export function payoutMethodConfig(env = process.env) {
+  const { profile } = loadCountryProfile(env)
+  return profile?.payoutMethods || {}
 }

@@ -3,12 +3,15 @@ import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   createPrototypeBooking,
+  fetchBookingQuote,
   fetchListingAvailability,
   fetchListingQuote,
   fetchListingReviews,
   fetchPrototypeListing,
   fetchPublicHostProfile,
+  getStoredGuestSession,
   sendListingInquiryMessage,
+  type BookingQuote,
   type HostProfile,
   type PlatformBooking,
   type PlatformListing,
@@ -19,7 +22,8 @@ import { divisionText, listingDescriptionText, moneyText, statusText } from '../
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 import { ListingSpecs } from './ListingSpecs'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey, type GoogleMapTarget } from '../../shared/maps/googleMapCapsule'
-import { freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
+import { cancellationRuleText, freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
+import { localeForLang } from '../../shared/country/presentation'
 import { guestFeeSummary } from '../bookings/guestFeeSummary'
 import { DateField, DateRangePicker, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { loadSearchDatesDraft } from '../search/UnifiedSearchBar'
@@ -77,7 +81,7 @@ const copy = {
     standardRate: 'السعر العادي',
     standardCopy: 'سعر أقل، وتطبق رسوم الإلغاء حسب السياسة.',
     protectedRate: 'السعر المحمي',
-    protectedCopy: 'أضف حماية الإلغاء المفاجئ واسترد قيمة الحجز بدون رسوم إلغاء.',
+    protectedCopy: 'أضف حماية الإلغاء المفاجئ لتسترد أكثر إذا ألغيت قبل الدخول.',
     protectionFee: 'رسوم الحماية',
     totalDue: 'الإجمالي المستحق',
     stayAmount: 'قيمة الحجز',
@@ -87,7 +91,7 @@ const copy = {
     parkingFee: 'رسوم مواقف السيارات',
     feesIncluded: 'شامل رسوم التنظيف والضرائب',
     agreementTitle: 'اتفاقية الإيجار اليومي',
-    agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي. أعلم أن SYBNB تخصم عمولة خدمة (12% من قيمة الإيجار) من مستحقات المضيف مقابل إدارة الحجز والدفع والحماية.',
+    agreementCopy: 'أوافق على صحة بياناتي، احترام سياسة الحجز والإلغاء، الدفع داخل SYBNB فقط، عدم الاتفاق خارج المنصة، الالتزام بقواعد الاستضافة، وتحويل أي نزاع إلى فريق SYBNB قبل أي تصرف خارجي. أعلم أن SYBNB تخصم عمولة خدمة (12% من إجمالي قيمة الحجز، عدا رسوم الحماية) من مستحقات المضيف مقابل إدارة الحجز والدفع والحماية.',
     agreementRequired: 'يجب قبول اتفاقية الإيجار اليومي قبل إرسال طلب الحجز.',
     datesTitle: 'اختر تاريخ الإقامة',
     datesRequired: 'اختر تاريخ الدخول والخروج قبل إرسال طلب الحجز.',
@@ -121,6 +125,20 @@ const copy = {
     inquirySentTitle: 'تم إرسال طلبك',
     inquirySentCopy: 'وصل طلبك إلى البائع/المضيف عبر صندوق الرسائل داخل SYBNB. لا حاجة للدفع الآن — سيتواصل معك الطرف الآخر من خلال المنصة.',
     openInbox: 'فتح صندوق الرسائل',
+    protectionFeeNote: '3% من قيمة الإقامة كاملة',
+    otherFees: 'رسوم أخرى',
+    demoNotice: 'هذا إعلان تجريبي للعرض فقط',
+    demoNoticeCopy: 'لا يمكن حجز هذا الإعلان أو التواصل بخصوصه. تصفّح الإعلانات الحقيقية المتاحة للحجز.',
+    notBookableNotice: 'هذا الإعلان غير متاح للحجز حالياً',
+    ownListing: 'لا يمكنك حجز إعلانك الخاص.',
+    sentTitle: 'طلبك أُرسل — ادفع خلال 48 ساعة',
+    sentDeadline: 'آخر موعد للدفع',
+    sentCopy: 'إذا لم يصل الدفع خلال 48 ساعة يُلغى الطلب تلقائياً وتعود التواريخ متاحة لغيرك.',
+    howToPay: 'طريقة الدفع',
+    howToPaySteps: ['حوّل المبلغ عبر شام كاش أو تحويل بنكي سوري.', 'ارفع صورة إيصال التحويل داخل SYBNB.', 'يراجع فريق SYBNB الإيصال ثم يرسل الطلب للمضيف للموافقة.'],
+    payAndUpload: 'الدفع ورفع الإيصال',
+    openBooking: 'فتح صفحة الحجز',
+    amountToPay: 'المبلغ المطلوب',
   },
   en: {
     back: 'Back',
@@ -165,7 +183,7 @@ const copy = {
     standardRate: 'Standard rate',
     standardCopy: 'Lower price; cancellation fees apply by policy.',
     protectedRate: 'Protected rate',
-    protectedCopy: 'Add sudden-cancellation protection and recover the booking amount without cancellation fee.',
+    protectedCopy: 'Add sudden-cancellation protection to get more back if you cancel before check-in.',
     protectionFee: 'Protection fee',
     totalDue: 'Total due',
     stayAmount: 'Booking amount',
@@ -175,7 +193,7 @@ const copy = {
     parkingFee: 'Parking fee',
     feesIncluded: 'Includes cleaning fee and taxes',
     agreementTitle: 'Short-Term Rental Agreement',
-    agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action. I understand SYBNB deducts a service commission (12% of the rent amount) from the host payout for managing the booking, payment, and protection.',
+    agreementCopy: 'I agree that my information is accurate, booking and cancellation rules apply, payment happens only inside SYBNB, no outside-platform agreement is allowed, stay rules must be respected, and disputes go to the SYBNB team before any outside action. I understand SYBNB deducts a service commission (12% of the total booking amount, excluding the protection fee) from the host payout for managing the booking, payment, and protection.',
     agreementRequired: 'You must accept the short-term rental agreement before sending the booking request.',
     datesTitle: 'Choose your stay dates',
     datesRequired: 'Choose check-in and check-out dates before sending the booking request.',
@@ -209,6 +227,20 @@ const copy = {
     inquirySentTitle: 'Your request was sent',
     inquirySentCopy: "Your request reached the seller/host through SYBNB's inbox. No payment needed now — they'll follow up with you through the platform.",
     openInbox: 'Open inbox',
+    protectionFeeNote: '3% of the full stay amount',
+    otherFees: 'Other fees',
+    demoNotice: 'Demo listing — not bookable',
+    demoNoticeCopy: 'This listing is for display only and cannot be booked or contacted. Browse real listings that are open for booking.',
+    notBookableNotice: 'This listing is not bookable right now',
+    ownListing: 'You cannot book your own listing.',
+    sentTitle: 'Your request was sent — pay within 48 hours',
+    sentDeadline: 'Payment deadline',
+    sentCopy: 'If payment does not arrive within 48 hours, the request is cancelled automatically and the dates open up again.',
+    howToPay: 'How to pay',
+    howToPaySteps: ['Transfer the amount via Sham Cash or a Syrian bank transfer.', 'Upload a photo of the transfer receipt inside SYBNB.', 'The SYBNB team checks the receipt, then sends the request to the host to accept.'],
+    payAndUpload: 'Pay and upload receipt',
+    openBooking: 'Open booking page',
+    amountToPay: 'Amount to pay',
   },
   fr: {
     back: 'Retour',
@@ -253,7 +285,7 @@ const copy = {
     standardRate: 'Tarif standard',
     standardCopy: 'Prix plus bas ; des frais d’annulation s’appliquent selon la politique.',
     protectedRate: 'Tarif protégé',
-    protectedCopy: 'Ajoutez une protection contre l’annulation imprévue et récupérez le montant de la réservation sans frais d’annulation.',
+    protectedCopy: 'Ajoutez une protection contre l’annulation imprévue pour récupérer davantage si vous annulez avant l’arrivée.',
     protectionFee: 'Frais de protection',
     totalDue: 'Total à payer',
     stayAmount: 'Montant de la réservation',
@@ -263,7 +295,7 @@ const copy = {
     parkingFee: 'Frais de stationnement',
     feesIncluded: 'Frais de ménage et taxes inclus',
     agreementTitle: 'Contrat de location de courte durée',
-    agreementCopy: 'Je confirme que mes informations sont exactes, que les règles de réservation et d’annulation s’appliquent, que le paiement s’effectue uniquement dans SYBNB, qu’aucun accord hors plateforme n’est autorisé, que les règles du logement doivent être respectées et que tout litige est soumis à l’équipe SYBNB avant toute démarche externe. Je comprends que SYBNB prélève une commission de service (12 % du montant de la location) sur le versement à l’hôte pour la gestion de la réservation, du paiement et de la protection.',
+    agreementCopy: 'Je confirme que mes informations sont exactes, que les règles de réservation et d’annulation s’appliquent, que le paiement s’effectue uniquement dans SYBNB, qu’aucun accord hors plateforme n’est autorisé, que les règles du logement doivent être respectées et que tout litige est soumis à l’équipe SYBNB avant toute démarche externe. Je comprends que SYBNB prélève une commission de service (12 % du montant total de la réservation, hors frais de protection) sur le versement à l’hôte pour la gestion de la réservation, du paiement et de la protection.',
     agreementRequired: 'Vous devez accepter le contrat de location de courte durée avant d’envoyer la demande de réservation.',
     datesTitle: 'Choisissez les dates de votre séjour',
     datesRequired: 'Choisissez les dates d’arrivée et de départ avant d’envoyer la demande de réservation.',
@@ -297,6 +329,20 @@ const copy = {
     inquirySentTitle: 'Votre demande a été envoyée',
     inquirySentCopy: 'Votre demande a été transmise au vendeur ou à l’hôte via la messagerie SYBNB. Aucun paiement n’est requis pour le moment : il vous répondra via la plateforme.',
     openInbox: 'Ouvrir la messagerie',
+    protectionFeeNote: '3 % du montant total du séjour',
+    otherFees: 'Autres frais',
+    demoNotice: 'Annonce de démonstration — non réservable',
+    demoNoticeCopy: 'Cette annonce est affichée à titre d’exemple : elle ne peut être ni réservée ni contactée. Parcourez les annonces réelles ouvertes à la réservation.',
+    notBookableNotice: 'Cette annonce n’est pas réservable pour le moment',
+    ownListing: 'Vous ne pouvez pas réserver votre propre annonce.',
+    sentTitle: 'Demande envoyée — payez dans les 48 heures',
+    sentDeadline: 'Date limite de paiement',
+    sentCopy: 'Si le paiement n’arrive pas dans les 48 heures, la demande est annulée automatiquement et les dates redeviennent disponibles.',
+    howToPay: 'Comment payer',
+    howToPaySteps: ['Virez le montant par Sham Cash ou par virement bancaire syrien.', 'Téléversez une photo du reçu de virement dans SYBNB.', 'L’équipe SYBNB vérifie le reçu, puis transmet la demande à l’hôte pour acceptation.'],
+    payAndUpload: 'Payer et téléverser le reçu',
+    openBooking: 'Ouvrir la page de réservation',
+    amountToPay: 'Montant à payer',
   },
 }
 
@@ -333,7 +379,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   )
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [disabledDates, setDisabledDates] = useState<Set<string>>(new Set())
+  // Local fallback only (legacy per-night quote) -- used when GET /api/bookings/quote fails.
   const [stayQuote, setStayQuote] = useState<{ totalMinor: number; nights: number } | null>(null)
+  // Single source of truth for price / fees / protection / total: GET /api/bookings/quote. Both
+  // variants (standard and protected) are fetched together so the two option cards show server
+  // numbers and switching protection never shows a stale total.
+  const [quotes, setQuotes] = useState<{ standard: BookingQuote; protected: BookingQuote } | null>(null)
   const [quoteLoading, setQuoteLoading] = useState(false)
   const [reviewSummary, setReviewSummary] = useState<{ reviews: PlatformListingReview[]; average: number | null; count: number }>({
     reviews: [],
@@ -354,25 +405,44 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     [listing],
   )
   const feesStandard = useMemo(() => guestFeeSummary({ amountMinor: displayedTotalMinor, listing: feeInput }), [displayedTotalMinor, feeInput])
-  // The server charges the cancellation-protection fee as 3% of ONE night's listing price (see
-  // buildBookingMetadata in server/routes/bookings.mjs — the value it stores wins over every 3%-of-
-  // total fallback). Pass that same base here so the price the guest evaluates equals the receipt
-  // and the actual charge, never a higher 3%-of-the-whole-stay figure. (If protection should instead
-  // scale with the full stay, that is a deliberate pricing change to make in buildBookingMetadata.)
-  const protectionFeeBaseMinor = listing?.priceMinor ?? 0
-  const feesProtected = useMemo(
-    () => guestFeeSummary({
-      amountMinor: displayedTotalMinor,
-      listing: feeInput,
-      metadata: {
-        cancellationProtectionPurchased: true,
-        cancellationProtectionFeeMinor: Math.round(protectionFeeBaseMinor * 0.03),
-      },
-    }),
-    [displayedTotalMinor, feeInput, protectionFeeBaseMinor],
-  )
-  const protectionFeeMinor = feesProtected.cancellationProtectionFeeMinor
-  const protectedTotalMinor = feesProtected.totalMinor
+  // Owner decision (Oct 8, 2026): the protection fee is 3% of the FULL stay amount (all nights,
+  // before cleaning/taxes). The server quote is authoritative; the local numbers below are only a
+  // fallback when the quote endpoint is unreachable and use that same 3%-of-the-full-stay rule.
+  const pricing = useMemo(() => {
+    if (quotes) {
+      const standard = quotes.standard
+      return {
+        source: 'quote' as const,
+        nights: standard.nights,
+        stayMinor: standard.stayMinor,
+        cleaningMinor: standard.cleaningMinor,
+        taxesMinor: standard.taxesMinor,
+        otherFeesMinor: standard.otherFeesMinor,
+        protectionMinor: quotes.protected.protectionMinor,
+        standardTotalMinor: standard.totalMinor,
+        protectedTotalMinor: quotes.protected.totalMinor,
+        currency: standard.currency || listing?.currency || 'SYP',
+      }
+    }
+    const protectionMinor = Math.round(feesStandard.stayAmountMinor * 0.03)
+    return {
+      source: 'local' as const,
+      nights: stayQuote?.nights ?? 1,
+      stayMinor: feesStandard.stayAmountMinor,
+      cleaningMinor: feesStandard.cleaningFeeMinor,
+      taxesMinor: feesStandard.taxesMinor,
+      otherFeesMinor: feesStandard.serviceFeeMinor + feesStandard.parkingFeeMinor + feesStandard.extraFeesMinor,
+      protectionMinor,
+      standardTotalMinor: feesStandard.totalMinor,
+      protectedTotalMinor: feesStandard.totalMinor + protectionMinor,
+      currency: listing?.currency || 'SYP',
+    }
+  }, [quotes, feesStandard, stayQuote, listing?.currency])
+  const protectionFeeMinor = pricing.protectionMinor
+  const protectedTotalMinor = pricing.protectedTotalMinor
+  const selectedTotalMinor = cancellationProtection ? pricing.protectedTotalMinor : pricing.standardTotalMinor
+  const isDemoListing = listing?.metadata?.demo === true
+  const notBookable = isDemoListing || quotes?.standard.bookable === false
   const mapTarget = listing ? listingMapTarget(listing, title, lang) : null
 
   useEffect(() => {
@@ -391,7 +461,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       } else {
         // A signed-in customer is ready to book -- never ask them to sign up again just because the
         // one-time per-tab flag is missing (new tab, return visit, signed in from the header).
-        setCustomerReady(Boolean(authStorage.getItem(GUEST_SESSION_TOKEN_KEY)) || sessionStorage.getItem(CUSTOMER_GATE_KEY) === '1' || sessionStorage.getItem(accountKey) === '1')
+        // Only a real stored guest session counts: booking and inquiry calls both need one, so the
+        // old per-tab "account ready" flags would just lead to a GUEST_SESSION_REQUIRED failure.
+        setCustomerReady(Boolean(getStoredGuestSession()))
       }
 
       if (hasResetFlag || hasLegacyAccountReadyFlag) {
@@ -445,18 +517,33 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     }
     let cancelled = false
     setQuoteLoading(true)
-    fetchListingQuote(listingId, dateRange.checkIn, dateRange.checkOut)
-      .then((response) => {
-        if (!cancelled) setStayQuote({ totalMinor: response.totalMinor, nights: response.nights })
-      })
-      .catch(() => {
-        if (!cancelled) setStayQuote(null)
-      })
-      .finally(() => {
-        if (!cancelled) setQuoteLoading(false)
-      })
+    const quoteInput = { listingId, checkIn: dateRange.checkIn, checkOut: dateRange.checkOut }
+    // Debounced so quick date edits don't fire a request per click.
+    const timer = window.setTimeout(() => {
+      Promise.all([fetchBookingQuote({ ...quoteInput, protection: false }), fetchBookingQuote({ ...quoteInput, protection: true })])
+        .then(([standard, protectedQuote]) => {
+          if (cancelled) return
+          setQuotes({ standard, protected: protectedQuote })
+          setStayQuote({ totalMinor: standard.stayMinor, nights: standard.nights })
+        })
+        .catch(async () => {
+          if (cancelled) return
+          setQuotes(null)
+          // Fallback: legacy per-night quote + local fee calculation.
+          try {
+            const response = await fetchListingQuote(listingId, dateRange.checkIn, dateRange.checkOut)
+            if (!cancelled) setStayQuote({ totalMinor: response.totalMinor, nights: response.nights })
+          } catch {
+            if (!cancelled) setStayQuote(null)
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setQuoteLoading(false)
+        })
+    }, 300)
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
     }
   }, [listingId, listing?.division, dateRange.checkIn, dateRange.checkOut])
 
@@ -486,18 +573,19 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   }
 
   async function requestListing() {
-    if (!listing) return
+    if (!listing || notBookable) return
+    // Signed-out: go to sign-in FIRST (before asking for dates). Any dates already picked stay in
+    // the per-listing booking draft (sessionStorage) and are restored when we come back here.
+    if (!getStoredGuestSession()) {
+      goToAccountAndBack(listing.id)
+      return
+    }
     if (
       listing.division === 'STAYS' &&
       (!isValidDate(dateRange.checkIn) || !isValidDate(dateRange.checkOut) || nightsBetween(dateRange.checkIn, dateRange.checkOut) < 1)
     ) {
       setShowDatePicker(true)
       setMessage(t.datesRequired)
-      return
-    }
-    const hasCustomerAccount = customerReady
-    if (!hasCustomerAccount) {
-      goToAccountAndBack(listing.id)
       return
     }
     if (listing.division === 'STAYS' && !acceptedGuestAgreement) {
@@ -527,7 +615,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
     try {
       const nextBooking = await createPrototypeBooking({
         listingId: listing.id,
-        amountMinor: displayedTotalMinor,
+        amountMinor: pricing.stayMinor,
         currency: listing.currency,
         checkIn: dateRange.checkIn,
         checkOut: dateRange.checkOut,
@@ -539,10 +627,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       setBooking(nextBooking)
       setStatus('ready')
       clearBookingDraft(listing.id)
-      window.location.hash = `/booking/${nextBooking.id}`
     } catch (error) {
       setStatus('error')
-      setMessage(error instanceof Error ? error.message : t.error)
+      const code = (error as { code?: string } | null)?.code
+      if (code === 'LISTING_NOT_BOOKABLE') setMessage(isDemoListing ? t.demoNotice : t.notBookableNotice)
+      else if (code === 'OWN_LISTING') setMessage(t.ownListing)
+      else setMessage(error instanceof Error ? error.message : t.error)
     }
   }
 
@@ -689,12 +779,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                 <strong style={styles.priceAmount} dir={isAr ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
                 {unit && <span style={styles.priceUnit}>/ {unit}</span>}
               </div>
-              {(isStays || feesStandard.totalMinor !== listing.priceMinor) && (
+              {(isStays || feesStandard.totalMinor !== listing.priceMinor) && !(isDemoListing && !isStays) && (
                 <small style={styles.priceSub}>
                   {quoteLoading
                     ? t.quoteLoading
-                    : `${t.totalDue}${colon}${moneyText(feesStandard.totalMinor, listing.currency, lang)}${
-                        isStays ? ` · ${stayQuote ? stayQuote.nights : 1} ${nightsWord(stayQuote ? stayQuote.nights : 1, lang)}` : ''
+                    : `${t.totalDue}${colon}${moneyText(isStays ? selectedTotalMinor : feesStandard.totalMinor, listing.currency, lang)}${
+                        isStays ? ` · ${pricing.nights} ${nightsWord(pricing.nights, lang)}` : ''
                       }`}
                   {isStays && !quoteLoading ? ` · ${t.feesIncluded}` : ''}
                 </small>
@@ -704,6 +794,10 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                 {isStays ? ` · ${t.protectedTitle}` : ''}
               </small>
             </section>
+
+            {notBookable && (
+              <div style={styles.demoBadge} role="note">{isDemoListing ? t.demoNotice : t.notBookableNotice}</div>
+            )}
 
             <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
             <ListingSpecs division={listing.division} metadata={listing.metadata} lang={lang} />
@@ -824,6 +918,16 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
           {/* Booking / contact block: always visible below the tabs, whatever tab is active. */}
           <section id="listing-booking" style={styles.bookingBlock}>
+            {notBookable && (
+              <section style={styles.demoNotice} role="note">
+                <strong>{isDemoListing ? t.demoNotice : t.notBookableNotice}</strong>
+                {isDemoListing && <span>{t.demoNoticeCopy}</span>}
+                <button type="button" style={styles.secondaryButton} onClick={() => (window.location.hash = returnPath || '/stays')}>
+                  {t.browseAll}
+                </button>
+              </section>
+            )}
+            {!notBookable && (<>
             {!customerReady && <div style={styles.accountHint}>{accountHintText(listing.division, lang)}</div>}
 
             {isStays && (
@@ -867,13 +971,14 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                     >
                       <b>{t.standardRate}</b>
                       <span>{t.standardCopy}</span>
-                      <em style={styles.cancellationCutoff}>{freeCancellationLabel(dateRange.checkIn, false, lang)}</em>
+                      <em style={styles.cancellationCutoff}>{cancellationRuleText(false, lang)}</em>
+                      {dateRange.checkIn && <small style={styles.feesIncludedNote}>{freeCancellationLabel(dateRange.checkIn, false, lang)}</small>}
                       <small>
                         {quoteLoading
                           ? t.quoteLoading
-                          : stayQuote
-                            ? `${moneyText(feesStandard.totalMinor, listing.currency, lang)} · ${stayQuote.nights} ${nightsWord(stayQuote.nights, lang)}`
-                            : moneyText(feesStandard.totalMinor, listing.currency, lang)}
+                          : stayQuote || quotes
+                            ? `${moneyText(pricing.standardTotalMinor, pricing.currency, lang)} · ${pricing.nights} ${nightsWord(pricing.nights, lang)}`
+                            : moneyText(pricing.standardTotalMinor, pricing.currency, lang)}
                       </small>
                       {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
                     </button>
@@ -884,24 +989,31 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                     >
                       <b>{t.protectedRate}</b>
                       <span>{t.protectedCopy}</span>
-                      <em style={styles.cancellationCutoff}>{freeCancellationLabel(dateRange.checkIn, true, lang)}</em>
-                      <small>{t.protectionFee}{colon}{moneyText(protectionFeeMinor, listing.currency, lang)}</small>
-                      <small>{t.totalDue}{colon}{moneyText(protectedTotalMinor, listing.currency, lang)}</small>
+                      <em style={styles.cancellationCutoff}>{cancellationRuleText(true, lang)}</em>
+                      <small>
+                        {quoteLoading
+                          ? t.quoteLoading
+                          : `${t.protectionFee}${colon}${moneyText(protectionFeeMinor, pricing.currency, lang)} (${t.protectionFeeNote})`}
+                      </small>
+                      {!quoteLoading && <small>{t.totalDue}{colon}{moneyText(protectedTotalMinor, pricing.currency, lang)}</small>}
                       {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
                     </button>
                   </div>
-                  {!quoteLoading && (feesStandard.cleaningFeeMinor > 0 || feesStandard.taxesMinor > 0 || feesStandard.serviceFeeMinor > 0 || feesStandard.parkingFeeMinor > 0) && (
+                  {!quoteLoading && (pricing.cleaningMinor > 0 || pricing.taxesMinor > 0 || pricing.otherFeesMinor > 0 || cancellationProtection) && (
                     <div style={styles.feeBreakdownRow}>
-                      <span>{t.stayAmount}{colon}{moneyText(feesStandard.stayAmountMinor, listing.currency, lang)}</span>
-                      {feesStandard.cleaningFeeMinor > 0 && (
-                        <span>{t.cleaningFee}{colon}{moneyText(feesStandard.cleaningFeeMinor, listing.currency, lang)}</span>
+                      <span>{t.stayAmount}{colon}{moneyText(pricing.stayMinor, pricing.currency, lang)}</span>
+                      {pricing.cleaningMinor > 0 && (
+                        <span>{t.cleaningFee}{colon}{moneyText(pricing.cleaningMinor, pricing.currency, lang)}</span>
                       )}
-                      {feesStandard.taxesMinor > 0 && <span>{t.taxes}{colon}{moneyText(feesStandard.taxesMinor, listing.currency, lang)}</span>}
-                      {feesStandard.serviceFeeMinor > 0 && (
-                        <span>{t.serviceFee}{colon}{moneyText(feesStandard.serviceFeeMinor, listing.currency, lang)}</span>
+                      {pricing.taxesMinor > 0 && <span>{t.taxes}{colon}{moneyText(pricing.taxesMinor, pricing.currency, lang)}</span>}
+                      {pricing.otherFeesMinor > 0 && (
+                        <span>{t.otherFees}{colon}{moneyText(pricing.otherFeesMinor, pricing.currency, lang)}</span>
                       )}
-                      {feesStandard.parkingFeeMinor > 0 && (
-                        <span>{t.parkingFee}{colon}{moneyText(feesStandard.parkingFeeMinor, listing.currency, lang)}</span>
+                      {cancellationProtection && (
+                        <span>{t.protectionFee}{colon}{moneyText(pricing.protectionMinor, pricing.currency, lang)}</span>
+                      )}
+                      {cancellationProtection && (
+                        <strong>{t.totalDue}{colon}{moneyText(pricing.protectedTotalMinor, pricing.currency, lang)}</strong>
                       )}
                     </div>
                   )}
@@ -931,14 +1043,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
             {messageBox}
 
-            {booking && (
-              <section style={styles.panel}>
-                <strong>{t.requestStatus}{colon}{statusText(booking.status, lang)}</strong>
-                <button type="button" style={styles.primaryButton} onClick={() => (window.location.hash = `/booking/${booking.id}`)}>
-                  {t.payment}
-                </button>
-              </section>
-            )}
+            {booking && <BookingSentPanel booking={booking} listing={listing} lang={lang} />}
 
             {inquirySent && (
               <section style={styles.panel}>
@@ -962,6 +1067,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                 </button>
               )}
             </div>
+            </>)}
           </section>
 
           <section style={styles.bookingSteps}>
@@ -986,7 +1092,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
           {/* Compact sticky bar: price + the one primary action only (no agreement text), so it never
               covers a large part of the listing. */}
-          {!inquirySent && !booking && (
+          {!inquirySent && !booking && !notBookable && (
             <section style={styles.bottomActionBar}>
               <div style={styles.bottomPrice}>
                 <strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
@@ -1000,6 +1106,64 @@ export function ListingDetailPage({ listingId, lang }: Props) {
         </>
       )}
     </main>
+  )
+}
+
+// Shown right after a stay booking is created: the guest has 48h to pay (manual proof rail:
+// Sham Cash / Syrian bank transfer + receipt upload), after which the unpaid request expires.
+function BookingSentPanel({ booking, listing, lang }: { booking: PlatformBooking; listing: PlatformListing; lang: Lang }) {
+  const t = copy[lang]
+  const colon = lang === 'fr' ? ' : ' : ': '
+  const expiresAt = booking.expiresAt
+    ? new Date(booking.expiresAt)
+    : new Date(new Date(booking.createdAt || Date.now()).getTime() + 48 * 60 * 60 * 1000)
+  const expiryText = Number.isNaN(expiresAt.getTime())
+    ? ''
+    : expiresAt.toLocaleString(pick(lang, localeForLang('ar'), localeForLang('en'), 'fr-CA'), {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+  const fees = guestFeeSummary({ amountMinor: booking.amountMinor, listing: { division: listing.division, metadata: listing.metadata }, metadata: booking.metadata })
+  const paymentRoute = `/payment/local-wallet/${booking.id}/${fees.totalMinor}/${encodeURIComponent(booking.currency)}`
+  // The booking page holds the one-time ID-photo step that precedes payment; when we know the
+  // guest has not sent it yet, send them there instead of straight to the receipt upload.
+  const needsIdFirst = Boolean(booking.guest) && !booking.guest?.idDocumentRef
+  return (
+    <section style={styles.sentPanel} role="status">
+      <strong style={styles.sentTitle}>✓ {t.sentTitle}</strong>
+      {expiryText && (
+        <span>
+          {t.sentDeadline}
+          {colon}
+          <b>{expiryText}</b>
+        </span>
+      )}
+      <span>
+        {t.amountToPay}
+        {colon}
+        <b dir={lang === 'ar' ? 'rtl' : 'ltr'}>{moneyText(fees.totalMinor, booking.currency, lang)}</b>
+      </span>
+      <small style={{ color: '#9aa6ba', lineHeight: 1.6 }}>{t.sentCopy}</small>
+      <div style={{ display: 'grid', gap: 6 }}>
+        <strong>{t.howToPay}</strong>
+        <ol style={styles.sentSteps}>
+          {t.howToPaySteps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+      </div>
+      <div style={styles.sentActions}>
+        <button type="button" style={styles.primaryButton} onClick={() => (window.location.hash = needsIdFirst ? `/booking/${booking.id}` : paymentRoute)}>
+          {t.payAndUpload}
+        </button>
+        <button type="button" style={styles.secondaryButton} onClick={() => (window.location.hash = `/booking/${booking.id}`)}>
+          {t.openBooking}
+        </button>
+      </div>
+    </section>
   )
 }
 
@@ -1272,8 +1436,8 @@ function TermsPanel({
         <>
           <article style={styles.info}>
             <span>{pick(lang, 'سياسة الإلغاء', 'Cancellation policy', 'Politique d’annulation')}</span>
-            <strong>{pick(lang, 'السعر العادي', 'Standard rate', 'Tarif standard')}{lang === 'fr' ? ' : ' : ': '}{freeCancellationLabel(checkIn, false, lang)}</strong>
-            <strong>{pick(lang, 'السعر المحمي', 'Protected rate', 'Tarif protégé')}{lang === 'fr' ? ' : ' : ': '}{freeCancellationLabel(checkIn, true, lang)}</strong>
+            <strong>{pick(lang, 'السعر العادي', 'Standard rate', 'Tarif standard')}{lang === 'fr' ? ' : ' : ': '}{cancellationRuleText(false, lang)}</strong>
+            <strong>{pick(lang, 'السعر المحمي', 'Protected rate', 'Tarif protégé')}{lang === 'fr' ? ' : ' : ': '}{cancellationRuleText(true, lang)}</strong>
           </article>
           <article style={styles.info}>
             <span>{pick(lang, 'الدفع', 'Payment', 'Paiement')}</span>
@@ -1335,6 +1499,12 @@ const styles: Record<string, CSSProperties> = {
   bookingSteps: { display: 'grid', gap: 10 },
   bookingStep: { display: 'grid', gridTemplateColumns: '38px minmax(0, 1fr)', alignItems: 'center', gap: 10, color: '#9aa6ba' },
   instantBookNote: { border: '1px solid rgba(213,169,21,.35)', borderRadius: 8, background: 'rgba(213,169,21,.08)', color: '#d5a915', padding: 12, fontWeight: 700 },
+  demoBadge: { justifySelf: 'center', border: '1px solid rgba(229,184,11,.55)', borderRadius: 999, background: 'rgba(229,184,11,.12)', color: '#ffe9a6', padding: '6px 14px', fontWeight: 900, textAlign: 'center' },
+  demoNotice: { border: '1px solid rgba(229,184,11,.55)', borderRadius: 10, background: 'rgba(229,184,11,.1)', color: '#ffe9a6', padding: 16, display: 'grid', gap: 10, lineHeight: 1.6 },
+  sentPanel: { border: '1px solid rgba(32,210,155,.5)', borderRadius: 12, background: 'rgba(32,210,155,.08)', color: '#fff', padding: 16, display: 'grid', gap: 10, lineHeight: 1.6 },
+  sentTitle: { fontSize: 18, color: '#b7ffe8' },
+  sentSteps: { margin: 0, paddingInlineStart: 20, display: 'grid', gap: 4, color: '#dfe5ff' },
+  sentActions: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' },
   accountHint: { border: '1px solid rgba(82,104,255,.45)', borderRadius: 8, background: 'rgba(82,104,255,.1)', color: '#dfe5ff', padding: 12, fontWeight: 900 },
   heroContent: { padding: 18, display: 'grid', gap: 12, alignContent: 'center' },
   eyebrow: { color: '#d5a915', letterSpacing: 2, fontWeight: 900, fontSize: 11, margin: 0 },

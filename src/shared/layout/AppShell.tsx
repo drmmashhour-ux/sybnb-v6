@@ -316,6 +316,14 @@ function getRouteContext(path: string, lang: Lang) {
       nextPath: '',
     }
   }
+  if (path === '/admin/money') {
+    return {
+      section: pick(lang, 'الإدارة', 'Admin', 'Administration'),
+      page: pick(lang, 'الصرف والاسترداد', 'Payouts & refunds', 'Versements et remboursements'),
+      backPath: '/admin/review',
+      nextPath: '/finance',
+    }
+  }
   if (path.startsWith('/admin')) {
     return {
       section: pick(lang, 'الإدارة', 'Admin', 'Administration'),

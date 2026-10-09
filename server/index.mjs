@@ -6,6 +6,7 @@ import { isRateLimited } from './lib/rateLimit.mjs'
 import { loadEnv, validateEnv } from './lib/env.mjs'
 import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
 import { pruneExpiredOtps } from './lib/otp-retention.mjs'
+import { expireUnpaidBookings } from './lib/booking-lifecycle.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
 import { log, logRequest, newRequestId } from './lib/logger.mjs'
 import { handleAdmin } from './routes/admin.mjs'
@@ -255,7 +256,7 @@ function setCors(req, res) {
     : CORS_ORIGINS[0] || DEFAULT_CORS_ORIGIN
   res.setHeader('access-control-allow-origin', origin)
   res.setHeader('vary', 'origin')
-  res.setHeader('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS')
+  res.setHeader('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
   res.setHeader('access-control-allow-headers', 'content-type,authorization')
 }
 
@@ -302,6 +303,23 @@ async function runOtpPrune() {
 void runOtpPrune()
 const otpPruneTimer = setInterval(runOtpPrune, OTP_PRUNE_INTERVAL_MS)
 otpPruneTimer.unref() // never keep the process alive on its own (tests/scripts that import this file)
+
+// Money-flow decision 6 (2026-10-08): unpaid PAYMENT_PENDING requests past the country's payment
+// window (Syria: 48h) with no live proof are cancelled (EXPIRED_UNPAID) and their dates released.
+// The same sweep also runs opportunistically from the booking read paths (completeExpiredBookings),
+// and date-overlap checks already ignore such requests before either runs; this light interval only
+// makes the CANCELLED status + guest email timely when nobody is browsing. Idempotent per row (each
+// cancel is a conditional update), so multiple replicas sweeping is harmless.
+const BOOKING_EXPIRY_SWEEP_INTERVAL_MS = Number(process.env.BOOKING_EXPIRY_SWEEP_MINUTES || 15) * 60 * 1000
+async function runBookingExpirySweep() {
+  try {
+    await expireUnpaidBookings()
+  } catch (error) {
+    log.error('booking_expiry_sweep_failed', { error: error instanceof Error ? error.message : String(error) })
+  }
+}
+const bookingExpiryTimer = setInterval(runBookingExpirySweep, BOOKING_EXPIRY_SWEEP_INTERVAL_MS)
+bookingExpiryTimer.unref()
 
 let shuttingDown = false
 for (const signal of ['SIGINT', 'SIGTERM']) {

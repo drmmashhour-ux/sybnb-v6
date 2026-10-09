@@ -8,6 +8,8 @@ import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 import { log } from '../lib/logger.mjs'
+import { expireUnpaidBookings } from '../lib/booking-lifecycle.mjs'
+import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 import { confirmStripeCheckoutSessionForActor, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
 import { applyPaymentEvent, intakeEvent, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
 
@@ -181,6 +183,9 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    // Decision 6: a request past its unpaid window must not be paid by card either -- expire it
+    // first so the PAYMENT_PENDING check below refuses it.
+    await expireUnpaidBookings({ id: bookingId, guestId: context.user.id })
     const booking = await db().booking.findFirst({
       where: { id: bookingId, guestId: context.user.id },
       include: { listing: true },
@@ -583,6 +588,23 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    // Decision 6 (2026-10-08): a cancelled booking (incl. an unpaid request that expired after the
+    // payment window and released its dates) can no longer be paid for -- approving such a proof
+    // would resurrect a booking over dates another guest may now hold. A stale request the sweep
+    // has not reached yet is expired right here, then refused the same way.
+    if (booking && booking.status === 'PAYMENT_PENDING') {
+      await expireUnpaidBookings({ id: booking.id })
+      const fresh = await db().booking.findUnique({ where: { id: booking.id }, select: { status: true } })
+      if (fresh) booking.status = fresh.status
+    }
+    if (booking && booking.status === 'CANCELLED') {
+      const error = new Error('This booking was cancelled (or its payment window expired) and can no longer be paid.')
+      error.statusCode = 409
+      error.code = 'BOOKING_NOT_PAYABLE'
+      error.expose = true
+      throw error
+    }
+
     // SR Ride vs. Uber gap-closure: a ride's fare, mirroring the booking case exactly -- only a
     // COMPLETED ride has a final, real fare (mid-ride the distance/time isn't settled yet, matching
     // Uber's own post-trip charge model), and only that ride's own rider may submit proof for it.
@@ -701,6 +723,10 @@ export async function handlePayments(req, res, url, context) {
     } catch (err) {
       if (isProviderRefUniqueViolation(err)) throw paymentReferenceDuplicate()
       throw err
+    }
+
+    if (proof.bookingId) {
+      notifyAdmin('admin_payment_proof', { amount: formatMoney(proof.amountMinor, proof.currency), bookingId: proof.bookingId }, `admin_payment_proof:${proof.id}`)
     }
 
     return json(res, 201, { ok: true, proof })

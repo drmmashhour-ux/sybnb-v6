@@ -1,6 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
-import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, executeManualRailRefund, finalizeCancellationLedgerEffects, recordWalletEntry, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, executeManualRailRefund, finalizeCancellationLedgerEffects, markPayoutRequestPaid, recordWalletEntry, rejectPayoutRequest, reverseBookingPlatformShare } from '../lib/finance-ledger.mjs'
+import { formatMoney, notifyBooking, notifyUser } from '../lib/notifications.mjs'
 import { completeExpiredBookings, isPayoutEligible, payoutEligibleAt, PAYOUT_HOLD_DAYS } from '../lib/booking-lifecycle.mjs'
 import { expireStaleWalletGifts } from '../lib/gift-lifecycle.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
@@ -116,6 +117,181 @@ export async function handleAdmin(req, res, url, context) {
     }
 
     return methodNotAllowed(res, ['GET'])
+  }
+
+  // Decision 2 (2026-10-08): host withdrawal requests. Listing is read-only (ADMIN/SUPPORT); the
+  // decision is ADMIN-only. 'paid' = the admin already paid the host OUTSIDE the platform; this posts
+  // exactly one DEBIT of the request amount on the host's wallet (markPayoutRequestPaid). 'reject'
+  // moves no money.
+  if (url.pathname === '/api/admin/payout-requests') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const status = String(url.searchParams.get('status') || '').toUpperCase()
+    if (status && !['REQUESTED', 'PAID', 'REJECTED'].includes(status)) {
+      const error = new Error('status must be REQUESTED, PAID or REJECTED.')
+      error.statusCode = 400
+      error.code = 'INVALID_STATUS_FILTER'
+      error.expose = true
+      throw error
+    }
+    const rows = await db().payoutRequest.findMany({
+      where: status ? { status } : {},
+      include: { host: { select: { id: true, displayName: true, email: true } } },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+    })
+    return json(res, 200, {
+      ok: true,
+      requests: rows.map((row) => ({
+        id: row.id,
+        amountMinor: row.amountMinor,
+        currency: row.currency,
+        status: row.status,
+        method: row.method,
+        ...(row.reference ? { reference: row.reference } : {}),
+        ...(row.note ? { note: row.note } : {}),
+        createdAt: row.createdAt,
+        ...(row.decidedAt ? { decidedAt: row.decidedAt } : {}),
+        host: row.host,
+      })),
+    })
+  }
+
+  const payoutRequestMatch = url.pathname.match(/^\/api\/admin\/payout-requests\/([^/]+)$/)
+  if (payoutRequestMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const action = String(body.action || '').toLowerCase()
+    const reference = typeof body.reference === 'string' ? body.reference.trim() : ''
+    const note = typeof body.note === 'string' ? body.note.trim() : ''
+    if (!['paid', 'reject'].includes(action)) {
+      const error = new Error("action must be 'paid' or 'reject'.")
+      error.statusCode = 400
+      error.code = 'INVALID_PAYOUT_ACTION'
+      error.expose = true
+      throw error
+    }
+    if (action === 'paid' && (!reference || reference.length > 200)) {
+      const error = new Error('reference (the external payment reference, at most 200 characters) is required to mark a payout paid.')
+      error.statusCode = 400
+      error.code = 'PAYOUT_REFERENCE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    if (action === 'reject' && (!note || note.length > 2000)) {
+      const error = new Error('note (the rejection reason, at most 2000 characters) is required to reject a payout.')
+      error.statusCode = 400
+      error.code = 'PAYOUT_NOTE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const requestId = payoutRequestMatch[1]
+    const existing = await db().payoutRequest.findUnique({ where: { id: requestId } })
+    if (!existing) {
+      const error = new Error('Payout request not found.')
+      error.statusCode = 404
+      error.code = 'PAYOUT_REQUEST_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // An admin who is also this host must not pay themselves out.
+    assertNotInterestedParty([existing.hostId], context.user.id)
+
+    // Paying a host is the same operation class as releasing a booking payout to them
+    // (payout_release, ADMIN-only, manual/internal-ledger provider): one DEBIT on the host's wallet
+    // recording money the platform sent outside itself. Gated on the 'paid' action only.
+    if (action === 'paid') {
+      authorizePaymentOperation({
+        operation: 'payout_release',
+        rail: 'manual_proof',
+        provider: 'manual',
+        division: 'PLATFORM',
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+        actor: { roles: context.roles },
+      })
+    }
+
+    const request = await db().$transaction(async (tx) => {
+      const fresh = await tx.payoutRequest.findUnique({ where: { id: requestId }, select: { hostId: true } })
+      await reauthorizeAtCommit(tx, context, {
+        action: action === 'paid' ? 'ADMIN_PAYOUT_REQUEST_PAID' : 'ADMIN_PAYOUT_REQUEST_REJECTED',
+        requiredRoles: ['ADMIN'],
+        interestedPartyIds: [fresh?.hostId],
+      })
+      const decided = action === 'paid'
+        ? await markPayoutRequestPaid(tx, { requestId, actorUserId: context.user.id, reference, note })
+        : await rejectPayoutRequest(tx, { requestId, actorUserId: context.user.id, note })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: action === 'paid' ? 'ADMIN_PAYOUT_REQUEST_PAID' : 'ADMIN_PAYOUT_REQUEST_REJECTED',
+          entityType: 'payout_requests',
+          entityId: requestId,
+          before: { ...existing, method: maskMethod(existing.method) },
+          after: { ...decided, method: maskMethod(decided.method) },
+        },
+      })
+      return decided
+    })
+
+    notifyUser(action === 'paid' ? 'host_payout_paid' : 'host_payout_rejected', request.hostId, {
+      amount: formatMoney(request.amountMinor, request.currency),
+      reference: request.reference || '',
+      note: request.note || '',
+    }, `payout:${request.id}:${request.status}`)
+
+    return json(res, 200, {
+      ok: true,
+      request: {
+        id: request.id,
+        amountMinor: request.amountMinor,
+        currency: request.currency,
+        status: request.status,
+        method: request.method,
+        ...(request.reference ? { reference: request.reference } : {}),
+        ...(request.note ? { note: request.note } : {}),
+        createdAt: request.createdAt,
+        ...(request.decidedAt ? { decidedAt: request.decidedAt } : {}),
+        walletEntryId: request.walletEntryId || undefined,
+      },
+    })
+  }
+
+  // Refund queue for the admin UI (execute + finalize live on the routes below).
+  if (url.pathname === '/api/admin/refunds') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const status = String(url.searchParams.get('status') || '').toUpperCase()
+    if (status && !['REQUESTED', 'IN_PROGRESS', 'ACTION_REQUIRED', 'SUCCEEDED', 'ACCOUNTING_ACCEPTED', 'CANCELLED'].includes(status)) {
+      const error = new Error('Unknown refund status filter.')
+      error.statusCode = 400
+      error.code = 'INVALID_STATUS_FILTER'
+      error.expose = true
+      throw error
+    }
+    const rows = await db().refund.findMany({
+      where: status ? { status } : {},
+      include: { paymentProof: { select: { provider: true, payer: { select: { id: true, displayName: true, email: true } } } } },
+      orderBy: { requestedAt: 'desc' },
+      take: 200,
+    })
+    return json(res, 200, {
+      ok: true,
+      refunds: rows.map((row) => ({
+        id: row.id,
+        bookingId: row.bookingId,
+        amountMinor: row.amountMinor,
+        currency: row.currency,
+        status: row.status,
+        reasonCode: row.reasonCode,
+        rail: row.rail,
+        migratedFromLegacy: row.migratedFromLegacy,
+        createdAt: row.requestedAt,
+        guest: row.paymentProof?.payer || null,
+      })),
+    })
   }
 
   const payoutReleaseMatch = url.pathname.match(/^\/api\/admin\/payouts\/([^/]+)\/release$/)
@@ -340,6 +516,15 @@ export async function handleAdmin(req, res, url, context) {
     try {
       result = await db().$transaction(finalizeInTransaction)
     } catch (err) {
+      if (err.code === 'WALLET_INSUFFICIENT_FUNDS' && existing.metadata?.cancellation?.policyVersion) {
+        // Rule-based cancellations (decision 3) never debit the guest, so the short wallet is the
+        // commission recipient's, or the host's (clawback of an already-released payout / host fee).
+        const error = new Error('A wallet this cancellation must debit (commission account or host) does not hold enough balance. Resolve the balance, then finalize again.')
+        error.statusCode = 409
+        error.code = 'FINALIZE_INSUFFICIENT_FUNDS'
+        error.expose = true
+        throw error
+      }
       if (err.code === 'WALLET_INSUFFICIENT_FUNDS') {
         const error = new Error(
           "This guest's cancellation fee can't be charged yet because their refund hasn't been executed " +
@@ -1229,6 +1414,12 @@ export async function handleAdmin(req, res, url, context) {
       })
       return { entity: after, auditLog }
     })
+    // Decision 8: a verified booking payment tells the guest and asks the host to accept (or tells
+    // the host about a confirmed Instant Book booking). Fire-and-forget, after commit.
+    if (moneyMovingOperation === 'capture' && result.entity?.bookingId) {
+      notifyBooking('guest_payment_confirmed', result.entity.bookingId, { amount: formatMoney(result.entity.amountMinor, result.entity.currency) })
+      notifyBooking('host_new_paid_request', result.entity.bookingId)
+    }
     return json(res, 200, { ok: true, ...result })
   }
 
@@ -1315,6 +1506,16 @@ function interestedPartyIds(model, entity) {
 // self-dealing check of any kind before this fix. Same underlying risk (an admin who also holds
 // a HOST/SELLER/GUEST role directing money to themselves), different code shape, one shared
 // assertion so it can't drift into 4 separately-written (and separately-forgettable) checks.
+// Audit rows never carry a full wallet/account number -- last 4 characters only.
+function maskMethod(method) {
+  if (!method || typeof method !== 'object') return method
+  const masked = { ...method }
+  for (const field of ['shamCashNumber', 'accountNumber']) {
+    if (masked[field]) masked[field] = `****${String(masked[field]).slice(-4)}`
+  }
+  return masked
+}
+
 function assertNotInterestedParty(interestedIds, actorUserId) {
   if (interestedIds.includes(actorUserId)) throw selfReviewError()
 }

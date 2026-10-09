@@ -51,6 +51,8 @@
     "test:e2e:refund-request-creation": "node tests/e2e/refund-request-creation.e2e.mjs",
     "test:e2e:refund-actor-policy-split": "node tests/e2e/refund-actor-policy-split.e2e.mjs",
     "test:e2e:refund-execution-wallet-credit": "node tests/e2e/refund-execution-wallet-credit.e2e.mjs",
+    "test:e2e:booking-money-flow": "node tests/e2e/booking-money-flow.e2e.mjs",
+    "test:unit": "node --test tests/unit/*.test.mjs",
     "test:e2e:payment-webhook-default-deny": "node tests/e2e/payment-webhook-default-deny.e2e.mjs",
     "test:e2e:payment-stripe-policy-deferred-recovery": "node tests/e2e/payment-event-stripe-policy-deferred-recovery.e2e.mjs",
     "test:e2e:payment-policy-stripe-approval-guard": "node tests/e2e/payment-policy-stripe-approval-guard.e2e.mjs",

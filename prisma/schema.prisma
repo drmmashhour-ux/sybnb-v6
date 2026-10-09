@@ -124,6 +124,7 @@ enum RideStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+  DISPUTED
 
   @@map("ride_status")
 }

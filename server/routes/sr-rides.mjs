@@ -17,6 +17,7 @@ import {
   validateActivePromoCode,
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
+import { notifyAdmin } from '../lib/notifications.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
 // file -- promo-code creation, promo-code activation toggling, and business-account onboarding --
 // were bare db().x.create/update calls with no transaction and no commit-boundary re-authorization.
@@ -396,6 +397,62 @@ export async function handleSrRides(req, res, url, context) {
       },
     })
 
+    return json(res, 200, { ok: true, ride })
+  }
+
+  // Ride dispute (2026-10-09): either party to a COMPLETED ride (the rider or the assigned driver)
+  // may open a dispute, moving it to DISPUTED with a reason, so a contested fare/ride has a
+  // structured hold an admin resolves (confirm, or reverse the payment) instead of ad-hoc handling.
+  const disputeMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/dispute$/)
+  if (disputeMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context)
+    const body = await readJson(req)
+    const reason = body.reason ? String(body.reason).trim().slice(0, 1000) : ''
+    const existing = await db().rideRequest.findUnique({ where: { id: disputeMatch[1] } })
+    if (!existing || (existing.riderId !== context.user.id && existing.driverId !== context.user.id)) {
+      const error = new Error('Ride not found for this account.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (existing.status !== 'COMPLETED') {
+      const error = new Error('Only a completed ride can be disputed.')
+      error.statusCode = 400
+      error.code = 'RIDE_NOT_DISPUTABLE'
+      error.expose = true
+      throw error
+    }
+    const openedBy = existing.riderId === context.user.id ? 'RIDER' : 'DRIVER'
+    const metadata = {
+      ...(existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}),
+      dispute: { openedBy, openedByUserId: context.user.id, reason, openedAt: new Date().toISOString() },
+    }
+    // Optimistic-concurrency guard on COMPLETED so a concurrent change can't be overwritten.
+    const updated = await db().rideRequest.updateMany({
+      where: { id: existing.id, status: 'COMPLETED' },
+      data: { status: 'DISPUTED', metadata },
+    })
+    if (updated.count !== 1) {
+      const error = new Error('This ride can no longer be disputed. Reload and try again.')
+      error.statusCode = 409
+      error.code = 'RIDE_DISPUTE_CONFLICT'
+      error.expose = true
+      throw error
+    }
+    const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'SR_RIDE_DISPUTED',
+        entityType: 'ride_requests',
+        entityId: ride.id,
+        before: existing,
+        after: ride,
+      },
+    })
+    notifyAdmin('admin_ride_disputed', { rideId: ride.id, openedBy }, `admin_ride_disputed:${ride.id}`)
     return json(res, 200, { ok: true, ride })
   }
 

@@ -1294,7 +1294,7 @@ export async function handleAdmin(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     const statusParam = url.searchParams.get('status')
-    const ACTIVE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+    const ACTIVE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'DISPUTED']
     const where = statusParam
       ? { status: statusParam }
       : { status: { in: ACTIVE_STATUSES } }
@@ -1426,6 +1426,76 @@ export async function handleAdmin(req, res, url, context) {
       },
     })
     return json(res, 200, { ok: true, driverProfile: updated })
+  }
+
+  // 2026-10-09: resolve a DISPUTED ride. CONFIRM dismisses the dispute (payment stands, ride back to
+  // COMPLETED). REVERSE refunds it — reverseRidePayment debits the driver's fare + the platform's
+  // commission back out (idempotent) and the ride returns to COMPLETED (the trip still happened,
+  // only the money is undone). REVERSE is gated by the same 'refund' payment policy as every other
+  // wallet-money-moving admin action.
+  const rideResolveMatch = url.pathname.match(/^\/api\/admin\/sr\/rides\/([^/]+)\/resolve-dispute$/)
+  if (rideResolveMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const resolution = String(body.resolution || '').toUpperCase()
+    if (!['CONFIRM', 'REVERSE'].includes(resolution)) {
+      const error = new Error('resolution must be CONFIRM or REVERSE.')
+      error.statusCode = 400
+      error.code = 'RIDE_DISPUTE_RESOLUTION_INVALID'
+      error.expose = true
+      throw error
+    }
+    const reason = body.reason ? String(body.reason).slice(0, 500) : `Ride dispute resolved (${resolution}).`
+    const existing = await db().rideRequest.findUnique({ where: { id: rideResolveMatch[1] } })
+    if (!existing) {
+      const error = new Error('Ride not found.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (existing.status !== 'DISPUTED') {
+      const error = new Error('This ride is not under dispute.')
+      error.statusCode = 400
+      error.code = 'RIDE_NOT_DISPUTED'
+      error.expose = true
+      throw error
+    }
+    if (resolution === 'REVERSE') {
+      authorizePaymentOperation({
+        operation: 'refund', rail: 'manual_proof', provider: 'manual', division: 'SR',
+        country: activePolicyCountryKey(), environment: policyEnvironment(), actor: { roles: context.roles },
+      })
+    }
+    const result = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, { action: 'ADMIN_RIDE_DISPUTE_RESOLVED', requiredRoles: ['ADMIN'] })
+      let reversal = null
+      if (resolution === 'REVERSE') {
+        reversal = await reverseRidePayment(tx, { rideId: existing.id, reason: `Dispute reversal: ${reason}` })
+      }
+      const metadata = {
+        ...(existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}),
+        dispute: {
+          ...((existing.metadata && existing.metadata.dispute) || {}),
+          resolution, resolvedReason: reason, resolvedByUserId: context.user.id, resolvedAt: new Date().toISOString(),
+        },
+      }
+      await tx.rideRequest.updateMany({ where: { id: existing.id, status: 'DISPUTED' }, data: { status: 'COMPLETED', metadata } })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'ADMIN_RIDE_DISPUTE_RESOLVED',
+          entityType: 'ride_requests',
+          entityId: existing.id,
+          before: existing,
+          after: { resolution, reversal },
+        },
+      })
+      return { reversal }
+    })
+    const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
+    return json(res, 200, { ok: true, ride, resolution, reversal: result.reversal })
   }
 
   if (url.pathname === '/api/admin/review-queue') {

@@ -59,6 +59,11 @@ export const PAYMENT_POLICY_ROUTES = Object.freeze([
   // refund as an internal wallet credit; also under the existing 'refund' operation, ADMIN-only) ---
   { method: 'PATCH', pathPattern: '^/api/admin/refunds/[^/]+/execute$', operation: 'refund', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
 
+  // --- admin.mjs (2026-10-09 — reversing an approved SR ride payment: debits the driver's fare and
+  // the platform's commission back out, a real wallet-money-moving correction, under the existing
+  // 'refund' operation, ADMIN-only) ---
+  { method: 'PATCH', pathPattern: '^/api/admin/sr/rides/[^/]+/reverse-payment$', operation: 'refund', file: 'server/routes/admin.mjs', rail: 'manual_proof' },
+
   // --- admin.mjs (money-flow decision 2, 2026-10-08 — marking a host withdrawal PAID posts the one
   // DEBIT on the host's wallet for money paid outside the platform; same operation class as
   // releasing a booking payout to the host, ADMIN-only. The 'reject' action moves no money.) ---

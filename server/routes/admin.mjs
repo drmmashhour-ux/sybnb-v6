@@ -1892,13 +1892,33 @@ export async function handleAdmin(req, res, url, context) {
       }),
     ])
 
-    // Reversed platform revenue (ride/booking reversals) netted out per currency, so the KPI shows
-    // revenue actually retained, not gross-of-corrections.
+    // Reversed platform revenue (every revenue stream's reversal), grouped by stream + currency so
+    // BOTH the by-stream and by-currency figures below are shown net of corrections (not gross).
     const platformRevenueReversed = await db().walletEntry.groupBy({
-      by: ['currency'],
-      where: { type: 'DEBIT', referenceType: { in: ['ride_commission_reversal', 'booking_admin_share_reversal'] } },
+      by: ['referenceType', 'currency'],
+      where: {
+        type: 'DEBIT',
+        referenceType: { in: ['ride_commission_reversal', 'booking_admin_share_reversal', 'booking_protection_fee_reversal', 'seller_plan_fee_reversal'] },
+      },
       _sum: { amountMinor: true },
     })
+
+    // Net the gross CREDITs by (stream,currency) against matching reversals (reversal referenceType
+    // is the stream's name + '_reversal'), so a corrected payment is not counted as revenue retained.
+    const reversedByStreamCurrency = new Map()
+    for (const r of platformRevenueReversed) {
+      const stream = r.referenceType.replace(/_reversal$/, '')
+      reversedByStreamCurrency.set(`${stream}|${r.currency}`, r._sum.amountMinor || 0)
+    }
+    const platformRevenueByStream = platformRevenue.map((r) => ({
+      stream: r.referenceType,
+      currency: r.currency,
+      amountMinor: (r._sum.amountMinor || 0) - (reversedByStreamCurrency.get(`${r.referenceType}|${r.currency}`) || 0),
+    }))
+    const platformRevenueByCurrency = platformRevenueByStream.reduce((acc, r) => {
+      acc[r.currency] = (acc[r.currency] || 0) + r.amountMinor
+      return acc
+    }, {})
 
     return json(res, 200, {
       ok: true,
@@ -1915,21 +1935,8 @@ export async function handleAdmin(req, res, url, context) {
         approvedPaymentCount: approvedPaymentVolume._count._all,
         approvedPaymentVolumeMinor: approvedPaymentVolume._sum.amountMinor || 0,
         // Real platform income (the house's cut), by stream and by currency, net of reversals.
-        platformRevenueByStream: platformRevenue.map((r) => ({
-          stream: r.referenceType,
-          currency: r.currency,
-          amountMinor: r._sum.amountMinor || 0,
-        })),
-        platformRevenueByCurrency: (() => {
-          const gross = platformRevenue.reduce((acc, r) => {
-            acc[r.currency] = (acc[r.currency] || 0) + (r._sum.amountMinor || 0)
-            return acc
-          }, {})
-          for (const r of platformRevenueReversed) {
-            gross[r.currency] = (gross[r.currency] || 0) - (r._sum.amountMinor || 0)
-          }
-          return gross
-        })(),
+        platformRevenueByStream,
+        platformRevenueByCurrency,
       },
     })
   }

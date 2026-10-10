@@ -221,7 +221,7 @@ export function AdminMoneyPage({ lang }: Props) {
       {/* (a) Payout requests */}
       <section style={styles.card} aria-labelledby="admin-payout-requests">
         <div style={styles.cardHead}>
-          <h2 id="admin-payout-requests" style={styles.cardTitle}>{pick(lang, 'طلبات سحب المضيفين', 'Host payout requests', 'Demandes de versement des hôtes')}</h2>
+          <h2 id="admin-payout-requests" style={styles.cardTitle}>{pick(lang, 'طلبات السحب', 'Payout requests', 'Demandes de versement')}</h2>
           <div style={styles.filters} role="tablist">
             {requestFilters.map(([value, label]) => (
               <button key={value || 'all'} role="tab" aria-selected={requestFilter === value} style={requestFilter === value ? styles.filterActive : styles.filter} onClick={() => setRequestFilter(value)}>
@@ -240,7 +240,7 @@ export function AdminMoneyPage({ lang }: Props) {
             <article key={request.id} style={styles.row}>
               <div style={styles.rowGrid}>
                 <div style={styles.cell}>
-                  <small style={styles.label}>{pick(lang, 'المضيف', 'Host', 'Hôte')}</small>
+                  <small style={styles.label}>{request.method?.kind === 'driver' ? pick(lang, 'السائق', 'Driver', 'Chauffeur') : pick(lang, 'المضيف', 'Host', 'Hôte')}</small>
                   <strong>{request.host?.displayName || request.host?.id?.slice(0, 8).toUpperCase() || '-'}</strong>
                   {request.host?.email && <small style={styles.muted} dir="ltr">{request.host.email}</small>}
                 </div>
@@ -300,7 +300,7 @@ export function AdminMoneyPage({ lang }: Props) {
                     </>
                   ) : (
                     <label style={styles.field}>
-                      <span>{pick(lang, 'سبب الرفض (مطلوب، يراه المضيف)', 'Rejection reason (required, shown to the host)', 'Motif du refus (obligatoire, visible par l’hôte)')}</span>
+                      <span>{pick(lang, 'سبب الرفض (مطلوب، يراه المستلم)', 'Rejection reason (required, shown to the requester)', 'Motif du refus (obligatoire, visible par le demandeur)')}</span>
                       <textarea style={styles.textarea} value={note} onChange={(event) => setNote(event.target.value)} autoFocus />
                     </label>
                   )}

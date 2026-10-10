@@ -707,6 +707,27 @@ export async function submitGuestIdDocument(file: File) {
   return response.user
 }
 
+// Re-audit fix (2026-10-10): the driver dashboard must submit its ID under the DRIVER session, not
+// the customer/guest one. /api/me/id-document attaches the document to the TOKEN's user, so using the
+// guest token (submitGuestIdDocument) only worked while a guest session for the same account happened
+// to coexist — it failed for an operator-provisioned pure-driver account, for a driver signed out of
+// the customer app, and (worst) could attach the ID to a different account on a shared device. This
+// variant submits under ensurePrototypeDriverSession(), mirroring submitHostIdDocument's host-session
+// pattern, so the ID always lands on the signed-in driver.
+export async function submitDriverIdDocument(file: File) {
+  const session = await ensurePrototypeDriverSession()
+  const fileBase64 = await readFileAsBase64(file)
+  const response = await apiRequest<{
+    ok: true
+    user: { id: string; idDocumentRef: string; idDocumentSubmittedAt: string; idDocumentStatus: string }
+  }>('/api/me/id-document', {
+    method: 'PATCH',
+    token: session.token,
+    body: { fileBase64, mimeType: file.type },
+  })
+  return response.user
+}
+
 export function getStoredGuestSession(): PlatformAuthSession | null {
   try {
     const raw = authStorage.getItem(GUEST_SESSION_KEY)
@@ -3252,6 +3273,10 @@ export type HostPayoutMethod = {
   bankName?: string
   accountNumber?: string
   officeCity?: string
+  // Re-audit fix (2026-10-10): a driver withdrawal reuses the same payout_requests table, tagged
+  // kind:'driver' in its method JSON, so the admin money desk can label the payee a Driver (not a
+  // Host). Absent / 'host' for host withdrawals.
+  kind?: 'driver' | 'host'
 }
 
 export type PayoutRequestStatus = 'REQUESTED' | 'PAID' | 'REJECTED'

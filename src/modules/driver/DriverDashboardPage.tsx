@@ -16,7 +16,7 @@ import {
   saveDriverVehicle,
   sendPrototypeSrRideMessage,
   submitDriverPhoto,
-  submitGuestIdDocument,
+  submitDriverIdDocument,
   updatePrototypeDriverAccessibility,
   updatePrototypeDriverRideStatus,
   verifySrPickup,
@@ -455,6 +455,7 @@ export function DriverDashboardPage({ lang }: Props) {
   // #190 fix: government-ID upload for self-registered drivers (every ride gate needs idDocumentStatus=APPROVED).
   const [idFile, setIdFile] = useState<File | null>(null)
   const [idStatus, setIdStatus] = useState<'idle' | 'uploading' | 'submitted' | 'error'>('idle')
+  const [idError, setIdError] = useState('')
   const [vehicleMake, setVehicleMake] = useState('')
   const [vehicleModel, setVehicleModel] = useState('')
   const [vehiclePlate, setVehiclePlate] = useState('')
@@ -476,7 +477,12 @@ export function DriverDashboardPage({ lang }: Props) {
     void loadPendingRides()
     void loadIdentityStatus()
     void loadPayouts()
-    const interval = window.setInterval(() => void loadPendingRides(), 6000)
+    const interval = window.setInterval(() => {
+      void loadPendingRides()
+      // Re-read identity status on the same cadence so an operator's mid-session ID approval reflects
+      // without the driver reloading (prior audit P2: status only refreshed on mount/after submit).
+      void loadIdentityStatus()
+    }, 6000)
     return () => window.clearInterval(interval)
   }, [])
 
@@ -516,12 +522,14 @@ export function DriverDashboardPage({ lang }: Props) {
   async function submitIdDocument() {
     if (!idFile) return
     setIdStatus('uploading')
+    setIdError('')
     try {
-      await submitGuestIdDocument(idFile)
+      await submitDriverIdDocument(idFile)
       setIdStatus('submitted')
       await loadIdentityStatus()
-    } catch {
+    } catch (error) {
       setIdStatus('error')
+      setIdError(error instanceof Error ? error.message : t.photoError)
     }
   }
 
@@ -948,7 +956,7 @@ export function DriverDashboardPage({ lang }: Props) {
                 {idFile ? idFile.name : t.uploadId}
               </label>
               {idStatus === 'submitted' && <p style={styles.photoNote}>✓ {t.idSubmitted}</p>}
-              {idStatus === 'error' && <p style={styles.photoNote}>{t.photoError}</p>}
+              {idStatus === 'error' && <p style={styles.photoNote}>{idError || t.photoError}</p>}
               <button
                 style={styles.photoSubmitButton}
                 disabled={!idFile || idStatus === 'uploading'}

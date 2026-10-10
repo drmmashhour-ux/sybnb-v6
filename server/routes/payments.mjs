@@ -183,6 +183,90 @@ export async function handlePayments(req, res, url, context) {
     const body = await readJson(req)
     const bookingId = String(body.bookingId || '')
     const origin = String(body.origin || '').replace(/\/$/, '')
+
+    // SR ride card payment (Stripe-for-SR Option A). A ride-scoped session charges the ride's own
+    // locked fare. SR fares are already in USD minor units, so when STRIPE_CURRENCY is usd they map
+    // 1:1 to the Stripe charge (the SYP->USD helper is for SYP-denominated bookings only).
+    const rideId = String(body.rideId || '')
+    if (rideId) {
+      if (!origin) {
+        const error = new Error('origin is required.')
+        error.statusCode = 400
+        error.code = 'STRIPE_SESSION_INPUT_INVALID'
+        error.expose = true
+        throw error
+      }
+      const ride = await db().rideRequest.findFirst({
+        where: {
+          id: rideId,
+          riderId: context.user.id,
+          OR: [{ status: 'COMPLETED' }, { status: 'CANCELLED', cancellationFeeMinor: { not: null } }],
+        },
+      })
+      if (!ride) {
+        const error = new Error('This ride is not available for payment.')
+        error.statusCode = 403
+        error.code = 'PAYMENT_RIDE_FORBIDDEN'
+        error.expose = true
+        throw error
+      }
+      if (ride.metadata && ride.metadata.prepaid) {
+        const error = new Error('This ride was prepaid from your wallet; no card payment is needed.')
+        error.statusCode = 409
+        error.code = 'RIDE_ALREADY_PREPAID'
+        error.expose = true
+        throw error
+      }
+      const liveProof = await db().paymentProof.findFirst({
+        where: { rideId: ride.id, status: { in: ['PENDING_ADMIN_REVIEW', 'APPROVED'] }, NOT: { provider: { startsWith: 'tip' } } },
+      })
+      if (liveProof) {
+        const error = new Error('Payment was already submitted for this ride.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_RIDE_ALREADY_SUBMITTED'
+        error.expose = true
+        throw error
+      }
+
+      authorizePaymentOperation({
+        operation: 'create',
+        rail: 'stripe_checkout',
+        provider: 'stripe',
+        division: 'SR',
+        country: activePolicyCountryKey(),
+        environment: policyEnvironment(),
+        actor: { roles: context.roles },
+      })
+
+      const amountDue = (ride.status === 'CANCELLED' ? ride.cancellationFeeMinor : ride.fareMinor) || 0
+      const chargeCurrency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
+      const unitAmount =
+        ride.currency === 'USD' && chargeCurrency === 'usd'
+          ? Math.max(50, Math.round(amountDue))
+          : stripeChargeAmount(amountDue).unitAmount
+
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price_data: { currency: chargeCurrency, unit_amount: unitAmount, product_data: { name: 'SYBNB SR ride' } },
+            quantity: 1,
+          },
+        ],
+        metadata: {
+          rideId: ride.id,
+          guestId: context.user.id,
+          sypTotalMinor: String(amountDue),
+          currency: ride.currency,
+          subjectType: 'SR_RIDE',
+        },
+        success_url: `${origin}/?session_id={CHECKOUT_SESSION_ID}#/sr`,
+        cancel_url: `${origin}/#/sr`,
+      })
+      return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
+    }
+
     if (!bookingId || !origin) {
       const error = new Error('bookingId and origin are required.')
       error.statusCode = 400
@@ -392,7 +476,9 @@ export async function handlePayments(req, res, url, context) {
     // doesn't otherwise track (its shape isn't a Checkout Session at all). Stored unconditionally
     // below, before any interpretation, so an unresolvable/malformed/irrelevant event still leaves a
     // durable, authenticated trace.
-    const providerReference = String(obj.metadata?.bookingId || '')
+    // A ride-scoped Checkout session carries metadata.rideId and no bookingId (Stripe-for-SR).
+    const isRideEvent = !obj.metadata?.bookingId && Boolean(obj.metadata?.rideId)
+    const providerReference = String(obj.metadata?.bookingId || obj.metadata?.rideId || '')
 
     // Durable intake -- this rail's own PaymentEvent row (previously nonexistent entirely; this
     // table could not hold a stripe_checkout event at all before migration 016). Race-safe under
@@ -403,7 +489,7 @@ export async function handlePayments(req, res, url, context) {
       provider: 'stripe',
       providerEndpointKey: 'stripe-checkout',
       environment: policyEnvironment(),
-      subjectType: 'BOOKING',
+      subjectType: isRideEvent ? 'SR_RIDE' : 'BOOKING',
       providerReference,
       providerEventId: event.id,
       type: event.type,
@@ -443,23 +529,39 @@ export async function handlePayments(req, res, url, context) {
     }
 
     const session = obj
-    // Resolve via the DURABLY STORED reference, not a fresh payload read, so a later redelivery or
-    // reconciliation pass always resolves consistently against what was actually authenticated.
-    const bookingId = eventRow.providerReference || null
-    const bookingRecord = bookingId
-      ? await db().booking.findUnique({ where: { id: bookingId }, select: { id: true, listing: { select: { division: true } } } })
-      : null
-    if (!bookingRecord) {
-      await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: bookingId ? 'BOOKING_NOT_FOUND' : 'BOOKING_REFERENCE_MISSING' } })
-      return json(res, 200, { ok: true, quarantined: true, received: true })
+    // Resolve via the DURABLY STORED reference and subjectType, not a fresh payload read, so a later
+    // redelivery or reconciliation pass always resolves consistently against what was authenticated.
+    const subjectRef = eventRow.providerReference || null
+    let division = 'PLATFORM'
+    if (eventRow.subjectType === 'SR_RIDE') {
+      // Ride card settlement: the subject is a ride, not a booking, so there is no booking row to
+      // bind or listing division to read -- the ride is settled by finalizeStripeSession's ride
+      // branch. We only confirm the ride exists before handing off to the apply pipeline.
+      const rideRecord = subjectRef
+        ? await db().rideRequest.findUnique({ where: { id: subjectRef }, select: { id: true } })
+        : null
+      if (!rideRecord) {
+        await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: subjectRef ? 'RIDE_NOT_FOUND' : 'RIDE_REFERENCE_MISSING' } })
+        return json(res, 200, { ok: true, quarantined: true, received: true })
+      }
+      division = 'SR'
+    } else {
+      const bookingId = subjectRef
+      const bookingRecord = bookingId
+        ? await db().booking.findUnique({ where: { id: bookingId }, select: { id: true, listing: { select: { division: true } } } })
+        : null
+      if (!bookingRecord) {
+        await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: bookingId ? 'BOOKING_NOT_FOUND' : 'BOOKING_REFERENCE_MISSING' } })
+        return json(res, 200, { ok: true, quarantined: true, received: true })
+      }
+      if (eventRow.bookingId !== bookingRecord.id) {
+        eventRow = await db().paymentEvent.update({
+          where: { id: eventRow.id },
+          data: { bookingId: bookingRecord.id, originalBookingId: bookingRecord.id },
+        })
+      }
+      division = bookingRecord.listing?.division || 'PLATFORM'
     }
-    if (eventRow.bookingId !== bookingRecord.id) {
-      eventRow = await db().paymentEvent.update({
-        where: { id: eventRow.id },
-        data: { bookingId: bookingRecord.id, originalBookingId: bookingRecord.id },
-      })
-    }
-    const division = bookingRecord.listing?.division || 'PLATFORM'
 
     try {
       authorizePaymentOperation({

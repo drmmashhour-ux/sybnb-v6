@@ -73,6 +73,7 @@ export type ListingAiReview = {
 export type PlatformPaymentProof = {
   id: string
   bookingId: string | null
+  rideId?: string | null
   userId: string
   provider: string
   status: string
@@ -1598,6 +1599,16 @@ export async function createStripeCheckoutSession(bookingId: string) {
     method: 'POST',
     token: session.token,
     body: { bookingId, origin: window.location.origin },
+  })
+  return response
+}
+
+export async function createStripeRideCheckoutSession(rideId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; url: string; sessionId: string }>('/api/payments/stripe/create-checkout-session', {
+    method: 'POST',
+    token: session.token,
+    body: { rideId, origin: window.location.origin },
   })
   return response
 }

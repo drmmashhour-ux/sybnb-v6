@@ -49,7 +49,8 @@ export async function finalizeStripeSession(session, { verifyOwnership, beforeEf
     if (beforeEffects) await beforeEffects(tx)
 
     const bookingId = session.metadata?.bookingId
-    if (!bookingId || session.payment_status !== 'paid') {
+    const rideId = session.metadata?.rideId
+    if ((!bookingId && !rideId) || session.payment_status !== 'paid') {
       if (markSettled) await markSettled(tx, { applied: false })
       return null
     }
@@ -60,6 +61,58 @@ export async function finalizeStripeSession(session, { verifyOwnership, beforeEf
     if (existingProof) {
       if (markSettled) await markSettled(tx, { applied: true })
       return existingProof
+    }
+
+    // SR ride card settlement (Stripe-for-SR Option A). A ride-scoped Checkout session carries a
+    // rideId (and no bookingId). The ledger's ride branch already splits a 'stripe' proof
+    // (driver net + house commission), identical to the local-wallet rail -- so settling a ride is
+    // just: create the card proof and auto-approve it, exactly like the booking path below.
+    if (rideId && !bookingId) {
+      const ride = await tx.rideRequest.findUnique({
+        where: { id: rideId },
+        select: { id: true, riderId: true, status: true, fareMinor: true, cancellationFeeMinor: true, currency: true, metadata: true },
+      })
+      const amountDue = ride ? (ride.status === 'CANCELLED' ? ride.cancellationFeeMinor : ride.fareMinor) || 0 : 0
+      const payable =
+        Boolean(ride) && amountDue > 0 && !ride.metadata?.prepaid && (ride.status === 'COMPLETED' || ride.status === 'CANCELLED')
+      // A ride that already has an APPROVED fare proof (e.g. the rider also paid cash/wallet) must
+      // not be auto-credited a second time: the card money is still captured, so record the proof
+      // and leave it PENDING for an operator to refund/reconcile, never auto-approve.
+      const conflicting = ride
+        ? await tx.paymentProof.findFirst({
+            where: { rideId: ride.id, status: 'APPROVED', NOT: { provider: { startsWith: 'tip' } } },
+          })
+        : null
+      const createdRide = await tx.paymentProof.create({
+        data: {
+          rideId: ride?.id || undefined,
+          userId: ride?.riderId || session.metadata?.guestId,
+          provider: 'stripe',
+          status: 'PENDING_ADMIN_REVIEW',
+          amountMinor: Number(amountDue || session.metadata?.sypTotalMinor || 0),
+          currency: ride?.currency || String(session.metadata?.currency || 'USD').toUpperCase(),
+          providerRef: session.id,
+          proofAssetUrl: session.payment_intent
+            ? `stripe://payment_intents/${typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id}`
+            : undefined,
+        },
+      })
+      if (!payable || conflicting) {
+        notifyAdmin(
+          'admin_payment_proof',
+          { amount: formatMoney(createdRide.amountMinor, createdRide.currency), rideId: ride?.id || rideId },
+          `admin_payment_closed_ride:${createdRide.id}`,
+        )
+        if (markSettled) await markSettled(tx, { applied: true })
+        return createdRide
+      }
+      const rideProof = await approvePaymentProof(tx, {
+        proofId: createdRide.id,
+        actorUserId: await firstAdminId(tx),
+        note: 'Auto-approved: Stripe confirmed the ride card charge was captured.',
+      })
+      if (markSettled) await markSettled(tx, { applied: true })
+      return rideProof
     }
 
     const booking = await tx.booking.findUnique({ where: { id: bookingId } })

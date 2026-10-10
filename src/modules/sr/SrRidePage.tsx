@@ -4,8 +4,10 @@ import { srRideFilterGroupsFromConfig, type VisualFilterSelection } from '../../
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   cancelPrototypeSrRide,
+  confirmStripePayment,
   createPrototypeSrRide,
   createSavedPlace,
+  createStripeRideCheckoutSession,
   deleteSavedPlace,
   enablePushNotifications,
   fetchBusinessMembership,
@@ -13,6 +15,7 @@ import {
   fetchPrototypeSrRideThread,
   fetchSavedPlaces,
   fetchSrQuote,
+  fetchStripePaymentStatus,
   resolveApiUrl,
   sendPrototypeSrRideMessage,
   sharePrototypeSrRide,
@@ -83,6 +86,9 @@ const copy = {
     payCopy: 'ادفع الأجرة للسائق مباشرة (نقداً أو تحويل)، ثم أدخل رقم مرجع العملية هنا ليتحقق منها فريق SYBNB.',
     payReferencePlaceholder: 'رقم مرجع العملية',
     payCashButton: 'دفعت نقداً للسائق',
+    payCardButton: 'الدفع بالبطاقة',
+    payCardRedirecting: 'جارٍ التحويل إلى الدفع…',
+    payCardConfirming: 'جارٍ تأكيد الدفع…',
     payCashHint: 'أو ادفع نقداً مباشرةً للسائق، ثم أكّد هنا. سيتحقق فريق SYBNB.',
     payOr: 'أو',
     paySubmit: 'إرسال إثبات الدفع',
@@ -186,6 +192,9 @@ const copy = {
     payCopy: "Pay the fare directly to the driver (cash or transfer), then enter the transaction reference here so SYBNB can verify it.",
     payReferencePlaceholder: 'Transaction reference',
     payCashButton: 'I paid the driver in cash',
+    payCardButton: 'Pay by card',
+    payCardRedirecting: 'Redirecting to payment…',
+    payCardConfirming: 'Confirming payment…',
     payCashHint: 'Or pay the driver in cash directly, then confirm here. SYBNB will verify it.',
     payOr: 'or',
     paySubmit: 'Submit payment proof',
@@ -289,6 +298,9 @@ const copy = {
     payCopy: 'Payez le tarif directement au chauffeur (en espèces ou par virement), puis saisissez ici la référence de la transaction afin que SYBNB puisse la vérifier.',
     payReferencePlaceholder: 'Référence de la transaction',
     payCashButton: 'J’ai payé le chauffeur en espèces',
+    payCardButton: 'Payer par carte',
+    payCardRedirecting: 'Redirection vers le paiement…',
+    payCardConfirming: 'Confirmation du paiement…',
     payCashHint: 'Ou payez le chauffeur en espèces directement, puis confirmez ici. SYBNB le vérifiera.',
     payOr: 'ou',
     paySubmit: 'Envoyer la preuve de paiement',
@@ -411,6 +423,8 @@ export function SrRidePage({ lang }: Props) {
   const [reviewStatus, setReviewStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [payProviderRef, setPayProviderRef] = useState('')
   const [payStatus, setPayStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
+  const [stripeConfigured, setStripeConfigured] = useState(false)
+  const [cardStatus, setCardStatus] = useState<'idle' | 'redirecting' | 'confirming' | 'error'>('idle')
   const [tipStatus, setTipStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
   const [tipAmountMinor, setTipAmountMinor] = useState(0)
   const [tipCustom, setTipCustom] = useState('')
@@ -450,6 +464,41 @@ export function SrRidePage({ lang }: Props) {
   // dropoff coords coming back null (the gazetteer geocoder found no match for either) means the
   // whole distance/price is a blind default, not a real estimate.
   const addressUnrecognized = Boolean(quote?.estimated) && !quote?.pickupCoords && !quote?.dropoffCoords
+
+  // Stripe-for-SR: learn whether the card rail is configured (controls the "Pay by card" button),
+  // and if the rider has just returned from Stripe Checkout (?session_id=... on the #/sr route),
+  // confirm the charge and refresh the ride so its payment state flips to confirmed.
+  useEffect(() => {
+    let cancelled = false
+    fetchStripePaymentStatus()
+      .then((s) => {
+        if (!cancelled) setStripeConfigured(Boolean(s.configured))
+      })
+      .catch(() => {})
+    const params = new URLSearchParams(window.location.search)
+    const sessionId = params.get('session_id')
+    if (sessionId) {
+      setCardStatus('confirming')
+      confirmStripePayment(sessionId)
+        .then(async (proof) => {
+          if (cancelled) return
+          setCardStatus('idle')
+          // Strip the query param so a refresh doesn't re-confirm.
+          const clean = window.location.pathname + window.location.hash
+          window.history.replaceState(null, '', clean)
+          if (proof?.rideId) setRide(await fetchPrototypeSrRide(proof.rideId))
+        })
+        .catch((error) => {
+          if (cancelled) return
+          setCardStatus('error')
+          setMessage(error instanceof Error ? error.message : t.error)
+        })
+    }
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (ride) return
@@ -777,6 +826,19 @@ export function SrRidePage({ lang }: Props) {
     }
   }
 
+  // Stripe-for-SR Option A: redirect the rider to Stripe's hosted Checkout for the locked fare.
+  async function payByCard() {
+    if (!ride) return
+    setCardStatus('redirecting')
+    try {
+      const { url } = await createStripeRideCheckoutSession(ride.id)
+      window.location.assign(url)
+    } catch (error) {
+      setCardStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
   async function submitTip() {
     if (!ride || tipAmountMinor <= 0 || !tipRef.trim()) return
     setTipStatus('saving')
@@ -828,6 +890,18 @@ export function SrRidePage({ lang }: Props) {
         <button disabled={payStatus === 'saving'} style={styles.secondaryButton} onClick={() => void submitCashPayment()}>
           {payStatus === 'saving' ? t.paySubmitting : t.payCashButton}
         </button>
+        {stripeConfigured && (
+          <>
+            <div style={styles.payCashDivider}>{t.payOr}</div>
+            <button
+              disabled={cardStatus === 'redirecting' || cardStatus === 'confirming'}
+              style={styles.primaryButton}
+              onClick={() => void payByCard()}
+            >
+              💳 {cardStatus === 'redirecting' ? t.payCardRedirecting : cardStatus === 'confirming' ? t.payCardConfirming : t.payCardButton}
+            </button>
+          </>
+        )}
       </div>
     )
   }

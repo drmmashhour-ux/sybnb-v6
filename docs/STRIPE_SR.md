@@ -1,6 +1,6 @@
 # Stripe card charging for SR rides
 
-Status: **design + decision needed** (no money code shipped yet). Author: build session 2026-10-10.
+Status: **Option A shipped** (gated behind Stripe keys; nothing charges until the owner sets keys + deploys). Author: build session 2026-10-10.
 
 ## What already exists (and works)
 
@@ -55,9 +55,9 @@ STRIPE_CURRENCY=usd                  # SR fares are USD; keep usd
 ```
 
 ## Build checklist once the model is chosen
-- [ ] A: ride-aware `create-checkout-session` (accepts `rideId`, locked `fareMinor`, `subjectType:'SR_RIDE'`)
-- [ ] A: ride settlement in the webhook (ride-shaped equivalent of `finalizeStripeSession` -> card proof -> `approvePaymentProof`)
-- [ ] A: rider "Pay by card" button in `SrRidePage` payment section
+- [x] A: ride-aware `create-checkout-session` (accepts `rideId`, locked `fareMinor`, `subjectType:'SR_RIDE'`)
+- [x] A: ride settlement in the webhook (+ confirm-on-return path) (ride-shaped equivalent of `finalizeStripeSession` -> card proof -> `approvePaymentProof`)
+- [x] A: rider "Pay by card" button in `SrRidePage` payment section
 - [ ] B: `SetupIntent` + Customer save-card flow; stored `stripeCustomerId` on the user
 - [ ] B: off-session `PaymentIntent` at `COMPLETED`; 3DS/decline fallback to a Checkout/confirm link
 - [ ] Tips over card: same rails, routed 100% to driver (tip ledger branch already exists)

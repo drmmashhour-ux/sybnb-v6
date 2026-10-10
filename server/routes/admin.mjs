@@ -1324,11 +1324,23 @@ export async function handleAdmin(req, res, url, context) {
     const body = await readJson(req)
     const reason = body.reason ? String(body.reason).slice(0, 500) : 'Ride payment reversed by admin.'
 
-    const ride = await db().rideRequest.findUnique({ where: { id: rideReverseMatch[1] }, select: { id: true } })
+    const ride = await db().rideRequest.findUnique({ where: { id: rideReverseMatch[1] }, select: { id: true, status: true } })
     if (!ride) {
       const error = new Error('Ride not found.')
       error.statusCode = 404
       error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // #201 (2026-10-10): reverse-payment corrects a wrongly-approved / duplicated / fraudulent fare on
+    // a ride where the fare was actually settled — i.e. COMPLETED (or DISPUTED, pending resolution). A
+    // CANCELLED ride is NOT reversible here: its money was already handled by the cancellation flow
+    // (rider prepayment refunded and/or a cancellation fee collected), so reversing it would double-
+    // refund the rider. Operators settle a cancellation through the cancellation path, not this one.
+    if (!['COMPLETED', 'DISPUTED'].includes(ride.status)) {
+      const error = new Error('Only a completed or disputed ride can have its payment reversed. A cancelled ride is settled through the cancellation flow.')
+      error.statusCode = 409
+      error.code = 'RIDE_NOT_REVERSIBLE'
       error.expose = true
       throw error
     }

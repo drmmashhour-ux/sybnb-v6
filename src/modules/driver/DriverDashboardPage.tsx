@@ -16,6 +16,7 @@ import {
   saveDriverVehicle,
   sendPrototypeSrRideMessage,
   submitDriverPhoto,
+  submitGuestIdDocument,
   updatePrototypeDriverAccessibility,
   updatePrototypeDriverRideStatus,
   verifySrPickup,
@@ -132,6 +133,10 @@ const copy = {
     identityNotVerified: 'غير موثق',
     photoTitle: 'صورتك الشخصية',
     photoCopy: 'ارفع صورة واضحة لوجهك ليتعرف عليك الراكب قبل الرحلة.',
+    idDocTitle: 'وثيقة الهوية',
+    idDocCopy: 'ارفع صورة واضحة لهويتك الحكومية (بطاقة أو جواز). مطلوبة قبل قبول الرحلات.',
+    uploadId: 'رفع الهوية',
+    idSubmitted: 'تم إرسال الهوية، بانتظار المراجعة.',
     uploadPhoto: 'رفع صورة',
     uploading: 'جار الرفع...',
     photoSubmitted: 'تم حفظ صورتك.',
@@ -259,6 +264,10 @@ const copy = {
     identityNotVerified: 'Not verified',
     photoTitle: 'Your photo',
     photoCopy: 'Upload a clear photo of your face so riders can recognize you before the ride.',
+    idDocTitle: 'ID document',
+    idDocCopy: 'Upload a clear photo of your government ID (card or passport). Required before you can accept rides.',
+    uploadId: 'Upload ID',
+    idSubmitted: 'ID submitted, awaiting review.',
     uploadPhoto: 'Upload photo',
     uploading: 'Uploading...',
     photoSubmitted: 'Your photo was saved.',
@@ -386,6 +395,10 @@ const copy = {
     identityNotVerified: 'Non vérifiée',
     photoTitle: 'Votre photo',
     photoCopy: 'Téléversez une photo nette de votre visage pour que les passagers vous reconnaissent avant la course.',
+    idDocTitle: 'Pièce d’identité',
+    idDocCopy: 'Téléversez une photo nette de votre pièce d’identité officielle (carte ou passeport). Obligatoire avant d’accepter des courses.',
+    uploadId: 'Téléverser la pièce',
+    idSubmitted: 'Pièce envoyée, en attente de vérification.',
     uploadPhoto: 'Téléverser une photo',
     uploading: 'Téléversement...',
     photoSubmitted: 'Votre photo a été enregistrée.',
@@ -439,6 +452,9 @@ export function DriverDashboardPage({ lang }: Props) {
   const [idDocumentStatus, setIdDocumentStatus] = useState<'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null>(null)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoStatus, setPhotoStatus] = useState<'idle' | 'uploading' | 'submitted' | 'error'>('idle')
+  // #190 fix: government-ID upload for self-registered drivers (every ride gate needs idDocumentStatus=APPROVED).
+  const [idFile, setIdFile] = useState<File | null>(null)
+  const [idStatus, setIdStatus] = useState<'idle' | 'uploading' | 'submitted' | 'error'>('idle')
   const [vehicleMake, setVehicleMake] = useState('')
   const [vehicleModel, setVehicleModel] = useState('')
   const [vehiclePlate, setVehiclePlate] = useState('')
@@ -494,6 +510,18 @@ export function DriverDashboardPage({ lang }: Props) {
       setIdDocumentStatus(await fetchDriverIdentityStatus())
     } catch {
       setIdDocumentStatus(null)
+    }
+  }
+
+  async function submitIdDocument() {
+    if (!idFile) return
+    setIdStatus('uploading')
+    try {
+      await submitGuestIdDocument(idFile)
+      setIdStatus('submitted')
+      await loadIdentityStatus()
+    } catch {
+      setIdStatus('error')
     }
   }
 
@@ -906,6 +934,30 @@ export function DriverDashboardPage({ lang }: Props) {
             }
             dir={isAr ? 'rtl' : 'ltr'}
           />
+          {idDocumentStatus !== 'APPROVED' && (
+            <div style={styles.photoUpload}>
+              <strong>{t.idDocTitle}</strong>
+              <span>{t.idDocCopy}</span>
+              <label style={styles.photoInputLabel}>
+                <input
+                  accept="image/png,image/jpeg,image/webp,application/pdf"
+                  style={{ display: 'none' }}
+                  type="file"
+                  onChange={(event) => setIdFile(event.target.files?.[0] || null)}
+                />
+                {idFile ? idFile.name : t.uploadId}
+              </label>
+              {idStatus === 'submitted' && <p style={styles.photoNote}>✓ {t.idSubmitted}</p>}
+              {idStatus === 'error' && <p style={styles.photoNote}>{t.photoError}</p>}
+              <button
+                style={styles.photoSubmitButton}
+                disabled={!idFile || idStatus === 'uploading'}
+                onClick={() => void submitIdDocument()}
+              >
+                {idStatus === 'uploading' ? t.uploading : t.uploadId}
+              </button>
+            </div>
+          )}
           <label style={styles.locationRow}>
             <input
               type="checkbox"
@@ -1028,7 +1080,7 @@ export function DriverDashboardPage({ lang }: Props) {
             {vehicleStatus === 'error' && <p style={styles.photoNote}>{vehicleErrMsg || t.vehicleErr}</p>}
             <button
               style={styles.photoSubmitButton}
-              disabled={vehicleStatus === 'saving' || !vehicleMake.trim() || !vehicleModel.trim() || !vehiclePlate.trim()}
+              disabled={vehicleStatus === 'saving' || !vehicleMake.trim() || !vehicleModel.trim() || !vehiclePlate.trim() || !vehicleCategory}
               onClick={() => void saveVehicle()}
             >
               {vehicleStatus === 'saving' ? t.uploading : t.vehicleSave}

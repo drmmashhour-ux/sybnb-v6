@@ -375,6 +375,32 @@ async function runBookingExpirySweep() {
 const bookingExpiryTimer = setInterval(runBookingExpirySweep, BOOKING_EXPIRY_SWEEP_INTERVAL_MS)
 bookingExpiryTimer.unref()
 
+// #204 (2026-10-10): in-process dispatch heartbeat. /internal/tick above still exists for an external
+// cron, but we ALSO run the same work on a timer so offer-escalation, scheduled-ride activation and
+// anomaly scans happen even when nothing is POSTing the tick (no external cron, thin driver polling).
+// Shares tickLastRunAt + TICK_MIN_INTERVAL_MS with the endpoint so the timer and a cron never double-
+// run the work. Best-effort and never throws into the process. Interval is env-tunable (>=15s, def 60s).
+// Note: on a spun-down free instance this timer is paused until the next request wakes the dyno — an
+// external uptime pinger hitting /internal/tick keeps it warm AND drives the tick as a backstop.
+const DISPATCH_TICK_INTERVAL_MS = (() => {
+  const raw = Number(process.env.SR_DISPATCH_TICK_SECONDS)
+  return (Number.isFinite(raw) && raw >= 15 ? raw : 60) * 1000
+})()
+async function runDispatchHeartbeat() {
+  const now = Date.now()
+  if (now - tickLastRunAt < TICK_MIN_INTERVAL_MS) return
+  tickLastRunAt = now
+  try {
+    await activateScheduledRides()
+    await runDispatchSweep()
+    await detectRideAnomalies().catch(() => ({ scanned: 0, flagged: 0 }))
+  } catch (error) {
+    log.error('dispatch_heartbeat_failed', { error: error instanceof Error ? error.message : String(error) })
+  }
+}
+const dispatchTickTimer = setInterval(runDispatchHeartbeat, DISPATCH_TICK_INTERVAL_MS)
+dispatchTickTimer.unref()
+
 let shuttingDown = false
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, async () => {

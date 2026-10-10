@@ -794,7 +794,7 @@ export function SrRidePage({ lang }: Props) {
   // the real fee (if any) is computed and stored server-side at the moment of cancellation. Keep
   // this rate in sync with RIDE_CANCELLATION_FEE_PERCENT in server/routes/sr-rides.mjs.
   const driverAlreadyCommitted = Boolean(ride && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status))
-  const estimatedCancellationFeeMinor = driverAlreadyCommitted && ride?.fareMinor ? Math.round((ride.fareMinor * 20) / 100) : 0
+  const estimatedCancellationFeeMinor = driverAlreadyCommitted && ride?.fareMinor ? Math.round((ride.fareMinor * 15) / 100) : 0
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>

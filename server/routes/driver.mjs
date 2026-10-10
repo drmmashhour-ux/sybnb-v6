@@ -203,19 +203,24 @@ export async function handleDriver(req, res, url, context) {
         error.expose = true
         throw error
       }
-      // Optional self-declared vehicle category (tier-to-vehicle enforcement). When present it must be
-      // one of the five enum values; setting/changing it is allowed and leaves the vehicleStatus
-      // review behavior untouched (make/model/plate changes still re-open review as before).
-      let vehicleCategory
-      if (body.vehicleCategory !== undefined && body.vehicleCategory !== null && body.vehicleCategory !== '') {
-        vehicleCategory = String(body.vehicleCategory)
-        if (!VEHICLE_CATEGORY_VALUES.includes(vehicleCategory)) {
-          const error = new Error('vehicleCategory must be one of BIKE, ECONOMY, COMFORT, SUV, VAN.')
-          error.statusCode = 400
-          error.code = 'VEHICLE_CATEGORY_INVALID'
-          error.expose = true
-          throw error
-        }
+      // #202 (2026-10-10): vehicle category is REQUIRED. Without it a vehicle can be "approved" yet is
+      // silently undispatchable — auto-dispatch requires an exact category match and a manual claim
+      // 403s on CATEGORY_REQUIRED — so a driver would finish onboarding, go online, and get zero rides
+      // with no visible reason. Requiring it at save time guarantees every registered vehicle has a tier.
+      const vehicleCategory = String(body.vehicleCategory || '').trim()
+      if (!vehicleCategory) {
+        const error = new Error('Please choose your vehicle category.')
+        error.statusCode = 400
+        error.code = 'VEHICLE_CATEGORY_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      if (!VEHICLE_CATEGORY_VALUES.includes(vehicleCategory)) {
+        const error = new Error('vehicleCategory must be one of BIKE, ECONOMY, COMFORT, SUV, VAN.')
+        error.statusCode = 400
+        error.code = 'VEHICLE_CATEGORY_INVALID'
+        error.expose = true
+        throw error
       }
       // Safety-grade vehicle profile: build year, color and registration expiry. The driver may NOT
       // set inspectionStatus / inspectionExpiresAt here -- those are admin-only (set via the admin

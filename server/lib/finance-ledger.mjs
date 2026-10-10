@@ -708,6 +708,18 @@ export async function reverseRidePayment(tx, { rideId, reason = 'Ride payment re
     },
     include: { wallet: true },
   })
+  // #201 (2026-10-10) double-refund guard: if the cancellation flow already returned the rider's
+  // prepayment (a `ride_prepayment_refund` entry exists), do NOT credit the prepayment back again
+  // here — that would refund the rider twice (money from nothing). We only reverse a prepayment that
+  // was actually settled out to the driver/platform (a COMPLETED prepaid ride), i.e. when no refund
+  // exists. The cash commission debt (ride_commission) is still reversed in all cases.
+  const priorPrepaymentRefund = await tx.walletEntry.findFirst({
+    where: { referenceId: rideId, referenceType: 'ride_prepayment_refund' },
+    select: { id: true },
+  })
+  const effectiveDebits = priorPrepaymentRefund
+    ? debits.filter((debit) => debit.referenceType !== 'ride_prepayment')
+    : debits
   let reversedMinor = 0
   const reversed = []
   for (const credit of credits) {
@@ -731,7 +743,7 @@ export async function reverseRidePayment(tx, { rideId, reason = 'Ride payment re
     reversedMinor += credit.amountMinor
     reversed.push({ referenceType: credit.referenceType, amountMinor: credit.amountMinor, userId: recipientUserId, direction: 'debit' })
   }
-  for (const debit of debits) {
+  for (const debit of effectiveDebits) {
     const partyUserId = debit.wallet?.userId
     if (!partyUserId) continue
     await recordWalletEntry(tx, {

@@ -8,6 +8,7 @@ import { bookingPolicySettings, defaultCurrency } from '../lib/country.mjs'
 import { loyaltySummary, redeemPoints } from '../lib/loyalty.mjs'
 // SEC-002R round 3, item 1: the self-service half of finding G1 -- see the id-document handler below.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
+import { revokeUserAccess, REVOCATION_REASONS } from '../lib/session-store.mjs'
 
 export async function handleMe(req, res, url, context) {
   // The signed-in account with its LIVE roles (getAuthContext reads user_roles on every request).
@@ -16,7 +17,54 @@ export async function handleMe(req, res, url, context) {
   // stale, so the app calls this on load and when the account menu opens to refresh it. Cheap:
   // no queries beyond the authentication lookup itself.
   if (url.pathname === '/api/me') {
-    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    // Self-service account deletion (App Store / Google Play requirement). Soft-delete: it strips the
+    // account's identifying data from the active record and ends ALL access, while leaving
+    // transactional rows (bookings/rides/payments/wallet, which reference the user by id only) intact
+    // for legal, financial and safety retention. Idempotent — deleting an already-deleted account is a
+    // clean no-op success. Commit-boundary re-authorized like the other self-service mutations here.
+    if (req.method === 'DELETE') {
+      requireAuth(context)
+      const existing = await db().user.findUnique({
+        where: { id: context.user.id },
+        select: { id: true, status: true, idDocumentRef: true },
+      })
+      if (existing && existing.status !== 'DELETED') {
+        await db().$transaction(async (tx) => {
+          await reauthorizeAtCommit(tx, context, { action: 'SELF_ACCOUNT_DELETED' })
+          await tx.user.update({
+            where: { id: context.user.id },
+            data: {
+              status: 'DELETED',
+              email: null,
+              phoneHash: null,
+              displayName: 'Deleted account',
+              idDocumentRef: null,
+              idDocumentMimeType: null,
+              idDocumentStatus: null,
+              avatarRef: null,
+              avatarMimeType: null,
+            },
+          })
+          await revokeUserAccess(context.user.id, REVOCATION_REASONS.ACCOUNT_DELETED, { tx })
+          await tx.adminAuditLog.create({
+            data: {
+              actorUserId: context.user.id,
+              action: 'SELF_ACCOUNT_DELETED',
+              entityType: 'users',
+              entityId: context.user.id,
+              before: { status: existing.status },
+              after: { status: 'DELETED' },
+            },
+          })
+        })
+        // Best-effort removal of the stored ID-document blob; never blocks the deletion.
+        if (existing.idDocumentRef) {
+          try { await deleteIdDocument(existing.idDocumentRef) } catch { /* retention/cleanup job handles leftovers */ }
+        }
+      }
+      return json(res, 200, { ok: true, deleted: true })
+    }
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET', 'DELETE'])
     requireAuth(context)
     return json(res, 200, {
       ok: true,

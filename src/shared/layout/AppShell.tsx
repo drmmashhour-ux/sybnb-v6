@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
-import { becomeDriver, currentAccountIsHost, getStoredGuestSession, getStoredStaffSession, refreshStoredSessionRoles, signOutGuest as revokeGuestSession } from '../api/platformApi'
+import { becomeDriver, currentAccountIsHost, deleteMyAccount, getStoredGuestSession, getStoredStaffSession, refreshStoredSessionRoles, signOutGuest as revokeGuestSession } from '../api/platformApi'
 import { Footer } from './Footer'
 
 type Props = {
@@ -211,6 +211,26 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
     navigate('/driver')
   }
 
+  // Store requirement: let a signed-in user delete their account + personal data from inside the app.
+  // Confirms first (destructive, irreversible for the user), then soft-deletes server-side and returns
+  // to a signed-out home.
+  async function deleteAccount() {
+    setOpen(false)
+    const msg = pick(
+      lang,
+      'سيتم حذف حسابك وبياناتك الشخصية نهائياً ولن تتمكن من تسجيل الدخول بعدها. هل تريد المتابعة؟',
+      'This permanently deletes your account and personal data — you will not be able to sign in again. Continue?',
+      'Ceci supprime définitivement votre compte et vos données personnelles — vous ne pourrez plus vous connecter. Continuer ?',
+    )
+    if (!window.confirm(msg)) return
+    try {
+      await deleteMyAccount()
+    } catch {
+      // Even if the call fails, drop the user to a signed-out home; they can retry.
+    }
+    navigate('/')
+  }
+
   const items: AccountMenuItem[] = signedIn
     ? [
         { key: 'trips', label: pick(lang, 'رحلاتي', 'My trips', 'Mes voyages'), onSelect: () => go('/dashboard'), strong: true },
@@ -239,6 +259,7 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
             void onSignOut()
           },
         },
+        { key: 'delete', label: pick(lang, 'حذف الحساب', 'Delete account', 'Supprimer le compte'), onSelect: () => void deleteAccount() },
       ]
     : [
         { key: 'login', label: pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription'), onSelect: () => go('/account/open'), strong: true },

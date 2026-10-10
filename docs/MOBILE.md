@@ -22,10 +22,11 @@ npx cap sync                # copies dist/ into both native projects + installs 
 This creates `ios/` and `android/` folders — commit them (they are part of the app).
 
 ## 2. Wire these BEFORE the first real build (required)
-1. **Absolute API base.** Inside the shell the origin is `capacitor://localhost` (iOS) /
-   `https://localhost` (Android), not your web domain. Make the app call the backend at its
-   absolute URL `https://sybnb-backend.onrender.com`. Check `API_BASE_URL` in
-   `src/shared/api/platformApi.ts` is absolute in a native build (not same-origin/relative).
+1. **Absolute API base.** The app reads `VITE_API_BASE_URL` at build time (default falls back to
+   localhost). When you build for mobile, set it so the baked bundle points at the live backend:
+   `VITE_API_BASE_URL=https://sybnb-backend.onrender.com npm run build` before `npx cap sync`.
+   Inside the native shell the origin is `capacitor://localhost` / `https://localhost`, so a
+   relative/same-origin base would hit the shell, not your API.
 2. **Backend CORS** must allow `capacitor://localhost` and `https://localhost` origins (server CORS).
 3. **Permissions strings:**
    - iOS `ios/App/App/Info.plist`: `NSLocationWhenInUseUsageDescription`,
@@ -38,7 +39,9 @@ This creates `ios/` and `android/` folders — commit them (they are part of the
    registration to Push Notifications (Phase 3 — Claude can do this next).
 5. **Icons & splash:** drop a 1024×1024 icon + splash in `resources/` then
    `npx @capacitor/assets generate` to produce every size.
-6. **In-app "Delete my account"** — both stores now require it. (Backend delete flow exists; expose it in the app's account screen.)
+6. **In-app "Delete my account"** — DONE and live: the account menu has a confirmed "Delete account"
+   action calling `DELETE /api/me` (server soft-deletes: identity scrubbed, sessions revoked,
+   transactional records retained). No action needed.
 
 ## 3. Run on device/simulator
 ```bash
@@ -63,3 +66,16 @@ before production — use your own team/drivers and start it early. An **Organiz
   Android keystore stay local.
 - Bundle id `app.sybnb` and app name `SYBNB` are set in `capacitor.config.ts`; change before the
   first submit if you want something different (it's permanent per store listing afterwards).
+
+## When the native projects exist — native plugin wiring (Claude can do this then)
+These two touch native config/credentials and can only be built + tested once `ios/` and `android/`
+exist, so they come AFTER step 1 above:
+- **Geolocation plugin** for reliable driver GPS (incl. background): the app's location reporting is
+  routed through the native Geolocation plugin when running in the shell, with the current
+  `navigator.geolocation` as the web fallback. Needs the Info.plist "always/when-in-use" strings and
+  Android background-location config in the generated projects.
+- **Push notifications**: register the device token via the Push Notifications plugin and POST it to
+  the backend; then deliver via **APNs** (needs an Apple push key `.p8`) for iOS and **FCM**
+  (`google-services.json`) for Android — those credentials are created in your Apple/Firebase
+  consoles. Once you have them + the native projects, Claude wires the token registration and the
+  backend send-path.

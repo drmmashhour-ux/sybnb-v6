@@ -1054,6 +1054,19 @@ export async function signOutGuest(): Promise<{ serverRevoked: boolean }> {
   return { serverRevoked }
 }
 
+// Store requirement (2026-10-10): self-service account deletion. Calls DELETE /api/me — the server
+// soft-deletes (scrubs identity, revokes all sessions, keeps transactional records for retention) —
+// then drops the local session so the app returns to a signed-out state. The account can no longer
+// sign in afterwards.
+export async function deleteMyAccount(): Promise<void> {
+  const session = getStoredGuestSession()
+  if (!session?.token) throw new Error('Sign in first.')
+  await apiRequest<{ ok: true; deleted: boolean }>('/api/me', { method: 'DELETE', token: session.token, body: {} })
+  clearGuestSession()
+  if (getStoredStaffSession()?.token) clearStoredStaffSession()
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+}
+
 export async function signOutStaff(): Promise<{ serverRevoked: boolean }> {
   const session = getStoredStaffSession()
   const serverRevoked = await revokeSessionOnServer(session?.token)

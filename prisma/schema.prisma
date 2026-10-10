@@ -1315,6 +1315,10 @@ model RideRequest {
   dropoffLocation Location? @relation("RideDropoff", fields: [dropoffLocationId], references: [id])
   review         RideReview?
   paymentProofs  PaymentProof[]
+  // Safety Phase 1 (2026-10-10): the immutable trip "black box" -- an append-only event stream
+  // (CREATED/OFFERED/ACCEPTED/.../SOS/...) reconstructing exactly what happened on this trip.
+  // Cascade so a deleted ride takes its events with it; audit rows never outlive their ride.
+  events         RideEvent[]
   messageThread  MessageThread?
   stops          RideStop[]
   promoCode      PromoCode?      @relation(fields: [promoCodeId], references: [id])
@@ -1528,4 +1532,84 @@ model SanctionsScreeningResult {
   @@index([subjectType, subjectId])
   @@index([status])
   @@map("sanctions_screening_results")
+}
+
+// Safety Phase 1 (2026-10-10): the immutable trip "black box". Every meaningful thing that happens
+// on a ride -- it was created, offered to a driver, accepted, the driver's live status changes,
+// an SOS is pulled -- is appended here with who/when/where, so a trip can be reconstructed exactly
+// even if the live ride row is later mutated (vehicle edited, dispute opened, etc.). Append-only by
+// discipline (no update/delete path exists); written best-effort so a logging failure never breaks
+// the ride flow (see server/lib/ride-events.mjs).
+enum RideEventType {
+  CREATED
+  OFFERED
+  ACCEPTED
+  ARRIVING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  DISPUTED
+  SOS
+  LOCATION_PING
+  PICKUP_VERIFIED
+
+  @@map("ride_event_type")
+}
+
+model RideEvent {
+  id        String        @id @default(uuid())
+  rideId    String        @map("ride_id")
+  type      RideEventType
+  // Loose actor fields (who triggered this): a user id + their role at the time. Nullable because a
+  // system/dispatch event (e.g. an auto-offer) has no human actor.
+  actorId   String?       @map("actor_id")
+  actorRole String?       @map("actor_role")
+  lat       Float?
+  lng       Float?
+  meta      Json          @default("{}")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  ride RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@index([rideId, createdAt])
+  @@map("ride_events")
+}
+
+// Safety Phase 1 (2026-10-10): an SOS/panic pull or a rider/driver report on a trip. Loose refs
+// (rideId/reporterId/resolvedById) matching the SanctionsScreeningResult style -- NOT hard FKs --
+// because an incident is an operational safety record that must survive even if the referenced ride
+// or account is later removed, and nothing traverses it via Prisma include.
+enum IncidentType {
+  SOS
+  REPORT
+
+  @@map("incident_type")
+}
+
+enum IncidentStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+
+  @@map("incident_status")
+}
+
+model Incident {
+  id           String         @id @default(uuid())
+  rideId       String?        @map("ride_id")
+  reporterId   String         @map("reporter_id")
+  reporterRole String         @map("reporter_role")
+  type         IncidentType
+  status       IncidentStatus @default(OPEN)
+  lat          Float?
+  lng          Float?
+  note         String?
+  meta         Json           @default("{}")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  resolvedAt   DateTime?      @map("resolved_at")
+  resolvedById String?        @map("resolved_by_id")
+
+  @@index([status, createdAt])
+  @@index([rideId])
+  @@map("incidents")
 }

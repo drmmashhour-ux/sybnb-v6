@@ -14,6 +14,7 @@ import { settlePrepaidRide } from '../lib/finance-ledger.mjs'
 // makes a fare billable, CANCELLED irreversibly destroys a receivable. See the ride status handler
 // below for the full reasoning on each.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
+import { logRideEventSafe } from '../lib/ride-events.mjs'
 
 // SEC-002R: the transitions this route may write that are IRREVERSIBLE and financially load-bearing,
 // and therefore re-authorized at the commit boundary. Both are terminal states. See the ride status
@@ -478,6 +479,23 @@ export async function handleDriver(req, res, url, context) {
         after: ride,
       },
     })
+
+    // Safety Phase 1 (2026-10-10): append this status change to the ride's immutable black box, with
+    // the driver's live location when it is fresh (getDriverLocation returns null when stale). Best-
+    // effort and fire-and-forget -- it never blocks or fails the status update.
+    const RIDE_EVENT_FOR_STATUS = { DRIVER_ARRIVING: 'ARRIVING', IN_PROGRESS: 'IN_PROGRESS', COMPLETED: 'COMPLETED', CANCELLED: 'CANCELLED' }
+    void (async () => {
+      const loc = await getDriverLocation(context.user.id).catch(() => null)
+      await logRideEventSafe(db(), {
+        rideId: ride.id,
+        type: RIDE_EVENT_FOR_STATUS[nextStatus] ?? nextStatus,
+        actorId: context.user.id,
+        actorRole: 'DRIVER',
+        lat: loc?.lat ?? null,
+        lng: loc?.lng ?? null,
+        meta: { from: existing.status, to: nextStatus },
+      })
+    })()
 
     // SR Ride vs. Uber gap-closure (P1 #7): fire-and-forget -- sendPushNotification() never throws
     // (see server/lib/push-notifications.mjs), so a missing/expired subscription or unconfigured

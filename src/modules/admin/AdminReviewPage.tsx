@@ -688,6 +688,9 @@ function ShortRentAdminCommandDashboard({
         <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/money-flow')}>
           {pick(lang, 'حركة الأموال', 'Money flow', 'Flux financier')}
         </button>
+        <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/sr/incidents')}>
+          {pick(lang, 'بلاغات السلامة', 'Safety incidents', 'Incidents de sécurité')}
+        </button>
       </nav>
 
       <section style={commandStyles.departmentGroups} aria-label={isAr ? 'أقسام الإدارة' : 'Admin departments'}>

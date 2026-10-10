@@ -146,6 +146,14 @@ const TEMPLATES = {
     en: (d) => ({ subject: 'SYBNB admin: new host payout request', body: `Payout request of ${d.amount} (${d.method}) from ${d.hostName}.` }),
     fr: (d) => ({ subject: 'SYBNB admin : nouvelle demande de retrait', body: `Demande de retrait de ${d.amount} (${d.method}) de ${d.hostName}.` }),
   },
+  // Safety Phase 1 (2026-10-10): an SOS/panic was pulled on an active ride. Routed to the admin
+  // inbox so the incident console is not the only alerting channel. The incident id is the console
+  // lookup key; no rider/driver PII beyond role is included in the email body.
+  admin_sos_triggered: {
+    ar: (d) => ({ subject: 'SYBNB: تنبيه طوارئ SOS على رحلة نشطة', body: `تم تفعيل زر الطوارئ من طرف ${d.reporterRole === 'DRIVER' ? 'السائق' : 'الراكب'} على الرحلة ${d.rideId} (الحالة: ${d.status}). رقم البلاغ: ${d.incidentId}. افتح لوحة البلاغات لمتابعته فوراً.` }),
+    en: (d) => ({ subject: 'SYBNB admin: SOS triggered on an active ride', body: `SOS was pulled by the ${String(d.reporterRole || '').toLowerCase()} on ride ${d.rideId} (status: ${d.status}). Incident ${d.incidentId}. Open the incidents console to act immediately.` }),
+    fr: (d) => ({ subject: 'SYBNB admin : SOS déclenché sur une course active', body: `Un SOS a été déclenché par le ${String(d.reporterRole || '').toLowerCase() === 'driver' ? 'chauffeur' : 'passager'} sur la course ${d.rideId} (statut : ${d.status}). Incident ${d.incidentId}. Ouvrez la console des incidents immédiatement.` }),
+  },
 }
 
 export const NOTIFICATION_KINDS = Object.freeze(Object.keys(TEMPLATES))

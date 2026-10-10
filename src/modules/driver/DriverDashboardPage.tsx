@@ -16,6 +16,7 @@ import {
   submitDriverPhoto,
   updatePrototypeDriverAccessibility,
   updatePrototypeDriverRideStatus,
+  triggerSrSos,
   type PlatformDriverOverview,
   type PlatformMessage,
   type PlatformRideRequest,
@@ -136,6 +137,11 @@ const copy = {
     inspEXPIRED: 'منتهٍ',
     reportIssue: 'إبلاغ عن مشكلة',
     sos: 'طوارئ SOS',
+    sosConfirm: 'هل أنت في حالة طوارئ؟ سيتم تنبيه فريق SYBNB فوراً مع موقعك وتفاصيل الرحلة.',
+    sosSending: 'جار إرسال التنبيه...',
+    sosSent: '✓ تم إرسال تنبيه الطوارئ.',
+    sosFailed: 'تعذر إرسال تنبيه الطوارئ. حاول مجدداً أو اتصل بالطوارئ مباشرة.',
+    sosInactive: 'زر الطوارئ متاح أثناء رحلة نشطة فقط.',
   },
   en: {
     back: 'Back to landing',
@@ -237,6 +243,11 @@ const copy = {
     inspEXPIRED: 'Expired',
     reportIssue: 'Report issue',
     sos: 'SOS emergency',
+    sosConfirm: 'Are you in an emergency? SYBNB will be alerted immediately with your location and trip details.',
+    sosSending: 'Sending alert...',
+    sosSent: '✓ Emergency alert sent.',
+    sosFailed: 'Could not send the emergency alert. Try again or call emergency services directly.',
+    sosInactive: 'SOS is available only during an active ride.',
   },
   fr: {
     back: 'Retour à l’accueil',
@@ -338,6 +349,11 @@ const copy = {
     inspEXPIRED: 'Expiré',
     reportIssue: 'Signaler un problème',
     sos: 'Urgence SOS',
+    sosConfirm: 'Êtes-vous en situation d’urgence ? SYBNB sera alerté immédiatement avec votre position et les détails de la course.',
+    sosSending: 'Envoi de l’alerte...',
+    sosSent: '✓ Alerte d’urgence envoyée.',
+    sosFailed: 'Impossible d’envoyer l’alerte d’urgence. Réessayez ou appelez les secours directement.',
+    sosInactive: 'Le SOS n’est disponible que pendant une course active.',
   },
 }
 
@@ -348,6 +364,7 @@ export function DriverDashboardPage({ lang }: Props) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'saving' | 'error'>('loading')
   const [message, setMessage] = useState('')
   const [activeRideId, setActiveRideId] = useState('')
+  const [sosState, setSosState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [pendingRides, setPendingRides] = useState<PlatformRideRequest[]>([])
   const [pendingStatus, setPendingStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [claimingRideId, setClaimingRideId] = useState('')
@@ -535,6 +552,34 @@ export function DriverDashboardPage({ lang }: Props) {
     }
   }
 
+  // Safety Phase 1 (2026-10-10): the driver's own SOS, shown only while they have an active ride.
+  // Confirm first, attach device geolocation when allowed, fall back to a location-less SOS so the
+  // alert always goes out. asDriver=true routes it through the driver session.
+  async function triggerSos(rideId: string) {
+    if (!window.confirm(t.sosConfirm)) return
+    setSosState('sending')
+    setMessage('')
+    const send = async (coords: { lat?: number; lng?: number }) => {
+      try {
+        await triggerSrSos(rideId, coords, true)
+        setSosState('sent')
+        setMessage(t.sosSent)
+      } catch (error) {
+        setSosState('error')
+        setMessage(error instanceof Error ? error.message : t.sosFailed)
+      }
+    }
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => void send({ lat: position.coords.latitude, lng: position.coords.longitude }),
+        () => void send({}),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 },
+      )
+    } else {
+      void send({})
+    }
+  }
+
   async function updateRide(rideId: string, nextStatus: 'DRIVER_ARRIVING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED') {
     setStatus('saving')
     setActiveRideId(rideId)
@@ -551,6 +596,8 @@ export function DriverDashboardPage({ lang }: Props) {
       setActiveRideId('')
     }
   }
+
+  const sosActiveRide = overview?.rides.find((ride) => LIVE_TRACKING_STATUSES.includes(ride.status)) ?? null
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -799,7 +846,17 @@ export function DriverDashboardPage({ lang }: Props) {
       </section>
 
       <section style={styles.driverCtas}>
-        <button style={styles.sosButton} onClick={() => (window.location.hash = '/trust-center/sos')}>{t.sos}</button>
+        {sosActiveRide ? (
+          <button
+            style={styles.sosButton}
+            disabled={sosState === 'sending' || sosState === 'sent'}
+            onClick={() => void triggerSos(sosActiveRide.id)}
+          >
+            {sosState === 'sending' ? t.sosSending : sosState === 'sent' ? t.sosSent : t.sos}
+          </button>
+        ) : (
+          <button style={styles.sosButtonIdle} disabled title={t.sosInactive}>{t.sos}</button>
+        )}
         <button style={styles.reportButton} onClick={() => (window.location.hash = '/immocontact')}>{t.reportIssue}</button>
         <button style={styles.startButton} onClick={() => (window.location.hash = '/ride')}>{t.start}</button>
       </section>
@@ -1055,6 +1112,7 @@ const styles: Record<string, CSSProperties> = {
   earningsPanel: { border: '1px solid #1e2a3c', borderRadius: 14, background: '#101119', padding: 24, display: 'grid', gap: 22, gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center' },
   driverCtas: { display: 'grid', gap: 28, gridTemplateColumns: '1fr 1fr 1fr' },
   sosButton: { border: 0, borderRadius: 12, background: '#ff5274', color: '#06070c', fontWeight: 950, minHeight: 72, fontSize: 22 },
+  sosButtonIdle: { border: '1px solid #4a2230', borderRadius: 12, background: '#1a0f14', color: '#7a5560', fontWeight: 950, minHeight: 72, fontSize: 22 },
   reportButton: { border: '1px solid #30384d', borderRadius: 12, background: '#0b0d14', color: '#fff', fontWeight: 950, minHeight: 72, fontSize: 22 },
   startButton: { border: 0, borderRadius: 12, background: '#526cff', color: '#06110e', fontWeight: 950, minHeight: 72, fontSize: 22 },
   dispatchItem: { border: '1px solid #263651', borderRadius: 8, background: '#101722', padding: 14, display: 'grid', gap: 6 },

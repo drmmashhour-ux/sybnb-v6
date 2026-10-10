@@ -31,6 +31,7 @@ import { recordWalletEntry, refundPrepaidRide } from '../lib/finance-ledger.mjs'
 import { REAUTH_FAILURE_CODES, reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mjs'
 import { offerRideToNextDriver, runDispatchSweep } from '../lib/ride-dispatch.mjs'
+import { logRideEventSafe } from '../lib/ride-events.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -285,6 +286,39 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
       after: ride,
     },
   })
+
+  // Safety Phase 1 (2026-10-10): immutable TRIP SNAPSHOT + ACCEPTED black-box event. Both run
+  // AFTER the claim has already committed, wrapped so nothing here can fail or delay the claim
+  // itself. The snapshot pins who/what was dispatched (driver identity + the EXACT vehicle + the
+  // rider) at assignment time, so the trail stays truthful even if the driver later edits their
+  // vehicle. Written as a metadata.snapshot merge (never touches fare/settlement fields).
+  try {
+    const [snapDriverProfile, snapDriverUser] = await Promise.all([
+      db().driverProfile.findUnique({
+        where: { userId: context.user.id },
+        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleColor: true, vehicleYear: true, vehicleCategory: true, photoRef: true },
+      }),
+      db().user.findUnique({ where: { id: context.user.id }, select: { id: true, displayName: true } }),
+    ])
+    const snapshot = {
+      assignedAt: new Date().toISOString(),
+      driver: { id: context.user.id, displayName: snapDriverUser?.displayName ?? context.user.displayName ?? null, photoRef: snapDriverProfile?.photoRef ?? null },
+      vehicle: {
+        make: snapDriverProfile?.vehicleMake ?? null,
+        model: snapDriverProfile?.vehicleModel ?? null,
+        plate: snapDriverProfile?.vehiclePlate ?? null,
+        color: snapDriverProfile?.vehicleColor ?? null,
+        year: snapDriverProfile?.vehicleYear ?? null,
+        category: snapDriverProfile?.vehicleCategory ?? null,
+      },
+      rider: { id: ride.riderId, displayName: ride.rider?.displayName ?? null },
+    }
+    const baseMeta = ride.metadata && typeof ride.metadata === 'object' ? ride.metadata : {}
+    await db().rideRequest.update({ where: { id: ride.id }, data: { metadata: { ...baseMeta, snapshot } } })
+    await logRideEventSafe(db(), { rideId: ride.id, type: 'ACCEPTED', actorId: context.user.id, actorRole: 'DRIVER', meta: { driverId: context.user.id, vehiclePlate: snapDriverProfile?.vehiclePlate ?? null } })
+  } catch {
+    // best-effort: the snapshot/event must never fail an already-committed claim
+  }
 
   // SR Ride vs. Uber gap-closure (P1 #7): fire-and-forget, never fails the claim itself.
   // context.user is the claiming driver -- real name, not a relation this query never included.
@@ -549,6 +583,17 @@ export async function handleSrRides(req, res, url, context) {
     // is dispatched later by the pending-list sweep once activateScheduledRides() flips it to REQUESTED.
     // Fire-and-forget: a dispatch failure must never fail (or delay) the create response.
     if (ride.status === 'REQUESTED') offerRideToNextDriver(ride.id).catch(() => {})
+    // Safety Phase 1 (2026-10-10): open the ride's immutable black box with a CREATED event.
+    // Fire-and-forget and best-effort -- it never blocks or fails the create response.
+    void logRideEventSafe(db(), {
+      rideId: ride.id,
+      type: 'CREATED',
+      actorId: context.user.id,
+      actorRole: 'GUEST',
+      lat: createdCoords.pickup?.lat ?? null,
+      lng: createdCoords.pickup?.lng ?? null,
+      meta: { category, pickup, dropoff, fareMinor: ride.fareMinor ?? null, currency: ride.currency, scheduled: Boolean(scheduledFor) },
+    })
     return json(res, 201, { ok: true, ride: { ...ride, stops: createdStops, pickupCoords: createdCoords.pickup, dropoffCoords: createdCoords.dropoff } })
   }
 
@@ -789,8 +834,84 @@ export async function handleSrRides(req, res, url, context) {
         after: ride,
       },
     })
+    // Safety Phase 1 (2026-10-10): record the dispute in the ride's black box too.
+    void logRideEventSafe(db(), { rideId: ride.id, type: 'DISPUTED', actorId: context.user.id, actorRole: openedBy, meta: { openedBy, reason } })
     notifyAdmin('admin_ride_disputed', { rideId: ride.id, openedBy }, `admin_ride_disputed:${ride.id}`)
     return json(res, 200, { ok: true, ride })
+  }
+
+  // Safety Phase 1 (2026-10-10): SOS / PANIC. Either party to an ACTIVE ride -- the rider (GUEST)
+  // or the assigned driver (DRIVER) -- can pull it. It creates an OPEN Incident (the single durable
+  // source of truth, with a copy of the trip snapshot + the other party embedded so the admin
+  // console needs no second lookup), appends an SOS event to the ride's black box, and alerts admins
+  // over BOTH email and push. Designed to be FAST and robust: the incident write is the only thing
+  // that must succeed; every alert side-effect is fire-and-forget and can never delay or fail it.
+  const sosMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/sos$/)
+  if (sosMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST', 'DRIVER'])
+    const body = await readJson(req).catch(() => ({}))
+    const ride = await db().rideRequest.findUnique({ where: { id: sosMatch[1] } })
+    if (!ride || (ride.riderId !== context.user.id && ride.driverId !== context.user.id)) {
+      const error = new Error('Ride not found for this account.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const SOS_ACTIVE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
+    if (!SOS_ACTIVE_STATUSES.includes(ride.status)) {
+      const error = new Error('SOS is only available during an active ride.')
+      error.statusCode = 400
+      error.code = 'RIDE_NOT_ACTIVE'
+      error.expose = true
+      throw error
+    }
+    const reporterRole = ride.riderId === context.user.id ? 'RIDER' : 'DRIVER'
+    const lat = typeof body.lat === 'number' && Number.isFinite(body.lat) ? body.lat : null
+    const lng = typeof body.lng === 'number' && Number.isFinite(body.lng) ? body.lng : null
+    const note = body.note ? String(body.note).trim().slice(0, 1000) : null
+    const otherPartyId = reporterRole === 'RIDER' ? ride.driverId : ride.riderId
+    const rideMeta = ride.metadata && typeof ride.metadata === 'object' ? ride.metadata : {}
+    const incident = await db().incident.create({
+      data: {
+        rideId: ride.id,
+        reporterId: context.user.id,
+        reporterRole,
+        type: 'SOS',
+        status: 'OPEN',
+        lat,
+        lng,
+        note,
+        meta: {
+          rideStatus: ride.status,
+          reporterDisplayName: context.user.displayName ?? null,
+          otherPartyId: otherPartyId ?? null,
+          snapshot: rideMeta.snapshot ?? null,
+          pickup: rideMeta.pickup ?? null,
+          dropoff: rideMeta.dropoff ?? null,
+        },
+      },
+    })
+    // Black-box event -- standalone (not part of the incident insert) so a logging failure can
+    // never lose the incident itself. Best-effort; never throws.
+    void logRideEventSafe(db(), { rideId: ride.id, type: 'SOS', actorId: context.user.id, actorRole: reporterRole, lat, lng, meta: { incidentId: incident.id, note } })
+    // Alert admins: email (idempotency-keyed to the incident) + web push to every ADMIN account.
+    // Both fire-and-forget so a slow or unconfigured channel never delays the panic response.
+    notifyAdmin('admin_sos_triggered', { rideId: ride.id, incidentId: incident.id, reporterRole, status: ride.status }, `sos:${incident.id}`)
+    void (async () => {
+      try {
+        const adminRoles = await db().userRole.findMany({ where: { role: 'ADMIN' }, select: { userId: true } })
+        await Promise.all(adminRoles.map((r) => sendPushNotification(r.userId, {
+          title: 'SOS triggered',
+          body: `A ${reporterRole.toLowerCase()} pulled SOS on an active ride.`,
+          url: '/admin/sr/incidents',
+        })))
+      } catch {
+        // push alerting is best-effort
+      }
+    })()
+    return json(res, 201, { ok: true, incidentId: incident.id })
   }
 
   const assignMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/assign-driver$/)

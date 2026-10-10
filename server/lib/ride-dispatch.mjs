@@ -12,6 +12,7 @@
 import { Prisma } from '@prisma/client'
 import { db } from './prisma.mjs'
 import { sendPushNotification } from './push-notifications.mjs'
+import { logRideEventSafe } from './ride-events.mjs'
 
 // Env knobs, clamped to sane bounds so a bad deploy value can't disable dispatch or offer forever.
 function envInt(name, def, min, max) {
@@ -122,6 +123,10 @@ export async function offerRideToNextDriver(rideId) {
     body: 'A rider needs a driver — open SR to accept.',
     url: '/driver',
   }).catch(() => {})
+  // Safety Phase 1 (2026-10-10): record the auto-dispatch offer in the ride's black box. No human
+  // actor (system dispatch), so actorId/actorRole stay null; the offered driver is in meta. Best-
+  // effort and fire-and-forget -- dispatch must never be delayed or broken by audit logging.
+  void logRideEventSafe(db(), { rideId: ride.id, type: 'OFFERED', meta: { offeredDriverId: next.userId, offerSeq: (ride.offerSeq ?? 0) + 1, distanceM: next.distanceM ?? null } })
   return { offered: true, driverId: next.userId }
 }
 

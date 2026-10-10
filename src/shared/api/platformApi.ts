@@ -2400,6 +2400,96 @@ export async function updatePrototypeDriverRideStatus(
   return response.ride
 }
 
+// Safety Phase 1 (2026-10-10): SOS / panic. Either party to an active ride can pull it. The rider
+// uses their guest session; the driver passes asDriver=true to use the driver session. Device
+// geolocation (lat/lng) is optional -- the server records the incident either way.
+export async function triggerSrSos(
+  rideId: string,
+  options: { lat?: number; lng?: number; note?: string } = {},
+  asDriver = false,
+) {
+  const session = asDriver ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; incidentId: string }>(`/api/sr/rides/${rideId}/sos`, {
+    method: 'POST',
+    token: session.token,
+    body: { lat: options.lat, lng: options.lng, note: options.note },
+  })
+  return response.incidentId
+}
+
+// Safety Phase 1 (2026-10-10): the admin incident + trail console (ADMIN/SUPPORT read; ADMIN
+// resolve). Loose-ref incident records plus a per-ride immutable trail.
+export type PlatformIncident = {
+  id: string
+  rideId: string | null
+  reporterId: string
+  reporterRole: string
+  type: 'SOS' | 'REPORT'
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED'
+  lat: number | null
+  lng: number | null
+  note: string | null
+  meta: Record<string, unknown>
+  createdAt: string
+  resolvedAt: string | null
+  resolvedById: string | null
+  ride?: {
+    id: string
+    status: string
+    fareMinor: number | null
+    currency: string
+    riderId: string
+    driverId: string | null
+    requestedAt: string
+  } | null
+}
+
+export type PlatformRideEvent = {
+  id: string
+  rideId: string
+  type: string
+  actorId: string | null
+  actorRole: string | null
+  lat: number | null
+  lng: number | null
+  meta: Record<string, unknown>
+  createdAt: string
+}
+
+export type PlatformRideTrail = {
+  ride: PlatformRideRequest
+  snapshot: Record<string, unknown> | null
+  events: PlatformRideEvent[]
+  incidents: PlatformIncident[]
+}
+
+export async function fetchAdminIncidents(status?: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED') {
+  const query = status ? `?status=${encodeURIComponent(status)}` : ''
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; incidents: PlatformIncident[]; count: number }>(`/api/admin/sr/incidents${query}`, { token }),
+  )
+  return response.incidents
+}
+
+export async function fetchAdminRideTrail(rideId: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true } & PlatformRideTrail>(`/api/admin/sr/rides/${rideId}/trail`, { token }),
+  )
+  const { ok: _ok, ...trail } = response
+  return trail as PlatformRideTrail
+}
+
+export async function resolveAdminIncident(incidentId: string, input: { status: 'ACKNOWLEDGED' | 'RESOLVED'; note?: string }) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; incident: PlatformIncident }>(`/api/admin/sr/incidents/${incidentId}`, {
+      method: 'PATCH',
+      token,
+      body: { status: input.status, note: input.note },
+    }),
+  )
+  return response.incident
+}
+
 export async function createPrototypeBooking(input: {
   listingId: string
   amountMinor: number

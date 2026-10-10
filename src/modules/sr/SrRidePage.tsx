@@ -18,6 +18,7 @@ import {
   sharePrototypeSrRide,
   submitPrototypeLocalWalletProof,
   submitPrototypeSrRideReview,
+  triggerSrSos,
   type PlatformMessage,
   type PlatformRideRequest,
   type PlatformSavedPlace,
@@ -128,6 +129,10 @@ const copy = {
     cancelling: 'جار الإلغاء',
     newRide: 'طلب رحلة جديدة',
     sos: 'طوارئ SOS',
+    sosConfirm: 'هل أنت في حالة طوارئ؟ سيتم تنبيه فريق SYBNB فوراً مع موقعك وتفاصيل الرحلة.',
+    sosSending: 'جار إرسال التنبيه...',
+    sosSent: '✓ تم إرسال تنبيه الطوارئ. فريق SYBNB على علم الآن.',
+    sosFailed: 'تعذر إرسال تنبيه الطوارئ. حاول مجدداً أو اتصل بالطوارئ مباشرة.',
   },
   en: {
     back: 'Back to landing',
@@ -216,6 +221,10 @@ const copy = {
     cancelling: 'Cancelling',
     newRide: 'Request a new ride',
     sos: 'SOS emergency',
+    sosConfirm: 'Are you in an emergency? SYBNB will be alerted immediately with your location and trip details.',
+    sosSending: 'Sending alert...',
+    sosSent: '✓ Emergency alert sent. The SYBNB team has been notified.',
+    sosFailed: 'Could not send the emergency alert. Try again or call emergency services directly.',
   },
   fr: {
     back: 'Retour à l’accueil',
@@ -304,6 +313,10 @@ const copy = {
     cancelling: 'Annulation',
     newRide: 'Demander une nouvelle course',
     sos: 'Urgence SOS',
+    sosConfirm: 'Êtes-vous en situation d’urgence ? SYBNB sera alerté immédiatement avec votre position et les détails de la course.',
+    sosSending: 'Envoi de l’alerte...',
+    sosSent: '✓ Alerte d’urgence envoyée. L’équipe SYBNB a été prévenue.',
+    sosFailed: 'Impossible d’envoyer l’alerte d’urgence. Réessayez ou appelez les secours directement.',
   },
 }
 
@@ -369,6 +382,7 @@ export function SrRidePage({ lang }: Props) {
   const [chatInput, setChatInput] = useState('')
   const [chatStatus, setChatStatus] = useState<'idle' | 'sending' | 'error'>('idle')
   const [shareStatus, setShareStatus] = useState<'idle' | 'sharing' | 'copied' | 'error'>('idle')
+  const [sosState, setSosState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [scheduleForLater, setScheduleForLater] = useState(false)
   const [scheduledFor, setScheduledFor] = useState('')
   const [accessibilityRequired, setAccessibilityRequired] = useState(false)
@@ -483,6 +497,35 @@ export function SrRidePage({ lang }: Props) {
     } catch (error) {
       setChatStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  // Safety Phase 1 (2026-10-10): pull SOS on this active ride. Confirm first (a mis-tap must not
+  // raise a false alarm), attach device geolocation when the browser allows it, and fall back to a
+  // location-less SOS if geolocation is unavailable or denied -- the alert must still go out.
+  async function triggerSos() {
+    if (!ride) return
+    if (!window.confirm(t.sosConfirm)) return
+    setSosState('sending')
+    setMessage('')
+    const send = async (coords: { lat?: number; lng?: number }) => {
+      try {
+        await triggerSrSos(ride.id, coords)
+        setSosState('sent')
+        setMessage(t.sosSent)
+      } catch (error) {
+        setSosState('error')
+        setMessage(error instanceof Error ? error.message : t.sosFailed)
+      }
+    }
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => void send({ lat: position.coords.latitude, lng: position.coords.longitude }),
+        () => void send({}),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 },
+      )
+    } else {
+      void send({})
     }
   }
 
@@ -1204,8 +1247,12 @@ export function SrRidePage({ lang }: Props) {
           )}
 
           {ride && ride.status !== 'DRAFT' && ACTIVE_RIDE_STATUSES.includes(ride.status) && (
-            <button style={styles.sosButton} onClick={() => (window.location.hash = '/trust-center/sos')}>
-              {t.sos} ⚠
+            <button
+              style={styles.sosButton}
+              disabled={sosState === 'sending' || sosState === 'sent'}
+              onClick={() => void triggerSos()}
+            >
+              {sosState === 'sending' ? t.sosSending : sosState === 'sent' ? t.sosSent : `${t.sos} ⚠`}
             </button>
           )}
 

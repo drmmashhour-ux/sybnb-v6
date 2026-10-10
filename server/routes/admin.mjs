@@ -2279,6 +2279,116 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, ...rest, ...(activationCode ? { activationCode } : {}) })
   }
 
+  // ---------------------------------------------------------------------------
+  // Safety Phase 1 (2026-10-10): the admin incident + trail console. Read the open SOS/report
+  // incidents, pull a single ride's full immutable trail (snapshot + ordered event timeline +
+  // incidents), and acknowledge/resolve an incident. Incidents hold LOOSE refs (text rideId /
+  // reporterId, no Prisma relations -- see the model), so related ride info is fetched separately
+  // and stitched in rather than via include.
+  // ---------------------------------------------------------------------------
+  if (url.pathname === '/api/admin/sr/incidents') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const statusParam = url.searchParams.get('status')
+    const where = statusParam && ['OPEN', 'ACKNOWLEDGED', 'RESOLVED'].includes(statusParam.toUpperCase())
+      ? { status: statusParam.toUpperCase() }
+      : {}
+    // status asc puts OPEN first (enum declaration order OPEN < ACKNOWLEDGED < RESOLVED), then
+    // newest-first within each bucket.
+    const incidents = await db().incident.findMany({
+      where,
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      take: 100,
+    })
+    const rideIds = Array.from(new Set(incidents.map((i) => i.rideId).filter(Boolean)))
+    const rides = rideIds.length
+      ? await db().rideRequest.findMany({
+          where: { id: { in: rideIds } },
+          select: { id: true, status: true, fareMinor: true, currency: true, riderId: true, driverId: true, requestedAt: true },
+        })
+      : []
+    const rideById = new Map(rides.map((r) => [r.id, r]))
+    const withRide = incidents.map((incident) => ({ ...incident, ride: incident.rideId ? rideById.get(incident.rideId) ?? null : null }))
+    return json(res, 200, { ok: true, incidents: withRide, count: withRide.length })
+  }
+
+  const rideTrailMatch = url.pathname.match(/^\/api\/admin\/sr\/rides\/([^/]+)\/trail$/)
+  if (rideTrailMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const ride = await db().rideRequest.findUnique({
+      where: { id: rideTrailMatch[1] },
+      include: {
+        rider: { select: { id: true, displayName: true, email: true } },
+        driver: { select: { id: true, displayName: true, email: true } },
+        stops: { select: { sequence: true, address: true, lat: true, lng: true }, orderBy: { sequence: 'asc' } },
+      },
+    })
+    if (!ride) {
+      const error = new Error('Ride not found.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const [events, incidents] = await Promise.all([
+      db().rideEvent.findMany({ where: { rideId: ride.id }, orderBy: { createdAt: 'asc' } }),
+      db().incident.findMany({ where: { rideId: ride.id }, orderBy: { createdAt: 'desc' } }),
+    ])
+    const rideMeta = ride.metadata && typeof ride.metadata === 'object' ? ride.metadata : {}
+    return json(res, 200, { ok: true, ride, snapshot: rideMeta.snapshot ?? null, events, incidents })
+  }
+
+  const incidentPatchMatch = url.pathname.match(/^\/api\/admin\/sr\/incidents\/([^/]+)$/)
+  if (incidentPatchMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const nextStatus = String(body.status || '').toUpperCase()
+    if (!['ACKNOWLEDGED', 'RESOLVED'].includes(nextStatus)) {
+      const error = new Error('status must be ACKNOWLEDGED or RESOLVED.')
+      error.statusCode = 400
+      error.code = 'INCIDENT_STATUS_INVALID'
+      error.expose = true
+      throw error
+    }
+    const note = body.note ? String(body.note).trim().slice(0, 1000) : null
+    const existing = await db().incident.findUnique({ where: { id: incidentPatchMatch[1] } })
+    if (!existing) {
+      const error = new Error('Incident not found.')
+      error.statusCode = 404
+      error.code = 'INCIDENT_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // The reporter's own note (incidents.note) is immutable evidence -- an admin resolution note is
+    // appended to meta.adminNotes instead of overwriting it.
+    const baseMeta = existing.meta && typeof existing.meta === 'object' ? existing.meta : {}
+    const adminNotes = Array.isArray(baseMeta.adminNotes) ? baseMeta.adminNotes : []
+    const meta = note
+      ? { ...baseMeta, adminNotes: [...adminNotes, { by: context.user.id, at: new Date().toISOString(), status: nextStatus, note }] }
+      : baseMeta
+    const incident = await db().incident.update({
+      where: { id: existing.id },
+      data: {
+        status: nextStatus,
+        meta,
+        ...(nextStatus === 'RESOLVED' ? { resolvedAt: new Date(), resolvedById: context.user.id } : {}),
+      },
+    })
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: `ADMIN_INCIDENT_${nextStatus}`,
+        entityType: 'incidents',
+        entityId: incident.id,
+        before: existing,
+        after: incident,
+      },
+    })
+    return json(res, 200, { ok: true, incident })
+  }
+
   return false
 }
 

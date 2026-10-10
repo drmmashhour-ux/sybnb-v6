@@ -34,6 +34,7 @@ import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mj
 import { offerRideToNextDriver, runDispatchSweep } from '../lib/ride-dispatch.mjs'
 import { logRideEventSafe } from '../lib/ride-events.mjs'
 import { analyzeRide } from '../lib/ai-ride-analyst.mjs'
+import { getOrCreateRideInvoice, renderInvoiceHtml } from '../lib/invoices.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -614,6 +615,27 @@ export async function handleSrRides(req, res, url, context) {
       meta: { category, pickup, dropoff, fareMinor: ride.fareMinor ?? null, currency: ride.currency, scheduled: Boolean(scheduledFor) },
     })
     return json(res, 201, { ok: true, ride: { ...ride, stops: createdStops, pickupCoords: createdCoords.pickup, dropoffCoords: createdCoords.dropoff } })
+  }
+
+  // SYBNB-generated invoice for a ride (division-numbered SR-000045). JSON, or `.html` for the
+  // branded, print-ready document. Lazily minted on first request; the ride's rider or an operator.
+  const invoiceMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/invoice(\.html)?$/)
+  if (invoiceMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    const invoice = await getOrCreateRideInvoice({
+      rideId: invoiceMatch[1],
+      requester: { id: context.user.id, roles: context.roles },
+    })
+    if (invoiceMatch[2]) {
+      const base = process.env.PUBLIC_APP_URL ? process.env.PUBLIC_APP_URL.replace(/\/$/, '') : ''
+      const logoUrl = base ? `${base}/assets/logos/sybnb-platform.png` : undefined
+      const html = renderInvoiceHtml(invoice, { logoUrl })
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, max-age=0' })
+      res.end(html)
+      return
+    }
+    return json(res, 200, { ok: true, invoice })
   }
 
   const rideMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)$/)

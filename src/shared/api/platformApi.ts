@@ -1648,6 +1648,39 @@ export async function createStripeRideCheckoutSession(rideId: string) {
   return response
 }
 
+export type RideInvoice = {
+  id: string
+  number: string
+  division: string
+  amountMinor: number
+  currency: string
+  data: { lineItems?: Array<{ label: string; amountMinor: number }>; totalMinor?: number; method?: string; category?: string; rideRef?: string }
+  issuedAt: string
+}
+
+export async function fetchRideInvoice(rideId: string): Promise<RideInvoice> {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; invoice: RideInvoice }>(
+    `/api/sr/rides/${encodeURIComponent(rideId)}/invoice`,
+    { token: session.token },
+  )
+  return response.invoice
+}
+
+// Opens the branded, print-ready SYBNB invoice in a new tab. Fetched with the auth header (so the
+// endpoint stays protected) and handed to the tab as a blob URL rather than a token-in-URL.
+export async function openRideInvoice(rideId: string): Promise<void> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await fetch(resolveApiUrl(`/api/sr/rides/${encodeURIComponent(rideId)}/invoice.html`), {
+    headers: { Authorization: `Bearer ${session.token}` },
+  })
+  if (!res.ok) throw new Error('Could not load the invoice.')
+  const html = await res.text()
+  const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+  window.open(url, '_blank')
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
 export async function confirmStripePayment(sessionId: string) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; proof: PlatformPaymentProof }>('/api/payments/stripe/confirm', {

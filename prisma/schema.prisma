@@ -1620,3 +1620,38 @@ model Incident {
   @@index([rideId])
   @@map("incidents")
 }
+
+// SYBNB-generated invoices (2026-10-10). Each platform division gets its own running invoice
+// sequence with a division prefix -- SR-000045 (rides), STR-000123 (stays), CARS-/MKT-/NC-/RENT-/BUY-.
+// One SYBNB Stripe account bills everything; the DIVISION distinction lives here, in SYBNB's own
+// invoice records (not in Stripe). `data` is an immutable snapshot of the line items + display
+// fields at issue time, so a historical invoice never changes even if the underlying ride does.
+model Invoice {
+  id          String   @id @default(uuid())
+  number      String   @unique
+  division    String
+  seq         Int
+  rideId      String?  @map("ride_id")
+  bookingId   String?  @map("booking_id")
+  userId      String   @map("user_id")
+  amountMinor Int      @map("amount_minor")
+  currency    String   @default("USD")
+  data        Json     @default("{}")
+  issuedAt    DateTime @default(now()) @map("issued_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([division, seq])
+  @@index([rideId])
+  @@index([bookingId])
+  @@index([userId])
+  @@map("invoices")
+}
+
+// One row per division holding the last-issued sequence number; incremented atomically when an
+// invoice is minted so numbers are gapless and unique per division.
+model InvoiceCounter {
+  division String @id
+  lastSeq  Int    @default(0) @map("last_seq")
+
+  @@map("invoice_counters")
+}

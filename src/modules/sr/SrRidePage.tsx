@@ -15,11 +15,13 @@ import {
   fetchPrototypeSrRide,
   fetchPrototypeSrRideThread,
   fetchSavedPlaces,
+  fetchRideInvoice,
   fetchSavedCard,
   fetchSrQuote,
   fetchStripePaymentStatus,
   createStripeSetupSession,
   deleteSavedCard,
+  openRideInvoice,
   resolveApiUrl,
   sendPrototypeSrRideMessage,
   sharePrototypeSrRide,
@@ -30,6 +32,7 @@ import {
   type PlatformRideRequest,
   type PlatformSavedPlace,
   type PlatformSrQuote,
+  type RideInvoice,
   type SavedCard,
 } from '../../shared/api/platformApi'
 
@@ -161,6 +164,8 @@ const copy = {
     tipSubmitting: 'جارٍ الإرسال',
     tipThanks: 'شكراً! تم تسجيل بقشيشك.',
     tipCashNote: 'نقداً للسائق',
+    invoiceTitle: 'فاتورة SYBNB',
+    downloadInvoice: 'عرض / تنزيل الفاتورة',
     cancelled: 'تم إلغاء الرحلة.',
     cancel: 'إلغاء الرحلة',
     cancelling: 'جار الإلغاء',
@@ -282,6 +287,8 @@ const copy = {
     tipSubmitting: 'Sending',
     tipThanks: 'Thank you! Your tip was recorded.',
     tipCashNote: 'Cash to driver',
+    invoiceTitle: 'SYBNB invoice',
+    downloadInvoice: 'View / download invoice',
     cancelled: 'This ride was cancelled.',
     cancel: 'Cancel ride',
     cancelling: 'Cancelling',
@@ -403,6 +410,8 @@ const copy = {
     tipSubmitting: 'Envoi',
     tipThanks: 'Merci ! Votre pourboire a été enregistré.',
     tipCashNote: 'Espèces au chauffeur',
+    invoiceTitle: 'Facture SYBNB',
+    downloadInvoice: 'Voir / télécharger la facture',
     cancelled: 'Cette course a été annulée.',
     cancel: 'Annuler la course',
     cancelling: 'Annulation',
@@ -477,6 +486,7 @@ export function SrRidePage({ lang }: Props) {
   const [cardStatus, setCardStatus] = useState<'idle' | 'redirecting' | 'confirming' | 'error'>('idle')
   const [savedCard, setSavedCard] = useState<SavedCard | null>(null)
   const [cardSetupStatus, setCardSetupStatus] = useState<'idle' | 'redirecting' | 'confirming' | 'error'>('idle')
+  const [invoice, setInvoice] = useState<RideInvoice | null>(null)
   const [tipStatus, setTipStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
   const [tipAmountMinor, setTipAmountMinor] = useState(0)
   const [tipCustom, setTipCustom] = useState('')
@@ -574,6 +584,26 @@ export function SrRidePage({ lang }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Fetch (lazily minting) the SYBNB invoice once the ride is terminal, to show its number + link.
+  useEffect(() => {
+    const st = ride?.status
+    if (!ride || (st !== 'COMPLETED' && st !== 'CANCELLED')) {
+      setInvoice(null)
+      return
+    }
+    let cancelled = false
+    fetchRideInvoice(ride.id)
+      .then((inv) => {
+        if (!cancelled) setInvoice(inv)
+      })
+      .catch(() => {
+        if (!cancelled) setInvoice(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [ride?.id, ride?.status])
 
   useEffect(() => {
     if (ride) return
@@ -1494,6 +1524,14 @@ export function SrRidePage({ lang }: Props) {
           )}
           {ride?.status === 'IN_PROGRESS' && (
             <div style={styles.message}>{t.inProgress}</div>
+          )}
+          {invoice && ride && (
+            <div style={styles.card}>
+              <strong>🧾 {t.invoiceTitle} · <span dir="ltr">{invoice.number}</span></strong>
+              <button style={styles.secondaryButton} onClick={() => void openRideInvoice(ride.id)}>
+                {t.downloadInvoice}
+              </button>
+            </div>
           )}
           {ride?.status === 'COMPLETED' && (
             <>

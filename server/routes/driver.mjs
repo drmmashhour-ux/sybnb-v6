@@ -335,7 +335,7 @@ export async function handleDriver(req, res, url, context) {
           })
           const r = await tx.rideRequest.updateMany({ where: guardedWhere, data: { status: nextStatus } })
           // Prepaid ride (2026-10-09): completing it settles the fare INSTANTLY from the rider's
-          // prepayment — driver gets 75%, platform 25% — with no post-ride proof or admin step.
+          // prepayment — driver gets the net (fare minus commission), platform the commission — with no post-ride proof or admin step.
           // Idempotent (keyed by ride id) and marked settled so a re-run never double-pays.
           if (r.count === 1 && nextStatus === 'COMPLETED' && existing.metadata?.prepaid && !existing.metadata?.settled) {
             await settlePrepaidRide(tx, { ride: existing })

@@ -459,7 +459,7 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // SR Ride vs. Uber gap-closure: no booking-style HOLD/release two-step -- a ride completes in
     // one continuous session (unlike a multi-day stay), so there's no equivalent dispute window to
     // hold funds against. The fare is split at approval time, mirroring Uber's standard model:
-    // SYBNB keeps SR_RIDE_COMMISSION_RATE (owner decision 2026-10-09: 25%, Uber's driver service
+    // SYBNB keeps SR_RIDE_COMMISSION_RATE (owner decision 2026-10-10: 15%, matching Syrian ride
     // fee) and the driver receives the rest. A CANCELLED-with-a-fee ride takes NO commission -- the
     // cancellation fee compensates the driver for a committed trip, so it stays 100% with them.
     const ride = await tx.rideRequest.findUnique({ where: { id: proof.rideId }, select: { driverId: true, status: true } })
@@ -493,7 +493,7 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       // fix (2026-10-09): recording no longer depends on `actorUserId` being truthy -- the commission
       // is recorded whenever there is any recipient to credit, so a future system/automated approval
       // (no actor) with PLATFORM_ACCOUNT_ID set still books the revenue instead of silently paying
-      // the driver 75% and losing the 25% off-ledger. The idempotency key is pinned by proof.id
+      // the driver the net and losing the commission off-ledger. The idempotency key is pinned by proof.id
       // alone (not the actor), so the same proof can never be credited twice by a different actor.
       const commissionRecipient = process.env.PLATFORM_ACCOUNT_ID || actorUserId
       if (commissionMinor > 0 && commissionRecipient) {

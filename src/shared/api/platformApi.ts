@@ -2678,6 +2678,8 @@ export type PlatformAdminSrRide = {
   scheduledFor: string | null
   requestedAt: string
   updatedAt: string
+  matchConfirmed?: boolean
+  matchConfirmedAt?: string | null
 }
 
 export async function fetchAdminSrRides(status?: string) {

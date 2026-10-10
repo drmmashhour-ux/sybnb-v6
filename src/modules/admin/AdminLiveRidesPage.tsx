@@ -31,6 +31,8 @@ const copy = {
     driver: 'السائق',
     fare: 'الأجرة',
     noDriver: 'لم يُعيَّن سائق',
+    matchConfirmed: 'تم تأكيد المطابقة',
+    matchPending: 'بانتظار تأكيد المطابقة',
     requested: 'طُلبت',
     scheduled: 'مجدولة',
     reasonPlaceholder: 'السبب (اختياري)',
@@ -54,6 +56,8 @@ const copy = {
     driver: 'Driver',
     fare: 'Fare',
     noDriver: 'No driver assigned',
+    matchConfirmed: 'Match confirmed',
+    matchPending: 'Match pending',
     requested: 'Requested',
     scheduled: 'Scheduled',
     reasonPlaceholder: 'Reason (optional)',
@@ -77,6 +81,8 @@ const copy = {
     driver: 'Chauffeur',
     fare: 'Tarif',
     noDriver: 'Aucun chauffeur',
+    matchConfirmed: 'Correspondance confirmée',
+    matchPending: 'Correspondance en attente',
     requested: 'Demandée',
     scheduled: 'Planifiée',
     reasonPlaceholder: 'Motif (facultatif)',
@@ -228,6 +234,11 @@ export function AdminLiveRidesPage({ lang }: Props) {
             <span dir="ltr" style={styles.dim}>
               {t.driver}: {ride.driverId ? ride.driverId.slice(0, 8) : t.noDriver}
             </span>
+            {ride.driverId && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(ride.status) && (
+              <span style={ride.matchConfirmed ? styles.matchOk : styles.matchWait}>
+                {ride.matchConfirmed ? `✓ ${t.matchConfirmed}` : `… ${t.matchPending}`}
+              </span>
+            )}
             {ride.accessibilityRequired && <span style={styles.tag}>♿</span>}
             {ride.scheduledFor && (
               <span dir="ltr" style={styles.dim}>{t.scheduled}: {fmt(ride.scheduledFor)}</span>
@@ -272,6 +283,8 @@ const styles: Record<string, CSSProperties> = {
   rideId: { color: '#9aa6ba', fontSize: 13, fontWeight: 700 },
   dim: { color: '#9aa6ba', fontSize: 13 },
   tag: { width: 'fit-content', borderRadius: 999, background: 'rgba(25,215,255,.14)', border: '1px solid rgba(25,215,255,.4)', color: '#19d7ff', fontWeight: 900, fontSize: 12, padding: '2px 8px' },
+  matchOk: { width: 'fit-content', borderRadius: 999, background: 'rgba(32,210,155,.14)', border: '1px solid rgba(32,210,155,.4)', color: '#20d29b', fontWeight: 900, fontSize: 12, padding: '2px 8px' },
+  matchWait: { width: 'fit-content', borderRadius: 999, background: 'rgba(245,197,66,.12)', border: '1px solid rgba(245,197,66,.4)', color: '#f5c542', fontWeight: 900, fontSize: 12, padding: '2px 8px' },
   actions: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 },
   primaryButton: { minHeight: 40, border: 0, borderRadius: 8, background: '#19d7ff', color: '#051014', padding: '0 14px', fontWeight: 950 },
   dangerButton: { minHeight: 40, border: '1px solid rgba(255,96,96,.5)', borderRadius: 8, background: 'rgba(255,96,96,.12)', color: '#ff8aa0', padding: '0 14px', fontWeight: 900 },

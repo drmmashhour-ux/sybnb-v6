@@ -1299,15 +1299,23 @@ export async function handleAdmin(req, res, url, context) {
     const where = statusParam
       ? { status: statusParam }
       : { status: { in: ACTIVE_STATUSES } }
-    const rides = await db().rideRequest.findMany({
+    const rows = await db().rideRequest.findMany({
       where,
       select: {
         id: true, status: true, fareMinor: true, currency: true, cancellationFeeMinor: true,
         riderId: true, driverId: true, accessibilityRequired: true, scheduledFor: true,
-        requestedAt: true, updatedAt: true,
+        requestedAt: true, updatedAt: true, metadata: true,
       },
       orderBy: { requestedAt: 'desc' },
       take: 200,
+    })
+    // Expose ONLY whether the rider<->driver pickup code was confirmed (and when) -- never the raw
+    // metadata, which holds the pickupCode itself. This is how an operator sees that the AI-gated
+    // match step actually completed for an in-progress ride.
+    const rides = rows.map((row) => {
+      const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+      const { metadata: _omit, ...rest } = row
+      return { ...rest, matchConfirmed: Boolean(meta.pickupVerifiedAt), matchConfirmedAt: meta.pickupVerifiedAt || null }
     })
     return json(res, 200, { ok: true, rides, count: rides.length })
   }

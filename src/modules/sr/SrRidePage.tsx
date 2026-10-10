@@ -1376,7 +1376,7 @@ export function SrRidePage({ lang }: Props) {
               }}
             >
               <span style={{ fontSize: 13, fontWeight: 800, color: '#19d7ff' }}>
-                {pick(lang, 'أظهر هذا الرمز لسائقك', 'Show this code to your driver', 'Montrez ce code à votre chauffeur')}
+                {pick(lang, 'تأكد أن السائق والمركبة أعلاه مطابقان، ثم أعطِ هذا الرمز لسائقك', 'Check the driver & car above match, then give this code to your driver', 'Vérifiez que le chauffeur et le véhicule ci-dessus correspondent, puis donnez ce code à votre chauffeur')}
               </span>
               <strong dir="ltr" style={{ fontSize: 40, letterSpacing: 10, fontWeight: 950 }}>
                 {String(ride.metadata.pickupCode)}

@@ -51,6 +51,7 @@ const AdminPromoCodesPage = lazyNamed(() => import('../modules/sr/AdminPromoCode
 const AdminBusinessAccountsPage = lazyNamed(() => import('../modules/sr/AdminBusinessAccountsPage'), 'AdminBusinessAccountsPage')
 const AdminIncidentsPage = lazyNamed(() => import('../modules/admin/AdminIncidentsPage'), 'AdminIncidentsPage')
 const AdminVehiclesPage = lazyNamed(() => import('../modules/admin/AdminVehiclesPage'), 'AdminVehiclesPage')
+const AdminLiveRidesPage = lazyNamed(() => import('../modules/admin/AdminLiveRidesPage'), 'AdminLiveRidesPage')
 const BusinessAccountPage = lazyNamed(() => import('../modules/sr/BusinessAccountPage'), 'BusinessAccountPage')
 const StaffAccessPage = lazyNamed(() => import('../modules/account/StaffAccessPage'), 'StaffAccessPage')
 const SyrianLocalWalletPaymentPage = lazyNamed(
@@ -241,6 +242,8 @@ export function App() {
           <AdminIncidentsPage lang={lang} />
         ) : path === '/admin/vehicles' ? (
           <AdminVehiclesPage lang={lang} />
+        ) : path === '/admin/sr/rides' ? (
+          <AdminLiveRidesPage lang={lang} />
         ) : path === '/business/account' ? (
           <BusinessAccountPage lang={lang} />
         ) : path === '/admin/hosts' ? (

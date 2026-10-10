@@ -2614,6 +2614,52 @@ export async function resolveAdminIncident(incidentId: string, input: { status: 
   return response.incident
 }
 
+// Re-audit follow-up (2026-10-10): operator live-ride ops. Wires the existing (previously UI-less)
+// GET /api/admin/sr/rides, PATCH .../resolve-dispute and PATCH .../reverse-payment so an operator can
+// watch active rides, resolve a disputed ride (confirm the fare, or reverse it), and reverse a
+// wrongly-approved/duplicated fare on a completed ride — all from a screen instead of the API.
+export type PlatformAdminSrRide = {
+  id: string
+  status: string
+  fareMinor: number | null
+  currency: string
+  cancellationFeeMinor: number | null
+  riderId: string
+  driverId: string | null
+  accessibilityRequired: boolean
+  scheduledFor: string | null
+  requestedAt: string
+  updatedAt: string
+}
+
+export async function fetchAdminSrRides(status?: string) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : ''
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; rides: PlatformAdminSrRide[]; count: number }>(`/api/admin/sr/rides${query}`, { token }),
+  )
+  return response.rides
+}
+
+export async function resolveAdminRideDispute(rideId: string, input: { resolution: 'CONFIRM' | 'REVERSE'; reason?: string }) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; ride: PlatformAdminSrRide; resolution: string; reversal: unknown }>(
+      `/api/admin/sr/rides/${encodeURIComponent(rideId)}/resolve-dispute`,
+      { method: 'PATCH', token, body: { resolution: input.resolution, reason: input.reason } },
+    ),
+  )
+  return response
+}
+
+export async function reverseAdminRidePayment(rideId: string, input: { reason?: string } = {}) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; reversal: unknown }>(
+      `/api/admin/sr/rides/${encodeURIComponent(rideId)}/reverse-payment`,
+      { method: 'PATCH', token, body: { reason: input.reason } },
+    ),
+  )
+  return response.reversal
+}
+
 // Launch blocker #188 (2026-10-10): operator vehicle/inspection review. Wires the existing
 // GET /api/admin/driver-vehicles + PATCH /api/admin/driver/:id/vehicle-review endpoints. A driver's
 // self-declared vehicle sits in PENDING_REVIEW until an operator approves it here; without this UI

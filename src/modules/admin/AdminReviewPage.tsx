@@ -694,6 +694,9 @@ function ShortRentAdminCommandDashboard({
         <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/vehicles')}>
           {pick(lang, 'مراجعة المركبات', 'Vehicle review', 'Contrôle des véhicules')}
         </button>
+        <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/sr/rides')}>
+          {pick(lang, 'الرحلات والنزاعات', 'Live rides & disputes', 'Courses & litiges')}
+        </button>
       </nav>
 
       <section style={commandStyles.departmentGroups} aria-label={isAr ? 'أقسام الإدارة' : 'Admin departments'}>

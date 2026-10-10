@@ -5,10 +5,12 @@ import {
   fetchAdminIncidents,
   fetchAdminRideTrail,
   fetchAdminDriverSafety,
+  fetchAdminRideAiSummary,
   resolveAdminIncident,
   type PlatformIncident,
   type PlatformRideTrail,
   type PlatformDriverSafety,
+  type PlatformRideAiAnalysis,
 } from '../../shared/api/platformApi'
 
 type Props = { lang: Lang }
@@ -123,6 +125,8 @@ export function AdminIncidentsPage({ lang }: Props) {
   const [trailLoading, setTrailLoading] = useState(false)
   const [safety, setSafety] = useState<PlatformDriverSafety | null>(null)
   const [safetyLoading, setSafetyLoading] = useState(false)
+  const [ai, setAi] = useState<PlatformRideAiAnalysis | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
   const [resolveNote, setResolveNote] = useState('')
   const [busyId, setBusyId] = useState('')
 
@@ -146,12 +150,24 @@ export function AdminIncidentsPage({ lang }: Props) {
     setTrailLoading(true)
     setTrail(null)
     setSafety(null)
+    setAi(null)
     try {
       setTrail(await fetchAdminRideTrail(rideId))
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t.error)
     } finally {
       setTrailLoading(false)
+    }
+  }
+
+  async function loadAiSummary(rideId: string, refresh = false) {
+    setAiLoading(true)
+    try {
+      setAi(await fetchAdminRideAiSummary(rideId, { refresh }))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setAiLoading(false)
     }
   }
 
@@ -220,6 +236,14 @@ export function AdminIncidentsPage({ lang }: Props) {
                 <span>
                   {t.note}: {incident.note}
                 </span>
+              )}
+              {incident.meta && typeof incident.meta.ai === 'object' && incident.meta.ai !== null && (
+                <div style={styles.aiInline}>
+                  <div style={styles.cardHead}>
+                    <span style={styles.dim}>{tr('قراءة الذكاء الاصطناعي', 'AI read', 'Lecture IA')}</span>
+                  </div>
+                  <AiAnalysisView analysis={incident.meta.ai as unknown as PlatformRideAiAnalysis} tr={tr} />
+                </div>
               )}
               {incident.ride && (
                 <span style={styles.dim} dir="ltr">
@@ -334,6 +358,30 @@ export function AdminIncidentsPage({ lang }: Props) {
                   )}
                 </div>
               )}
+              <div style={styles.snapshotBox}>
+                <div style={styles.cardHead}>
+                  <strong>{tr('تحليل الذكاء الاصطناعي', 'AI analysis', 'Analyse IA')}</strong>
+                  <div style={styles.actions}>
+                    <button
+                      style={styles.secondaryButton}
+                      disabled={aiLoading}
+                      onClick={() => void loadAiSummary(trail.ride.id, false)}
+                    >
+                      {aiLoading
+                        ? t.loading
+                        : ai
+                          ? tr('تحديث', 'Refresh', 'Actualiser')
+                          : tr('تشغيل التحليل', 'Run analysis', 'Lancer l’analyse')}
+                    </button>
+                  </div>
+                </div>
+                {!ai && !aiLoading && (
+                  <span style={styles.dim}>
+                    {tr('اضغط لتوليد قراءة أمان بالذكاء الاصطناعي لهذه الرحلة.', 'Generate an AI safety read for this trip.', 'Générez une lecture de sécurité IA pour cette course.')}
+                  </span>
+                )}
+                {ai && <AiAnalysisView analysis={ai} tr={tr} />}
+              </div>
               <div>
                 <strong>{t.events}</strong>
                 {trail.events.length === 0 ? (
@@ -358,6 +406,69 @@ export function AdminIncidentsPage({ lang }: Props) {
         </section>
       )}
     </main>
+  )
+}
+
+const SEVERITY_CHIP: Record<string, CSSProperties> = {
+  none: { borderRadius: 999, background: 'rgba(154,166,186,.14)', border: '1px solid rgba(154,166,186,.4)', color: '#9aa6ba', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
+  low: { borderRadius: 999, background: 'rgba(32,210,155,.14)', border: '1px solid rgba(32,210,155,.4)', color: '#20d29b', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
+  medium: { borderRadius: 999, background: 'rgba(255,210,122,.14)', border: '1px solid rgba(255,210,122,.4)', color: '#ffd27a', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
+  high: { borderRadius: 999, background: 'rgba(255,96,96,.14)', border: '1px solid rgba(255,96,96,.4)', color: '#ff8aa0', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
+}
+
+function SeverityChip({ severity, tr }: { severity: string; tr: (ar: string, en: string, fr: string) => string }) {
+  const label =
+    severity === 'high'
+      ? tr('خطورة عالية', 'High severity', 'Gravité élevée')
+      : severity === 'medium'
+        ? tr('خطورة متوسطة', 'Medium severity', 'Gravité moyenne')
+        : severity === 'low'
+          ? tr('خطورة منخفضة', 'Low severity', 'Gravité faible')
+          : tr('لا خطورة', 'No concern', 'Aucun risque')
+  return <span style={SEVERITY_CHIP[severity] ?? SEVERITY_CHIP.low}>{label}</span>
+}
+
+function AiAnalysisView({
+  analysis,
+  tr,
+}: {
+  analysis: PlatformRideAiAnalysis
+  tr: (ar: string, en: string, fr: string) => string
+}) {
+  if (!analysis.configured) {
+    return (
+      <span style={styles.dim}>
+        {tr('تحليل الذكاء الاصطناعي غير مُفعَّل.', 'AI analysis not enabled.', 'Analyse IA non activée.')}
+      </span>
+    )
+  }
+  if (analysis.error) {
+    return (
+      <span style={styles.dim}>
+        {tr('تعذّر إنشاء التحليل. حاول مرة أخرى.', 'Could not generate the analysis. Try again.', 'Impossible de générer l’analyse. Réessayez.')}
+      </span>
+    )
+  }
+  return (
+    <div style={styles.snapshotGrid}>
+      <SeverityChip severity={analysis.severity} tr={tr} />
+      {analysis.summary && <span>{analysis.summary}</span>}
+      {analysis.concerns.length > 0 && (
+        <div>
+          <span style={styles.dim}>{tr('مخاوف السلامة', 'Safety concerns', 'Préoccupations de sécurité')}:</span>
+          <ul style={styles.concernList}>
+            {analysis.concerns.map((concern, index) => (
+              <li key={index}>{concern}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {analysis.recommendation && (
+        <span>
+          <strong>{tr('التوصية', 'Recommendation', 'Recommandation')}:</strong> {analysis.recommendation}
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -405,6 +516,8 @@ const styles: Record<string, CSSProperties> = {
   trailPanel: { border: '1px solid #1e2a3c', borderRadius: 8, background: '#0b111b', padding: 16, display: 'grid', gap: 14 },
   snapshotBox: { border: '1px solid #1e2a3c', borderRadius: 8, background: '#101722', padding: 12, display: 'grid', gap: 8 },
   snapshotGrid: { display: 'grid', gap: 4 },
+  concernList: { margin: '4px 0 0', paddingInlineStart: 18, display: 'grid', gap: 2 },
+  aiInline: { border: '1px solid #1e2a3c', borderRadius: 8, background: '#0b111b', padding: 10, display: 'grid', gap: 6, marginTop: 4 },
   timeline: { margin: '8px 0 0', padding: 0, listStyle: 'none', display: 'grid', gap: 8 },
   timelineItem: { display: 'grid', gap: 2, borderInlineStart: '2px solid #263651', paddingInlineStart: 10 },
   eventType: { fontWeight: 900, color: '#19d7ff', fontSize: 14 },

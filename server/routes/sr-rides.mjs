@@ -33,6 +33,7 @@ import { REAUTH_FAILURE_CODES, reauthorizeAtCommit } from '../lib/commit-authori
 import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mjs'
 import { offerRideToNextDriver, runDispatchSweep } from '../lib/ride-dispatch.mjs'
 import { logRideEventSafe } from '../lib/ride-events.mjs'
+import { analyzeRide } from '../lib/ai-ride-analyst.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -941,6 +942,26 @@ export async function handleSrRides(req, res, url, context) {
         // push alerting is best-effort
       }
     })()
+    // Safety Phase 3 (2026-10-10): give the fresh SOS incident an INSTANT AI read. Fully
+    // fire-and-forget -- NOT awaited before responding, so the panic response stays fast -- and
+    // best-effort: analyzeRide never throws and is key-gated, and a failure to attach can never
+    // affect the SOS. On success the advisory read is merged onto incident.meta.ai.
+    void (async () => {
+      try {
+        const [events, incidents] = await Promise.all([
+          db().rideEvent.findMany({ where: { rideId: ride.id }, orderBy: { createdAt: 'asc' } }),
+          db().incident.findMany({ where: { rideId: ride.id }, orderBy: { createdAt: 'desc' } }),
+        ])
+        const analysis = await analyzeRide({ ride, events, incidents })
+        if (analysis.configured && !analysis.error) {
+          const fresh = await db().incident.findUnique({ where: { id: incident.id }, select: { meta: true } })
+          const baseMeta = fresh?.meta && typeof fresh.meta === 'object' && !Array.isArray(fresh.meta) ? fresh.meta : {}
+          await db().incident.update({ where: { id: incident.id }, data: { meta: { ...baseMeta, ai: analysis } } })
+        }
+      } catch {
+        // best-effort: an AI attach failure must never affect the SOS
+      }
+    })().catch(() => {})
     return json(res, 201, { ok: true, incidentId: incident.id })
   }
 

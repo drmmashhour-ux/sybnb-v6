@@ -13,6 +13,7 @@ import { db } from './prisma.mjs'
 import { log } from './logger.mjs'
 import { getDriverLocation } from './live-map.mjs'
 import { notifyAdmin } from './notifications.mjs'
+import { analyzeRide } from './ai-ride-analyst.mjs'
 
 // elapsed > estimatedMinutes * this factor => OVERTIME. Env-tunable; conservative default.
 function overtimeFactor() {
@@ -75,6 +76,25 @@ async function flagAnomaly(ride, anomaly, detail) {
       { rideId: ride.id, anomaly, incidentId: incident.id, ...detail },
       `anomaly:${ride.id}:${anomaly}`,
     )
+    // Safety Phase 3 (2026-10-10): give the new anomaly incident an instant AI read. Fire-and-forget
+    // and best-effort -- analyzeRide never throws and is key-gated; a failure can never break the
+    // sweep. On success the advisory read is merged onto incident.meta.ai.
+    void (async () => {
+      try {
+        const [events, incidents] = await Promise.all([
+          db().rideEvent.findMany({ where: { rideId: ride.id }, orderBy: { createdAt: 'asc' } }),
+          db().incident.findMany({ where: { rideId: ride.id }, orderBy: { createdAt: 'desc' } }),
+        ])
+        const analysis = await analyzeRide({ ride, events, incidents })
+        if (analysis.configured && !analysis.error) {
+          const fresh = await db().incident.findUnique({ where: { id: incident.id }, select: { meta: true } })
+          const baseMeta = fresh?.meta && typeof fresh.meta === 'object' && !Array.isArray(fresh.meta) ? fresh.meta : {}
+          await db().incident.update({ where: { id: incident.id }, data: { meta: { ...baseMeta, ai: analysis } } })
+        }
+      } catch {
+        // best-effort: an AI attach failure must never affect anomaly detection
+      }
+    })().catch(() => {})
     return true
   } catch (error) {
     log.warn('ride_anomaly_flag_failed', {

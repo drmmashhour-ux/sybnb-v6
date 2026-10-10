@@ -2492,6 +2492,29 @@ export async function fetchAdminRideTrail(rideId: string) {
   return trail as PlatformRideTrail
 }
 
+// Safety Phase 3 (2026-10-10): the AI trip-analysis layer. Advisory, fully key-gated server-side
+// (configured:false when ANTHROPIC_API_KEY is unset) and never-throws. ADMIN/SUPPORT only.
+export type PlatformRideAiAnalysis = {
+  configured: boolean
+  error?: boolean
+  summary: string | null
+  concerns: string[]
+  severity: 'none' | 'low' | 'medium' | 'high'
+  recommendation: string | null
+  generatedAt?: string
+}
+
+export async function fetchAdminRideAiSummary(rideId: string, options: { refresh?: boolean } = {}) {
+  const query = options.refresh ? '?refresh=1' : ''
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; analysis: PlatformRideAiAnalysis; cached?: boolean }>(
+      `/api/admin/sr/rides/${encodeURIComponent(rideId)}/ai-summary${query}`,
+      { token },
+    ),
+  )
+  return response.analysis
+}
+
 // Safety Phase 2 (2026-10-10): a driver's security-history profile, aggregated server-side from
 // existing tables. ADMIN/SUPPORT only.
 export type PlatformDriverSafety = {

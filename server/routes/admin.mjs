@@ -22,6 +22,7 @@ import { reviewListingNow, scheduleAiListingReview, serializeAiReview } from '..
 // Advisory-only AI decision assistant for the review desk (disputes + manual payments). Reuses the
 // same Anthropic plumbing / key gating as the listing review; never moves money or changes state.
 import { runAdminAiAssist, ADMIN_ASSIST_KINDS } from '../lib/ai-admin-assist.mjs'
+import { analyzeRide } from '../lib/ai-ride-analyst.mjs'
 import { runLoyaltyManager } from '../lib/ai-loyalty-manager.mjs'
 import { applyAiLoyaltyDecision, loyaltySummary, AI_BONUS_CAP_PER_REVIEW, AI_BONUS_CAP_PER_DAY } from '../lib/loyalty.mjs'
 import { approvalActivationDecision, issueHostActivationCodeTx } from '../lib/host-activation-issue.mjs'
@@ -2337,6 +2338,54 @@ export async function handleAdmin(req, res, url, context) {
     ])
     const rideMeta = ride.metadata && typeof ride.metadata === 'object' ? ride.metadata : {}
     return json(res, 200, { ok: true, ride, snapshot: rideMeta.snapshot ?? null, events, incidents })
+  }
+
+  // Safety Phase 3 (2026-10-10): the AI trip-analysis layer. Assembles the same ride + ordered event
+  // trail + incidents as the trail route and asks the AI ride analyst (advisory, fully key-gated,
+  // never-throws) for a plain-language safety read. Results are best-effort cached into
+  // ride.metadata.aiSummary for an hour; ?refresh=1 forces a fresh run. The metadata write is a
+  // SHALLOW MERGE that only ever adds/replaces the aiSummary key -- it never touches fare,
+  // settlement or any other metadata field.
+  const rideAiSummaryMatch = url.pathname.match(/^\/api\/admin\/sr\/rides\/([^/]+)\/ai-summary$/)
+  if (rideAiSummaryMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const ride = await db().rideRequest.findUnique({ where: { id: rideAiSummaryMatch[1] } })
+    if (!ride) {
+      const error = new Error('Ride not found.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const refresh = url.searchParams.get('refresh') === '1'
+    const rideMeta = ride.metadata && typeof ride.metadata === 'object' && !Array.isArray(ride.metadata) ? ride.metadata : {}
+    const cached = rideMeta.aiSummary && typeof rideMeta.aiSummary === 'object' && !Array.isArray(rideMeta.aiSummary) ? rideMeta.aiSummary : null
+    // Serve a recent cached copy (< 1 hour) unless an explicit refresh was asked for.
+    if (!refresh && cached && cached.generatedAt) {
+      const age = Date.now() - new Date(cached.generatedAt).getTime()
+      if (Number.isFinite(age) && age >= 0 && age < 60 * 60 * 1000) {
+        return json(res, 200, { ok: true, analysis: cached, cached: true })
+      }
+    }
+    const [events, incidents] = await Promise.all([
+      db().rideEvent.findMany({ where: { rideId: ride.id }, orderBy: { createdAt: 'asc' } }),
+      db().incident.findMany({ where: { rideId: ride.id }, orderBy: { createdAt: 'desc' } }),
+    ])
+    const analysis = await analyzeRide({ ride, events, incidents })
+    // Best-effort cache only when the AI is configured and actually produced a read -- never cache a
+    // not-configured placeholder, and never let a cache-write failure fail the request.
+    if (analysis.configured && !analysis.error) {
+      try {
+        await db().rideRequest.update({
+          where: { id: ride.id },
+          data: { metadata: { ...rideMeta, aiSummary: { ...analysis } } },
+        })
+      } catch {
+        // caching is best-effort; the analysis is still returned below
+      }
+    }
+    return json(res, 200, { ok: true, analysis })
   }
 
   const incidentPatchMatch = url.pathname.match(/^\/api\/admin\/sr\/incidents\/([^/]+)$/)

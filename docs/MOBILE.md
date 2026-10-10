@@ -13,7 +13,13 @@ Claude has already added the Capacitor dependencies, `capacitor.config.ts`, and 
 ## 1. Install deps + generate the native projects
 ```bash
 cd ~/sybnb-v6
-npm install                 # pulls the new @capacitor/* packages
+npm install
+# Add the Capacitor packages on the Mac (done here, not in the shared repo, so package.json AND
+# package-lock.json update together — the backend's Docker build uses `npm ci`, which requires them
+# to stay in sync):
+npm install --save @capacitor/core @capacitor/cli @capacitor/ios @capacitor/android \
+  @capacitor/app @capacitor/geolocation @capacitor/push-notifications @capacitor/splash-screen @capacitor/status-bar
+git add package.json package-lock.json && git commit -m "Add Capacitor deps (lock in sync)"
 npm run build               # produces dist/ (tsc && vite build)
 npx cap add ios
 npx cap add android

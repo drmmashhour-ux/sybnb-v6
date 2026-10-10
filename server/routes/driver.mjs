@@ -10,6 +10,7 @@ import { VEHICLE_CATEGORY_VALUES, isCategoryAllowedForYear, VEHICLE_MAX_AGE_YEAR
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
 import { settlePrepaidRide, createDriverPayoutRequest, driverPayoutBalances } from '../lib/finance-ledger.mjs'
+import { maybeAutoChargeRideCard } from '../lib/ride-auto-charge.mjs'
 import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 // SEC-002R rounds 3 and 4: the two TERMINAL transitions this route can write are Class A -- COMPLETED
 // makes a fare billable, CANCELLED irreversibly destroys a receivable. See the ride status handler
@@ -638,6 +639,14 @@ export async function handleDriver(req, res, url, context) {
     const pushCopy = RIDER_STATUS_PUSH_COPY[nextStatus]
     if (pushCopy) {
       void sendPushNotification(ride.riderId, { ...pushCopy, url: '/#/ride' })
+    }
+
+    // Stripe-for-SR Option B: the instant a trip completes, auto-charge the fare to the rider's saved
+    // card off-session (no rider tap). Fire-and-forget and fails open -- if there is no saved card, or
+    // the charge needs SCA / is declined, it books nothing and the rider simply pays via their other
+    // rails. A prepaid ride already settled above, so this is a no-op for it (guarded inside).
+    if (nextStatus === 'COMPLETED') {
+      void maybeAutoChargeRideCard({ rideId: ride.id }).catch(() => {})
     }
 
     return json(res, 200, { ok: true, ride })

@@ -36,6 +36,24 @@ function requireStripe() {
   return stripe
 }
 
+// Stripe-for-SR Option B: resolve (and cache) the rider's Stripe Customer. One customer per user,
+// created lazily the first time they save a card; the id is stored on the user so off-session
+// charges and future cards reuse it. Only non-identifying metadata (our userId) is sent to Stripe.
+async function ensureStripeCustomer(userId) {
+  const user = await db().user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, displayName: true, stripeCustomerId: true },
+  })
+  if (user?.stripeCustomerId) return user.stripeCustomerId
+  const customer = await stripe.customers.create({
+    email: user?.email || undefined,
+    name: user?.displayName || undefined,
+    metadata: { userId },
+  })
+  await db().user.update({ where: { id: userId }, data: { stripeCustomerId: customer.id } })
+  return customer.id
+}
+
 // Translate a DB unique-constraint violation on (provider, provider_ref) into the governed
 // duplicate error. This is what closes the TOCTOU race: even if two concurrent submissions both
 // pass the app-level pre-check, only one insert can win — the other raises P2002 here.
@@ -478,7 +496,11 @@ export async function handlePayments(req, res, url, context) {
     // durable, authenticated trace.
     // A ride-scoped Checkout session carries metadata.rideId and no bookingId (Stripe-for-SR).
     const isRideEvent = !obj.metadata?.bookingId && Boolean(obj.metadata?.rideId)
-    const providerReference = String(obj.metadata?.bookingId || obj.metadata?.rideId || '')
+    // A save-card session (Option B) is a setup-mode Checkout carrying metadata.userId + purpose.
+    const isSetupEvent = obj.mode === 'setup' || obj.metadata?.purpose === 'save_card'
+    const providerReference = String(
+      (isSetupEvent ? obj.metadata?.userId : obj.metadata?.bookingId || obj.metadata?.rideId) || '',
+    )
 
     // Durable intake -- this rail's own PaymentEvent row (previously nonexistent entirely; this
     // table could not hold a stripe_checkout event at all before migration 016). Race-safe under
@@ -489,7 +511,7 @@ export async function handlePayments(req, res, url, context) {
       provider: 'stripe',
       providerEndpointKey: 'stripe-checkout',
       environment: policyEnvironment(),
-      subjectType: isRideEvent ? 'SR_RIDE' : 'BOOKING',
+      subjectType: isSetupEvent ? 'CARD_SETUP' : isRideEvent ? 'SR_RIDE' : 'BOOKING',
       providerReference,
       providerEventId: event.id,
       type: event.type,
@@ -526,6 +548,40 @@ export async function handlePayments(req, res, url, context) {
       // previously returned before ever reaching the durable insert for exactly this case).
       eventRow = await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'IGNORED' } })
       return json(res, 200, { ok: true, ignored: event.type })
+    }
+
+    // Stripe-for-SR Option B: a completed setup-mode session means the rider saved a card. Persist it
+    // (brand/last4 + payment-method id) as a backup to the synchronous setup-confirm call, so a rider
+    // who closes the tab before returning still ends up with their card saved. Not money movement.
+    if (eventRow.subjectType === 'CARD_SETUP') {
+      const userId = eventRow.providerReference || null
+      try {
+        const setupIntentId = typeof obj.setup_intent === 'string' ? obj.setup_intent : obj.setup_intent?.id
+        const setupIntent = setupIntentId ? await stripe.setupIntents.retrieve(setupIntentId) : null
+        const pmId =
+          typeof setupIntent?.payment_method === 'string' ? setupIntent.payment_method : setupIntent?.payment_method?.id
+        if (userId && pmId) {
+          const pm = await stripe.paymentMethods.retrieve(pmId)
+          if (obj.customer) {
+            await stripe.customers.update(String(obj.customer), { invoice_settings: { default_payment_method: pmId } })
+          }
+          await db().user.update({
+            where: { id: userId },
+            data: {
+              stripeCustomerId: obj.customer ? String(obj.customer) : undefined,
+              defaultCardPmId: pmId,
+              defaultCardBrand: pm.card?.brand || null,
+              defaultCardLast4: pm.card?.last4 || null,
+            },
+          })
+        }
+        eventRow = await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'APPLIED', appliedAt: new Date() } })
+        return json(res, 200, { ok: true, applied: true, cardSetup: true, received: true })
+      } catch (err) {
+        log.warn('stripe_card_setup_apply_failed', { eventId: event.id, message: err?.message })
+        eventRow = await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: 'CARD_SETUP_APPLY_FAILED' } })
+        return json(res, 200, { ok: true, quarantined: true, received: true })
+      }
     }
 
     const session = obj
@@ -588,6 +644,124 @@ export async function handlePayments(req, res, url, context) {
       apply: (claimToken) => applyStripeCheckoutEvent({ eventId: eventRow.id, session, claimToken }),
     })
     return json(res, webhookAcknowledgeStatus(result), { ok: true, received: true, ...result })
+  }
+
+  // Stripe-for-SR Option B: save a card via a Checkout session in SETUP mode (hosted by Stripe, so
+  // no card data ever touches us and no new frontend dependency is needed). On return the rider's
+  // card is attached to their Customer and set as the default for off-session charges.
+  if (url.pathname === '/api/payments/stripe/setup-session') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+    requireStripe()
+    const body = await readJson(req)
+    const origin = String(body.origin || '').replace(/\/$/, '')
+    if (!origin) {
+      const error = new Error('origin is required.')
+      error.statusCode = 400
+      error.code = 'STRIPE_SESSION_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+    authorizePaymentOperation({
+      operation: 'create',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: 'SR',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: context.roles },
+    })
+    const customerId = await ensureStripeCustomer(context.user.id)
+    const session = await stripe.checkout.sessions.create({
+      mode: 'setup',
+      payment_method_types: ['card'],
+      customer: customerId,
+      metadata: { userId: context.user.id, purpose: 'save_card' },
+      success_url: `${origin}/?setup_session_id={CHECKOUT_SESSION_ID}#/sr`,
+      cancel_url: `${origin}/#/sr`,
+    })
+    return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
+  }
+
+  if (url.pathname === '/api/payments/stripe/setup-confirm') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+    requireStripe()
+    const body = await readJson(req)
+    const sessionId = String(body.sessionId || '')
+    if (!sessionId) {
+      const error = new Error('sessionId is required.')
+      error.statusCode = 400
+      error.code = 'STRIPE_CONFIRM_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+    const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ['setup_intent'] })
+    if (session.metadata?.userId !== context.user.id) {
+      const error = new Error('This setup session does not belong to this account.')
+      error.statusCode = 403
+      error.code = 'STRIPE_SESSION_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+    if (session.mode !== 'setup' || session.status !== 'complete') {
+      const error = new Error('This card has not been saved yet.')
+      error.statusCode = 409
+      error.code = 'STRIPE_SETUP_NOT_COMPLETE'
+      error.expose = true
+      throw error
+    }
+    const setupIntent =
+      typeof session.setup_intent === 'string' ? await stripe.setupIntents.retrieve(session.setup_intent) : session.setup_intent
+    const pmId =
+      typeof setupIntent?.payment_method === 'string' ? setupIntent.payment_method : setupIntent?.payment_method?.id
+    if (!pmId) {
+      const error = new Error('No payment method was saved.')
+      error.statusCode = 409
+      error.code = 'STRIPE_NO_PAYMENT_METHOD'
+      error.expose = true
+      throw error
+    }
+    const pm = await stripe.paymentMethods.retrieve(pmId)
+    const customerId = await ensureStripeCustomer(context.user.id)
+    // Make this the default so future off-session charges pick it up automatically.
+    await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: pmId } })
+    await db().user.update({
+      where: { id: context.user.id },
+      data: { defaultCardPmId: pmId, defaultCardBrand: pm.card?.brand || null, defaultCardLast4: pm.card?.last4 || null },
+    })
+    return json(res, 200, { ok: true, card: { brand: pm.card?.brand || null, last4: pm.card?.last4 || null } })
+  }
+
+  if (url.pathname === '/api/payments/stripe/saved-card') {
+    requireAuth(context, ['GUEST'])
+    if (req.method === 'GET') {
+      const user = await db().user.findUnique({
+        where: { id: context.user.id },
+        select: { defaultCardPmId: true, defaultCardBrand: true, defaultCardLast4: true },
+      })
+      return json(res, 200, {
+        ok: true,
+        card: user?.defaultCardPmId ? { brand: user.defaultCardBrand, last4: user.defaultCardLast4 } : null,
+      })
+    }
+    if (req.method === 'DELETE') {
+      requireStripe()
+      const user = await db().user.findUnique({ where: { id: context.user.id }, select: { defaultCardPmId: true } })
+      if (user?.defaultCardPmId) {
+        try {
+          await stripe.paymentMethods.detach(user.defaultCardPmId)
+        } catch {
+          // Already detached / unknown at Stripe -- clearing our side is what matters.
+        }
+      }
+      await db().user.update({
+        where: { id: context.user.id },
+        data: { defaultCardPmId: null, defaultCardBrand: null, defaultCardLast4: null },
+      })
+      return json(res, 200, { ok: true })
+    }
+    return methodNotAllowed(res, ['GET', 'DELETE'])
   }
 
   if (url.pathname === '/api/payments/stripe/status') {

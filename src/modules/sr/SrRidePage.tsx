@@ -5,6 +5,7 @@ import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
   cancelPrototypeSrRide,
   confirmStripePayment,
+  confirmStripeSetup,
   createPrototypeSrRide,
   createSavedPlace,
   createStripeRideCheckoutSession,
@@ -14,8 +15,11 @@ import {
   fetchPrototypeSrRide,
   fetchPrototypeSrRideThread,
   fetchSavedPlaces,
+  fetchSavedCard,
   fetchSrQuote,
   fetchStripePaymentStatus,
+  createStripeSetupSession,
+  deleteSavedCard,
   resolveApiUrl,
   sendPrototypeSrRideMessage,
   sharePrototypeSrRide,
@@ -26,6 +30,7 @@ import {
   type PlatformRideRequest,
   type PlatformSavedPlace,
   type PlatformSrQuote,
+  type SavedCard,
 } from '../../shared/api/platformApi'
 
 const ACTIVE_RIDE_STATUSES = ['DRAFT', 'REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
@@ -72,6 +77,13 @@ const copy = {
     locationNotConfirmed: 'يرجى تأكيد نقطة الانطلاق والوجهة (بالكتابة أو عبر GPS) قبل طلب الرحلة.',
     driverNotAssigned: 'لم يُعيّن سائق بعد',
     verifiedDriver: 'هوية موثقة',
+    autoPayTitle: 'الدفع التلقائي بالبطاقة',
+    autoPayHint: 'احفظ بطاقة مرة واحدة لتُخصم الأجرة تلقائياً بعد كل رحلة — بدون أي خطوة.',
+    addCard: 'إضافة بطاقة',
+    addingCard: 'جارٍ الفتح…',
+    removeCard: 'إزالة',
+    autoPayOn: 'الدفع التلقائي مُفعّل',
+    cardEndingIn: 'تنتهي بـ',
     safetyTitle: 'سائقك ومركبته',
     safetyHint: 'احتفظ بهذه التفاصيل لأمانك. إن حدث أي طارئ شاركها مع شخص تثق به.',
     vehicleLabel: 'المركبة',
@@ -186,6 +198,13 @@ const copy = {
     locationNotConfirmed: 'Please confirm both pickup and dropoff (by typing or via GPS) before requesting a ride.',
     driverNotAssigned: 'Not assigned yet',
     verifiedDriver: 'Verified identity',
+    autoPayTitle: 'Automatic card payment',
+    autoPayHint: 'Save a card once and the fare is charged automatically after each ride — no steps.',
+    addCard: 'Add a card',
+    addingCard: 'Opening…',
+    removeCard: 'Remove',
+    autoPayOn: 'Auto-pay is on',
+    cardEndingIn: 'ending in',
     safetyTitle: 'Your driver & vehicle',
     safetyHint: 'Keep these details for your safety. If anything happens, share them with someone you trust.',
     vehicleLabel: 'Vehicle',
@@ -300,6 +319,13 @@ const copy = {
     locationNotConfirmed: 'Veuillez confirmer le point de départ et la destination (en les saisissant ou par GPS) avant de demander une course.',
     driverNotAssigned: 'Pas encore attribué',
     verifiedDriver: 'Identité vérifiée',
+    autoPayTitle: 'Paiement automatique par carte',
+    autoPayHint: 'Enregistrez une carte une fois et le tarif est débité automatiquement après chaque course.',
+    addCard: 'Ajouter une carte',
+    addingCard: 'Ouverture…',
+    removeCard: 'Retirer',
+    autoPayOn: 'Paiement automatique activé',
+    cardEndingIn: 'se terminant par',
     safetyTitle: 'Votre chauffeur et son véhicule',
     safetyHint: 'Conservez ces informations pour votre sécurité. En cas de problème, partagez-les avec une personne de confiance.',
     vehicleLabel: 'Véhicule',
@@ -449,6 +475,8 @@ export function SrRidePage({ lang }: Props) {
   const [payStatus, setPayStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
   const [stripeConfigured, setStripeConfigured] = useState(false)
   const [cardStatus, setCardStatus] = useState<'idle' | 'redirecting' | 'confirming' | 'error'>('idle')
+  const [savedCard, setSavedCard] = useState<SavedCard | null>(null)
+  const [cardSetupStatus, setCardSetupStatus] = useState<'idle' | 'redirecting' | 'confirming' | 'error'>('idle')
   const [tipStatus, setTipStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
   const [tipAmountMinor, setTipAmountMinor] = useState(0)
   const [tipCustom, setTipCustom] = useState('')
@@ -499,7 +527,30 @@ export function SrRidePage({ lang }: Props) {
         if (!cancelled) setStripeConfigured(Boolean(s.configured))
       })
       .catch(() => {})
+    fetchSavedCard()
+      .then((card) => {
+        if (!cancelled) setSavedCard(card)
+      })
+      .catch(() => {})
     const params = new URLSearchParams(window.location.search)
+    // Returned from a save-card (setup) Checkout -> confirm and store the card.
+    const setupSessionId = params.get('setup_session_id')
+    if (setupSessionId) {
+      setCardSetupStatus('confirming')
+      confirmStripeSetup(setupSessionId)
+        .then((card) => {
+          if (cancelled) return
+          setSavedCard(card)
+          setCardSetupStatus('idle')
+          const clean = window.location.pathname + window.location.hash
+          window.history.replaceState(null, '', clean)
+        })
+        .catch((error) => {
+          if (cancelled) return
+          setCardSetupStatus('error')
+          setMessage(error instanceof Error ? error.message : t.error)
+        })
+    }
     const sessionId = params.get('session_id')
     if (sessionId) {
       setCardStatus('confirming')
@@ -863,6 +914,27 @@ export function SrRidePage({ lang }: Props) {
     }
   }
 
+  // Stripe-for-SR Option B: save a card once (hosted setup Checkout) so future trips auto-charge.
+  async function startAddCard() {
+    setCardSetupStatus('redirecting')
+    try {
+      const { url } = await createStripeSetupSession()
+      window.location.assign(url)
+    } catch (error) {
+      setCardSetupStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
+  async function removeSavedCard() {
+    try {
+      await deleteSavedCard()
+      setSavedCard(null)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
   async function submitTip() {
     if (!ride || tipAmountMinor <= 0 || !tipRef.trim()) return
     setTipStatus('saving')
@@ -966,6 +1038,35 @@ export function SrRidePage({ lang }: Props) {
         )}
         {pushStatus === 'enabled' && <span style={styles.verifiedBadge}>✓ {t.notificationsEnabled}</span>}
       </section>
+
+      {stripeConfigured && (
+        <section style={styles.card}>
+          <strong>💳 {t.autoPayTitle}</strong>
+          {savedCard ? (
+            <>
+              <span style={styles.verifiedBadge}>✓ {t.autoPayOn}</span>
+              <Info
+                label={t.autoPayTitle}
+                value={`${savedCard.brand ? savedCard.brand.toUpperCase() : 'CARD'} · ${t.cardEndingIn} ${savedCard.last4 || '----'}`}
+              />
+              <button style={styles.secondaryButton} onClick={() => void removeSavedCard()}>
+                {t.removeCard}
+              </button>
+            </>
+          ) : (
+            <>
+              <span style={styles.payCashHint}>{t.autoPayHint}</span>
+              <button
+                style={styles.primaryButton}
+                disabled={cardSetupStatus === 'redirecting' || cardSetupStatus === 'confirming'}
+                onClick={() => void startAddCard()}
+              >
+                {cardSetupStatus === 'redirecting' || cardSetupStatus === 'confirming' ? t.addingCard : t.addCard}
+              </button>
+            </>
+          )}
+        </section>
+      )}
 
       <section style={styles.grid}>
         <article style={styles.card}>

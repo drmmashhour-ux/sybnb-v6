@@ -182,6 +182,13 @@ model User {
   // by POST /api/bookings (server/lib/host-verification.mjs).
   hostVerifiedAt   DateTime? @map("host_verified_at")
   hostVerifiedById String?   @map("host_verified_by_id")
+  // Stripe-for-SR Option B (saved-card auto-charge). The rider's Stripe Customer and their one saved
+  // default card, captured once via a Checkout session in setup mode. Only non-sensitive descriptors
+  // (brand + last4) are stored; the card itself lives at Stripe, referenced by the payment-method id.
+  stripeCustomerId  String? @map("stripe_customer_id")
+  defaultCardPmId   String? @map("default_card_pm_id")
+  defaultCardBrand  String? @map("default_card_brand")
+  defaultCardLast4  String? @map("default_card_last4")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 

@@ -1603,6 +1603,41 @@ export async function createStripeCheckoutSession(bookingId: string) {
   return response
 }
 
+export type SavedCard = { brand: string | null; last4: string | null }
+
+export async function fetchSavedCard(): Promise<SavedCard | null> {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; card: SavedCard | null }>('/api/payments/stripe/saved-card', {
+    token: session.token,
+  })
+  return response.card
+}
+
+export async function deleteSavedCard() {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>('/api/payments/stripe/saved-card', { method: 'DELETE', token: session.token })
+}
+
+export async function createStripeSetupSession() {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; url: string; sessionId: string }>('/api/payments/stripe/setup-session', {
+    method: 'POST',
+    token: session.token,
+    body: { origin: window.location.origin },
+  })
+  return response
+}
+
+export async function confirmStripeSetup(sessionId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; card: SavedCard }>('/api/payments/stripe/setup-confirm', {
+    method: 'POST',
+    token: session.token,
+    body: { sessionId },
+  })
+  return response.card
+}
+
 export async function createStripeRideCheckoutSession(rideId: string) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; url: string; sessionId: string }>('/api/payments/stripe/create-checkout-session', {

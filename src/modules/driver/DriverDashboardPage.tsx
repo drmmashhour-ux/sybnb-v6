@@ -88,6 +88,7 @@ const copy = {
     status: 'الحالة',
     fare: 'الأجرة',
     arriving: 'في الطريق',
+    navigate: 'التنقّل',
     start: 'بدء الرحلة',
     complete: 'إنهاء',
     cancel: 'إلغاء',
@@ -219,6 +220,7 @@ const copy = {
     status: 'Status',
     fare: 'Fare',
     arriving: 'Arriving',
+    navigate: 'Navigate',
     start: 'Start ride',
     complete: 'Complete',
     cancel: 'Cancel',
@@ -350,6 +352,7 @@ const copy = {
     status: 'Statut',
     fare: 'Tarif',
     arriving: 'En route',
+    navigate: 'Itinéraire',
     start: 'Démarrer la course',
     complete: 'Terminer',
     cancel: 'Annuler',
@@ -1185,6 +1188,9 @@ function RideCard({
         <PickupVerifyPanel ride={ride} lang={lang} onRefresh={onRefresh} />
       )}
       {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
+        <NavigateButton ride={ride} label={labels.navigate} />
+      )}
+      {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
         <div style={styles.actions}>
           <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>
             {labels.arriving}
@@ -1203,6 +1209,33 @@ function RideCard({
       {LIVE_TRACKING_STATUSES.includes(ride.status) && <LocationSharingToggle rideId={ride.id} labels={labels} />}
       {MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status) && <RideChatPanel rideId={ride.id} labels={labels} />}
     </article>
+  )
+}
+
+// One-tap navigation (SR vs. Uber parity): opens the device's default maps app with turn-by-turn
+// directions. Before the trip starts the destination is the pickup point; once IN_PROGRESS it is the
+// drop-off. Prefers precise coordinates and falls back to the saved address text. Google Maps universal
+// links hand off to Apple Maps / the native app on the respective platforms, so no API key is needed.
+function NavigateButton({ ride, label }: { ride: PlatformRideRequest; label: string }) {
+  const headingToDropoff = ride.status === 'IN_PROGRESS'
+  const coords = headingToDropoff ? ride.dropoffCoords : ride.pickupCoords
+  const text = headingToDropoff ? ride.metadata.dropoff : ride.metadata.pickup
+  const destination = coords
+    ? `${coords.lat},${coords.lng}`
+    : typeof text === 'string' && text.trim()
+      ? text.trim()
+      : ''
+  if (!destination) return null
+  const href = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      style={{ ...styles.primaryButton, display: 'block', textAlign: 'center', textDecoration: 'none', marginBottom: 8 }}
+    >
+      🧭 {label}
+    </a>
   )
 }
 

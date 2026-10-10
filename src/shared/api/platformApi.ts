@@ -3624,3 +3624,83 @@ export async function finalizeListingAuction(auctionId: string): Promise<Platfor
   )
   return res.auction
 }
+
+// ---------------------------------------------------------------------------------------------
+// Centris-parity Phase 1 (2026-10-10): favourites (saved listings) + saved searches with alerts.
+// All require a signed-in guest session.
+// ---------------------------------------------------------------------------------------------
+
+export type PlatformFavourite = {
+  id: string
+  listingId: string
+  createdAt: string
+  listing: PlatformListing | null
+}
+
+export type PlatformSavedSearch = {
+  id: string
+  label: string | null
+  division: string
+  filters: Record<string, unknown>
+  notifyOnNew: boolean
+  createdAt: string
+}
+
+export async function fetchFavourites(): Promise<PlatformFavourite[]> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; favourites: PlatformFavourite[] }>('/api/favourites', { token: session.token })
+  return res.favourites
+}
+
+// Lightweight: just the set of favourited listing ids (for rendering hearts). Returns [] when signed out.
+export async function fetchFavouriteIds(): Promise<string[]> {
+  const session = getStoredGuestSession()
+  if (!session) return []
+  try {
+    const res = await apiRequest<{ ok: true; favourites: PlatformFavourite[] }>('/api/favourites', { token: session.token })
+    return res.favourites.map((f) => f.listingId)
+  } catch {
+    return []
+  }
+}
+
+export async function addFavourite(listingId: string): Promise<void> {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>('/api/favourites', { method: 'POST', token: session.token, body: { listingId } })
+}
+
+export async function removeFavourite(listingId: string): Promise<void> {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/favourites/${encodeURIComponent(listingId)}`, { method: 'DELETE', token: session.token })
+}
+
+export async function createSavedSearch(input: {
+  division: string
+  filters: Record<string, unknown>
+  label?: string
+  notifyOnNew?: boolean
+}): Promise<PlatformSavedSearch> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; savedSearch: PlatformSavedSearch }>('/api/saved-searches', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return res.savedSearch
+}
+
+export async function fetchSavedSearches(): Promise<PlatformSavedSearch[]> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; savedSearches: PlatformSavedSearch[] }>('/api/saved-searches', { token: session.token })
+  return res.savedSearches
+}
+
+export async function deleteSavedSearch(id: string): Promise<void> {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/saved-searches/${encodeURIComponent(id)}`, { method: 'DELETE', token: session.token })
+}
+
+export async function updateSavedSearch(id: string, patch: { notifyOnNew?: boolean; label?: string | null }): Promise<void> {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/saved-searches/${encodeURIComponent(id)}`, { method: 'PATCH', token: session.token, body: patch })
+}

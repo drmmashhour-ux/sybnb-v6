@@ -39,6 +39,7 @@ const ImmocontactPage = lazyNamed(() => import('../modules/immocontact/Immoconta
 const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'LandingPage')
 const LegalDocumentPage = lazyNamed(() => import('../modules/legal/LegalDocumentPage'), 'LegalDocumentPage')
 const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDetailPage'), 'ListingDetailPage')
+const SavedPage = lazyNamed(() => import('../modules/listings/SavedPage'), 'SavedPage')
 const OperationsCalendarPage = lazyNamed(() => import('../modules/operations/OperationsCalendarPage'), 'OperationsCalendarPage')
 const PaymentReceiptPage = lazyNamed(() => import('../modules/payments/PaymentReceiptPage'), 'PaymentReceiptPage')
 const PlatformStatusPage = lazyNamed(() => import('../modules/status/PlatformStatusPage'), 'PlatformStatusPage')
@@ -211,6 +212,8 @@ export function App() {
           <DashboardPage lang={lang} />
         ) : path === '/host/profile' ? (
           <HostProfilePage lang={lang} />
+        ) : path === '/saved' ? (
+          <SavedPage lang={lang} />
         ) : path === '/profile' ? (
           <ProfilePage lang={lang} />
         ) : path === '/host' ||

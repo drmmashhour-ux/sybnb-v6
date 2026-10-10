@@ -18,6 +18,8 @@ import { handleDriver } from './routes/driver.mjs'
 import { handleHost } from './routes/host.mjs'
 import { handleListings } from './routes/listings.mjs'
 import { handleAuctions, closeDueAuctions } from './routes/auctions.mjs'
+import { handleEngagement } from './routes/engagement.mjs'
+import { runSavedSearchAlerts } from './lib/saved-search-alerts.mjs'
 import { handleMe } from './routes/me.mjs'
 import { handleHostProfile } from './routes/host-profile.mjs'
 import { handleHostVerification } from './routes/host-verification.mjs'
@@ -148,10 +150,11 @@ async function handleInternalTick(res) {
     const activated = await activateScheduledRides()
     const sweep = await runDispatchSweep()
     const auctionsClosed = await closeDueAuctions().catch(() => ({ closed: 0 }))
+    const alerts = await runSavedSearchAlerts().catch(() => ({ notified: 0 }))
     // Safety Phase 2 (2026-10-10): scan active rides for time/signal anomalies on the same timer.
     // detectRideAnomalies() is best-effort and never throws; the extra .catch is pure belt-and-braces.
     const anomalies = await detectRideAnomalies().catch(() => ({ scanned: 0, flagged: 0 }))
-    return json(res, 200, { ok: true, activated, expired: sweep.expired, opened: sweep.opened, anomaliesFlagged: anomalies.flagged, auctionsClosed: auctionsClosed.closed })
+    return json(res, 200, { ok: true, activated, expired: sweep.expired, opened: sweep.opened, anomaliesFlagged: anomalies.flagged, auctionsClosed: auctionsClosed.closed, alertsSent: alerts.notified })
   } catch {
     // never leak errors/stack; the tick is best-effort
     return json(res, 200, { ok: true })
@@ -261,6 +264,7 @@ async function dispatch(req, res, url, context) {
     handleLegal,
     handlePaymentIntents,
     handleAuctions,
+    handleEngagement,
     handleListings,
     handleBookings,
     handlePayments,
@@ -397,6 +401,8 @@ async function runDispatchHeartbeat() {
     await activateScheduledRides()
     await runDispatchSweep()
     await detectRideAnomalies().catch(() => ({ scanned: 0, flagged: 0 }))
+    await closeDueAuctions().catch(() => ({ closed: 0 }))
+    await runSavedSearchAlerts().catch(() => ({ notified: 0 }))
   } catch (error) {
     log.error('dispatch_heartbeat_failed', { error: error instanceof Error ? error.message : String(error) })
   }

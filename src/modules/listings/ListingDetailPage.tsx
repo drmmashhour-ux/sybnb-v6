@@ -9,7 +9,10 @@ import {
   fetchListingReviews,
   fetchPrototypeListing,
   fetchPublicHostProfile,
+  addFavourite,
+  fetchFavouriteIds,
   getStoredGuestSession,
+  removeFavourite,
   sendListingInquiryMessage,
   type BookingQuote,
   type HostProfile,
@@ -22,6 +25,8 @@ import { divisionText, listingDescriptionText, moneyText, statusText } from '../
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 import { ListingSpecs } from './ListingSpecs'
 import { AuctionPanel } from './AuctionPanel'
+import { FavouriteButton } from './FavouriteButton'
+import { AffordabilityCalculator } from './AffordabilityCalculator'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey, type GoogleMapTarget } from '../../shared/maps/googleMapCapsule'
 import { cancellationRuleText, freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { localeForLang } from '../../shared/country/presentation'
@@ -373,6 +378,32 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const [cancellationProtection, setCancellationProtection] = useState(bookingDraft.cancellationProtection ?? false)
   const [acceptedGuestAgreement, setAcceptedGuestAgreement] = useState(bookingDraft.acceptedGuestAgreement ?? false)
   const [customerReady, setCustomerReady] = useState(false)
+  const [isFav, setIsFav] = useState(false)
+  const [favBusy, setFavBusy] = useState(false)
+
+  useEffect(() => {
+    if (!listing) return
+    fetchFavouriteIds().then((ids) => setIsFav(ids.includes(listing.id))).catch(() => {})
+  }, [listing?.id])
+
+  async function toggleFavourite() {
+    if (!listing) return
+    const active = isFav
+    setFavBusy(true)
+    setIsFav(!active)
+    try {
+      if (active) await removeFavourite(listing.id)
+      else await addFavourite(listing.id)
+    } catch (err) {
+      setIsFav(active)
+      if ((err as { code?: string })?.code === 'GUEST_SESSION_REQUIRED') {
+        try { sessionStorage.setItem(GUEST_RETURN_PATH_KEY, `/listing/${listing.id}`) } catch { /* noop */ }
+        window.location.hash = `/account/open/${listing.id}`
+      }
+    } finally {
+      setFavBusy(false)
+    }
+  }
   const [offlineMapReady, setOfflineMapReady] = useState(false)
   const [activeMedia, setActiveMedia] = useState(0)
   const [activeTab, setActiveTab] = useState<'terms' | 'host' | 'location' | 'reviews'>('terms')
@@ -778,9 +809,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
             {/* Price block: always visible, independent of the active tab. */}
             <section style={styles.priceBlock} aria-label={t.price}>
-              <div style={styles.priceHeadline}>
+              <div style={{ ...styles.priceHeadline, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <strong style={styles.priceAmount} dir={isAr ? 'rtl' : 'ltr'}>{moneyText(listing.priceMinor, listing.currency, lang)}</strong>
                 {unit && <span style={styles.priceUnit}>/ {unit}</span>}
+                <span style={{ marginInlineStart: 'auto' }}>
+                  <FavouriteButton active={isFav} busy={favBusy} onToggle={toggleFavourite} lang={lang} variant="inline" />
+                </span>
               </div>
               {(isStays || feesStandard.totalMinor !== listing.priceMinor) && !(isDemoListing && !isStays) && (
                 <small style={styles.priceSub}>
@@ -804,6 +838,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
             <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
             <ListingSpecs division={listing.division} metadata={listing.metadata} lang={lang} />
+            {(listing.division === 'BUY' || listing.division === 'NEW_CONSTRUCTION') && (
+              <AffordabilityCalculator priceMinor={listing.priceMinor} currency={listing.currency} lang={lang} />
+            )}
 
             <div style={styles.tabRow} role="tablist" aria-label={pick(lang, 'تفاصيل الإعلان', 'Listing details', 'Détails de l’annonce')}>
               {(['terms', 'host', 'location', 'reviews'] as const).map((tab) => (

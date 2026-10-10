@@ -218,6 +218,9 @@ model User {
   auctionsSelling   Auction[]         @relation("AuctionSeller")
   auctionsWon       Auction[]         @relation("AuctionWinner")
   bids              Bid[]             @relation("BidBidder")
+  // Centris-parity Phase 1 (migration 061): saved listings + saved searches with new-listing alerts.
+  favourites        Favourite[]       @relation("UserFavourites")
+  savedSearches     SavedSearch[]     @relation("UserSavedSearches")
   savedPlaces       SavedPlace[]
   promoRedemptions  PromoRedemption[]
   pushSubscriptions PushSubscription[]
@@ -490,6 +493,9 @@ model Listing {
   currency    String          @default("SYP")
   instantBookEnabled Boolean  @default(false) @map("instant_book_enabled")
   expiresAt   DateTime?       @map("expires_at")
+  // Set when the listing transitions to APPROVED (migration 061). Powers new-listing alerts so they
+  // fire on approval, not on draft creation. Null for listings approved before this migration.
+  approvedAt  DateTime?       @map("approved_at")
   metadata    Json            @default("{}")
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
@@ -507,6 +513,8 @@ model Listing {
   // Cars marketplace auction (migration 060). A CARS listing may be sold by auction; the row's
   // existence is the source of truth for "this listing is an auction". Fixed-price listings have none.
   auction        Auction?
+  // Users who saved this listing to their favourites (migration 061).
+  favouritedBy   Favourite[]
 
   @@index([division, status])
   @@index([ownerId])
@@ -1761,4 +1769,45 @@ model Bid {
   @@index([auctionId, createdAt])
   @@index([bidderId])
   @@map("bids")
+}
+
+
+// ---------------------------------------------------------------------------
+// Centris-parity Phase 1 (migration 061, 2026-10-10): favourites + saved searches.
+// A Favourite is a user bookmarking a listing. A SavedSearch stores a browse filter set and, when
+// notifyOnNew is true, the new-listing alert sweep (server internal tick) pushes a notification the
+// moment an APPROVED listing created after lastCheckedAt matches it. UUID ids/FKs match this DB.
+// ---------------------------------------------------------------------------
+
+model Favourite {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  listingId String   @map("listing_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user    User    @relation("UserFavourites", fields: [userId], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listingId])
+  @@index([userId])
+  @@index([listingId])
+  @@map("favourites")
+}
+
+model SavedSearch {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  label         String?
+  division      String
+  filters       Json     @default("{}")
+  notifyOnNew   Boolean  @default(true) @map("notify_on_new")
+  lastCheckedAt DateTime @default(now()) @map("last_checked_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user User @relation("UserSavedSearches", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([notifyOnNew, lastCheckedAt])
+  @@map("saved_searches")
 }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { getCity, getGovernorate, GOVERNORATE_CITY_NAME, governorateCityName, labelFor, listingMatchesKeyword, SYRIA_GOVERNORATES } from '../../engines/search'
-import { fetchApprovedListings, isSampleListing, type PlatformListing } from '../../shared/api/platformApi'
+import { addFavourite, createSavedSearch, fetchApprovedListings, fetchFavouriteIds, isSampleListing, removeFavourite, type PlatformListing } from '../../shared/api/platformApi'
+import { FavouriteButton } from '../listings/FavouriteButton'
 import { listingDescriptionText, statusText } from '../../shared/i18n/display'
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 import { listingPriceText } from './listingPriceText'
@@ -224,6 +225,42 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   // Only the newest request may update the list (choosing a governorate searches immediately, so
   // several requests can be in flight).
   const requestSeq = useRef(0)
+  const [favIds, setFavIds] = useState<Set<string>>(new Set())
+  const [favBusy, setFavBusy] = useState<string | null>(null)
+  const [savedMsg, setSavedMsg] = useState<'idle' | 'saved' | 'error'>('idle')
+
+  useEffect(() => {
+    fetchFavouriteIds().then((ids) => setFavIds(new Set(ids))).catch(() => {})
+  }, [])
+
+  async function toggleFavourite(listingId: string) {
+    const active = favIds.has(listingId)
+    setFavBusy(listingId)
+    setFavIds((prev) => { const n = new Set(prev); if (active) n.delete(listingId); else n.add(listingId); return n })
+    try {
+      if (active) await removeFavourite(listingId)
+      else await addFavourite(listingId)
+    } catch (err) {
+      setFavIds((prev) => { const n = new Set(prev); if (active) n.add(listingId); else n.delete(listingId); return n })
+      if ((err as { code?: string })?.code === 'GUEST_SESSION_REQUIRED') window.location.hash = '/account'
+    } finally {
+      setFavBusy(null)
+    }
+  }
+
+  async function saveCurrentSearch() {
+    if (!lastQuery) return
+    const f = (lastQuery.filters || {}) as Record<string, unknown>
+    const attrs = (f.attributes && typeof f.attributes === 'object' ? f.attributes : {}) as Record<string, unknown>
+    const flat: Record<string, unknown> = { ...attrs, priceMin: f.priceMin, priceMax: f.priceMax, bedroomsMin: f.bedroomsMin, bathroomsMin: f.bathroomsMin, city: f.city, sort: f.sort, priceBand: f.priceBand }
+    try {
+      await createSavedSearch({ division: lastQuery.division, filters: flat })
+      setSavedMsg('saved')
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'GUEST_SESSION_REQUIRED') { window.location.hash = '/account'; return }
+      setSavedMsg('error')
+    }
+  }
   const isStaysEntry = entry === 'stays'
   const isDirectDivisionEntry = isStaysEntry || initialDivision !== 'stays'
   const divisionCopy = t.divisionCopy[effectiveInitialDivision]
@@ -385,6 +422,17 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           ) : hasSearched ? (
             <strong>{countText}</strong>
           ) : null}
+          {hasSearched && lastQuery ? (
+            <button
+              type="button"
+              onClick={saveCurrentSearch}
+              style={{ marginInlineStart: 'auto', padding: '6px 12px', borderRadius: 999, border: '1px solid #c9d3e6', background: savedMsg === 'saved' ? '#eafaf0' : '#fff', color: savedMsg === 'saved' ? '#1e9e62' : '#0b1b3b', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}
+            >
+              {savedMsg === 'saved'
+                ? pick(lang, '✓ تم حفظ البحث', '✓ Search saved', '✓ Recherche sauvegardée')
+                : pick(lang, '☆ احفظ هذا البحث', '☆ Save this search', '☆ Sauvegarder')}
+            </button>
+          ) : null}
         </div>
         {(state === 'error' || (state === 'empty' && visibleListings.length === 0)) && (
           <SearchStateCard
@@ -401,7 +449,10 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               const card = cardText(listing, lang)
               const photo = listingPhoto(listing)
               return (
-                <article key={listing.id} className="search-result-card">
+                <article key={listing.id} className="search-result-card" style={{ position: 'relative' }}>
+                  <div style={{ position: 'absolute', top: 8, insetInlineEnd: 8, zIndex: 3 }}>
+                    <FavouriteButton active={favIds.has(listing.id)} busy={favBusy === listing.id} onToggle={() => toggleFavourite(listing.id)} lang={lang} />
+                  </div>
                   <button type="button" className="search-result-media" onClick={() => openListing(listing)} aria-label={card.title}>
                     {photo ? (
                       <img src={photo} alt={card.title} loading="lazy" />

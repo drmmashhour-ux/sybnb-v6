@@ -2707,7 +2707,11 @@ async function updateReviewEntity(tx, entityType, entityId, decision, actorUserI
     // both apply (same TOCTOU class as the payment-proof and SR-ride races fixed earlier).
     const updated = await tx.listing.updateMany({
       where: { id: entityId, status: 'PENDING_REVIEW' },
-      data: { status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED' },
+      data: {
+        status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
+        // migration 061: stamp approval time so new-listing alerts fire on approval, not creation.
+        ...(decision === 'APPROVED' ? { approvedAt: new Date() } : {}),
+      },
     })
     if (updated.count === 0) throw reviewStateError('LISTING_NOT_REVIEWABLE')
     // A rejected advertising campaign never ran -- release its bound payment (rather than leaving

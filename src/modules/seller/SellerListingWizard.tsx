@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
-import { acceptListingAgreement, createAndSubmitPrototypeListing, fetchMyIdDocumentStatus, getStoredSellerSession, submitHostIdDocument, uploadPaymentProofFile, type IdDocumentStatus } from '../../shared/api/platformApi'
+import { acceptListingAgreement, createAndSubmitPrototypeListing, createListingAuction, fetchMyIdDocumentStatus, getStoredSellerSession, submitHostIdDocument, uploadPaymentProofFile, type IdDocumentStatus } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGroups, sellerRealEstateFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
@@ -183,6 +183,12 @@ export function SellerListingWizard({ lang }: Props) {
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
   const [bathrooms, setBathrooms] = useState(draft.bathrooms || '2')
   const [instantBookEnabled, setInstantBookEnabled] = useState(draft.instantBookEnabled ?? false)
+  // Cars sale mode (2026-10-10): a CARS listing is fixed-price or an auction. Auction fields below.
+  const [saleMode, setSaleMode] = useState<'FIXED' | 'AUCTION'>('FIXED')
+  const [auctionReserve, setAuctionReserve] = useState('')
+  const [auctionDurationDays, setAuctionDurationDays] = useState('7')
+  const [auctionDepositMode, setAuctionDepositMode] = useState<'NONE' | 'REQUIRED'>('NONE')
+  const [auctionDeposit, setAuctionDeposit] = useState('')
   const [adPlacement, setAdPlacement] = useState(pick(lang, 'الرئيسية', 'Landing page', 'Page d’accueil'))
   const [adDuration, setAdDuration] = useState(pick(lang, 'أسبوع واحد', 'One week', 'Une semaine'))
   // Real per-slot banner/logo uploads (slot id -> uploaded file). Replaces a prior version of this
@@ -372,7 +378,7 @@ export function SellerListingWizard({ lang }: Props) {
         const listingMedia = isAdvertisingFlow
           ? Object.entries(adSlotUploads).map(([slotId, upload], index) => ({ url: upload.url, kind: slotId, sortOrder: index }))
           : uploadedPhotoUrls.map((url, index) => ({ url, kind: 'image', sortOrder: index }))
-        await createAndSubmitPrototypeListing({
+        const createdListing = await createAndSubmitPrototypeListing({
           // Ads must be division='MARKETPLACE' -- that's what gates listing creation behind an
           // admin-approved paid seller plan (PAID_PLAN_DIVISIONS in server/routes/listings.mjs).
           // Leaving this as the property-flow's default 'STAYS' meant an ad could reach
@@ -405,8 +411,29 @@ export function SellerListingWizard({ lang }: Props) {
             bedrooms: toNumber(bedrooms),
             bathrooms: toNumber(bathrooms),
             visualFilters,
+            saleMode: division === 'CARS' ? saleMode : undefined,
           },
         })
+        if (division === 'CARS' && saleMode === 'AUCTION') {
+          try {
+            await createListingAuction({
+              listingId: createdListing.id,
+              startMinor: toMinor(price),
+              currency: currency === 'USD' ? 'USD' : 'SYP',
+              reserveMinor: toNumber(auctionReserve) > 0 ? toMinor(auctionReserve) : null,
+              durationHours: Math.max(1, Math.round(toNumber(auctionDurationDays) || 7)) * 24,
+              depositMode: currency === 'USD' ? auctionDepositMode : 'NONE',
+              depositMinor:
+                currency === 'USD' && auctionDepositMode === 'REQUIRED' && toNumber(auctionDeposit) > 0
+                  ? toMinor(auctionDeposit)
+                  : undefined,
+            })
+          } catch (auctionError) {
+            setSubmitState('error')
+            setSubmitError(submitErrorText(auctionError))
+            return
+          }
+        }
         clearDraft()
         navigate('/sell/submitted')
       } catch (error) {
@@ -685,6 +712,62 @@ export function SellerListingWizard({ lang }: Props) {
                 <span>{pick(lang, 'الحمامات', 'Bathrooms', 'Salles de bain')}</span>
                 <input dir="ltr" onChange={(event) => setBathrooms(event.target.value)} placeholder="2" value={bathrooms} />
               </label>
+              {division === 'CARS' && (
+                <div className="seller-wide-field" style={{ display: 'grid', gap: 12, border: '1px solid #e4e9f2', borderRadius: 12, padding: 14 }}>
+                  <strong>{pick(lang, 'طريقة البيع', 'How to sell', 'Mode de vente')}</strong>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => setSaleMode('FIXED')}
+                      style={{ padding: '8px 16px', borderRadius: 999, cursor: 'pointer', border: saleMode === 'FIXED' ? '2px solid #0b1b3b' : '1px solid #c9d3e6', background: saleMode === 'FIXED' ? '#0b1b3b' : '#fff', color: saleMode === 'FIXED' ? '#fff' : '#0b1b3b', fontWeight: 700 }}
+                    >
+                      {pick(lang, 'سعر ثابت', 'Fixed price', 'Prix fixe')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSaleMode('AUCTION')}
+                      style={{ padding: '8px 16px', borderRadius: 999, cursor: 'pointer', border: saleMode === 'AUCTION' ? '2px solid #0b1b3b' : '1px solid #c9d3e6', background: saleMode === 'AUCTION' ? '#0b1b3b' : '#fff', color: saleMode === 'AUCTION' ? '#fff' : '#0b1b3b', fontWeight: 700 }}
+                    >
+                      {pick(lang, 'مزاد', 'Auction', 'Enchère')}
+                    </button>
+                  </div>
+                  {saleMode === 'AUCTION' && (
+                    <>
+                      <small>{pick(lang, 'سعر البداية هو السعر المطلوب أعلاه.', 'The starting price is the asking price above.', 'Le prix de départ est le prix demandé ci-dessus.')}</small>
+                      <label>
+                        <span>{pick(lang, 'الحد الأدنى للبيع (اختياري)', 'Reserve price (optional)', 'Prix de réserve (optionnel)')}</span>
+                        <input dir="ltr" value={auctionReserve} onChange={(event) => setAuctionReserve(event.target.value.replace(/[^0-9]/g, ''))} placeholder={pick(lang, 'لا يُعرض للمشترين', 'Hidden from buyers', 'Caché aux acheteurs')} />
+                      </label>
+                      <label>
+                        <span>{pick(lang, 'مدة المزاد (أيام)', 'Auction duration (days)', 'Durée (jours)')}</span>
+                        <select dir="ltr" value={auctionDurationDays} onChange={(event) => setAuctionDurationDays(event.target.value)}>
+                          <option value="1">1</option>
+                          <option value="3">3</option>
+                          <option value="7">7</option>
+                          <option value="14">14</option>
+                        </select>
+                      </label>
+                      {currency === 'USD' ? (
+                        <label>
+                          <span>{pick(lang, 'عربون المزايدة', 'Bidder deposit', 'Acompte')}</span>
+                          <select dir="ltr" value={auctionDepositMode} onChange={(event) => setAuctionDepositMode(event.target.value === 'REQUIRED' ? 'REQUIRED' : 'NONE')}>
+                            <option value="NONE">{pick(lang, 'بدون عربون — تسوية خارج المنصة', 'No deposit — settle offline', 'Sans acompte')}</option>
+                            <option value="REQUIRED">{pick(lang, 'عربون مطلوب ببطاقة', 'Card deposit required', 'Acompte par carte requis')}</option>
+                          </select>
+                        </label>
+                      ) : (
+                        <small>{pick(lang, 'العربون بالبطاقة متاح لمزادات الدولار فقط.', 'Card deposits are available for USD auctions only.', 'Acompte par carte : enchères en USD uniquement.')}</small>
+                      )}
+                      {currency === 'USD' && auctionDepositMode === 'REQUIRED' && (
+                        <label>
+                          <span>{pick(lang, 'قيمة العربون (USD)', 'Deposit amount (USD)', 'Montant de l’acompte (USD)')}</span>
+                          <input dir="ltr" value={auctionDeposit} onChange={(event) => setAuctionDeposit(event.target.value.replace(/[^0-9]/g, ''))} placeholder={pick(lang, 'افتراضي 5٪ من سعر البداية', 'Default 5% of start price', 'Défaut 5% du prix de départ')} />
+                        </label>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               {division === 'STAYS' && (
                 <label className="seller-wide-field seller-instant-book-toggle">
                   <input type="checkbox" checked={instantBookEnabled} onChange={(event) => setInstantBookEnabled(event.target.checked)} />

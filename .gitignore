@@ -9,3 +9,6 @@ server/uploads/
 .DS_Store
 .env.resend.local
 .vercel
+
+# local editor backups (auto-created during edits)
+*.bak

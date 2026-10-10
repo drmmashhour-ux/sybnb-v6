@@ -17,6 +17,7 @@ import { handleBookings } from './routes/bookings.mjs'
 import { handleDriver } from './routes/driver.mjs'
 import { handleHost } from './routes/host.mjs'
 import { handleListings } from './routes/listings.mjs'
+import { handleAuctions, closeDueAuctions } from './routes/auctions.mjs'
 import { handleMe } from './routes/me.mjs'
 import { handleHostProfile } from './routes/host-profile.mjs'
 import { handleHostVerification } from './routes/host-verification.mjs'
@@ -146,10 +147,11 @@ async function handleInternalTick(res) {
     tickLastRunAt = now
     const activated = await activateScheduledRides()
     const sweep = await runDispatchSweep()
+    const auctionsClosed = await closeDueAuctions().catch(() => ({ closed: 0 }))
     // Safety Phase 2 (2026-10-10): scan active rides for time/signal anomalies on the same timer.
     // detectRideAnomalies() is best-effort and never throws; the extra .catch is pure belt-and-braces.
     const anomalies = await detectRideAnomalies().catch(() => ({ scanned: 0, flagged: 0 }))
-    return json(res, 200, { ok: true, activated, expired: sweep.expired, opened: sweep.opened, anomaliesFlagged: anomalies.flagged })
+    return json(res, 200, { ok: true, activated, expired: sweep.expired, opened: sweep.opened, anomaliesFlagged: anomalies.flagged, auctionsClosed: auctionsClosed.closed })
   } catch {
     // never leak errors/stack; the tick is best-effort
     return json(res, 200, { ok: true })
@@ -258,6 +260,7 @@ async function dispatch(req, res, url, context) {
     handleStorage,
     handleLegal,
     handlePaymentIntents,
+    handleAuctions,
     handleListings,
     handleBookings,
     handlePayments,

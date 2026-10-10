@@ -214,6 +214,10 @@ model User {
   sentMessages      Message[]         @relation("MessageSender")
   paymentProofs     PaymentProof[]    @relation("PaymentPayer")
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
+  // Cars marketplace auction (migration 060): as seller, as winner, and placed bids.
+  auctionsSelling   Auction[]         @relation("AuctionSeller")
+  auctionsWon       Auction[]         @relation("AuctionWinner")
+  bids              Bid[]             @relation("BidBidder")
   savedPlaces       SavedPlace[]
   promoRedemptions  PromoRedemption[]
   pushSubscriptions PushSubscription[]
@@ -500,6 +504,9 @@ model Listing {
   // AI pre-check for the admin reviewer (migration 050). Never included unless asked for, so it
   // cannot leak through the many `include: { listing: true }` guest-facing responses.
   aiReview       ListingAiReview?
+  // Cars marketplace auction (migration 060). A CARS listing may be sold by auction; the row's
+  // existence is the source of truth for "this listing is an auction". Fixed-price listings have none.
+  auction        Auction?
 
   @@index([division, status])
   @@index([ownerId])
@@ -1658,4 +1665,100 @@ model InvoiceCounter {
   lastSeq  Int    @default(0) @map("last_seq")
 
   @@map("invoice_counters")
+}
+
+
+// ---------------------------------------------------------------------------
+// Cars marketplace + auction (migration 060, 2026-10-10)
+// A hybrid model layered on the existing polymorphic Listing table: a CARS listing is either
+// fixed-price (no Auction row -> browse + contact/buy as before) or an auction (one Auction row).
+// Auctions are free-bid (DepositMode NONE: highest bid at close wins, parties settle offline) or
+// deposit-required (DepositMode REQUIRED: bidder must have a saved card; the winner is charged the
+// deposit off-session at close). Anti-snipe extends the clock on late bids. The Auction row carries
+// a denormalized currentBid* + bidCount so cards/detail render without scanning Bid, and a monotonic
+// `version` gives bid placement an optimistic-concurrency guard against two bids racing.
+// ---------------------------------------------------------------------------
+
+enum AuctionDepositMode {
+  NONE
+  REQUIRED
+
+  @@map("auction_deposit_mode")
+}
+
+enum AuctionStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+  SETTLED
+  CANCELLED
+
+  @@map("auction_status")
+}
+
+enum BidStatus {
+  ACTIVE
+  OUTBID
+  WON
+  LOST
+  RETRACTED
+
+  @@map("bid_status")
+}
+
+model Auction {
+  id                String             @id @default(uuid())
+  listingId         String             @unique @map("listing_id")
+  sellerId          String             @map("seller_id")
+  currency          String             @default("USD")
+  startMinor        Int                @map("start_minor")
+  reserveMinor      Int?               @map("reserve_minor")
+  minIncrementMinor Int                @default(5000) @map("min_increment_minor")
+  depositMode       AuctionDepositMode @default(NONE) @map("deposit_mode")
+  depositMinor      Int?               @map("deposit_minor")
+  antiSnipeSeconds  Int                @default(120) @map("anti_snipe_seconds")
+  startsAt          DateTime           @default(now()) @map("starts_at")
+  endsAt            DateTime           @map("ends_at")
+  status            AuctionStatus      @default(LIVE)
+  currentBidMinor   Int?               @map("current_bid_minor")
+  currentBidId      String?            @map("current_bid_id")
+  bidCount          Int                @default(0) @map("bid_count")
+  winnerId          String?            @map("winner_id")
+  winningBidMinor   Int?               @map("winning_bid_minor")
+  reserveMet        Boolean            @default(false) @map("reserve_met")
+  settledAt         DateTime?          @map("settled_at")
+  version           Int                @default(0)
+  metadata          Json               @default("{}")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  seller  User    @relation("AuctionSeller", fields: [sellerId], references: [id])
+  winner  User?   @relation("AuctionWinner", fields: [winnerId], references: [id])
+  bids    Bid[]
+
+  @@index([status, endsAt])
+  @@index([sellerId])
+  @@map("auctions")
+}
+
+model Bid {
+  id             String    @id @default(uuid())
+  auctionId      String    @map("auction_id")
+  bidderId       String    @map("bidder_id")
+  amountMinor    Int       @map("amount_minor")
+  currency       String    @default("USD")
+  status         BidStatus @default(ACTIVE)
+  maxProxyMinor  Int?      @map("max_proxy_minor")
+  depositPmId    String?   @map("deposit_pm_id")
+  depositProofId String?   @map("deposit_proof_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  bidder  User    @relation("BidBidder", fields: [bidderId], references: [id])
+
+  @@index([auctionId, amountMinor])
+  @@index([auctionId, createdAt])
+  @@index([bidderId])
+  @@map("bids")
 }

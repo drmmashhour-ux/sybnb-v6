@@ -21,6 +21,7 @@ import { authStorage } from '../../shared/api/authStorage'
 import { divisionText, listingDescriptionText, moneyText, statusText } from '../../shared/i18n/display'
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 import { ListingSpecs } from './ListingSpecs'
+import { AuctionPanel } from './AuctionPanel'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey, type GoogleMapTarget } from '../../shared/maps/googleMapCapsule'
 import { cancellationRuleText, freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { localeForLang } from '../../shared/country/presentation'
@@ -931,6 +932,8 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             )}
             {!notBookable && (<>
             {!customerReady && <div style={styles.accountHint}>{accountHintText(listing.division, lang)}</div>}
+
+            {listing.division === 'CARS' && <AuctionPanel listing={listing} lang={lang} />}
 
             {isStays && (
               <>

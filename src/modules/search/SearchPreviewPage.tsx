@@ -417,6 +417,11 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
                     {listing.status !== 'APPROVED' && (
                       <span className="search-result-status">{statusText(listing.status, lang)}</span>
                     )}
+                    {(listing.metadata as { auction?: { isAuction?: boolean } } | null)?.auction?.isAuction ? (
+                      <span className="search-result-status" style={{ background: '#0b1b3b', color: '#fff' }}>
+                        {pick(lang, 'مزاد', 'Auction', 'Enchère')}
+                      </span>
+                    ) : null}
                     <h2>{card.title}</h2>
                     {card.place ? <span className="search-result-place">{card.place}</span> : null}
                     {card.description ? <p>{card.description}</p> : null}

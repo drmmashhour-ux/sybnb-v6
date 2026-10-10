@@ -118,6 +118,12 @@ export function listingSpecRows(division: string, metadata: Record<string, unkno
     add('body', pick(lang, 'شكل السيارة', 'Body type', 'Carrosserie'), body ? optionLabel(body, lang, carFilterGroup) : '')
     const condition = firstValue(vf.condition, md.condition)
     add('condition', pick(lang, 'الحالة', 'Condition', 'État'), condition ? optionLabel(condition, lang, conditionFilterGroup) : '')
+    const auction = (md.auction as { isAuction?: boolean } | undefined)
+    if (auction?.isAuction) {
+      add('saleType', pick(lang, 'طريقة البيع', 'Sale type', 'Mode de vente'), pick(lang, 'مزاد', 'Auction', 'Enchère'))
+    } else if (md.saleMode === 'AUCTION') {
+      add('saleType', pick(lang, 'طريقة البيع', 'Sale type', 'Mode de vente'), pick(lang, 'مزاد', 'Auction', 'Enchère'))
+    }
   } else if (division === 'MARKETPLACE') {
     const category = firstValue(vf.marketCategory, md.marketCategory, md.category)
     add('category', pick(lang, 'التصنيف', 'Category', 'Catégorie'), category ? optionLabel(category, lang, marketFilterGroup) : '')

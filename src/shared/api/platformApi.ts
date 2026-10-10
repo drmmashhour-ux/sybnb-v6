@@ -3498,3 +3498,129 @@ export async function finalizeAdminBookingCancellation(bookingId: string) {
     ),
   )
 }
+
+// ---------------------------------------------------------------------------------------------
+// Cars marketplace + auction (2026-10-10). A CARS listing can be sold by auction (one auction per
+// listing). Reads are public (viewer flags filled in when a guest token is present); bidding and
+// creating/cancelling require a session. Amounts are minor units in the auction's currency.
+// ---------------------------------------------------------------------------------------------
+
+export type PlatformAuction = {
+  id: string
+  listingId: string
+  sellerId: string
+  status: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'SETTLED' | 'CANCELLED'
+  currency: string
+  startMinor: number
+  reserveMinor?: number | null
+  hasReserve: boolean
+  reserveMet: boolean
+  minIncrementMinor: number
+  minNextBidMinor: number
+  depositMode: 'NONE' | 'REQUIRED'
+  depositMinor: number | null
+  antiSnipeSeconds: number
+  startsAt: string
+  endsAt: string
+  currentBidMinor: number | null
+  bidCount: number
+  winnerId?: string | null
+  winningBidMinor?: number | null
+  viewerIsSeller: boolean
+  viewerIsHighBidder: boolean
+  viewerWon: boolean
+  timeLeftMs: number
+  settledAt: string | null
+}
+
+export type AuctionBid = {
+  id: string
+  amountMinor: number
+  currency: string
+  status: string
+  createdAt: string
+  bidderMasked: string
+  isYou: boolean
+}
+
+export type CreateAuctionInput = {
+  listingId: string
+  startMinor: number
+  reserveMinor?: number | null
+  minIncrementMinor?: number
+  depositMode?: 'NONE' | 'REQUIRED'
+  depositMinor?: number | null
+  antiSnipeSeconds?: number
+  durationHours?: number
+  endsAt?: string
+  currency?: string
+}
+
+function optionalGuestToken(): string | undefined {
+  try {
+    return getStoredGuestSession()?.token || undefined
+  } catch {
+    return undefined
+  }
+}
+
+export async function fetchAuctionByListing(listingId: string): Promise<PlatformAuction | null> {
+  const res = await apiRequest<{ ok: true; auction: PlatformAuction | null }>(
+    `/api/auctions/by-listing/${encodeURIComponent(listingId)}`,
+    { token: optionalGuestToken() },
+  )
+  return res.auction
+}
+
+export async function fetchAuction(auctionId: string): Promise<PlatformAuction | null> {
+  const res = await apiRequest<{ ok: true; auction: PlatformAuction | null }>(
+    `/api/auctions/${encodeURIComponent(auctionId)}`,
+    { token: optionalGuestToken() },
+  )
+  return res.auction
+}
+
+export async function fetchAuctionBids(auctionId: string): Promise<AuctionBid[]> {
+  const res = await apiRequest<{ ok: true; bids: AuctionBid[] }>(
+    `/api/auctions/${encodeURIComponent(auctionId)}/bids`,
+    { token: optionalGuestToken() },
+  )
+  return res.bids
+}
+
+export async function placeAuctionBid(auctionId: string, amountMinor: number, maxProxyMinor?: number): Promise<PlatformAuction> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; auction: PlatformAuction }>(
+    `/api/auctions/${encodeURIComponent(auctionId)}/bids`,
+    { method: 'POST', token: session.token, body: { amountMinor, ...(maxProxyMinor ? { maxProxyMinor } : {}) } },
+  )
+  return res.auction
+}
+
+export async function createListingAuction(input: CreateAuctionInput): Promise<PlatformAuction> {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const res = await apiRequest<{ ok: true; auction: PlatformAuction }>('/api/auctions', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return res.auction
+}
+
+export async function cancelListingAuction(auctionId: string): Promise<PlatformAuction> {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const res = await apiRequest<{ ok: true; auction: PlatformAuction }>(
+    `/api/auctions/${encodeURIComponent(auctionId)}/cancel`,
+    { method: 'POST', token: session.token },
+  )
+  return res.auction
+}
+
+export async function finalizeListingAuction(auctionId: string): Promise<PlatformAuction> {
+  const session = getStoredSellerSession() || (await ensurePrototypeHostSession())
+  const res = await apiRequest<{ ok: true; auction: PlatformAuction }>(
+    `/api/auctions/${encodeURIComponent(auctionId)}/finalize`,
+    { method: 'POST', token: session.token },
+  )
+  return res.auction
+}

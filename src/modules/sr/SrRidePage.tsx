@@ -82,6 +82,9 @@ const copy = {
     payTitle: 'تأكيد الدفع',
     payCopy: 'ادفع الأجرة للسائق مباشرة (نقداً أو تحويل)، ثم أدخل رقم مرجع العملية هنا ليتحقق منها فريق SYBNB.',
     payReferencePlaceholder: 'رقم مرجع العملية',
+    payCashButton: 'دفعت نقداً للسائق',
+    payCashHint: 'أو ادفع نقداً مباشرةً للسائق، ثم أكّد هنا. سيتحقق فريق SYBNB.',
+    payOr: 'أو',
     paySubmit: 'إرسال إثبات الدفع',
     paySubmitting: 'جار الإرسال...',
     paymentPending: 'تم إرسال إثبات الدفع، بانتظار المراجعة.',
@@ -174,6 +177,9 @@ const copy = {
     payTitle: 'Confirm payment',
     payCopy: "Pay the fare directly to the driver (cash or transfer), then enter the transaction reference here so SYBNB can verify it.",
     payReferencePlaceholder: 'Transaction reference',
+    payCashButton: 'I paid the driver in cash',
+    payCashHint: 'Or pay the driver in cash directly, then confirm here. SYBNB will verify it.',
+    payOr: 'or',
     paySubmit: 'Submit payment proof',
     paySubmitting: 'Submitting...',
     paymentPending: 'Payment proof submitted, awaiting review.',
@@ -266,6 +272,9 @@ const copy = {
     payTitle: 'Confirmer le paiement',
     payCopy: 'Payez le tarif directement au chauffeur (en espèces ou par virement), puis saisissez ici la référence de la transaction afin que SYBNB puisse la vérifier.',
     payReferencePlaceholder: 'Référence de la transaction',
+    payCashButton: 'J’ai payé le chauffeur en espèces',
+    payCashHint: 'Ou payez le chauffeur en espèces directement, puis confirmez ici. SYBNB le vérifiera.',
+    payOr: 'ou',
     paySubmit: 'Envoyer la preuve de paiement',
     paySubmitting: 'Envoi...',
     paymentPending: 'Preuve de paiement envoyée, en attente de vérification.',
@@ -718,6 +727,28 @@ export function SrRidePage({ lang }: Props) {
     }
   }
 
+  // #191 (2026-10-10): cash / paid-to-driver. No transaction reference — the rider confirms they paid
+  // the driver the fare in cash; an operator approves it, and settlement books only the platform's
+  // commission against the driver (who holds the cash). Same server endpoint, method:'cash'.
+  async function submitCashPayment() {
+    if (!ride) return
+    setPayStatus('saving')
+    try {
+      const amountMinor = ride.status === 'CANCELLED' ? ride.cancellationFeeMinor || 0 : ride.fareMinor || 0
+      await submitPrototypeLocalWalletProof({
+        rideId: ride.id,
+        amountMinor,
+        currency: ride.currency,
+        method: 'cash',
+      })
+      setRide(await fetchPrototypeSrRide(ride.id))
+      setPayStatus('submitted')
+    } catch (error) {
+      setPayStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
   function renderPaymentSection(title: string, copy: string) {
     const latestProof = ride?.paymentProofs?.[0]
     if (latestProof?.status === 'APPROVED') {
@@ -740,6 +771,11 @@ export function SrRidePage({ lang }: Props) {
         />
         <button disabled={!payProviderRef.trim() || payStatus === 'saving'} style={styles.primaryButton} onClick={() => void submitPayment()}>
           {payStatus === 'saving' ? t.paySubmitting : t.paySubmit}
+        </button>
+        <div style={styles.payCashDivider}>{t.payOr}</div>
+        <span style={styles.payCashHint}>{t.payCashHint}</span>
+        <button disabled={payStatus === 'saving'} style={styles.secondaryButton} onClick={() => void submitCashPayment()}>
+          {payStatus === 'saving' ? t.paySubmitting : t.payCashButton}
         </button>
       </div>
     )
@@ -1377,6 +1413,8 @@ const styles: Record<string, CSSProperties> = {
   starActive: { border: 0, background: 'transparent', color: '#e5b80b', fontSize: 28, padding: 0, cursor: 'pointer' },
   reviewTextarea: { minHeight: 64, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: 10, fontFamily: 'inherit', resize: 'vertical' },
   payInput: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
+  payCashDivider: { textAlign: 'center', color: '#5c6b85', fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 },
+  payCashHint: { color: '#9aa6ba', fontSize: 13, lineHeight: 1.4 },
   chatMessages: { display: 'grid', gap: 6, maxHeight: 220, overflowY: 'auto' },
   chatEmpty: { color: '#5c6b85', fontSize: 13 },
   chatBubbleMine: { justifySelf: 'end', maxWidth: '80%', borderRadius: '10px 10px 2px 10px', background: 'rgba(32,210,155,.14)', border: '1px solid rgba(32,210,155,.35)', color: '#e7fff6', padding: '8px 10px', fontSize: 13 },

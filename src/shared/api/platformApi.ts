@@ -451,6 +451,7 @@ export type PlatformDriverOverview = {
     registrationExpiresAt?: string | null
     inspectionStatus?: 'PENDING' | 'PASSED' | 'FAILED' | 'EXPIRED' | null
     inspectionExpiresAt?: string | null
+    inspectionRequired?: boolean
   }
   totals: {
     assigned: number
@@ -773,6 +774,25 @@ export async function becomeHost() {
   const updated = { ...session, user: { ...session.user, roles: result.roles } } as PlatformAuthSession
   authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(updated))
   mirrorHostAccess(updated)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return updated
+}
+
+// Launch blocker #190 (2026-10-10): "Become a driver" — adds DRIVER to the signed-in account
+// (POST /api/me/become-driver), then refreshes the stored session's roles so the driver dashboard
+// opens immediately with the same sign-in. The new DRIVER is an APPLICANT: they can submit their ID
+// document and vehicle for review, but cannot be offered or claim any ride until an operator approves
+// their documents (gates enforced server-side). Mirrors becomeHost minus the host-area mirroring.
+export async function becomeDriver() {
+  const session = getStoredGuestSession()
+  if (!session?.token) throw new Error('Sign in first.')
+  const result = await apiRequest<{ ok: true; roles: string[] }>('/api/me/become-driver', {
+    method: 'POST',
+    token: session.token,
+    body: {},
+  })
+  const updated = { ...session, user: { ...session.user, roles: result.roles } } as PlatformAuthSession
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(updated))
   window.dispatchEvent(new Event('sybnb-session-changed'))
   return updated
 }
@@ -1516,7 +1536,10 @@ export async function submitPrototypeLocalWalletProof(input: {
   currency: string
   proofAssetUrl?: string
   proofAssetUrls?: string[]
-  providerRef: string
+  // #191: a wallet/transfer proof carries a transaction reference; a CASH ride proof carries
+  // method:'cash' and no reference (the driver collected the fare in cash).
+  providerRef?: string
+  method?: 'cash'
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; proof: PlatformPaymentProof }>('/api/payments/local-wallet-proof', {
@@ -2336,6 +2359,43 @@ export async function reportPrototypeDriverLocation(lat: number, lng: number) {
   })
 }
 
+// #192 (2026-10-10): driver earnings withdrawal client. GET reports the withdrawable/pending balance
+// and the driver's own withdrawal requests; POST files a request an operator pays out externally.
+export type DriverPayoutRequest = {
+  id: string
+  amountMinor: number
+  currency: string
+  status: 'REQUESTED' | 'PAID' | 'REJECTED'
+  reference?: string | null
+  note?: string | null
+  createdAt: string
+  decidedAt?: string | null
+}
+export type DriverPayoutInfo = {
+  availableMinor: number
+  pendingMinor: number
+  currency: string
+  requests: DriverPayoutRequest[]
+}
+export async function fetchDriverPayouts(currency = 'USD') {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true } & DriverPayoutInfo>(
+    `/api/driver/payouts?currency=${encodeURIComponent(currency)}`,
+    { token: session.token },
+  )
+  const { ok: _ok, ...info } = response
+  return info as DriverPayoutInfo
+}
+export async function requestDriverPayout(input: { amountMinor: number; currency?: string; method?: Record<string, string> }) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; request: DriverPayoutRequest }>('/api/driver/payouts', {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+  return response.request
+}
+
 // CAPSULE_RULES.noFakeTrustSignal: the driver dashboard's own docs-status panel must reflect the
 // same real idDocumentStatus field the host/guest verification badges already use, not a static claim.
 export async function fetchDriverIdentityStatus() {
@@ -2552,6 +2612,50 @@ export async function resolveAdminIncident(incidentId: string, input: { status: 
     }),
   )
   return response.incident
+}
+
+// Launch blocker #188 (2026-10-10): operator vehicle/inspection review. Wires the existing
+// GET /api/admin/driver-vehicles + PATCH /api/admin/driver/:id/vehicle-review endpoints. A driver's
+// self-declared vehicle sits in PENDING_REVIEW until an operator approves it here; without this UI
+// no driver could ever be cleared to carry a passenger.
+export type PlatformDriverVehicle = {
+  userId: string
+  vehicleMake: string | null
+  vehicleModel: string | null
+  vehiclePlate: string | null
+  vehicleStatus: string | null
+  vehicleCategory: string | null
+  vehicleYear: number | null
+  vehicleColor: string | null
+  registrationExpiresAt: string | null
+  inspectionStatus: string | null
+  inspectionExpiresAt: string | null
+  updatedAt?: string | null
+  user?: { displayName: string | null; email: string | null; idDocumentStatus: string | null } | null
+}
+
+export async function fetchAdminDriverVehicles() {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; vehicles: PlatformDriverVehicle[]; count: number }>('/api/admin/driver-vehicles', { token }),
+  )
+  return response.vehicles
+}
+
+export async function reviewAdminDriverVehicle(
+  driverId: string,
+  input: {
+    decision?: 'APPROVE' | 'REJECT'
+    inspectionStatus?: 'PENDING' | 'PASSED' | 'FAILED' | 'EXPIRED'
+    inspectionExpiresAt?: string | null
+  },
+) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; driverProfile: PlatformDriverVehicle }>(
+      `/api/admin/driver/${encodeURIComponent(driverId)}/vehicle-review`,
+      { method: 'PATCH', token, body: input },
+    ),
+  )
+  return response.driverProfile
 }
 
 export async function createPrototypeBooking(input: {

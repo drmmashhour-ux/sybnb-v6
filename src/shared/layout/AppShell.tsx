@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../brand'
-import { currentAccountIsHost, getStoredGuestSession, getStoredStaffSession, refreshStoredSessionRoles, signOutGuest as revokeGuestSession } from '../api/platformApi'
+import { becomeDriver, currentAccountIsHost, getStoredGuestSession, getStoredStaffSession, refreshStoredSessionRoles, signOutGuest as revokeGuestSession } from '../api/platformApi'
 import { Footer } from './Footer'
 
 type Props = {
@@ -34,6 +34,9 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
   const staffSession = typeof window !== 'undefined' ? getStoredStaffSession() : null
   // Admin entry: the account's own roles, or an admin staff session signed in on this browser.
   const isAdmin = Boolean(guestSession?.user.roles?.includes('ADMIN') || staffSession?.user.roles?.includes('ADMIN'))
+  // #190: whether this account already holds the DRIVER role, so the menu offers "SR driver
+  // dashboard" instead of the "Drive with SR" self-onboarding entry.
+  const isDriver = Boolean(guestSession?.user.roles?.includes('DRIVER'))
   // /host/why (public landing) and /host/join (host entrance) are not the host area.
   const inHostArea = path.startsWith('/host') && path !== '/host/why' && path !== '/host/join'
 
@@ -103,6 +106,7 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
               signedIn={Boolean(guestSession)}
               isHost={isHost}
               isAdmin={isAdmin}
+              isDriver={isDriver}
               inHostArea={inHostArea}
               onSignOut={signOutGuest}
             />
@@ -140,6 +144,7 @@ type AccountMenuProps = {
   signedIn: boolean
   isHost: boolean
   isAdmin: boolean
+  isDriver: boolean
   inHostArea: boolean
   onSignOut: () => void | Promise<void>
 }
@@ -148,7 +153,7 @@ type AccountMenuItem = { key: string; label: string; onSelect: () => void; stron
 
 // Airbnb-style account menu: one round avatar + hamburger button that opens a small panel. Closes on
 // outside click, Escape and route change; arrow keys move between items.
-function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, inHostArea, onSignOut }: AccountMenuProps) {
+function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDriver, inHostArea, onSignOut }: AccountMenuProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
@@ -192,6 +197,20 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, inHos
     navigate(target)
   }
 
+  // #190: one-tap "Drive with SR" on the SAME account. Grants the DRIVER role (applicant) then opens
+  // the onboarding dashboard. The applicant can submit ID + vehicle but cannot claim any ride until an
+  // operator approves their documents (gates enforced server-side). If the grant call fails
+  // transiently we still open /driver — the route itself gates on the live role.
+  async function startDriving() {
+    setOpen(false)
+    try {
+      await becomeDriver()
+    } catch {
+      // ignore — navigate anyway; the dashboard/route gates on the live role.
+    }
+    navigate('/driver')
+  }
+
   const items: AccountMenuItem[] = signedIn
     ? [
         { key: 'trips', label: pick(lang, 'رحلاتي', 'My trips', 'Mes voyages'), onSelect: () => go('/dashboard'), strong: true },
@@ -202,6 +221,9 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, inHos
           : isHost
             ? { key: 'host', label: pick(lang, 'التبديل إلى الاستضافة', 'Switch to hosting', 'Passer en mode hôte'), onSelect: () => go('/host') }
             : { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/join') },
+        isDriver
+          ? { key: 'driver', label: pick(lang, 'لوحة سائق سير', 'SR driver dashboard', 'Tableau de bord chauffeur SR'), onSelect: () => go('/driver') }
+          : { key: 'driver', label: pick(lang, 'قُد مع سير', 'Drive with SR', 'Conduire avec SR'), onSelect: () => void startDriving() },
         ...(isAdmin
           ? [
               { key: 'admin', label: pick(lang, 'لوحة الإدارة', 'Admin panel', 'Administration'), onSelect: () => go('/admin/review') },

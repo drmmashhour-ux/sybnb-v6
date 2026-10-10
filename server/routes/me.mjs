@@ -58,6 +58,43 @@ export async function handleMe(req, res, url, context) {
     return json(res, 200, { ok: true, roles })
   }
 
+  // Launch blocker #190 (2026-10-10): "Become a driver" — the self-service front door for a signed-in
+  // customer to start driving. Previously DRIVER was operator-provisioned only (auth.mjs keeps it out
+  // of PUBLIC_REGISTER_ROLES), which meant no one could ever onboard as a driver without a script.
+  //
+  // This grants nothing a self-registered driver could abuse: the DRIVER role alone only unlocks the
+  // onboarding dashboard where the applicant SUBMITS their ID document and vehicle for review. Every
+  // ride claim/offer is gated server-side (server/routes/sr-rides.mjs + ride-dispatch.mjs) on an
+  // ADMIN-APPROVED id document, an ADMIN-APPROVED registered vehicle, a valid registration and a
+  // passed mechanical inspection — none of which the applicant can set themselves. So a brand-new
+  // self-registered driver is an APPLICANT who cannot see a rider, be offered a ride, or claim one
+  // until an operator approves them. This is the standard ride-hailing "sign up to drive, documents
+  // reviewed before you can go online" model. Grant-only, idempotent, no session revoke (roles are
+  // read live per request), commit-boundary re-authorized exactly like become-host above.
+  if (url.pathname === '/api/me/become-driver') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    const roles = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, { action: 'SELF_BECOME_DRIVER' })
+      await tx.userRole.upsert({
+        where: { userId_role: { userId: context.user.id, role: 'DRIVER' } },
+        create: { userId: context.user.id, role: 'DRIVER' },
+        update: {},
+      })
+      // Seed an empty driver profile so the onboarding dashboard has a row to fill (vehicle PUT also
+      // upserts, but creating it here means the applicant immediately shows up as a pending onboarding
+      // case rather than only after they save a vehicle).
+      await tx.driverProfile.upsert({
+        where: { userId: context.user.id },
+        create: { userId: context.user.id },
+        update: {},
+      })
+      const rows = await tx.userRole.findMany({ where: { userId: context.user.id }, select: { role: true } })
+      return rows.map((row) => row.role)
+    })
+    return json(res, 200, { ok: true, roles })
+  }
+
   if (url.pathname === '/api/me/id-document') {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context)

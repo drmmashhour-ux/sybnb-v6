@@ -7,6 +7,8 @@ import {
   declineSrOffer,
   enablePushNotifications,
   fetchDriverIdentityStatus,
+  fetchDriverPayouts,
+  requestDriverPayout,
   fetchPendingSrRides,
   fetchPrototypeDriverOverview,
   fetchPrototypeSrRideThread,
@@ -21,6 +23,7 @@ import {
   type PlatformDriverOverview,
   type PlatformMessage,
   type PlatformRideRequest,
+  type DriverPayoutInfo,
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
 
@@ -56,6 +59,27 @@ const copy = {
     awaitingTag: 'بانتظار الدفع',
     netEarn: 'صافي ربحك',
     verifyToAccept: 'أكمل التحقق (هوية معتمدة + مركبة مسجّلة) لقبول الرحلات.',
+    goOnline: 'ابدأ الاستلام',
+    goOffline: 'إيقاف الاستلام',
+    youAreOnline: 'أنت متصل — ستصلك الطلبات القريبة',
+    youAreOffline: 'أنت غير متصل — فعّل الاستلام لتصلك الطلبات',
+    onlineHint: 'يجب تفعيل موقعك لتصلك طلبات الرحلات.',
+    pickupLabel: 'الانطلاق',
+    deadheadLabel: 'إليك',
+    etaAway: 'دقيقة للوصول',
+    expiresIn: 'ينتهي خلال',
+    regExpiredGate: 'انتهت رخصة سير مركبتك — جددها لقبول الرحلات.',
+    inspectionGate: 'يجب أن تجتاز مركبتك الفحص الميكانيكي قبل قبول الرحلات.',
+    withdrawTitle: 'سحب الأرباح',
+    withdrawAvailable: 'المتاح للسحب',
+    withdrawPending: 'قيد المعالجة',
+    withdrawAmount: 'المبلغ',
+    withdrawSubmit: 'طلب سحب',
+    withdrawSubmitting: 'جار الإرسال...',
+    withdrawEmpty: 'لا توجد طلبات سحب بعد.',
+    withdrawStatusREQUESTED: 'قيد المراجعة',
+    withdrawStatusPAID: 'تم الدفع',
+    withdrawStatusREJECTED: 'مرفوض',
     rating: 'تقييمك',
     rider: 'الراكب',
     pickup: 'الانطلاق',
@@ -162,6 +186,27 @@ const copy = {
     awaitingTag: 'Awaiting payment',
     netEarn: 'You earn',
     verifyToAccept: 'Finish verification (approved ID + registered vehicle) to accept rides.',
+    goOnline: 'Go online',
+    goOffline: 'Go offline',
+    youAreOnline: 'You are online — nearby requests will come to you',
+    youAreOffline: 'You are offline — go online to receive requests',
+    onlineHint: 'Turn on your location to receive ride requests.',
+    pickupLabel: 'Pickup',
+    deadheadLabel: 'to you',
+    etaAway: 'min away',
+    expiresIn: 'Expires in',
+    regExpiredGate: 'Your vehicle registration has expired — renew it to accept rides.',
+    inspectionGate: 'Your vehicle must pass a mechanical inspection before accepting rides.',
+    withdrawTitle: 'Withdraw earnings',
+    withdrawAvailable: 'Available to withdraw',
+    withdrawPending: 'Pending',
+    withdrawAmount: 'Amount',
+    withdrawSubmit: 'Request withdrawal',
+    withdrawSubmitting: 'Submitting...',
+    withdrawEmpty: 'No withdrawal requests yet.',
+    withdrawStatusREQUESTED: 'Under review',
+    withdrawStatusPAID: 'Paid',
+    withdrawStatusREJECTED: 'Rejected',
     rating: 'Your rating',
     rider: 'Rider',
     pickup: 'Pickup',
@@ -268,6 +313,27 @@ const copy = {
     awaitingTag: 'En attente',
     netEarn: 'Vous gagnez',
     verifyToAccept: 'Terminez la vérification (pièce d’identité approuvée + véhicule enregistré) pour accepter des courses.',
+    goOnline: 'Se mettre en ligne',
+    goOffline: 'Se mettre hors ligne',
+    youAreOnline: 'Vous êtes en ligne — les demandes proches vous parviendront',
+    youAreOffline: 'Vous êtes hors ligne — mettez-vous en ligne pour recevoir des demandes',
+    onlineHint: 'Activez votre localisation pour recevoir des demandes de course.',
+    pickupLabel: 'Prise en charge',
+    deadheadLabel: 'vers vous',
+    etaAway: 'min',
+    expiresIn: 'Expire dans',
+    regExpiredGate: 'Votre carte grise a expiré — renouvelez-la pour accepter des courses.',
+    inspectionGate: 'Votre véhicule doit passer un contrôle technique avant d’accepter des courses.',
+    withdrawTitle: 'Retirer les gains',
+    withdrawAvailable: 'Disponible au retrait',
+    withdrawPending: 'En attente',
+    withdrawAmount: 'Montant',
+    withdrawSubmit: 'Demander un retrait',
+    withdrawSubmitting: 'Envoi...',
+    withdrawEmpty: 'Aucune demande de retrait pour le moment.',
+    withdrawStatusREQUESTED: 'En cours d’examen',
+    withdrawStatusPAID: 'Payé',
+    withdrawStatusREJECTED: 'Rejeté',
     rating: 'Votre note',
     rider: 'Passager',
     pickup: 'Prise en charge',
@@ -383,14 +449,45 @@ export function DriverDashboardPage({ lang }: Props) {
   const [registrationExpiresAt, setRegistrationExpiresAt] = useState('')
   const [vehicleErrMsg, setVehicleErrMsg] = useState('')
   const [pushStatus, setPushStatus] = useState<'idle' | 'enabling' | 'enabled' | 'error'>('idle')
+  // #192: driver earnings withdrawal.
+  const [payoutInfo, setPayoutInfo] = useState<DriverPayoutInfo | null>(null)
+  const [payoutAmount, setPayoutAmount] = useState('')
+  const [payoutStatus, setPayoutStatus] = useState<'idle' | 'saving' | 'error'>('idle')
+  const [payoutMsg, setPayoutMsg] = useState('')
 
   useEffect(() => {
     void loadOverview()
     void loadPendingRides()
     void loadIdentityStatus()
+    void loadPayouts()
     const interval = window.setInterval(() => void loadPendingRides(), 6000)
     return () => window.clearInterval(interval)
   }, [])
+
+  async function loadPayouts() {
+    try {
+      setPayoutInfo(await fetchDriverPayouts('USD'))
+    } catch {
+      // Non-critical; the withdrawal card simply won't render its balance.
+    }
+  }
+
+  async function submitPayout() {
+    const amount = Math.round(Number(payoutAmount))
+    if (!Number.isFinite(amount) || amount <= 0) return
+    setPayoutStatus('saving')
+    setPayoutMsg('')
+    try {
+      // Ride fares are whole USD units (not cents), matching amountMinor across the SR ledger.
+      await requestDriverPayout({ amountMinor: amount, currency: payoutInfo?.currency || 'USD' })
+      setPayoutAmount('')
+      await loadPayouts()
+      setPayoutStatus('idle')
+    } catch (error) {
+      setPayoutStatus('error')
+      setPayoutMsg(error instanceof Error ? error.message : t.error)
+    }
+  }
 
   async function loadIdentityStatus() {
     try {
@@ -502,12 +599,34 @@ export function DriverDashboardPage({ lang }: Props) {
     return base
   }, [lang, overview, t])
 
-  // Verification gate for accepting rides (matches the server claim gate): approved ID + a
-  // registered vehicle. Surfaced in the UI so the driver sees a clear "finish verification" state
-  // instead of tapping Accept and eating a 403.
-  const canAccept = idDocumentStatus === 'APPROVED'
-    && Boolean(overview?.driver.vehiclePlate)
-    && overview?.driver.vehicleStatus === 'APPROVED'
+  // Verification gate for accepting rides. Mirrors the server claim gate
+  // (server/routes/sr-rides.mjs claimRideForDriver) EXACTLY so the driver sees the real reason
+  // instead of tapping Accept and eating a 403: approved ID + a registered & approved vehicle +
+  // registration not expired (always enforced) + a passed, unexpired mechanical inspection when the
+  // server says inspection is required (overview.driver.inspectionRequired; env
+  // SR_REQUIRE_VEHICLE_INSPECTION, default on). Category match is per-ride, not a global gate.
+  const driverProfile = overview?.driver
+  const registrationExpired = Boolean(
+    driverProfile?.registrationExpiresAt && new Date(driverProfile.registrationExpiresAt).getTime() <= Date.now(),
+  )
+  const inspectionOk =
+    driverProfile?.inspectionRequired === false
+      ? true
+      : driverProfile?.inspectionStatus === 'PASSED'
+        && !(driverProfile?.inspectionExpiresAt && new Date(driverProfile.inspectionExpiresAt).getTime() <= Date.now())
+  const verifiedBase =
+    idDocumentStatus === 'APPROVED'
+    && Boolean(driverProfile?.vehiclePlate)
+    && driverProfile?.vehicleStatus === 'APPROVED'
+  const canAccept = Boolean(verifiedBase && !registrationExpired && inspectionOk)
+  // The single most relevant reason to show when Accept is blocked.
+  const acceptGateReason = canAccept
+    ? ''
+    : registrationExpired
+      ? t.regExpiredGate
+      : verifiedBase && !inspectionOk
+        ? t.inspectionGate
+        : t.verifyToAccept
 
   async function loadOverview() {
     setStatus('loading')
@@ -646,15 +765,19 @@ export function DriverDashboardPage({ lang }: Props) {
         <article style={styles.dispatchHero}>
           <span>{t.available}</span>
           <strong>{t.dispatch}</strong>
+          <GoOnlineToggle labels={t} canGoOnline={canAccept} />
           {claimError && <p style={styles.insuranceWarning}>{claimError}</p>}
           <div style={styles.offerGrid}>
-            {!canAccept && <p style={styles.insuranceWarning}>{t.verifyToAccept}</p>}
+            {!canAccept && <p style={styles.insuranceWarning}>{acceptGateReason}</p>}
             {pendingRides.length === 0 ? (
               <p style={{ color: '#9aa6ba' }}>{pendingStatus === 'loading' ? t.pendingLoading : t.pendingEmpty}</p>
             ) : (
               pendingRides.map((pendingRide) => (
                 <article key={pendingRide.id} style={styles.offerCard}>
-                  <span>{String(pendingRide.metadata.dropoff || '-')}</span>
+                  {pendingRide.metadata.pickup ? (
+                    <span dir="ltr" style={styles.pickupText}>↑ {t.pickupLabel}: {String(pendingRide.metadata.pickup)}</span>
+                  ) : null}
+                  <span>↓ {String(pendingRide.metadata.dropoff || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
                   <small dir="ltr" style={{ color: '#7dd3b0' }}>
                     {t.netEarn}: {moneyText(Math.round((pendingRide.fareMinor || 0) * (1 - (overview?.totals.commissionRate ?? 0.15))), pendingRide.currency, lang)}
@@ -662,6 +785,12 @@ export function DriverDashboardPage({ lang }: Props) {
                   <i dir="ltr">
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}
                   </i>
+                  {pendingRide.pickupDistanceKm != null && (
+                    <small dir="ltr" style={styles.deadheadText}>
+                      {pendingRide.pickupDistanceKm.toFixed(1)} km {t.deadheadLabel}
+                      {pendingRide.etaToPickupMinutes != null ? ` · ${pendingRide.etaToPickupMinutes} ${t.etaAway}` : ''}
+                    </small>
+                  )}
                   {pendingRide.accessibilityRequired && <span style={styles.accessibilityBadge}>♿ {t.accessibilityRequired}</span>}
                   {pendingRide.shareable && <span style={styles.accessibilityBadge}>🤝 {t.shareable}</span>}
                   {(pendingRide.stops || []).length > 0 && (
@@ -672,6 +801,7 @@ export function DriverDashboardPage({ lang }: Props) {
                   {pendingRide.offeredToYou ? (
                     <>
                       <span style={styles.accessibilityBadge}>⚡ {t.offeredToYou}</span>
+                      <OfferCountdown expiresAt={pendingRide.offerExpiresAt} label={t.expiresIn} />
                       <div style={{ display: 'flex', gap: 8 }}>
                         <button
                           style={{ flex: 1 }}
@@ -700,6 +830,67 @@ export function DriverDashboardPage({ lang }: Props) {
           </div>
         </article>
       </section>
+
+      {payoutInfo && (
+        <section style={styles.dispatchPanel}>
+          <article style={styles.docsPanel}>
+            <h2>{t.withdrawTitle}</h2>
+            <div style={styles.stats}>
+              <div style={styles.statBox}>
+                <span>{t.withdrawAvailable}</span>
+                <strong>{moneyText(payoutInfo.availableMinor, payoutInfo.currency, lang)}</strong>
+              </div>
+              {payoutInfo.pendingMinor > 0 && (
+                <div style={styles.statBox}>
+                  <span>{t.withdrawPending}</span>
+                  <strong>{moneyText(payoutInfo.pendingMinor, payoutInfo.currency, lang)}</strong>
+                </div>
+              )}
+            </div>
+            <div style={styles.onlineBox}>
+              <input
+                style={styles.payoutInput}
+                inputMode="numeric"
+                value={payoutAmount}
+                onChange={(event) => setPayoutAmount(event.target.value.replace(/[^0-9]/g, ''))}
+                placeholder={`${t.withdrawAmount} (${payoutInfo.currency})`}
+              />
+              <button
+                style={styles.primaryButton}
+                disabled={
+                  payoutStatus === 'saving'
+                  || payoutInfo.availableMinor <= 0
+                  || !payoutAmount
+                  || Number(payoutAmount) <= 0
+                  || Number(payoutAmount) > payoutInfo.availableMinor
+                }
+                onClick={() => void submitPayout()}
+              >
+                {payoutStatus === 'saving' ? t.withdrawSubmitting : t.withdrawSubmit}
+              </button>
+            </div>
+            {payoutMsg && <p style={styles.insuranceWarning}>{payoutMsg}</p>}
+            {payoutInfo.requests.length === 0 ? (
+              <span style={styles.onlineStatusText}>{t.withdrawEmpty}</span>
+            ) : (
+              <div style={{ display: 'grid', gap: 6 }}>
+                {payoutInfo.requests.slice(0, 5).map((request) => (
+                  <div key={request.id} style={styles.payoutRow}>
+                    <b dir="ltr">{moneyText(request.amountMinor, request.currency, lang)}</b>
+                    <span style={styles.onlineStatusText}>
+                      {request.status === 'PAID'
+                        ? t.withdrawStatusPAID
+                        : request.status === 'REJECTED'
+                          ? t.withdrawStatusREJECTED
+                          : t.withdrawStatusREQUESTED}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </article>
+        </section>
+      )}
 
       <section style={{ ...styles.driverIntelligence, gridTemplateColumns: '1fr' }}>
         <article style={styles.docsPanel}>
@@ -1028,6 +1219,106 @@ function PickupVerifyPanel({
 // (RideCard's own gate), so leaving that window (completed/cancelled) unmounts this component and
 // its cleanup effect stops the watch automatically -- no separate "is this ride still active"
 // bookkeeping needed here.
+// #189 (2026-10-10): the driver's top-level availability control. A driver is "online" (dispatchable)
+// purely by reporting a fresh GPS position within the dispatch online-window (server-side 120s) --
+// there is no separate availability flag. Previously the ONLY location-sharing control lived inside an
+// active ride card, so a driver could never go online to receive a FIRST offer (a deadlock). This
+// posts the driver's position continuously while on, so auto-dispatch can offer them rides.
+function GoOnlineToggle({ labels, canGoOnline }: { labels: typeof copy.en; canGoOnline: boolean }) {
+  const [online, setOnline] = useState(false)
+  const [error, setError] = useState('')
+  const watchIdRef = useRef<number | null>(null)
+  const lastSentAtRef = useRef(0)
+
+  function stop() {
+    if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
+    watchIdRef.current = null
+    setOnline(false)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current)
+    }
+  }, [])
+
+  // If the driver loses eligibility (e.g. registration lapses) while online, stop reporting so they
+  // don't keep appearing dispatchable when the server would refuse every claim anyway.
+  useEffect(() => {
+    if (!canGoOnline && online) stop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canGoOnline])
+
+  function start() {
+    if (!navigator.geolocation) {
+      setError(labels.locationUnsupported)
+      return
+    }
+    setError('')
+    // Post once immediately so the driver enters the online window without waiting for the first
+    // watchPosition tick.
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        lastSentAtRef.current = Date.now()
+        void reportPrototypeDriverLocation(position.coords.latitude, position.coords.longitude)
+      },
+      () => setError(labels.locationDenied),
+      { enableHighAccuracy: true, maximumAge: 5000 },
+    )
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const now = Date.now()
+        if (now - lastSentAtRef.current < LOCATION_REPORT_INTERVAL_MS) return
+        lastSentAtRef.current = now
+        void reportPrototypeDriverLocation(position.coords.latitude, position.coords.longitude)
+      },
+      () => setError(labels.locationDenied),
+      { enableHighAccuracy: true, maximumAge: 5000 },
+    )
+    setOnline(true)
+  }
+
+  return (
+    <div style={styles.onlineBox}>
+      <button
+        style={online ? styles.onlineActiveButton : styles.primaryButton}
+        disabled={!canGoOnline}
+        onClick={() => (online ? stop() : start())}
+      >
+        {online ? labels.goOffline : labels.goOnline}
+      </button>
+      <span style={styles.onlineStatusText}>
+        {online ? labels.youAreOnline : canGoOnline ? labels.youAreOffline : labels.onlineHint}
+      </span>
+      {error && <span style={styles.chatEmpty}>{error}</span>}
+    </div>
+  )
+}
+
+function secondsUntil(ts?: string | null) {
+  if (!ts) return null
+  const t = new Date(ts).getTime()
+  if (Number.isNaN(t)) return null
+  return Math.max(0, Math.round((t - Date.now()) / 1000))
+}
+
+// #189 (2026-10-10): live countdown for a ride offered directly to this driver, so they see how long
+// the offer stays theirs before it escalates to the next-nearest driver (server OFFER_TTL_SECONDS).
+function OfferCountdown({ expiresAt, label }: { expiresAt?: string | null; label: string }) {
+  const [remaining, setRemaining] = useState<number | null>(() => secondsUntil(expiresAt))
+  useEffect(() => {
+    setRemaining(secondsUntil(expiresAt))
+    const id = window.setInterval(() => setRemaining(secondsUntil(expiresAt)), 1000)
+    return () => window.clearInterval(id)
+  }, [expiresAt])
+  if (remaining == null) return null
+  return (
+    <span style={styles.countdownBadge}>
+      ⏱ {label} {remaining}s
+    </span>
+  )
+}
+
 function LocationSharingToggle({ rideId, labels }: { rideId: string; labels: typeof copy.en }) {
   const [sharing, setSharing] = useState(false)
   const [error, setError] = useState('')
@@ -1210,6 +1501,14 @@ const styles: Record<string, CSSProperties> = {
   panel: { border: '1px solid #263651', borderRadius: 8, background: '#101722', color: '#9aa6ba', padding: 14 },
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
   locationRow: { display: 'flex', alignItems: 'center', gap: 10, borderTop: '1px solid #263651', paddingTop: 10 },
+  onlineBox: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, margin: '6px 0 2px' },
+  onlineActiveButton: { minHeight: 44, border: 0, borderRadius: 10, background: '#20d29b', color: '#04140d', fontWeight: 950, padding: '0 18px' },
+  onlineStatusText: { color: '#9aa6ba', fontSize: 13, fontWeight: 700 },
+  countdownBadge: { display: 'inline-block', width: 'fit-content', borderRadius: 999, background: 'rgba(255,210,122,.14)', border: '1px solid rgba(255,210,122,.4)', color: '#ffd27a', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
+  pickupText: { color: '#7dd3b0', fontSize: 13, fontWeight: 700 },
+  deadheadText: { color: '#9aa6ba' },
+  payoutInput: { minHeight: 44, flex: 1, minWidth: 120, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
+  payoutRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, borderTop: '1px solid #1b2636', paddingTop: 6 },
   accessibilityBadge: { display: 'inline-block', width: 'fit-content', borderRadius: 999, background: 'rgba(25,215,255,.14)', border: '1px solid rgba(25,215,255,.4)', color: '#19d7ff', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
   chatPanel: { display: 'grid', gap: 8, borderTop: '1px solid #263651', paddingTop: 10 },
   chatMessages: { display: 'grid', gap: 6, maxHeight: 180, overflowY: 'auto' },

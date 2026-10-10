@@ -9,7 +9,8 @@ import { runDispatchSweep } from '../lib/ride-dispatch.mjs'
 import { VEHICLE_CATEGORY_VALUES, isCategoryAllowedForYear, VEHICLE_MAX_AGE_YEARS } from '../lib/vehicle-category.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
-import { settlePrepaidRide } from '../lib/finance-ledger.mjs'
+import { settlePrepaidRide, createDriverPayoutRequest, driverPayoutBalances } from '../lib/finance-ledger.mjs'
+import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 // SEC-002R rounds 3 and 4: the two TERMINAL transitions this route can write are Class A -- COMPLETED
 // makes a fare billable, CANCELLED irreversibly destroys a receivable. See the ride status handler
 // below for the full reasoning on each.
@@ -112,6 +113,70 @@ export async function handleDriver(req, res, url, context) {
       select: { accessibilityCapable: true },
     })
     return json(res, 200, { ok: true, driverProfile: profile })
+  }
+
+  // #192 (2026-10-10): driver earnings withdrawal. A driver's ride earnings (fare + cancellation-fee
+  // CREDITs, net of any cash-ride commission debt and prior withdrawals) are theirs to withdraw —
+  // previously there was NO route for this, so collected ride money could never leave the platform to
+  // the driver. GET reports the withdrawable/pending balance and the driver's own requests; POST files
+  // a withdrawal request (moves NO money) that an operator marks PAID via the existing
+  // /api/admin/payout-requests flow (markPayoutRequestPaid, which DEBITs the driver's wallet under a
+  // re-checked driver balance). Mirrors /api/host/payouts, over the ride ledger. Ride fares are USD.
+  if (url.pathname === '/api/driver/payouts') {
+    requireAuth(context, ['DRIVER'])
+    const currency = String(url.searchParams.get('currency') || 'USD').toUpperCase().slice(0, 8)
+    if (req.method === 'GET') {
+      const balances = await db().$transaction((tx) => driverPayoutBalances(tx, { userId: context.user.id, currency }))
+      const all = await db().payoutRequest.findMany({
+        where: { hostId: context.user.id },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      })
+      const requests = all
+        .filter((r) => r.method && typeof r.method === 'object' && !Array.isArray(r.method) && r.method.kind === 'driver')
+        .map((r) => ({ id: r.id, amountMinor: r.amountMinor, currency: r.currency, status: r.status, reference: r.reference, note: r.note, createdAt: r.createdAt, decidedAt: r.decidedAt }))
+      return json(res, 200, { ok: true, availableMinor: balances.availableMinor, pendingMinor: balances.pendingMinor, currency, requests })
+    }
+    if (req.method === 'POST') {
+      const body = await readJson(req)
+      const amountMinor = Number(body.amountMinor)
+      if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+        const error = new Error('amountMinor must be a positive whole number.')
+        error.statusCode = 400
+        error.code = 'PAYOUT_AMOUNT_INVALID'
+        error.expose = true
+        throw error
+      }
+      const requestCurrency = String(body.currency || currency).toUpperCase().slice(0, 8)
+      // Free-form payout destination the operator pays to, shallow-copied + length-capped so a client
+      // cannot smuggle a huge or deeply-nested payload into the stored method JSON.
+      const methodInput = (body.method && typeof body.method === 'object' && !Array.isArray(body.method)) ? body.method : {}
+      const method = {}
+      for (const key of ['type', 'accountName', 'accountNumber', 'bankName', 'walletNumber', 'notes']) {
+        if (methodInput[key] != null) method[key] = String(methodInput[key]).slice(0, 200)
+      }
+      const request = await db().$transaction(async (tx) => {
+        const created = await createDriverPayoutRequest(tx, { driverId: context.user.id, amountMinor, currency: requestCurrency, method })
+        await tx.adminAuditLog.create({
+          data: {
+            actorUserId: context.user.id,
+            action: 'DRIVER_PAYOUT_REQUESTED',
+            entityType: 'payout_requests',
+            entityId: created.id,
+            before: null,
+            after: { id: created.id, amountMinor: created.amountMinor, currency: created.currency, status: created.status },
+          },
+        })
+        return created
+      })
+      notifyAdmin('admin_payout_request', {
+        amount: formatMoney(amountMinor, requestCurrency),
+        method: method.type || 'driver',
+        hostName: context.user.displayName || context.user.id,
+      }, `admin_payout_request:${request.id}`)
+      return json(res, 201, { ok: true, request: { id: request.id, amountMinor: request.amountMinor, currency: request.currency, status: request.status, createdAt: request.createdAt } })
+    }
+    return methodNotAllowed(res, ['GET', 'POST'])
   }
 
   // Vehicle registration. The DriverProfile has make/model/plate columns and riders are shown them,
@@ -393,6 +458,11 @@ export async function handleDriver(req, res, url, context) {
           registrationExpiresAt: driverProfile?.registrationExpiresAt ? driverProfile.registrationExpiresAt.toISOString() : null,
           inspectionStatus: driverProfile?.inspectionStatus || null,
           inspectionExpiresAt: driverProfile?.inspectionExpiresAt ? driverProfile.inspectionExpiresAt.toISOString() : null,
+          // #189 (2026-10-10): tell the client whether the mechanical-inspection gate is active
+          // (env SR_REQUIRE_VEHICLE_INSPECTION, default on) so the dashboard's canAccept mirrors the
+          // server claim gate EXACTLY -- never over-blocking Accept when inspection is disabled, nor
+          // under-blocking (tap -> 403) when it is required. Registration expiry is always enforced.
+          inspectionRequired: !['false', '0'].includes(String(process.env.SR_REQUIRE_VEHICLE_INSPECTION ?? '').trim().toLowerCase()),
         },
         totals: {
           assigned: rides.length,

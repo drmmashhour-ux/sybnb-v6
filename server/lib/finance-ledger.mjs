@@ -210,6 +210,13 @@ export async function recordWalletEntry(tx, {
   referenceId,
   keyParts,
   note,
+  // #191 (2026-10-10): opt-in, default false — every existing caller keeps the strict no-overdraw
+  // guarantee untouched. Only the CASH ride-commission debit (approvePaymentProof's cash branch)
+  // passes true: a driver who collected the full fare in cash owes the platform its commission, and
+  // that debt is represented as a negative driver-wallet balance (cleared by future card-ride net
+  // credits or a top-up). A pure-cash driver legitimately has nothing to debit against, so the
+  // strict guard would otherwise make the commission uncollectable. No other flow may go negative.
+  allowNegative = false,
 }) {
   const normalizedAmount = Math.max(0, Math.round(amountMinor || 0))
   if (!userId || !normalizedAmount) return null
@@ -231,7 +238,13 @@ export async function recordWalletEntry(tx, {
         ? -normalizedAmount
         : 0
 
-  if (balanceDelta < 0) {
+  if (balanceDelta < 0 && allowNegative) {
+    // #191: the cash ride-commission debt. Intentionally NOT balance-guarded: the driver's wallet is
+    // allowed to go negative because the negative balance IS the commission they owe on cash they
+    // already collected. Still idempotent (the walletEntry idempotencyKey below is the real guard
+    // against a double debit), so a re-approval can't double the debt.
+    await tx.wallet.update({ where: { id: wallet.id }, data: { cachedBalanceMinor: { decrement: normalizedAmount } } })
+  } else if (balanceDelta < 0) {
     // Atomic, race-safe guard: the WHERE clause re-checks the balance at update time (not from a
     // stale read), so two concurrent debits against the same wallet can't both pass and jointly
     // overdraw it — mirrors the updateMany-guard pattern used elsewhere (e.g. approvePaymentProof).
@@ -473,40 +486,80 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
       const commissionMinor = isCancellationFee
         ? 0
         : Math.round(fareMinor * SR_RIDE_COMMISSION_RATE)
-      const driverMinor = fareMinor - commissionMinor
-      await recordWalletEntry(tx, {
-        userId: ride.driverId,
-        type: 'CREDIT',
-        amountMinor: driverMinor,
-        currency: proof.currency,
-        referenceType: isCancellationFee ? 'ride_cancellation_fee' : 'ride_fare',
-        referenceId: proof.rideId,
-        keyParts: [isCancellationFee ? 'ride-cancellation-fee' : 'ride-fare', proof.rideId, proof.id],
-        note: isCancellationFee
-          ? 'Driver cancellation fee collected after verified rider payment proof (no commission).'
-          : `Driver fare net of the ${Math.round(SR_RIDE_COMMISSION_RATE * 100)}% SYBNB ride commission, collected after verified rider payment proof.`,
-      })
-      // The platform's ride commission -- routed to the fixed house account (PLATFORM_ACCOUNT_ID),
-      // exactly like the booking admin-share and seller-plan fee above, so all platform revenue
-      // pools in one place rather than fragmenting across operators' personal wallets. Falls back
-      // to the approving admin ONLY when no house account is configured (dev/e2e). Revenue-integrity
-      // fix (2026-10-09): recording no longer depends on `actorUserId` being truthy -- the commission
-      // is recorded whenever there is any recipient to credit, so a future system/automated approval
-      // (no actor) with PLATFORM_ACCOUNT_ID set still books the revenue instead of silently paying
-      // the driver the net and losing the commission off-ledger. The idempotency key is pinned by proof.id
-      // alone (not the actor), so the same proof can never be credited twice by a different actor.
-      const commissionRecipient = process.env.PLATFORM_ACCOUNT_ID || actorUserId
-      if (commissionMinor > 0 && commissionRecipient) {
+
+      if (proof.provider === 'cash') {
+        // #191 (2026-10-10): CASH / paid-to-driver. The rider handed the driver the full fare in cash
+        // (off-ledger), so the driver is NEVER credited the fare here — that would double-pay them.
+        // The platform is owed only its commission, so we DEBIT it from the driver (their wallet may
+        // go negative: that negative balance IS the driver's commission debt, cleared by future
+        // card-ride net credits or a top-up) and CREDIT the same amount to the house account. A cash
+        // cancellation fee carries no commission, so nothing moves and the driver keeps the whole fee.
+        // Net economics match a card ride exactly: card -> wallet +(fare-commission); cash -> wallet
+        // -commission while holding `fare` in cash -> both leave the driver with fare-commission.
+        const commissionRecipient = process.env.PLATFORM_ACCOUNT_ID || null
+        if (commissionMinor > 0) {
+          await recordWalletEntry(tx, {
+            userId: ride.driverId,
+            type: 'DEBIT',
+            amountMinor: commissionMinor,
+            currency: proof.currency,
+            referenceType: 'ride_commission',
+            referenceId: proof.rideId,
+            keyParts: ['ride-commission-cash-driver', proof.rideId, proof.id],
+            note: `SYBNB ride commission (${Math.round(SR_RIDE_COMMISSION_RATE * 100)}%) owed on a cash ride, debited from the driver who collected the full fare in cash.`,
+            allowNegative: true,
+          })
+          // Counterpart credit to the house account, so platform revenue still pools in one place.
+          // Skipped only when no house account is configured (dev/e2e) or it would be the driver.
+          if (commissionRecipient && commissionRecipient !== ride.driverId) {
+            await recordWalletEntry(tx, {
+              userId: commissionRecipient,
+              type: 'CREDIT',
+              amountMinor: commissionMinor,
+              currency: proof.currency,
+              referenceType: 'ride_commission',
+              referenceId: proof.rideId,
+              keyParts: ['ride-commission-cash-platform', proof.rideId, proof.id],
+              note: 'SYBNB ride commission collected on a cash ride (counterpart to the driver debit).',
+            })
+          }
+        }
+      } else {
+        const driverMinor = fareMinor - commissionMinor
         await recordWalletEntry(tx, {
-          userId: commissionRecipient,
+          userId: ride.driverId,
           type: 'CREDIT',
-          amountMinor: commissionMinor,
+          amountMinor: driverMinor,
           currency: proof.currency,
-          referenceType: 'ride_commission',
+          referenceType: isCancellationFee ? 'ride_cancellation_fee' : 'ride_fare',
           referenceId: proof.rideId,
-          keyParts: ['ride-commission', proof.rideId, proof.id],
-          note: 'SYBNB ride commission collected after verified rider payment.',
+          keyParts: [isCancellationFee ? 'ride-cancellation-fee' : 'ride-fare', proof.rideId, proof.id],
+          note: isCancellationFee
+            ? 'Driver cancellation fee collected after verified rider payment proof (no commission).'
+            : `Driver fare net of the ${Math.round(SR_RIDE_COMMISSION_RATE * 100)}% SYBNB ride commission, collected after verified rider payment proof.`,
         })
+        // The platform's ride commission -- routed to the fixed house account (PLATFORM_ACCOUNT_ID),
+        // exactly like the booking admin-share and seller-plan fee above, so all platform revenue
+        // pools in one place rather than fragmenting across operators' personal wallets. Falls back
+        // to the approving admin ONLY when no house account is configured (dev/e2e). Revenue-integrity
+        // fix (2026-10-09): recording no longer depends on `actorUserId` being truthy -- the commission
+        // is recorded whenever there is any recipient to credit, so a future system/automated approval
+        // (no actor) with PLATFORM_ACCOUNT_ID set still books the revenue instead of silently paying
+        // the driver the net and losing the commission off-ledger. The idempotency key is pinned by proof.id
+        // alone (not the actor), so the same proof can never be credited twice by a different actor.
+        const commissionRecipient = process.env.PLATFORM_ACCOUNT_ID || actorUserId
+        if (commissionMinor > 0 && commissionRecipient) {
+          await recordWalletEntry(tx, {
+            userId: commissionRecipient,
+            type: 'CREDIT',
+            amountMinor: commissionMinor,
+            currency: proof.currency,
+            referenceType: 'ride_commission',
+            referenceId: proof.rideId,
+            keyParts: ['ride-commission', proof.rideId, proof.id],
+            note: 'SYBNB ride commission collected after verified rider payment.',
+          })
+        }
       }
     }
   } else if (proof.planCode === 'wallet_topup') {
@@ -628,11 +681,30 @@ export async function originalAdminShareRecipient(tx, bookingId) {
 // originalAdminShareRecipient), never re-derived from a rate. Idempotent by key: a second call for
 // the same ride is a no-op. Returns a summary of what was reversed.
 export async function reverseRidePayment(tx, { rideId, reason = 'Ride payment reversed by admin.' }) {
+  // Reverse BOTH directions of a ride's settlement so every party is made whole:
+  //  * Settlement CREDITs (driver fare / cancellation fee, platform commission) are DEBITed back out
+  //    of their recipients.
+  //  * Settlement DEBITs are CREDITed back: the RIDER's prepayment (prepaid rides — this is the
+  //    actual rider refund that was previously missing, defect #1), and the cash-ride driver
+  //    commission debt (cash rides — undo the debt).
+  // Idempotent: every reversal entry's idempotency key is pinned to its SOURCE entry id, so a second
+  // call re-derives the same keys and is a no-op. The queries match only the ORIGINAL referenceTypes,
+  // never the `…_reversal` entries this function writes, so a reversal is never itself reversed.
   const credits = await tx.walletEntry.findMany({
     where: {
       referenceId: rideId,
       type: 'CREDIT',
       referenceType: { in: ['ride_fare', 'ride_cancellation_fee', 'ride_commission'] },
+    },
+    include: { wallet: true },
+  })
+  const debits = await tx.walletEntry.findMany({
+    where: {
+      referenceId: rideId,
+      type: 'DEBIT',
+      // ride_prepayment = the rider's prepaid funds (refund them); ride_commission = the cash-ride
+      // driver commission debt (undo it). `…_reversal` DEBITs are excluded by this explicit list.
+      referenceType: { in: ['ride_prepayment', 'ride_commission'] },
     },
     include: { wallet: true },
   })
@@ -650,9 +722,29 @@ export async function reverseRidePayment(tx, { rideId, reason = 'Ride payment re
       referenceId: rideId,
       keyParts: [`${credit.referenceType}-reversal`, rideId, credit.id],
       note: reason,
+      // The recipient may already have withdrawn or spent this credit (drivers can now withdraw ride
+      // earnings, #192), so the claw-back must be allowed to push the wallet negative — that negative
+      // is a genuine receivable the platform collects from future earnings, exactly like the cash
+      // commission debt. Without this a reversal of an already-withdrawn ride would throw and roll back.
+      allowNegative: true,
     })
     reversedMinor += credit.amountMinor
-    reversed.push({ referenceType: credit.referenceType, amountMinor: credit.amountMinor, userId: recipientUserId })
+    reversed.push({ referenceType: credit.referenceType, amountMinor: credit.amountMinor, userId: recipientUserId, direction: 'debit' })
+  }
+  for (const debit of debits) {
+    const partyUserId = debit.wallet?.userId
+    if (!partyUserId) continue
+    await recordWalletEntry(tx, {
+      userId: partyUserId,
+      type: 'CREDIT',
+      amountMinor: debit.amountMinor,
+      currency: debit.currency,
+      referenceType: `${debit.referenceType}_reversal`,
+      referenceId: rideId,
+      keyParts: [`${debit.referenceType}-reversal`, rideId, debit.id],
+      note: reason,
+    })
+    reversed.push({ referenceType: debit.referenceType, amountMinor: debit.amountMinor, userId: partyUserId, direction: 'credit' })
   }
   return { reversedEntries: reversed.length, reversedMinor, reversed }
 }
@@ -1092,6 +1184,56 @@ export async function hostPayoutBalances(tx, { userId, currency, excludeRequestI
   }
 }
 
+// #192 (2026-10-10): what a DRIVER may withdraw. Their ride earnings — fare + cancellation-fee
+// CREDITs — net of any cash-ride commission debits and prior driver withdrawals, and never more than
+// the wallet's ACTUAL balance (so a reversal, a cash commission debt, or any negative balance can
+// never be withdrawn, and rider top-ups / gifts / refunds sitting in the same wallet — a user can be
+// both rider and driver — are never withdrawable as driver cash). Mirrors hostPayoutBalances but over
+// the ride ledger instead of the booking ledger. Uses the same payoutRequest table; a driver request
+// is tagged method.kind === 'driver' and its withdrawal DEBIT uses referenceType
+// 'driver_payout_withdrawal' so the two ledgers never cross-count.
+export async function driverPayoutBalances(tx, { userId, currency, excludeRequestId }) {
+  const wallet = await tx.wallet.findUnique({ where: { userId_currency: { userId, currency } } })
+  const pending = await tx.payoutRequest.aggregate({
+    where: { hostId: userId, currency, status: 'REQUESTED', ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}) },
+    _sum: { amountMinor: true },
+  })
+  const pendingMinor = pending._sum.amountMinor || 0
+  if (!wallet) return { ...payoutAvailability({ pendingMinor }), currency }
+  const [fareMinor, cancelFeeMinor, cashCommissionDebtMinor, withdrawnMinor] = await Promise.all([
+    sumEntries(tx, wallet.id, 'CREDIT', 'ride_fare'),
+    sumEntries(tx, wallet.id, 'CREDIT', 'ride_cancellation_fee'),
+    sumEntries(tx, wallet.id, 'DEBIT', 'ride_commission'), // cash-ride commission the driver owes
+    sumEntries(tx, wallet.id, 'DEBIT', 'driver_payout_withdrawal'),
+  ])
+  return {
+    ...payoutAvailability({
+      releasedMinor: fareMinor + cancelFeeMinor,
+      clawbackMinor: cashCommissionDebtMinor,
+      hostFeesMinor: 0,
+      withdrawnMinor,
+      walletBalanceMinor: wallet.cachedBalanceMinor,
+      pendingMinor,
+    }),
+    currency,
+  }
+}
+
+// A driver files a withdrawal request. Like createPayoutRequest, moves NO money — it only reserves
+// the amount against future requests via pendingMinor and records the payout method. Tagged
+// method.kind='driver' so markPayoutRequestPaid re-checks driver (not host) balances and books the
+// driver withdrawal referenceType.
+export async function createDriverPayoutRequest(tx, { driverId, amountMinor, currency, method }) {
+  await lockHostPayouts(tx, driverId)
+  const balances = await driverPayoutBalances(tx, { userId: driverId, currency })
+  if (amountMinor > balances.requestableMinor) {
+    throw payoutError(409, 'PAYOUT_AMOUNT_EXCEEDS_AVAILABLE', 'The requested amount is more than your available ride earnings minus pending requests.')
+  }
+  return tx.payoutRequest.create({
+    data: { hostId: driverId, amountMinor, currency, status: 'REQUESTED', method: { ...(method && typeof method === 'object' ? method : {}), kind: 'driver' } },
+  })
+}
+
 function payoutError(statusCode, code, message) {
   const error = new Error(message)
   error.statusCode = statusCode
@@ -1126,10 +1268,18 @@ export async function createPayoutRequest(tx, { hostId, amountMinor, currency, m
 export async function markPayoutRequestPaid(tx, { requestId, actorUserId, reference, note }) {
   const request = await tx.payoutRequest.findUnique({ where: { id: requestId } })
   if (!request) throw payoutError(404, 'PAYOUT_REQUEST_NOT_FOUND', 'Payout request not found.')
+  // #192: a driver withdrawal (tagged method.kind==='driver') is re-checked against the DRIVER's ride
+  // earnings and booked as 'driver_payout_withdrawal', so it never cross-counts with host booking
+  // earnings. Everything else is the host path, unchanged.
+  const isDriver = Boolean(request.method && typeof request.method === 'object' && !Array.isArray(request.method) && request.method.kind === 'driver')
   await lockHostPayouts(tx, request.hostId)
-  const balances = await hostPayoutBalances(tx, { userId: request.hostId, currency: request.currency, excludeRequestId: request.id })
+  const balances = isDriver
+    ? await driverPayoutBalances(tx, { userId: request.hostId, currency: request.currency, excludeRequestId: request.id })
+    : await hostPayoutBalances(tx, { userId: request.hostId, currency: request.currency, excludeRequestId: request.id })
   if (request.amountMinor > balances.availableMinor) {
-    throw payoutError(409, 'PAYOUT_AMOUNT_EXCEEDS_AVAILABLE', 'The host no longer has enough available balance for this payout.')
+    throw payoutError(409, 'PAYOUT_AMOUNT_EXCEEDS_AVAILABLE', isDriver
+      ? 'The driver no longer has enough available ride earnings for this payout.'
+      : 'The host no longer has enough available balance for this payout.')
   }
   const claimed = await tx.payoutRequest.updateMany({
     where: { id: request.id, status: 'REQUESTED' },
@@ -1143,10 +1293,12 @@ export async function markPayoutRequestPaid(tx, { requestId, actorUserId, refere
     type: 'DEBIT',
     amountMinor: request.amountMinor,
     currency: request.currency,
-    referenceType: 'host_payout_withdrawal',
+    referenceType: isDriver ? 'driver_payout_withdrawal' : 'host_payout_withdrawal',
     referenceId: request.id,
-    keyParts: ['host-payout-withdrawal', request.id],
-    note: `Host withdrawal paid outside the platform (reference ${reference}).`,
+    keyParts: [isDriver ? 'driver-payout-withdrawal' : 'host-payout-withdrawal', request.id],
+    note: isDriver
+      ? `Driver withdrawal paid outside the platform (reference ${reference}).`
+      : `Host withdrawal paid outside the platform (reference ${reference}).`,
   })
   return tx.payoutRequest.update({ where: { id: request.id }, data: { walletEntryId: walletEntry?.id || null } })
 }

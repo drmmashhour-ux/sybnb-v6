@@ -703,8 +703,16 @@ export async function handlePayments(req, res, url, context) {
       actor: { roles: context.roles },
     })
 
+    // #191 (2026-10-10): CASH / paid-to-driver has NO wallet transaction reference. Only a RIDE may be
+    // settled in cash (a booking or standalone proof still requires a wallet reference). A cash proof
+    // records that the rider paid the driver directly; an operator approves it in the normal review
+    // queue, and settlement (finance-ledger.mjs approvePaymentProof cash branch) books ONLY the
+    // platform's commission as the driver's debt — the driver is never credited the fare, because they
+    // already hold it as physical cash. The operator-approval step is the check that protects a driver
+    // from a rider who falsely marks a ride cash-paid.
+    const isCashRide = Boolean(ride) && String(body.method || body.paymentMethod || '').trim().toLowerCase() === 'cash'
     const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
-    if (!providerRef) {
+    if (!isCashRide && !providerRef) {
       const error = new Error('Syrian wallet transaction reference is required.')
       error.statusCode = 400
       error.code = 'PAYMENT_REFERENCE_REQUIRED'
@@ -712,19 +720,21 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
-    const duplicate = await db().paymentProof.findFirst({
-      where: {
-        provider: 'syrian_local_wallet',
-        providerRef,
-      },
-    })
+    if (!isCashRide) {
+      const duplicate = await db().paymentProof.findFirst({
+        where: {
+          provider: 'syrian_local_wallet',
+          providerRef,
+        },
+      })
 
-    if (duplicate) {
-      const error = new Error('This wallet transaction reference was already submitted.')
-      error.statusCode = 409
-      error.code = 'PAYMENT_REFERENCE_DUPLICATE'
-      error.expose = true
-      throw error
+      if (duplicate) {
+        const error = new Error('This wallet transaction reference was already submitted.')
+        error.statusCode = 409
+        error.code = 'PAYMENT_REFERENCE_DUPLICATE'
+        error.expose = true
+        throw error
+      }
     }
 
     if (ride) {
@@ -751,13 +761,13 @@ export async function handlePayments(req, res, url, context) {
           bookingId: booking?.id || undefined,
           rideId: ride?.id || undefined,
           userId: context.user.id,
-          provider: 'syrian_local_wallet',
+          provider: isCashRide ? 'cash' : 'syrian_local_wallet',
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
           currency: booking?.currency || ride?.currency || resolveClientCurrency(body.currency, defaultCurrency()),
           proofAssetUrl: walletProofAssetUrls[0] || undefined,
           proofAssetUrls: walletProofAssetUrls,
-          providerRef,
+          providerRef: isCashRide ? undefined : providerRef,
         },
       })
     } catch (err) {

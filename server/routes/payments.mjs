@@ -279,8 +279,8 @@ export async function handlePayments(req, res, url, context) {
           currency: ride.currency,
           subjectType: 'SR_RIDE',
         },
-        success_url: `${origin}/?session_id={CHECKOUT_SESSION_ID}#/sr`,
-        cancel_url: `${origin}/#/sr`,
+        success_url: `${origin}/?session_id={CHECKOUT_SESSION_ID}#/ride`,
+        cancel_url: `${origin}/#/ride`,
       })
       return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
     }
@@ -677,8 +677,8 @@ export async function handlePayments(req, res, url, context) {
       payment_method_types: ['card'],
       customer: customerId,
       metadata: { userId: context.user.id, purpose: 'save_card' },
-      success_url: `${origin}/?setup_session_id={CHECKOUT_SESSION_ID}#/sr`,
-      cancel_url: `${origin}/#/sr`,
+      success_url: `${origin}/?setup_session_id={CHECKOUT_SESSION_ID}#/ride`,
+      cancel_url: `${origin}/#/ride`,
     })
     return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
   }

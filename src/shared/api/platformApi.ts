@@ -136,6 +136,10 @@ export type PlatformRideRequest = {
   etaToPickupMinutes?: number | null
   matchTimedOut?: boolean
   pickupDistanceKm?: number | null
+  // Full auto-dispatch (2026-10-10): the live outstanding offer, surfaced on the driver pending list.
+  offeredDriverId?: string | null
+  offerExpiresAt?: string | null
+  offeredToYou?: boolean
   rider?: {
     id: string
     displayName: string
@@ -2351,6 +2355,27 @@ export async function claimPrototypeSrRide(rideId: string) {
     token: session.token,
   })
   return response.ride
+}
+
+// Full auto-dispatch (2026-10-10): accept a ride offered directly to this driver. Same driver
+// session/auth pattern as claimPrototypeSrRide; the server gates it to the current offer holder.
+export async function acceptSrOffer(rideId: string) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>(`/api/sr/rides/${rideId}/accept-offer`, {
+    method: 'PATCH',
+    token: session.token,
+  })
+  return response.ride
+}
+
+// Decline an offer so it escalates to the next-nearest driver.
+export async function declineSrOffer(rideId: string) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true }>(`/api/sr/rides/${rideId}/decline-offer`, {
+    method: 'PATCH',
+    token: session.token,
+  })
+  return response
 }
 
 export async function updatePrototypeDriverRideStatus(

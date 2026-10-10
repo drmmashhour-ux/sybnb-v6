@@ -29,6 +29,7 @@ import { recordWalletEntry, refundPrepaidRide } from '../lib/finance-ledger.mjs'
 // self-dealing gap round 2 left open -- see each call site.
 import { REAUTH_FAILURE_CODES, reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mjs'
+import { offerRideToNextDriver, runDispatchSweep } from '../lib/ride-dispatch.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
 // trip -- a completed or cancelled ride has no live position to show, and showing one would be
@@ -76,6 +77,174 @@ async function computeSrQuoteWithTraffic(baseParams) {
     estimatedMinutesOverride: Math.round(live.durationInTrafficMin),
     trafficMultiplierOverride: live.trafficMultiplier,
   })
+}
+
+// Full auto-dispatch (2026-10-10): the entire manual-claim flow -- every eligibility gate, the
+// atomic claim+pooling transaction, the driver-assigned push, and the response payload -- extracted
+// verbatim so the auto-dispatch "accept offer" path reuses it EXACTLY, with one added guard. Manual
+// /claim calls it with requireOfferForCaller=false (identical behavior to before); accept-offer calls
+// it with requireOfferForCaller=true, which first requires the caller to be the ride's current,
+// unexpired offer holder. A successful claim also clears the outstanding offer fields.
+async function claimRideForDriver(context, rideId, { requireOfferForCaller = false } = {}) {
+  if (requireOfferForCaller) {
+    const offered = await db().rideRequest.findUnique({
+      where: { id: rideId },
+      select: { offeredDriverId: true, offerExpiresAt: true },
+    })
+    if (!offered || offered.offeredDriverId !== context.user.id || !offered.offerExpiresAt || offered.offerExpiresAt <= new Date()) {
+      const error = new Error('This ride offer has expired or was reassigned.')
+      error.statusCode = 409
+      error.code = 'RIDE_OFFER_EXPIRED'
+      error.expose = true
+      throw error
+    }
+  }
+
+  const existing = await db().rideRequest.findUnique({ where: { id: rideId } })
+  if (!existing || existing.driverId || !['REQUESTED', 'MATCHING'].includes(existing.status)) {
+    const error = new Error('This ride has already been claimed by another driver.')
+    error.statusCode = 409
+    error.code = 'RIDE_ALREADY_CLAIMED'
+    error.expose = true
+    throw error
+  }
+
+  // Pilot-safety gate: a driver may only pick up a passenger once (1) their identity is verified
+  // via the same ID-review pipeline as hosts/guests, and (2) they have registered a vehicle, so
+  // the rider can see and trust who/what is collecting them. Previously any DRIVER-role account
+  // with no approved ID, no photo and no vehicle could accept a live passenger.
+  const claimingUser = await db().user.findUnique({
+    where: { id: context.user.id },
+    select: { idDocumentStatus: true },
+  })
+  if (claimingUser?.idDocumentStatus !== 'APPROVED') {
+    const error = new Error('Verify your identity (an approved ID document) before accepting rides.')
+    error.statusCode = 403
+    error.code = 'DRIVER_NOT_VERIFIED'
+    error.expose = true
+    throw error
+  }
+  const claimingVehicle = await db().driverProfile.findUnique({
+    where: { userId: context.user.id },
+    select: { vehiclePlate: true, vehicleStatus: true },
+  })
+  if (!claimingVehicle?.vehiclePlate) {
+    const error = new Error('Register your vehicle (make, model and plate) before accepting rides.')
+    error.statusCode = 403
+    error.code = 'DRIVER_VEHICLE_REQUIRED'
+    error.expose = true
+    throw error
+  }
+  if (claimingVehicle.vehicleStatus !== 'APPROVED') {
+    const error = new Error('Your vehicle is awaiting review. You can accept rides once it is approved.')
+    error.statusCode = 403
+    error.code = 'DRIVER_VEHICLE_NOT_APPROVED'
+    error.expose = true
+    throw error
+  }
+
+  // Ride-pooling: real eligibility, not a decorative "Share" label. Also closes a genuine
+  // pre-existing gap -- nothing previously stopped a driver from claiming any number of
+  // unrelated active rides at once; a normal (non-shareable) ride now correctly enforces one
+  // active ride per driver, and a shareable ride allows a second only if it's also shareable and
+  // its pickup is genuinely close to the driver's other active ride. pairedWithRideId is set only
+  // when this claim genuinely pools with the driver's other active ride -- that's the ONLY
+  // trigger for the discount now (see the ride-creation comment above for why).
+  const { pairedWithRideId } = await poolClaimEligibility(context.user.id, existing)
+
+  // SR Ride vs. Uber gap-closure (P2 #16): enforced, not decorative -- a rider who marked
+  // accessibilityRequired genuinely needs a driver who self-declared their vehicle as capable.
+  // Real matching, not just a badge nobody has to honor (CAPSULE_RULES.noFakeTrustSignal).
+  if (existing.accessibilityRequired) {
+    const claimingDriverProfile = await db().driverProfile.findUnique({
+      where: { userId: context.user.id },
+      select: { accessibilityCapable: true },
+    })
+    if (!claimingDriverProfile?.accessibilityCapable) {
+      const error = new Error('This ride requires an accessibility-capable vehicle.')
+      error.statusCode = 403
+      error.code = 'RIDE_ACCESSIBILITY_MISMATCH'
+      error.expose = true
+      throw error
+    }
+  }
+
+  // Optimistic-concurrency guard: the WHERE clause re-checks driverId is still null so two
+  // drivers tapping "accept" on the same pending ride at the same moment can't both win. When
+  // this claim genuinely pools (pairedWithRideId set), the discount is applied to BOTH rides'
+  // fareMinor and the pairing recorded on both, in the SAME transaction as the claim itself --
+  // the two rides never end up "half paired" (one linked, fare unchanged on the other) even if
+  // something fails partway. The other ride's update is guarded on pairedRideId: null too: by
+  // construction (poolClaimEligibility caps a driver at 2 active rides) it can never already be
+  // paired with a third ride, but the guard costs nothing and means a violated assumption fails
+  // safe (0 rows updated) instead of silently re-discounting an already-paired ride.
+  const claimResult = await db().$transaction(async (tx) => {
+    // SEC-002R round 2, fresh-sweep Class A. A claim does two things a revoked actor must not be
+    // able to commit: it MUTATES fareMinor on up to two riders' rides (the pooling discount --
+    // real money the platform will bill), and it dispatches THIS driver to a live passenger. A
+    // driver suspended or de-roled mid-request is precisely the actor who must not end up assigned
+    // to a rider. Runs before the claim write, under the user_sessions/users locks.
+    await reauthorizeAtCommit(tx, context, {
+      action: 'SR_RIDE_CLAIMED',
+      requiredRoles: ['DRIVER'],
+    })
+    const claimed = await tx.rideRequest.updateMany({
+      where: { id: rideId, driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
+      data: {
+        driverId: context.user.id,
+        status: 'DRIVER_ASSIGNED',
+        offeredDriverId: null,
+        offerExpiresAt: null,
+        ...(pairedWithRideId
+          ? { fareMinor: applyShareDiscount(existing.fareMinor ?? 0), pairedRideId: pairedWithRideId }
+          : {}),
+      },
+    })
+    if (claimed.count === 0) return { count: 0 }
+
+    if (pairedWithRideId) {
+      const otherRide = await tx.rideRequest.findUnique({ where: { id: pairedWithRideId }, select: { fareMinor: true } })
+      await tx.rideRequest.updateMany({
+        where: { id: pairedWithRideId, pairedRideId: null },
+        data: { fareMinor: applyShareDiscount(otherRide?.fareMinor ?? 0), pairedRideId: rideId },
+      })
+    }
+    return { count: claimed.count }
+  })
+
+  if (claimResult.count === 0) {
+    const error = new Error('This ride has already been claimed by another driver.')
+    error.statusCode = 409
+    error.code = 'RIDE_ALREADY_CLAIMED'
+    error.expose = true
+    throw error
+  }
+
+  const ride = await db().rideRequest.findUnique({
+    where: { id: rideId },
+    include: { rider: { select: { id: true, displayName: true, email: true } } },
+  })
+
+  await db().adminAuditLog.create({
+    data: {
+      actorUserId: context.user.id,
+      action: 'SR_DRIVER_SELF_CLAIMED',
+      entityType: 'ride_requests',
+      entityId: ride.id,
+      before: existing,
+      after: ride,
+    },
+  })
+
+  // SR Ride vs. Uber gap-closure (P1 #7): fire-and-forget, never fails the claim itself.
+  // context.user is the claiming driver -- real name, not a relation this query never included.
+  void sendPushNotification(ride.riderId, {
+    title: 'Driver assigned',
+    body: `${context.user.displayName} is on the way to your pickup.`,
+    url: '/#/ride',
+  })
+
+  return { ok: true, ride }
 }
 
 export async function handleSrRides(req, res, url, context) {
@@ -325,6 +494,11 @@ export async function handleSrRides(req, res, url, context) {
       db().rideStop.findMany({ where: { rideId: ride.id }, select: { address: true, lat: true, lng: true }, orderBy: { sequence: 'asc' } }),
       getRideCoords(ride.id),
     ])
+    // Full auto-dispatch (2026-10-10): kick off the first offer to the nearest online driver as soon
+    // as the ride is fully persisted, but ONLY for an immediate (REQUESTED) ride -- a scheduled DRAFT
+    // is dispatched later by the pending-list sweep once activateScheduledRides() flips it to REQUESTED.
+    // Fire-and-forget: a dispatch failure must never fail (or delay) the create response.
+    if (ride.status === 'REQUESTED') offerRideToNextDriver(ride.id).catch(() => {})
     return json(res, 201, { ok: true, ride: { ...ride, stops: createdStops, pickupCoords: createdCoords.pickup, dropoffCoords: createdCoords.dropoff } })
   }
 
@@ -696,150 +870,40 @@ export async function handleSrRides(req, res, url, context) {
   if (claimMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context, ['DRIVER'])
+    const payload = await claimRideForDriver(context, claimMatch[1])
+    return json(res, 200, payload)
+  }
 
-    const existing = await db().rideRequest.findUnique({ where: { id: claimMatch[1] } })
-    if (!existing || existing.driverId || !['REQUESTED', 'MATCHING'].includes(existing.status)) {
-      const error = new Error('This ride has already been claimed by another driver.')
+  const acceptOfferMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/accept-offer$/)
+  if (acceptOfferMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    return json(res, 200, await claimRideForDriver(context, acceptOfferMatch[1], { requireOfferForCaller: true }))
+  }
+
+  const declineOfferMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/decline-offer$/)
+  if (declineOfferMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const declineRideId = declineOfferMatch[1]
+    const existingOffer = await db().rideRequest.findUnique({
+      where: { id: declineRideId },
+      select: { offeredDriverId: true, declinedByIds: true },
+    })
+    if (!existingOffer || existingOffer.offeredDriverId !== context.user.id) {
+      const error = new Error('This ride offer is no longer yours to decline.')
       error.statusCode = 409
-      error.code = 'RIDE_ALREADY_CLAIMED'
+      error.code = 'RIDE_OFFER_NOT_YOURS'
       error.expose = true
       throw error
     }
-
-    // Pilot-safety gate: a driver may only pick up a passenger once (1) their identity is verified
-    // via the same ID-review pipeline as hosts/guests, and (2) they have registered a vehicle, so
-    // the rider can see and trust who/what is collecting them. Previously any DRIVER-role account
-    // with no approved ID, no photo and no vehicle could accept a live passenger.
-    const claimingUser = await db().user.findUnique({
-      where: { id: context.user.id },
-      select: { idDocumentStatus: true },
+    const declined = Array.from(new Set([...(existingOffer.declinedByIds || []), context.user.id]))
+    await db().rideRequest.update({
+      where: { id: declineRideId },
+      data: { declinedByIds: declined, offeredDriverId: null, offerExpiresAt: null },
     })
-    if (claimingUser?.idDocumentStatus !== 'APPROVED') {
-      const error = new Error('Verify your identity (an approved ID document) before accepting rides.')
-      error.statusCode = 403
-      error.code = 'DRIVER_NOT_VERIFIED'
-      error.expose = true
-      throw error
-    }
-    const claimingVehicle = await db().driverProfile.findUnique({
-      where: { userId: context.user.id },
-      select: { vehiclePlate: true, vehicleStatus: true },
-    })
-    if (!claimingVehicle?.vehiclePlate) {
-      const error = new Error('Register your vehicle (make, model and plate) before accepting rides.')
-      error.statusCode = 403
-      error.code = 'DRIVER_VEHICLE_REQUIRED'
-      error.expose = true
-      throw error
-    }
-    if (claimingVehicle.vehicleStatus !== 'APPROVED') {
-      const error = new Error('Your vehicle is awaiting review. You can accept rides once it is approved.')
-      error.statusCode = 403
-      error.code = 'DRIVER_VEHICLE_NOT_APPROVED'
-      error.expose = true
-      throw error
-    }
-
-    // Ride-pooling: real eligibility, not a decorative "Share" label. Also closes a genuine
-    // pre-existing gap -- nothing previously stopped a driver from claiming any number of
-    // unrelated active rides at once; a normal (non-shareable) ride now correctly enforces one
-    // active ride per driver, and a shareable ride allows a second only if it's also shareable and
-    // its pickup is genuinely close to the driver's other active ride. pairedWithRideId is set only
-    // when this claim genuinely pools with the driver's other active ride -- that's the ONLY
-    // trigger for the discount now (see the ride-creation comment above for why).
-    const { pairedWithRideId } = await poolClaimEligibility(context.user.id, existing)
-
-    // SR Ride vs. Uber gap-closure (P2 #16): enforced, not decorative -- a rider who marked
-    // accessibilityRequired genuinely needs a driver who self-declared their vehicle as capable.
-    // Real matching, not just a badge nobody has to honor (CAPSULE_RULES.noFakeTrustSignal).
-    if (existing.accessibilityRequired) {
-      const claimingDriverProfile = await db().driverProfile.findUnique({
-        where: { userId: context.user.id },
-        select: { accessibilityCapable: true },
-      })
-      if (!claimingDriverProfile?.accessibilityCapable) {
-        const error = new Error('This ride requires an accessibility-capable vehicle.')
-        error.statusCode = 403
-        error.code = 'RIDE_ACCESSIBILITY_MISMATCH'
-        error.expose = true
-        throw error
-      }
-    }
-
-    // Optimistic-concurrency guard: the WHERE clause re-checks driverId is still null so two
-    // drivers tapping "accept" on the same pending ride at the same moment can't both win. When
-    // this claim genuinely pools (pairedWithRideId set), the discount is applied to BOTH rides'
-    // fareMinor and the pairing recorded on both, in the SAME transaction as the claim itself --
-    // the two rides never end up "half paired" (one linked, fare unchanged on the other) even if
-    // something fails partway. The other ride's update is guarded on pairedRideId: null too: by
-    // construction (poolClaimEligibility caps a driver at 2 active rides) it can never already be
-    // paired with a third ride, but the guard costs nothing and means a violated assumption fails
-    // safe (0 rows updated) instead of silently re-discounting an already-paired ride.
-    const claimResult = await db().$transaction(async (tx) => {
-      // SEC-002R round 2, fresh-sweep Class A. A claim does two things a revoked actor must not be
-      // able to commit: it MUTATES fareMinor on up to two riders' rides (the pooling discount --
-      // real money the platform will bill), and it dispatches THIS driver to a live passenger. A
-      // driver suspended or de-roled mid-request is precisely the actor who must not end up assigned
-      // to a rider. Runs before the claim write, under the user_sessions/users locks.
-      await reauthorizeAtCommit(tx, context, {
-        action: 'SR_RIDE_CLAIMED',
-        requiredRoles: ['DRIVER'],
-      })
-      const claimed = await tx.rideRequest.updateMany({
-        where: { id: claimMatch[1], driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
-        data: {
-          driverId: context.user.id,
-          status: 'DRIVER_ASSIGNED',
-          ...(pairedWithRideId
-            ? { fareMinor: applyShareDiscount(existing.fareMinor ?? 0), pairedRideId: pairedWithRideId }
-            : {}),
-        },
-      })
-      if (claimed.count === 0) return { count: 0 }
-
-      if (pairedWithRideId) {
-        const otherRide = await tx.rideRequest.findUnique({ where: { id: pairedWithRideId }, select: { fareMinor: true } })
-        await tx.rideRequest.updateMany({
-          where: { id: pairedWithRideId, pairedRideId: null },
-          data: { fareMinor: applyShareDiscount(otherRide?.fareMinor ?? 0), pairedRideId: claimMatch[1] },
-        })
-      }
-      return { count: claimed.count }
-    })
-
-    if (claimResult.count === 0) {
-      const error = new Error('This ride has already been claimed by another driver.')
-      error.statusCode = 409
-      error.code = 'RIDE_ALREADY_CLAIMED'
-      error.expose = true
-      throw error
-    }
-
-    const ride = await db().rideRequest.findUnique({
-      where: { id: claimMatch[1] },
-      include: { rider: { select: { id: true, displayName: true, email: true } } },
-    })
-
-    await db().adminAuditLog.create({
-      data: {
-        actorUserId: context.user.id,
-        action: 'SR_DRIVER_SELF_CLAIMED',
-        entityType: 'ride_requests',
-        entityId: ride.id,
-        before: existing,
-        after: ride,
-      },
-    })
-
-    // SR Ride vs. Uber gap-closure (P1 #7): fire-and-forget, never fails the claim itself.
-    // context.user is the claiming driver -- real name, not a relation this query never included.
-    void sendPushNotification(ride.riderId, {
-      title: 'Driver assigned',
-      body: `${context.user.displayName} is on the way to your pickup.`,
-      url: '/#/ride',
-    })
-
-    return json(res, 200, { ok: true, ride })
+    await offerRideToNextDriver(declineRideId)
+    return json(res, 200, { ok: true })
   }
 
   // Trust remediation: SR Ride previously had no receipt/rating at all after a completed ride.

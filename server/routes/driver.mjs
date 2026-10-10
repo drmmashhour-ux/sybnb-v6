@@ -5,6 +5,7 @@ import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { updateDriverLocation, getDriverLocation, getRideCoords, haversineKm, etaMinutesForKm } from '../lib/live-map.mjs'
 import { activateScheduledRides } from '../lib/ride-schedule.mjs'
+import { runDispatchSweep } from '../lib/ride-dispatch.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
 import { settlePrepaidRide } from '../lib/finance-ledger.mjs'
@@ -144,8 +145,20 @@ export async function handleDriver(req, res, url, context) {
     // (unlike the single-ride GET) since this is exactly the read path meant to surface every
     // ride ready for dispatch, scheduled or not.
     await activateScheduledRides()
+    // Full auto-dispatch (2026-10-10): no daemon in this deployment, so the offer-escalation sweep
+    // runs here on the pending-list read -- mirroring activateScheduledRides() above. It expires
+    // lapsed offers (re-offering to the next-nearest driver) and seeds offers on still-unoffered
+    // open rides. Best-effort; never throws into this read path.
+    await runDispatchSweep()
     const rides = await db().rideRequest.findMany({
-      where: { driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
+      where: {
+        driverId: null,
+        status: { in: ['REQUESTED', 'MATCHING'] },
+        // A driver sees a ride only if it's been offered specifically to them, or it's an open
+        // (unoffered) ride claimable as the manual fallback -- but never one they already declined.
+        OR: [{ offeredDriverId: context.user.id }, { offeredDriverId: null }],
+        NOT: { declinedByIds: { has: context.user.id } },
+      },
       include: {
         rider: {
           select: {
@@ -170,16 +183,18 @@ export async function handleDriver(req, res, url, context) {
         const coords = await getRideCoords(ride.id)
         pickupDistanceKm = coords.pickup ? haversineKm(driverLoc, coords.pickup) : null
       }
-      return { ...ride, pickupDistanceKm, etaToPickupMinutes: etaMinutesForKm(pickupDistanceKm) }
+      return { ...ride, offeredToYou: ride.offeredDriverId === context.user.id, pickupDistanceKm, etaToPickupMinutes: etaMinutesForKm(pickupDistanceKm) }
     }))
-    if (driverLoc) {
-      withProximity.sort((a, b) => {
-        if (a.pickupDistanceKm == null && b.pickupDistanceKm == null) return 0
-        if (a.pickupDistanceKm == null) return 1
-        if (b.pickupDistanceKm == null) return -1
-        return a.pickupDistanceKm - b.pickupDistanceKm
-      })
-    }
+    // Rides offered directly to this driver always sort first (they're the active hand-raise), then
+    // the existing nearest-first ordering for the open fallback rides below them.
+    withProximity.sort((a, b) => {
+      if (a.offeredToYou !== b.offeredToYou) return a.offeredToYou ? -1 : 1
+      if (!driverLoc) return 0
+      if (a.pickupDistanceKm == null && b.pickupDistanceKm == null) return 0
+      if (a.pickupDistanceKm == null) return 1
+      if (b.pickupDistanceKm == null) return -1
+      return a.pickupDistanceKm - b.pickupDistanceKm
+    })
     return json(res, 200, { ok: true, rides: withProximity, driverLocated: Boolean(driverLoc) })
   }
 

@@ -1275,6 +1275,14 @@ model RideRequest {
   // ride-request time -- see the claim route's own comment for why.
   pairedRideId    String?    @map("paired_ride_id")
   currency        String     @default("SYP")
+  // Full auto-dispatch (2026-10-10): a ride is auto-offered to the nearest eligible online driver
+  // with a short expiry. offeredDriverId/offerExpiresAt is the live outstanding offer; offerSeq is
+  // the monotonically-increasing escalation round (capped, so a ride can't be offered forever);
+  // declinedByIds are drivers who declined or let an offer lapse and are skipped on re-offer.
+  offeredDriverId String?    @map("offered_driver_id")
+  offerExpiresAt  DateTime?  @map("offer_expires_at")
+  offerSeq        Int        @default(0) @map("offer_seq")
+  declinedByIds   String[]   @default([]) @map("declined_by_ids")
   pickupGeo       Unsupported("geometry(Point,4326)")? @map("pickup_geo")
   dropoffGeo      Unsupported("geometry(Point,4326)")? @map("dropoff_geo")
   metadata        Json       @default("{}")
@@ -1297,6 +1305,7 @@ model RideRequest {
   // Scale-readiness audit: the primary rider-facing "my trips" query (GET /api/me/overview) filters
   // by riderId with no index -- only the driverId side of that OR was covered.
   @@index([riderId])
+  @@index([offeredDriverId, status])
   @@map("ride_requests")
 }
 

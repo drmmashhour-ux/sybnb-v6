@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
+  acceptSrOffer,
   claimPrototypeSrRide,
+  declineSrOffer,
   enablePushNotifications,
   fetchDriverIdentityStatus,
   fetchPendingSrRides,
@@ -89,6 +91,9 @@ const copy = {
     openFinance: 'فتح المالية',
     available: 'متاح',
     accept: 'قبول',
+    decline: 'رفض',
+    declining: 'جار الرفض...',
+    offeredToYou: 'عرضت عليك',
     pendingEmpty: 'لا توجد طلبات رحلات بانتظار سائق الآن.',
     pendingLoading: 'جار البحث عن الطلبات المتاحة...',
     claiming: 'جار القبول...',
@@ -171,6 +176,9 @@ const copy = {
     openFinance: 'Open finance',
     available: 'Available',
     accept: 'Accept',
+    decline: 'Decline',
+    declining: 'Declining...',
+    offeredToYou: 'Offered to you',
     pendingEmpty: 'No ride requests waiting for a driver right now.',
     pendingLoading: 'Looking for open requests...',
     claiming: 'Claiming...',
@@ -253,6 +261,9 @@ const copy = {
     openFinance: 'Ouvrir les finances',
     available: 'Disponibles',
     accept: 'Accepter',
+    decline: 'Refuser',
+    declining: 'Refus...',
+    offeredToYou: 'Proposée pour vous',
     pendingEmpty: 'Aucune demande de course en attente de chauffeur pour le moment.',
     pendingLoading: 'Recherche de demandes disponibles...',
     claiming: 'Acceptation...',
@@ -370,6 +381,35 @@ export function DriverDashboardPage({ lang }: Props) {
       setClaimError(error instanceof Error ? error.message : t.claimError)
       await loadPendingRides()
     } finally {
+      setClaimingRideId('')
+    }
+  }
+
+  async function acceptOffer(rideId: string) {
+    setClaimingRideId(rideId)
+    setClaimError('')
+
+    try {
+      await acceptSrOffer(rideId)
+      await Promise.all([loadOverview(), loadPendingRides()])
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : t.claimError)
+      await loadPendingRides()
+    } finally {
+      setClaimingRideId('')
+    }
+  }
+
+  async function declineOffer(rideId: string) {
+    setClaimingRideId(rideId)
+    setClaimError('')
+
+    try {
+      await declineSrOffer(rideId)
+    } catch (error) {
+      setClaimError(error instanceof Error ? error.message : t.claimError)
+    } finally {
+      await loadPendingRides()
       setClaimingRideId('')
     }
   }
@@ -505,9 +545,31 @@ export function DriverDashboardPage({ lang }: Props) {
                       {pendingRide.stops.length} {t.stopsCount}
                     </span>
                   )}
-                  <button disabled={!canAccept || claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
-                    {claimingRideId === pendingRide.id ? t.claiming : t.accept}
-                  </button>
+                  {pendingRide.offeredToYou ? (
+                    <>
+                      <span style={styles.accessibilityBadge}>⚡ {t.offeredToYou}</span>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          style={{ flex: 1 }}
+                          disabled={!canAccept || claimingRideId === pendingRide.id}
+                          onClick={() => void acceptOffer(pendingRide.id)}
+                        >
+                          {claimingRideId === pendingRide.id ? t.claiming : t.accept}
+                        </button>
+                        <button
+                          style={{ flex: 1 }}
+                          disabled={claimingRideId === pendingRide.id}
+                          onClick={() => void declineOffer(pendingRide.id)}
+                        >
+                          {claimingRideId === pendingRide.id ? t.declining : t.decline}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <button disabled={!canAccept || claimingRideId === pendingRide.id} onClick={() => void claimRide(pendingRide.id)}>
+                      {claimingRideId === pendingRide.id ? t.claiming : t.accept}
+                    </button>
+                  )}
                 </article>
               ))
             )}

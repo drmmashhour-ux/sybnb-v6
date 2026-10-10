@@ -154,6 +154,15 @@ const TEMPLATES = {
     en: (d) => ({ subject: 'SYBNB admin: SOS triggered on an active ride', body: `SOS was pulled by the ${String(d.reporterRole || '').toLowerCase()} on ride ${d.rideId} (status: ${d.status}). Incident ${d.incidentId}. Open the incidents console to act immediately.` }),
     fr: (d) => ({ subject: 'SYBNB admin : SOS déclenché sur une course active', body: `Un SOS a été déclenché par le ${String(d.reporterRole || '').toLowerCase() === 'driver' ? 'chauffeur' : 'passager'} sur la course ${d.rideId} (statut : ${d.status}). Incident ${d.incidentId}. Ouvrez la console des incidents immédiatement.` }),
   },
+  // Safety Phase 2 (2026-10-10): an automated anomaly (OVERTIME / DRIVER_SIGNAL_LOST) detected on an
+  // active ride by detectRideAnomalies() (server/lib/ride-anomaly.mjs). Idempotency-keyed per
+  // ride+anomaly so repeated sweeps of the same unresolved anomaly never re-send. The incident id
+  // is the console lookup key; no rider/driver PII beyond the ride id is included.
+  admin_ride_anomaly: {
+    ar: (d) => ({ subject: 'SYBNB: شذوذ مكتشف على رحلة نشطة', body: `اكتشف النظام حالة «${d.anomaly}» على الرحلة ${d.rideId}. رقم البلاغ: ${d.incidentId}. افتح لوحة البلاغات لمراجعتها.` }),
+    en: (d) => ({ subject: 'SYBNB admin: anomaly detected on an active ride', body: `The system detected ${d.anomaly} on ride ${d.rideId}. Incident ${d.incidentId}. Open the incidents console to review.` }),
+    fr: (d) => ({ subject: 'SYBNB admin : anomalie détectée sur une course active', body: `Le système a détecté ${d.anomaly} sur la course ${d.rideId}. Incident ${d.incidentId}. Ouvrez la console des incidents pour vérifier.` }),
+  },
 }
 
 export const NOTIFICATION_KINDS = Object.freeze(Object.keys(TEMPLATES))

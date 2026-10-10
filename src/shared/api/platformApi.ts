@@ -2400,6 +2400,19 @@ export async function updatePrototypeDriverRideStatus(
   return response.ride
 }
 
+// Safety Phase 2 (2026-10-10): the assigned driver submits the rider's 4-digit pickup PIN. On a
+// match the server stamps metadata.pickupVerifiedAt, which unlocks the IN_PROGRESS (start trip)
+// transition. A mismatch is a 403 PICKUP_CODE_MISMATCH surfaced to the driver.
+export async function verifySrPickup(rideId: string, code: string) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true }>(`/api/sr/rides/${rideId}/verify-pickup`, {
+    method: 'POST',
+    token: session.token,
+    body: { code },
+  })
+  return response.ok
+}
+
 // Safety Phase 1 (2026-10-10): SOS / panic. Either party to an active ride can pull it. The rider
 // uses their guest session; the driver passes asDriver=true to use the driver session. Device
 // geolocation (lat/lng) is optional -- the server records the incident either way.
@@ -2477,6 +2490,34 @@ export async function fetchAdminRideTrail(rideId: string) {
   )
   const { ok: _ok, ...trail } = response
   return trail as PlatformRideTrail
+}
+
+// Safety Phase 2 (2026-10-10): a driver's security-history profile, aggregated server-side from
+// existing tables. ADMIN/SUPPORT only.
+export type PlatformDriverSafety = {
+  driverId: string
+  displayName: string
+  accountCreatedAt: string
+  idDocumentStatus: string | null
+  currentVehicleStatus: string | null
+  inspectionStatus: string | null
+  inspectionExpiresAt: string | null
+  registrationExpiresAt: string | null
+  totalRides: number
+  completed: number
+  cancelledByDriver: number
+  completionRate: number | null
+  disputesInvolved: number
+  sosInvolved: number
+  avgRating: number | null
+  ratingCount: number
+}
+
+export async function fetchAdminDriverSafety(driverId: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; safety: PlatformDriverSafety }>(`/api/admin/driver/${encodeURIComponent(driverId)}/safety`, { token }),
+  )
+  return response.safety
 }
 
 export async function resolveAdminIncident(incidentId: string, input: { status: 'ACKNOWLEDGED' | 'RESOLVED'; note?: string }) {

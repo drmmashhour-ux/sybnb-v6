@@ -16,6 +16,7 @@ import {
   submitDriverPhoto,
   updatePrototypeDriverAccessibility,
   updatePrototypeDriverRideStatus,
+  verifySrPickup,
   triggerSrSos,
   type PlatformDriverOverview,
   type PlatformMessage,
@@ -580,6 +581,14 @@ export function DriverDashboardPage({ lang }: Props) {
     }
   }
 
+  async function refreshOverview() {
+    try {
+      setOverview(await fetchPrototypeDriverOverview())
+    } catch {
+      // best-effort refresh; the next poll/action will reconcile
+    }
+  }
+
   async function updateRide(rideId: string, nextStatus: 'DRIVER_ARRIVING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED') {
     setStatus('saving')
     setActiveRideId(rideId)
@@ -882,6 +891,7 @@ export function DriverDashboardPage({ lang }: Props) {
               labels={t}
               disabled={activeRideId === ride.id || status === 'saving'}
               onUpdate={(nextStatus) => void updateRide(ride.id, nextStatus)}
+              onRefresh={() => void refreshOverview()}
             />
           ))
         ) : (
@@ -898,12 +908,14 @@ function RideCard({
   labels,
   disabled,
   onUpdate,
+  onRefresh,
 }: {
   ride: PlatformRideRequest
   lang: Lang
   labels: typeof copy.en
   disabled: boolean
   onUpdate: (status: 'DRIVER_ARRIVING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED') => void
+  onRefresh: () => void
 }) {
   return (
     <article style={styles.card}>
@@ -918,6 +930,9 @@ function RideCard({
       {(ride.stops || []).map((stop, index) => (
         <Info key={index} label={`${labels.stopLabel} ${index + 1}`} value={stop.address} />
       ))}
+      {['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status) && (
+        <PickupVerifyPanel ride={ride} lang={lang} onRefresh={onRefresh} />
+      )}
       {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
         <div style={styles.actions}>
           <button disabled={disabled} style={styles.secondaryButton} onClick={() => onUpdate('DRIVER_ARRIVING')}>
@@ -937,6 +952,75 @@ function RideCard({
       {LIVE_TRACKING_STATUSES.includes(ride.status) && <LocationSharingToggle rideId={ride.id} labels={labels} />}
       {MESSAGING_ELIGIBLE_RIDE_STATUSES.includes(ride.status) && <RideChatPanel rideId={ride.id} labels={labels} />}
     </article>
+  )
+}
+
+// Safety Phase 2 (2026-10-10): the driver verifies the rider's 4-digit pickup PIN before starting
+// the trip. metadata.pickupVerifiedAt (set server-side on a match) shows a confirmed state; the
+// server also hard-gates the IN_PROGRESS transition on it, so this is both the UX and the proof.
+function PickupVerifyPanel({
+  ride,
+  lang,
+  onRefresh,
+}: {
+  ride: PlatformRideRequest
+  lang: Lang
+  onRefresh: () => void
+}) {
+  const [code, setCode] = useState('')
+  const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle')
+  const [error, setError] = useState('')
+  const verified = typeof ride.metadata.pickupVerifiedAt === 'string'
+  const tr = (ar: string, en: string, fr: string) => (lang === 'ar' ? ar : lang === 'fr' ? fr : en)
+
+  if (verified) {
+    return (
+      <div style={{ ...styles.verifyBox, borderColor: 'rgba(32,210,155,.5)', background: 'rgba(32,210,155,.08)' }}>
+        <span style={{ color: '#20d29b', fontWeight: 900 }}>
+          ✓ {tr('تم تأكيد رمز الاستلام', 'Pickup code verified', 'Code de prise en charge vérifié')}
+        </span>
+      </div>
+    )
+  }
+
+  async function submit() {
+    const trimmed = code.trim()
+    if (trimmed.length < 4) return
+    setState('saving')
+    setError('')
+    try {
+      await verifySrPickup(ride.id, trimmed)
+      setCode('')
+      setState('idle')
+      onRefresh()
+    } catch (err) {
+      setState('error')
+      setError(err instanceof Error ? err.message : tr('تعذّر التحقق', 'Could not verify', 'Échec de la vérification'))
+    }
+  }
+
+  return (
+    <div style={styles.verifyBox}>
+      <span style={{ fontSize: 13, fontWeight: 800 }}>
+        {tr('أدخل رمز الاستلام من الراكب', 'Enter the rider pickup code', 'Saisissez le code du passager')}
+      </span>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          style={{ ...styles.input, flex: 1, letterSpacing: 6, textAlign: 'center' as const, fontWeight: 900 }}
+          value={code}
+          onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 4))}
+          inputMode="numeric"
+          placeholder="----"
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void submit()
+          }}
+        />
+        <button disabled={code.trim().length < 4 || state === 'saving'} style={styles.primaryButton} onClick={() => void submit()}>
+          {state === 'saving' ? tr('جارٍ…', 'Verifying…', 'Vérification…') : tr('تحقّق', 'Verify pickup', 'Vérifier')}
+        </button>
+      </div>
+      {error && <span style={styles.chatEmpty}>{error}</span>}
+    </div>
   )
 }
 
@@ -1134,4 +1218,6 @@ const styles: Record<string, CSSProperties> = {
   chatBubbleTheirs: { justifySelf: 'start', maxWidth: '80%', borderRadius: '10px 10px 10px 2px', background: '#0d1420', border: '1px solid #263651', color: '#e7ecf5', padding: '8px 10px', fontSize: 13 },
   chatInputRow: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 },
   chatInput: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
+  input: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
+  verifyBox: { border: '2px solid #263651', borderRadius: 10, background: '#0b1119', padding: 12, display: 'grid', gap: 8 },
 }

@@ -2389,6 +2389,85 @@ export async function handleAdmin(req, res, url, context) {
     return json(res, 200, { ok: true, incident })
   }
 
+  // Safety Phase 2 (2026-10-10): a driver's security-history profile for the admin console. Pure
+  // read-side aggregation over existing tables (ride_requests / ride_reviews / incidents / users /
+  // driver_profiles) -- no new storage. Efficient count/aggregate queries; every optional piece is
+  // best-effort so one missing bit never fails the whole summary.
+  const driverSafetyMatch = url.pathname.match(/^\/api\/admin\/driver\/([^/]+)\/safety$/)
+  if (driverSafetyMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const driverId = driverSafetyMatch[1]
+    const driver = await db().user.findUnique({
+      where: { id: driverId },
+      select: {
+        id: true,
+        displayName: true,
+        createdAt: true,
+        idDocumentStatus: true,
+        driverProfile: {
+          select: {
+            vehicleStatus: true,
+            inspectionStatus: true,
+            inspectionExpiresAt: true,
+            registrationExpiresAt: true,
+          },
+        },
+      },
+    })
+    if (!driver) {
+      const error = new Error('Driver not found.')
+      error.statusCode = 404
+      error.code = 'DRIVER_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const [totalRides, completed, cancelledByDriver, disputesInvolved, ratingAgg] = await Promise.all([
+      db().rideRequest.count({ where: { driverId } }),
+      db().rideRequest.count({ where: { driverId, status: 'COMPLETED' } }),
+      // "cancelled where the driver was assigned" -- a CANCELLED ride still carrying this driverId.
+      db().rideRequest.count({ where: { driverId, status: 'CANCELLED' } }),
+      db().rideRequest.count({ where: { driverId, status: 'DISPUTED' } }),
+      db().rideReview.aggregate({ _avg: { rating: true }, _count: { rating: true }, where: { ride: { driverId } } }),
+    ])
+    // SOS incidents where this driver was a party: either the reporter, or the embedded other party
+    // (the SOS route records meta.otherPartyId). Best-effort -- the JSON path filter is wrapped so a
+    // connector quirk can never fail the summary.
+    let sosInvolved = 0
+    try {
+      sosInvolved = await db().incident.count({
+        where: {
+          type: 'SOS',
+          OR: [{ reporterId: driverId }, { meta: { path: ['otherPartyId'], equals: driverId } }],
+        },
+      })
+    } catch {
+      sosInvolved = 0
+    }
+    const completionRate = totalRides > 0 ? Math.round((completed / totalRides) * 1000) / 1000 : null
+    return json(res, 200, {
+      ok: true,
+      safety: {
+        driverId: driver.id,
+        displayName: driver.displayName,
+        accountCreatedAt: driver.createdAt,
+        idDocumentStatus: driver.idDocumentStatus ?? null,
+        currentVehicleStatus: driver.driverProfile?.vehicleStatus ?? null,
+        inspectionStatus: driver.driverProfile?.inspectionStatus ?? null,
+        inspectionExpiresAt: driver.driverProfile?.inspectionExpiresAt ?? null,
+        registrationExpiresAt: driver.driverProfile?.registrationExpiresAt ?? null,
+        totalRides,
+        completed,
+        cancelledByDriver,
+        completionRate,
+        disputesInvolved,
+        sosInvolved,
+        avgRating: ratingAgg._avg.rating ?? null,
+        ratingCount: ratingAgg._count.rating ?? 0,
+      },
+    })
+  }
+
   return false
 }
 

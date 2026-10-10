@@ -21,6 +21,29 @@ import { logRideEventSafe } from '../lib/ride-events.mjs'
 // handler for the per-status reasoning and for why the two intermediate transitions are not here.
 const COMMIT_PROTECTED_DRIVER_STATUSES = new Set(['COMPLETED', 'CANCELLED'])
 
+// Safety Phase 2 (2026-10-10): GPS breadcrumb throttle. Keyed by rideId -> last LOCATION_PING epoch
+// so the trip's route trail gets at most one ping per active ride per ~20s, regardless of the
+// driver client's much faster GPS-report cadence. A plain in-process Map is right-sized (single
+// persistent process); a lost entry only ever costs one extra ping, never correctness.
+const LOCATION_PING_MIN_INTERVAL_MS = 20_000
+const lastLocationPingAt = new Map()
+
+// Safety Phase 2 (2026-10-10): the IN_PROGRESS gate honours env SR_REQUIRE_PICKUP_CODE (default ON;
+// 'false'/'0' disables it) so the pickup-PIN requirement can be turned off without a code change.
+function pickupCodeRequired() {
+  const raw = String(process.env.SR_REQUIRE_PICKUP_CODE ?? '').trim().toLowerCase()
+  return raw !== 'false' && raw !== '0'
+}
+
+// Safety Phase 2 (2026-10-10): the pickup PIN is the rider's to show, never the driver's to read --
+// strip metadata.pickupCode from every driver-facing ride payload so a driver can't self-verify from
+// their own API response. metadata.pickupVerifiedAt (the confirmed flag) is deliberately kept.
+function stripPickupCode(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata
+  const { pickupCode: _omitPickupCode, ...rest } = metadata
+  return rest
+}
+
 const RIDER_STATUS_PUSH_COPY = {
   DRIVER_ARRIVING: { title: 'Your driver is arriving', body: 'Your SR driver is on the way to your pickup point.' },
   IN_PROGRESS: { title: 'Trip started', body: 'Your SR ride is now in progress.' },
@@ -47,6 +70,32 @@ export async function handleDriver(req, res, url, context) {
     }
 
     await updateDriverLocation(context.user.id, lat, lng)
+    // Safety Phase 2 (2026-10-10): drop a throttled breadcrumb into the driver's active trip's black
+    // box so the admin ride-trail can render the real driven route. Fire-and-forget and best-effort
+    // -- it can never block or fail the location update itself.
+    void (async () => {
+      try {
+        const activeRide = await db().rideRequest.findFirst({
+          where: { driverId: context.user.id, status: 'IN_PROGRESS' },
+          select: { id: true },
+        })
+        if (!activeRide) return
+        const now = Date.now()
+        const last = lastLocationPingAt.get(activeRide.id) || 0
+        if (now - last < LOCATION_PING_MIN_INTERVAL_MS) return
+        lastLocationPingAt.set(activeRide.id, now)
+        await logRideEventSafe(db(), {
+          rideId: activeRide.id,
+          type: 'LOCATION_PING',
+          actorId: context.user.id,
+          actorRole: 'DRIVER',
+          lat,
+          lng,
+        })
+      } catch {
+        // breadcrumb is best-effort; a failure here must never surface to the driver client
+      }
+    })()
     return json(res, 200, { ok: true })
   }
 
@@ -259,7 +308,7 @@ export async function handleDriver(req, res, url, context) {
         const coords = await getRideCoords(ride.id)
         pickupDistanceKm = coords.pickup ? haversineKm(driverLoc, coords.pickup) : null
       }
-      return { ...ride, offeredToYou: ride.offeredDriverId === context.user.id, pickupDistanceKm, etaToPickupMinutes: etaMinutesForKm(pickupDistanceKm) }
+      return { ...ride, metadata: stripPickupCode(ride.metadata), offeredToYou: ride.offeredDriverId === context.user.id, pickupDistanceKm, etaToPickupMinutes: etaMinutesForKm(pickupDistanceKm) }
     }))
     // Rides offered directly to this driver always sort first (they're the active hand-raise), then
     // the existing nearest-first ordering for the open fallback rides below them.
@@ -318,7 +367,7 @@ export async function handleDriver(req, res, url, context) {
     const annotatedRides = rides.map((ride) => {
       const payable = ride.status === 'COMPLETED' || (ride.status === 'CANCELLED' && ride.cancellationFeeMinor)
       const paymentStatus = paidRideIds.has(ride.id) ? 'PAID' : (payable ? 'AWAITING_PAYMENT' : 'NONE')
-      return { ...ride, paymentStatus, expectedNetMinor: expectedNetForRide(ride) }
+      return { ...ride, metadata: stripPickupCode(ride.metadata), paymentStatus, expectedNetMinor: expectedNetForRide(ride) }
     })
     const billedMinor = rides.filter((ride) => ride.status === 'COMPLETED').reduce((sum, ride) => sum + (ride.fareMinor || 0), 0)
     // Net earnings still awaiting payment (rides done but not yet paid by rider + approved).
@@ -386,6 +435,17 @@ export async function handleDriver(req, res, url, context) {
     }
 
     assertDriverRideTransition(existing.status, nextStatus)
+
+    // Safety Phase 2 (2026-10-10): a driver may only START the trip (IN_PROGRESS) once the rider's
+    // pickup PIN has been verified (POST /api/sr/rides/:id/verify-pickup sets metadata.pickupVerifiedAt),
+    // proving the right rider is in the car. Env-gated via SR_REQUIRE_PICKUP_CODE (default ON).
+    if (nextStatus === 'IN_PROGRESS' && pickupCodeRequired() && !existing.metadata?.pickupVerifiedAt) {
+      const error = new Error('Verify the rider pickup code before starting the trip.')
+      error.statusCode = 403
+      error.code = 'PICKUP_NOT_VERIFIED'
+      error.expose = true
+      throw error
+    }
 
     // SEC-002R rounds 3 (COMPLETED) and 4 (CANCELLED). The two TERMINAL transitions this route can
     // write are Class A; the two intermediate ones are not. Which is which, and why:

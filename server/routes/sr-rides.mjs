@@ -1,6 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { randomInt } from 'node:crypto'
 // Consume the country-neutral geocoding seam (resolves the active country's geocoder, fail-closed) —
 // the route does NOT depend on any country's geocoder module directly.
 import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
@@ -328,7 +329,21 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
     url: '/#/ride',
   })
 
-  return { ok: true, ride }
+  // Safety Phase 2 (2026-10-10): the driver claims/accepts the ride here -- strip the rider's pickup
+  // PIN from this response too, so a driver never receives it in any payload (the rider shows it in
+  // person; metadata.pickupVerifiedAt is kept).
+  const safeRide = ride.metadata && typeof ride.metadata === 'object' && !Array.isArray(ride.metadata)
+    ? { ...ride, metadata: (() => { const { pickupCode: _omit, ...rest } = ride.metadata; return rest })() }
+    : ride
+  return { ok: true, ride: safeRide }
+}
+
+// Safety Phase 2 (2026-10-10): a crypto-random, zero-padded 4-digit pickup PIN. The rider shows it
+// to the driver, who verifies it via POST /api/sr/rides/:id/verify-pickup before the trip can start
+// (the driver IN_PROGRESS transition is gated on metadata.pickupVerifiedAt). Anti wrong-pickup /
+// impersonation. Generated here, server-side only -- a client can never supply or override it.
+function generatePickupCode() {
+  return String(randomInt(0, 10000)).padStart(4, '0')
 }
 
 export async function handleSrRides(req, res, url, context) {
@@ -471,6 +486,9 @@ export async function handleSrRides(req, res, url, context) {
         distanceEstimated: quote.estimated,
         distanceSource: quote.distanceSource,
         estimatedMinutes: quote.estimatedMinutes,
+        // Safety Phase 2 (2026-10-10): the 4-digit pickup PIN. Set here, AFTER the `...(body.metadata
+        // || {})` spread above, so a client can never inject or override its own code.
+        pickupCode: generatePickupCode(),
         // Pricing factors captured at booking time (audit trail of why this fare was charged).
         fareFactors: {
           baseFareMinor: quote.baseFareMinor,
@@ -659,6 +677,17 @@ export async function handleSrRides(req, res, url, context) {
       && !ride.driverId
       && ride.requestedAt
       && (Date.now() - new Date(ride.requestedAt).getTime() > RIDE_MATCH_TIMEOUT_MS)
+    // Safety Phase 2 (2026-10-10): the pickup PIN is the rider's to show, never the driver's to
+    // read -- redact metadata.pickupCode for anyone who is not the rider (driver / support / admin),
+    // so the verify-pickup gate can't be bypassed by reading the code straight off this payload.
+    const isRiderViewer = ride.riderId === context.user.id
+    const safeRideMetadata = isRiderViewer
+      ? ride.metadata
+      : (() => {
+          const base = ride.metadata && typeof ride.metadata === 'object' ? ride.metadata : {}
+          const { pickupCode: _omitPickupCode, ...rest } = base
+          return rest
+        })()
     const ridePayload = ride.driver
       ? {
           ...ride,
@@ -686,6 +715,7 @@ export async function handleSrRides(req, res, url, context) {
           },
         }
       : { ...ride, pickupCoords: rideCoords.pickup, dropoffCoords: rideCoords.dropoff, etaToPickupMinutes, matchTimedOut: Boolean(matchTimedOut) }
+    ridePayload.metadata = safeRideMetadata
     return json(res, 200, { ok: true, ride: ridePayload })
   }
 
@@ -912,6 +942,64 @@ export async function handleSrRides(req, res, url, context) {
       }
     })()
     return json(res, 201, { ok: true, incidentId: incident.id })
+  }
+
+  // Safety Phase 2 (2026-10-10): pickup PIN verification. The assigned driver submits the 4-digit
+  // code the rider reads them; a match proves the right rider is in the car before the trip can
+  // start. Allowed only at the pickup moment (DRIVER_ASSIGNED / DRIVER_ARRIVING). On success it
+  // stamps metadata.pickupVerifiedAt (which driver.mjs's IN_PROGRESS transition is gated on) and
+  // appends a PICKUP_VERIFIED event to the ride's black box.
+  const verifyPickupMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/verify-pickup$/)
+  if (verifyPickupMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req).catch(() => ({}))
+    const ride = await db().rideRequest.findUnique({ where: { id: verifyPickupMatch[1] } })
+    if (!ride) {
+      const error = new Error('Ride not found.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    if (ride.driverId !== context.user.id) {
+      const error = new Error('This ride is not assigned to your account.')
+      error.statusCode = 403
+      error.code = 'RIDE_FORBIDDEN'
+      error.expose = true
+      throw error
+    }
+    if (!['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status)) {
+      const error = new Error('Pickup can only be verified before the trip starts.')
+      error.statusCode = 409
+      error.code = 'PICKUP_NOT_VERIFIABLE'
+      error.expose = true
+      throw error
+    }
+    const rideMeta = ride.metadata && typeof ride.metadata === 'object' ? ride.metadata : {}
+    const expected = String(rideMeta.pickupCode ?? '')
+    const provided = String(body.code ?? '').trim()
+    if (!expected || provided !== expected) {
+      const error = new Error('That pickup code does not match. Ask the rider to read you the 4-digit code shown in their app.')
+      error.statusCode = 403
+      error.code = 'PICKUP_CODE_MISMATCH'
+      error.expose = true
+      throw error
+    }
+    const verifiedAt = new Date().toISOString()
+    await db().rideRequest.update({
+      where: { id: ride.id },
+      data: { metadata: { ...rideMeta, pickupVerifiedAt: verifiedAt } },
+    })
+    // Best-effort black-box event -- never blocks the success response.
+    void logRideEventSafe(db(), {
+      rideId: ride.id,
+      type: 'PICKUP_VERIFIED',
+      actorId: context.user.id,
+      actorRole: 'DRIVER',
+      meta: { verifiedAt },
+    })
+    return json(res, 200, { ok: true })
   }
 
   const assignMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/assign-driver$/)

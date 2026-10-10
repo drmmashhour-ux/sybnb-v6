@@ -4,9 +4,11 @@ import type { Lang } from '../../engines/language/languageEngine'
 import {
   fetchAdminIncidents,
   fetchAdminRideTrail,
+  fetchAdminDriverSafety,
   resolveAdminIncident,
   type PlatformIncident,
   type PlatformRideTrail,
+  type PlatformDriverSafety,
 } from '../../shared/api/platformApi'
 
 type Props = { lang: Lang }
@@ -113,11 +115,14 @@ function fmt(ts: string | null | undefined) {
 export function AdminIncidentsPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const t = copy[lang]
+  const tr = (ar: string, en: string, fr: string) => (lang === 'ar' ? ar : lang === 'fr' ? fr : en)
   const [incidents, setIncidents] = useState<PlatformIncident[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
   const [trail, setTrail] = useState<PlatformRideTrail | null>(null)
   const [trailLoading, setTrailLoading] = useState(false)
+  const [safety, setSafety] = useState<PlatformDriverSafety | null>(null)
+  const [safetyLoading, setSafetyLoading] = useState(false)
   const [resolveNote, setResolveNote] = useState('')
   const [busyId, setBusyId] = useState('')
 
@@ -140,12 +145,25 @@ export function AdminIncidentsPage({ lang }: Props) {
     if (!rideId) return
     setTrailLoading(true)
     setTrail(null)
+    setSafety(null)
     try {
       setTrail(await fetchAdminRideTrail(rideId))
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t.error)
     } finally {
       setTrailLoading(false)
+    }
+  }
+
+  async function openSafety(driverId: string) {
+    setSafetyLoading(true)
+    setSafety(null)
+    try {
+      setSafety(await fetchAdminDriverSafety(driverId))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Failed to load driver safety record.')
+    } finally {
+      setSafetyLoading(false)
     }
   }
 
@@ -265,7 +283,7 @@ export function AdminIncidentsPage({ lang }: Props) {
         <section style={styles.trailPanel}>
           <div style={styles.cardHead}>
             <strong>{t.trailTitle}</strong>
-            <button style={styles.secondaryButton} onClick={() => setTrail(null)}>
+            <button style={styles.secondaryButton} onClick={() => { setTrail(null); setSafety(null) }}>
               {t.close}
             </button>
           </div>
@@ -280,6 +298,42 @@ export function AdminIncidentsPage({ lang }: Props) {
                   <span style={styles.dim}>{t.noSnapshot}</span>
                 )}
               </div>
+              {trail.ride.driverId && (
+                <div style={styles.snapshotBox}>
+                  <div style={styles.cardHead}>
+                    <strong>{tr('سجل أمان السائق', 'Driver safety record', 'Dossier de sécurité du chauffeur')}</strong>
+                    <button style={styles.secondaryButton} onClick={() => void openSafety(trail.ride.driverId as string)}>
+                      {safetyLoading
+                        ? t.loading
+                        : tr('عرض سجل الأمان', 'View safety record', 'Voir le dossier')}
+                    </button>
+                  </div>
+                  {safety && safety.driverId === trail.ride.driverId && (
+                    <div style={styles.snapshotGrid}>
+                      <span>{tr('السائق', 'Driver', 'Chauffeur')}: {safety.displayName}</span>
+                      <span dir="ltr">
+                        {tr('الرحلات', 'Rides', 'Courses')}: {safety.totalRides} · {tr('مكتملة', 'completed', 'terminées')} {safety.completed}
+                        {safety.completionRate != null ? ` (${Math.round(safety.completionRate * 100)}%)` : ''}
+                      </span>
+                      <span dir="ltr">
+                        {tr('ملغاة', 'Cancelled', 'Annulées')}: {safety.cancelledByDriver} · {tr('نزاعات', 'disputes', 'litiges')} {safety.disputesInvolved} · SOS {safety.sosInvolved}
+                      </span>
+                      <span dir="ltr">
+                        {tr('التقييم', 'Rating', 'Note')}: {safety.avgRating != null ? `${safety.avgRating.toFixed(2)} (${safety.ratingCount})` : '—'}
+                      </span>
+                      <span dir="ltr">
+                        {tr('المركبة', 'Vehicle', 'Véhicule')}: {safety.currentVehicleStatus ?? '—'} · {tr('الفحص', 'inspection', 'inspection')} {safety.inspectionStatus ?? '—'}
+                      </span>
+                      <span dir="ltr">
+                        {tr('الهوية', 'ID', 'Pièce')}: {safety.idDocumentStatus ?? '—'} · {tr('أُنشئ', 'joined', 'inscrit')} {fmt(safety.accountCreatedAt)}
+                      </span>
+                      <span dir="ltr">
+                        {tr('انتهاء التسجيل', 'Registration expires', 'Expiration immatriculation')}: {safety.registrationExpiresAt ? fmt(safety.registrationExpiresAt) : '—'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
                 <strong>{t.events}</strong>
                 {trail.events.length === 0 ? (

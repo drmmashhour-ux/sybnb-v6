@@ -1174,6 +1174,36 @@ export function SrRidePage({ lang }: Props) {
           {ride?.status === 'DRIVER_ARRIVING' && (
             <div style={styles.message}>{t.driverArriving}{typeof ride.etaToPickupMinutes === 'number' ? ` · ${t.etaPrefix}${ride.etaToPickupMinutes}${t.etaSuffix}` : ''}</div>
           )}
+          {ride && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status) && typeof ride.metadata.pickupCode === 'string' && (
+            <div
+              style={{
+                display: 'grid',
+                gap: 4,
+                justifyItems: 'center',
+                textAlign: 'center',
+                border: '2px solid #19d7ff',
+                borderRadius: 12,
+                background: 'rgba(25,215,255,.08)',
+                padding: '14px 16px',
+                margin: '4px 0',
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 800, color: '#19d7ff' }}>
+                {pick(lang, 'أظهر هذا الرمز لسائقك', 'Show this code to your driver', 'Montrez ce code à votre chauffeur')}
+              </span>
+              <strong dir="ltr" style={{ fontSize: 40, letterSpacing: 10, fontWeight: 950 }}>
+                {String(ride.metadata.pickupCode)}
+              </strong>
+              <span style={{ fontSize: 12, color: '#9aa6ba' }}>
+                {pick(
+                  lang,
+                  'لن تبدأ الرحلة قبل أن يؤكد السائق هذا الرمز.',
+                  'The trip only starts once the driver confirms this code.',
+                  "La course ne démarre qu'une fois ce code confirmé par le chauffeur.",
+                )}
+              </span>
+            </div>
+          )}
           {ride?.status === 'IN_PROGRESS' && (
             <div style={styles.message}>{t.inProgress}</div>
           )}

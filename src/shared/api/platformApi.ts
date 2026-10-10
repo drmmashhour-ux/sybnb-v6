@@ -1897,14 +1897,27 @@ export type PlatformSrQuote = {
   distanceKm: number
   estimated: boolean
   estimatedMinutes?: number
+  distanceSource?: string
   baseFareMinor?: number
   airportSurcharge?: number
   airportTrip?: boolean
+  stopsCount?: number
+  stopsFee?: number
+  riderCount?: number
+  ridersFee?: number
+  bagCount?: number
+  bagsFee?: number
   fuelSurchargePercent?: number
+  trafficMultiplier?: number
+  trafficSource?: string
+  isPeak?: boolean
+  isNight?: boolean
+  nightMultiplier?: number
+  scheduled?: boolean
+  scheduleMultiplier?: number
   peakMultiplier?: number
   demandMultiplier?: number
   surgeMultiplier?: number
-  isPeak?: boolean
   pickupCoords: { lat: number; lng: number } | null
   dropoffCoords: { lat: number; lng: number } | null
 }
@@ -1916,6 +1929,9 @@ export async function fetchSrQuote(input: {
   lowDataMode: boolean
   pickupCoords?: { lat: number; lng: number }
   stops?: string[]
+  riderCount?: number
+  bagCount?: number
+  scheduled?: boolean
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; quote: PlatformSrQuote }>('/api/sr/quote', {
@@ -1942,6 +1958,8 @@ export async function createPrototypeSrRide(input: {
   promoCode?: string
   billToBusinessAccount?: boolean
   shareable?: boolean
+  riderCount?: number
+  bagCount?: number
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -1960,6 +1978,8 @@ export async function createPrototypeSrRide(input: {
       promoCode: input.promoCode,
       billToBusinessAccount: input.billToBusinessAccount,
       shareable: input.shareable,
+      riderCount: input.riderCount,
+      bagCount: input.bagCount,
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',

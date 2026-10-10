@@ -382,6 +382,8 @@ export function SrRidePage({ lang }: Props) {
   const [businessAccountName, setBusinessAccountName] = useState<string | null>(null)
   const [billToBusinessAccount, setBillToBusinessAccount] = useState(false)
   const [shareable, setShareable] = useState(false)
+  const [riderCount, setRiderCount] = useState(1)
+  const [bagCount, setBagCount] = useState(0)
   const [savedPlaces, setSavedPlaces] = useState<PlatformSavedPlace[]>([])
   const [newPlaceLabel, setNewPlaceLabel] = useState('')
   const [savingPlace, setSavingPlace] = useState(false)
@@ -401,10 +403,10 @@ export function SrRidePage({ lang }: Props) {
   useEffect(() => {
     if (ride) return
     const timer = window.setTimeout(() => {
-      fetchSrQuote({ pickup, dropoff, category, lowDataMode, pickupCoords, stops: trimmedStops }).then(setQuote).catch(() => setQuote(null))
+      fetchSrQuote({ pickup, dropoff, category, lowDataMode, pickupCoords, stops: trimmedStops, riderCount, bagCount, scheduled: scheduleForLater }).then(setQuote).catch(() => setQuote(null))
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [pickup, dropoff, category, lowDataMode, pickupCoords, ride, trimmedStops])
+  }, [pickup, dropoff, category, lowDataMode, pickupCoords, ride, trimmedStops, riderCount, bagCount, scheduleForLater])
 
   useEffect(() => {
     fetchSavedPlaces().then(setSavedPlaces).catch(() => setSavedPlaces([]))
@@ -587,6 +589,8 @@ export function SrRidePage({ lang }: Props) {
         scheduledFor: scheduleForLater && scheduledFor ? new Date(scheduledFor).toISOString() : undefined,
         accessibilityRequired,
         stops: stops.map((stop) => stop.trim()).filter(Boolean),
+        riderCount,
+        bagCount,
         promoCode: promoCode.trim() || undefined,
         billToBusinessAccount: businessAccountName ? billToBusinessAccount : undefined,
         shareable,
@@ -920,25 +924,64 @@ export function SrRidePage({ lang }: Props) {
             </div>
           ) : null}
 
-          {!ride && quote && (quote.airportTrip || (quote.fuelSurchargePercent ?? 0) > 0 || quote.isPeak || (quote.demandMultiplier ?? 1) > 1) ? (
+          {!ride ? (
+            <div style={styles.stat}>
+              <span>{isAr ? 'عدد الركاب' : 'Riders'}</span>
+              <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button type="button" aria-label="fewer riders" onClick={() => setRiderCount((n) => Math.max(1, n - 1))} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(148,163,184,0.5)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 18, lineHeight: '1' }}>−</button>
+                <strong dir="ltr">{riderCount}</strong>
+                <button type="button" aria-label="more riders" onClick={() => setRiderCount((n) => Math.min(8, n + 1))} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(148,163,184,0.5)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 18, lineHeight: '1' }}>+</button>
+              </span>
+            </div>
+          ) : null}
+
+          {!ride ? (
+            <div style={styles.stat}>
+              <span>{isAr ? 'عدد الحقائب' : 'Bags'}</span>
+              <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button type="button" aria-label="fewer bags" onClick={() => setBagCount((n) => Math.max(0, n - 1))} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(148,163,184,0.5)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 18, lineHeight: '1' }}>−</button>
+                <strong dir="ltr">{bagCount}</strong>
+                <button type="button" aria-label="more bags" onClick={() => setBagCount((n) => Math.min(10, n + 1))} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid rgba(148,163,184,0.5)', background: 'transparent', color: 'inherit', cursor: 'pointer', fontSize: 18, lineHeight: '1' }}>+</button>
+              </span>
+            </div>
+          ) : null}
+
+          {!ride && quote && ((quote.trafficMultiplier ?? 1) > 1 || quote.isNight || quote.scheduled || (quote.fuelSurchargePercent ?? 0) > 0 || (quote.demandMultiplier ?? 1) > 1 || quote.airportTrip || (quote.stopsFee ?? 0) > 0 || (quote.bagsFee ?? 0) > 0 || (quote.ridersFee ?? 0) > 0) ? (
             <div style={styles.addressWarning} dir={isAr ? 'rtl' : 'ltr'}>
-              {(isAr ? '\u062a\u0633\u0639\u064a\u0631 \u0645\u062a\u063a\u064a\u0631: ' : 'Dynamic pricing: ') +
+              {(isAr ? 'تسعير متغير: ' : 'Dynamic pricing: ') +
                 [
-                  quote.isPeak
-                    ? (isAr ? `\u0630\u0631\u0648\u0629 +${Math.round(((quote.peakMultiplier ?? 1) - 1) * 100)}%` : `peak +${Math.round(((quote.peakMultiplier ?? 1) - 1) * 100)}%`)
+                  (quote.trafficMultiplier ?? 1) > 1
+                    ? (quote.trafficSource === 'google'
+                        ? (isAr ? `زحمة +${Math.round(((quote.trafficMultiplier ?? 1) - 1) * 100)}%` : `traffic +${Math.round(((quote.trafficMultiplier ?? 1) - 1) * 100)}%`)
+                        : (isAr ? `ذروة +${Math.round(((quote.trafficMultiplier ?? 1) - 1) * 100)}%` : `peak +${Math.round(((quote.trafficMultiplier ?? 1) - 1) * 100)}%`))
+                    : null,
+                  quote.isNight
+                    ? (isAr ? `ليلي +${Math.round(((quote.nightMultiplier ?? 1) - 1) * 100)}%` : `night +${Math.round(((quote.nightMultiplier ?? 1) - 1) * 100)}%`)
+                    : null,
+                  quote.scheduled
+                    ? (isAr ? `حجز مسبق +${Math.round(((quote.scheduleMultiplier ?? 1) - 1) * 100)}%` : `scheduled +${Math.round(((quote.scheduleMultiplier ?? 1) - 1) * 100)}%`)
                     : null,
                   (quote.fuelSurchargePercent ?? 0) > 0
-                    ? (isAr ? `\u0648\u0642\u0648\u062f +${quote.fuelSurchargePercent}%` : `fuel +${quote.fuelSurchargePercent}%`)
+                    ? (isAr ? `وقود +${quote.fuelSurchargePercent}%` : `fuel +${quote.fuelSurchargePercent}%`)
                     : null,
                   (quote.demandMultiplier ?? 1) > 1
-                    ? (isAr ? `\u0637\u0644\u0628 \u00d7${quote.demandMultiplier}` : `demand \u00d7${quote.demandMultiplier}`)
+                    ? (isAr ? `طلب ×${quote.demandMultiplier}` : `demand ×${quote.demandMultiplier}`)
                     : null,
                   quote.airportTrip
-                    ? (isAr ? `\u0627\u0644\u0645\u0637\u0627\u0631 $${quote.airportSurcharge}` : `airport $${quote.airportSurcharge}`)
+                    ? (isAr ? `مطار $${quote.airportSurcharge}` : `airport $${quote.airportSurcharge}`)
+                    : null,
+                  (quote.stopsFee ?? 0) > 0
+                    ? (isAr ? `محطات $${quote.stopsFee}` : `stops $${quote.stopsFee}`)
+                    : null,
+                  (quote.bagsFee ?? 0) > 0
+                    ? (isAr ? `حقائب $${quote.bagsFee}` : `bags $${quote.bagsFee}`)
+                    : null,
+                  (quote.ridersFee ?? 0) > 0
+                    ? (isAr ? `ركاب $${quote.ridersFee}` : `riders $${quote.ridersFee}`)
                     : null,
                 ]
                   .filter(Boolean)
-                  .join(' \u00b7 ')}
+                  .join(' · ')}
             </div>
           ) : null}
 

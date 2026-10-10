@@ -4,6 +4,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 // Consume the country-neutral geocoding seam (resolves the active country's geocoder, fail-closed) —
 // the route does NOT depend on any country's geocoder module directly.
 import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
+import { resolveTrafficDistance } from '../lib/traffic-distance.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { getDriverLocation, getRideCoords, etaMinutesBetween } from '../lib/live-map.mjs'
@@ -57,6 +58,26 @@ const RIDE_CANCEL_GRACE_MS = (() => {
   return (Number.isFinite(raw) && raw >= 0 ? raw : 120) * 1000
 })()
 
+// Compute an SR quote, upgraded with live Google road distance + traffic when GOOGLE_MAPS_API_KEY is
+// set. Pure/sync engine first (resolves coords + a gazetteer estimate); then, if a key and valid
+// coords exist, re-quote with the live distance, traffic-aware minutes, and congestion multiplier.
+// Fail-open: any Google error leaves the gazetteer quote untouched. Used by BOTH /quote and /rides so
+// the price shown equals the price charged.
+async function computeSrQuoteWithTraffic(baseParams) {
+  let quote = quoteSrRideForActiveCountry(baseParams)
+  if (!process.env.GOOGLE_MAPS_API_KEY) return quote
+  if (!quote.pickupCoords || !quote.dropoffCoords) return quote
+  const points = [quote.pickupCoords, ...(Array.isArray(quote.stopCoords) ? quote.stopCoords : []), quote.dropoffCoords]
+  const live = await resolveTrafficDistance({ points })
+  if (!live) return quote
+  return quoteSrRideForActiveCountry({
+    ...baseParams,
+    distanceKmOverride: live.distanceKm,
+    estimatedMinutesOverride: Math.round(live.durationInTrafficMin),
+    trafficMultiplierOverride: live.trafficMultiplier,
+  })
+}
+
 export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/sr/quote') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
@@ -69,7 +90,7 @@ export async function handleSrRides(req, res, url, context) {
       .map((stop) => String(stop || '').trim())
       .filter(Boolean)
       .slice(0, 3)
-    const quote = quoteSrRideForActiveCountry({
+    const quote = await computeSrQuoteWithTraffic({
       pickup: body.pickup,
       dropoff: body.dropoff,
       category: body.category,
@@ -78,6 +99,9 @@ export async function handleSrRides(req, res, url, context) {
       dropoffCoordsOverride: body.dropoffCoords,
       stops: quoteStops,
       stopCoordsOverrides: Array.isArray(body.stopCoords) ? body.stopCoords : [],
+      riderCount: body.riderCount,
+      bagCount: body.bagCount,
+      scheduled: Boolean(body.scheduled) || Boolean(body.scheduledFor),
     })
     return json(res, 200, { ok: true, quote })
   }
@@ -97,7 +121,7 @@ export async function handleSrRides(req, res, url, context) {
       .filter(Boolean)
       .slice(0, 3)
     const stopCoordsOverrides = Array.isArray(body.stopCoords) ? body.stopCoords : []
-    const quote = quoteSrRideForActiveCountry({
+    const quote = await computeSrQuoteWithTraffic({
       pickup,
       dropoff,
       category,
@@ -106,6 +130,9 @@ export async function handleSrRides(req, res, url, context) {
       dropoffCoordsOverride: body.dropoffCoords,
       stops,
       stopCoordsOverrides,
+      riderCount: body.riderCount,
+      bagCount: body.bagCount,
+      scheduled: Boolean(body.scheduledFor),
     })
 
     // SR Ride vs. Uber gap-closure (P1 #6): an optional future pickup time. A ride created dormant
@@ -189,6 +216,28 @@ export async function handleSrRides(req, res, url, context) {
         category,
         distanceKm: quote.distanceKm,
         distanceEstimated: quote.estimated,
+        distanceSource: quote.distanceSource,
+        estimatedMinutes: quote.estimatedMinutes,
+        // Pricing factors captured at booking time (audit trail of why this fare was charged).
+        fareFactors: {
+          baseFareMinor: quote.baseFareMinor,
+          airportSurcharge: quote.airportSurcharge,
+          stopsCount: quote.stopsCount,
+          stopsFee: quote.stopsFee,
+          riderCount: quote.riderCount,
+          ridersFee: quote.ridersFee,
+          bagCount: quote.bagCount,
+          bagsFee: quote.bagsFee,
+          fuelSurchargePercent: quote.fuelSurchargePercent,
+          trafficMultiplier: quote.trafficMultiplier,
+          trafficSource: quote.trafficSource,
+          isNight: quote.isNight,
+          nightMultiplier: quote.nightMultiplier,
+          scheduled: quote.scheduled,
+          scheduleMultiplier: quote.scheduleMultiplier,
+          demandMultiplier: quote.demandMultiplier,
+          surgeMultiplier: quote.surgeMultiplier,
+        },
       },
     }
 

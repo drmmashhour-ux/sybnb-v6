@@ -66,26 +66,28 @@ export function haversineKm(a, b) {
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(h))
 }
 
-// SR SMART VARIABLE PRICING (owner decision 2026-10-09, USD). Fares are priced in USD, not SYP: the
-// Syrian pound is volatile (parallel market ~13,000 old SYP/USD, Aug 2026) and the Syria profile
-// already advertises in USD, so a USD anchor keeps the real fare stable as the pound moves. Amounts
-// are whole USD (the platform renders money in whole currency units). Rate LEVELS are calibrated to
-// the LOCAL Syrian market, NOT tourist taxi aggregators: Enab Baladi (2025) puts a cross-town app
-// trip (~8-9 km) near 42,000 old SYP ~= $3, so SR Economy at that distance lands ~$3 here.
+// SR SMART VARIABLE PRICING ENGINE (owner decision 2026-10-10, USD). Fares are priced in USD, not
+// SYP: the pound is volatile (~13,000 old SYP/USD, Aug 2026) and the Syria profile advertises in USD,
+// so a USD anchor keeps the real fare stable. Levels are calibrated to the LOCAL market (Enab Baladi
+// 2025, ~$3 cross-town Economy), not tourist taxi aggregators.
 //
-// Final fare = BASE x variable factors:
-//   base   = baseUsd + perKmUsd*km + perMinUsd*min (+ airport surcharge), floored at minFareUsd
-//   x (1 + fuel%)   -- FACTOR 2 fuel/gas cost pass-through (raise when pump prices rise)
-//   x peak          -- FACTOR 1 automatic rush-hour multiplier (time of day)
-//   x demand        -- FACTOR 3 operator "live" knob for demand/weather/holidays (other factors)
-// then rounded to the nearest whole USD (min $1). Every factor is env-tunable with a safe default,
-// so pricing is steered without a code change.
+// Final fare = (BASE + per-trip add-ons) x variable multipliers, rounded UP to a clean step:
+//   BASE      = baseUsd + perKmUsd*km + perMinUsd*min (+ airport surcharge), floored at minFareUsd
+//   add-ons   + stops fee + extra-bag fee + extra-rider fee            (fixed USD, per trip)
+//   x (1 + fuel%)        fuel/gas cost pass-through
+//   x traffic            live congestion (Google duration_in_traffic ratio) OR rush-hour proxy
+//   x night              late-night / early-morning premium
+//   x schedule           advance-booking (scheduled ride) premium
+//   x demand             operator live knob (weather, holidays, high demand)
+// then rounded UP to SR_FARE_ROUNDING_USD. Distance & traffic use Google Maps when GOOGLE_MAPS_API_KEY
+// is set (see server/lib/traffic-distance.mjs); otherwise the local gazetteer distance + a rush-hour
+// traffic proxy are used. Every factor is env-tunable with a safe default.
 const CATEGORY_RATES = {
-  'SR Bike':    { baseUsd: 0.8, perKmUsd: 0.11, perMinUsd: 0.015, minFareUsd: 1 },
-  'SR Economy': { baseUsd: 1.2, perKmUsd: 0.18, perMinUsd: 0.02,  minFareUsd: 2 },
-  'SR Comfort': { baseUsd: 1.5, perKmUsd: 0.22, perMinUsd: 0.028, minFareUsd: 3 },
-  'SR SUV':     { baseUsd: 2.2, perKmUsd: 0.32, perMinUsd: 0.045, minFareUsd: 4 },
-  'SR Van':     { baseUsd: 2.8, perKmUsd: 0.38, perMinUsd: 0.055, minFareUsd: 5 },
+  'SR Bike':    { baseUsd: 0.8, perKmUsd: 0.11, perMinUsd: 0.015, minFareUsd: 3 },
+  'SR Economy': { baseUsd: 1.2, perKmUsd: 0.18, perMinUsd: 0.02,  minFareUsd: 4 },
+  'SR Comfort': { baseUsd: 1.5, perKmUsd: 0.22, perMinUsd: 0.028, minFareUsd: 5 },
+  'SR SUV':     { baseUsd: 2.2, perKmUsd: 0.32, perMinUsd: 0.045, minFareUsd: 7 },
+  'SR Van':     { baseUsd: 2.8, perKmUsd: 0.38, perMinUsd: 0.055, minFareUsd: 9 },
 }
 const SR_FARE_CURRENCY = 'USD'
 
@@ -95,27 +97,53 @@ function srEnvNum(name, def, min, max) {
   return Number.isFinite(raw) && raw >= min && raw <= max ? raw : def
 }
 
-// FACTOR 1 -- Peak-hour surge (time). Env SR_PEAK_SURGE_MULTIPLIER (1..3), default 1.25 (+25%).
-const SR_PEAK_SURGE_MULTIPLIER = srEnvNum('SR_PEAK_SURGE_MULTIPLIER', 1.25, 1, 3)
-// Damascus local time is a fixed UTC+3 (Syria abolished daylight saving in 2022). Peaks: 07:00-09:59
-// and 16:00-19:59 local.
+// Damascus local time is a fixed UTC+3 (Syria abolished daylight saving in 2022).
 const SYRIA_UTC_OFFSET_HOURS = 3
+function syriaLocalHour(date) {
+  return (date.getUTCHours() + SYRIA_UTC_OFFSET_HOURS) % 24
+}
+// Rush-hour windows, used as the TRAFFIC proxy when no live Google traffic is available: 07:00-09:59
+// and 16:00-19:59 local.
 export function isPeakHour(date = new Date()) {
-  const localHour = (date.getUTCHours() + SYRIA_UTC_OFFSET_HOURS) % 24
-  return (localHour >= 7 && localHour < 10) || (localHour >= 16 && localHour < 20)
+  const h = syriaLocalHour(date)
+  return (h >= 7 && h < 10) || (h >= 16 && h < 20)
+}
+// Night / early-morning window: 22:00-05:59 local.
+export function isNightHour(date = new Date()) {
+  const h = syriaLocalHour(date)
+  return h >= 22 || h < 6
 }
 
-// FACTOR 2 -- Fuel/gas surcharge %. Added to the base fare so a rise in pump prices passes through.
-// Env SR_FUEL_SURCHARGE_PERCENT (0..100), default 0 (off until fuel rises).
+// --- Variable multiplier knobs (env-tunable) ---
+// TRAFFIC proxy multiplier when no live Google traffic (applied during rush hours). Also the default
+// name kept for continuity. Env SR_PEAK_SURGE_MULTIPLIER (1..3), default 1.25.
+const SR_TRAFFIC_PEAK_MULTIPLIER = srEnvNum('SR_PEAK_SURGE_MULTIPLIER', 1.25, 1, 3)
+// Cap on the LIVE traffic multiplier (Google duration_in_traffic / free-flow duration). Env
+// SR_TRAFFIC_MAX (1..4), default 2.0 -- a bad-traffic trip never more than doubles.
+const SR_TRAFFIC_MAX = srEnvNum('SR_TRAFFIC_MAX', 2, 1, 4)
+// Night / early-morning premium. Env SR_NIGHT_MULTIPLIER (1..3), default 1.15 (+15%).
+const SR_NIGHT_MULTIPLIER = srEnvNum('SR_NIGHT_MULTIPLIER', 1.15, 1, 3)
+// Scheduled (advance-booking) premium. Env SR_SCHEDULE_MULTIPLIER (1..3), default 1.10 (+10%).
+const SR_SCHEDULE_MULTIPLIER = srEnvNum('SR_SCHEDULE_MULTIPLIER', 1.10, 1, 3)
+// Fuel/gas cost pass-through %. Env SR_FUEL_SURCHARGE_PERCENT (0..100), default 0.
 const SR_FUEL_SURCHARGE_PERCENT = srEnvNum('SR_FUEL_SURCHARGE_PERCENT', 0, 0, 100)
-
-// FACTOR 3 -- Demand / "other factors" surge. One live multiplier the operator raises for high
-// demand, weather, holidays, etc. Env SR_DEMAND_SURGE_MULTIPLIER (1..5), default 1 (no surge).
+// Operator live demand knob. Env SR_DEMAND_SURGE_MULTIPLIER (1..5), default 1.
 const SR_DEMAND_SURGE_MULTIPLIER = srEnvNum('SR_DEMAND_SURGE_MULTIPLIER', 1, 1, 5)
 
-// FACTOR 4 -- Airport zone surcharge. Airport runs are specially priced everywhere (highway, waiting,
-// empty return leg), so a linear per-km fare underprices them. Fixed USD add-on when pickup OR dropoff
-// is Damascus airport. Env SR_AIRPORT_SURCHARGE_USD (0..50), default 5.
+// --- Per-trip additive fees (fixed USD) ---
+// Per intermediate stop. Env SR_STOP_FEE_USD (0..20), default 1.
+const SR_STOP_FEE_USD = srEnvNum('SR_STOP_FEE_USD', 1, 0, 20)
+// Bags: a free allowance, then a fee per extra bag. Env SR_FREE_BAGS (0..10, default 2),
+// SR_BAG_FEE_USD (0..20, default 1).
+const SR_FREE_BAGS = srEnvNum('SR_FREE_BAGS', 2, 0, 10)
+const SR_BAG_FEE_USD = srEnvNum('SR_BAG_FEE_USD', 1, 0, 20)
+// Riders: included up to a base count, then a fee per extra rider. Env SR_BASE_RIDERS (1..8,
+// default 4), SR_EXTRA_RIDER_FEE_USD (0..20, default 1).
+const SR_BASE_RIDERS = srEnvNum('SR_BASE_RIDERS', 4, 1, 8)
+const SR_EXTRA_RIDER_FEE_USD = srEnvNum('SR_EXTRA_RIDER_FEE_USD', 1, 0, 20)
+
+// Airport zone surcharge. Fixed USD add-on when pickup OR dropoff is Damascus airport. Env
+// SR_AIRPORT_SURCHARGE_USD (0..50), default 5.
 const SR_AIRPORT_SURCHARGE_USD = srEnvNum('SR_AIRPORT_SURCHARGE_USD', 5, 0, 50)
 const DAMASCUS_AIRPORT_COORDS = { lat: 33.4114, lng: 36.5156 }
 const AIRPORT_RADIUS_KM = 3
@@ -123,22 +151,18 @@ function isAirportPoint(coords) {
   return Boolean(coords) && haversineKm(coords, DAMASCUS_AIRPORT_COORDS) <= AIRPORT_RADIUS_KM
 }
 
-// Average city speed to estimate trip minutes from distance (quote is pre-trip). Env-tunable.
-// Fare rounding step (USD). Fares round UP to the nearest multiple of this, so prices land on clean
-// numbers (e.g. 5, 10, 15, 20) instead of odd figures -- easier for a cash market. Env
-// SR_FARE_ROUNDING_USD (1..50), default 5. Set to 1 for fine per-dollar steps.
+// Fares round UP to the nearest multiple of this so prices land on clean numbers (5/10/15/20). Env
+// SR_FARE_ROUNDING_USD (1..50), default 5. Set 1 for fine per-dollar steps that show every factor.
 const SR_FARE_ROUNDING_USD = srEnvNum('SR_FARE_ROUNDING_USD', 5, 1, 50)
-
+// Average city speed to estimate trip minutes from distance when no live duration is available.
 const SR_AVG_SPEED_KMH = srEnvNum('SR_AVG_SPEED_KMH', 28, 1, 200)
-
 // Live-tracking surcharge (USD) for riders who opt out of low-data mode.
 const LIVE_TRACKING_SURCHARGE_USD = 0.2
 
-// SYBNB SR only operates in Syria. A client-supplied override (device GPS) landing wildly outside
-// the country is almost certainly bad data (GPS glitch or manipulation), not a real pickup/dropoff
-// — fall back to gazetteer text-matching instead of trusting it and computing a wild fare.
+// SYBNB SR only operates in Syria. A client-supplied override (device GPS) landing wildly outside the
+// country is almost certainly bad data (GPS glitch or manipulation), not a real pickup/dropoff -- fall
+// back to gazetteer text-matching instead of trusting it and computing a wild fare.
 const SYRIA_BOUNDS = { minLat: 32, maxLat: 37.5, minLng: 35, maxLng: 43 }
-
 function isValidCoords(value) {
   return (
     value &&
@@ -151,14 +175,11 @@ function isValidCoords(value) {
   )
 }
 
-// pickupCoordsOverride comes from the rider's device GPS (navigator.geolocation), which is more
-// accurate than gazetteer text-matching and should win whenever it's available.
-// SR Ride vs. Uber gap-closure (P2 #14): multi-stop rides. `stops` is an ordered list of
-// intermediate address texts between pickup and dropoff -- resolved the exact same way pickup/
-// dropoff already are (device-GPS override wins, else gazetteer text match). The base fare and
-// surcharge apply once for the whole trip, not once per leg -- only distance accumulates across
-// legs, matching how Uber's own multi-stop pricing extends a single trip rather than stacking
-// multiple flat fares.
+// quoteSrRide is PURE and synchronous. Live Google distance/traffic (async) is resolved by the quote
+// ROUTE and passed in via distanceKmOverride / estimatedMinutesOverride / trafficMultiplierOverride;
+// with no key the engine falls back to gazetteer distance and the rush-hour traffic proxy.
+// Multi-stop: `stops` is an ordered list of intermediate addresses; distance accumulates across legs
+// (base fare + surcharges apply once for the whole trip), plus a fixed handling fee per stop.
 export function quoteSrRide({
   pickup,
   dropoff,
@@ -168,6 +189,13 @@ export function quoteSrRide({
   dropoffCoordsOverride,
   stops,
   stopCoordsOverrides,
+  riderCount,
+  bagCount,
+  scheduled,
+  distanceKmOverride,
+  estimatedMinutesOverride,
+  trafficMultiplierOverride,
+  now,
 }) {
   const rates = CATEGORY_RATES[category] || CATEGORY_RATES['SR Economy']
   const pickupCoords = isValidCoords(pickupCoordsOverride) ? pickupCoordsOverride : resolvePlaceText(pickup)
@@ -178,24 +206,31 @@ export function quoteSrRide({
     return isValidCoords(override) ? override : resolvePlaceText(stopText)
   })
 
+  // Distance: prefer a live road distance from Google (passed by the route); else sum gazetteer legs.
   let distanceKm = DEFAULT_DISTANCE_KM
   let estimated = true
-  const routePoints = [pickupCoords, ...stopCoords, dropoffCoords]
-  if (routePoints.every(Boolean)) {
-    let total = 0
-    for (let i = 0; i < routePoints.length - 1; i += 1) {
-      total += haversineKm(routePoints[i], routePoints[i + 1])
-    }
-    distanceKm = Math.max(1, total)
+  let distanceSource = 'estimate'
+  if (Number.isFinite(distanceKmOverride) && distanceKmOverride > 0) {
+    distanceKm = Math.max(1, distanceKmOverride)
     estimated = false
+    distanceSource = 'google'
+  } else {
+    const routePoints = [pickupCoords, ...stopCoords, dropoffCoords]
+    if (routePoints.every(Boolean)) {
+      let total = 0
+      for (let i = 0; i < routePoints.length - 1; i += 1) total += haversineKm(routePoints[i], routePoints[i + 1])
+      distanceKm = Math.max(1, total)
+      estimated = false
+      distanceSource = 'gazetteer'
+    }
   }
 
-  // Per-minute (time) component: the quote is pre-trip, so estimate minutes from distance at the
-  // city average speed. per-km + per-min together is the standard time-and-distance model.
-  const estimatedMinutes = Math.max(1, Math.round((distanceKm / SR_AVG_SPEED_KMH) * 60))
+  // Trip minutes: prefer a live (traffic-aware) duration; else estimate from distance at city speed.
+  const estimatedMinutes = Number.isFinite(estimatedMinutesOverride) && estimatedMinutesOverride > 0
+    ? Math.round(estimatedMinutesOverride)
+    : Math.max(1, Math.round((distanceKm / SR_AVG_SPEED_KMH) * 60))
 
-  // Base fare (USD): base + per-km + per-minute + optional live-tracking + airport surcharge, floored
-  // at the category minimum.
+  // BASE fare (USD), floored at the category minimum ("min ride").
   const airportTrip = isAirportPoint(pickupCoords) || isAirportPoint(dropoffCoords)
   const airportSurchargeUsd = airportTrip ? SR_AIRPORT_SURCHARGE_USD : 0
   const rawBaseUsd = rates.baseUsd
@@ -205,16 +240,38 @@ export function quoteSrRide({
     + airportSurchargeUsd
   const baseFareUsd = Math.max(rates.minFareUsd || 0, rawBaseUsd)
 
-  // Variable factors on the base fare: fuel% (cost) -> peak (time) -> demand (other factors).
-  const peak = isPeakHour()
-  const peakMultiplier = peak ? SR_PEAK_SURGE_MULTIPLIER : 1
+  // Per-trip additive fees: stops, extra bags, extra riders.
+  const stopsCount = stopList.length
+  const stopsFeeUsd = stopsCount * SR_STOP_FEE_USD
+  const bags = Math.max(0, Math.floor(Number(bagCount) || 0))
+  const bagsFeeUsd = Math.max(0, bags - SR_FREE_BAGS) * SR_BAG_FEE_USD
+  const riders = Math.max(1, Math.floor(Number(riderCount) || 1))
+  const extraRiders = Math.max(0, riders - SR_BASE_RIDERS)
+  const ridersFeeUsd = extraRiders * SR_EXTRA_RIDER_FEE_USD
+  const preFactorUsd = baseFareUsd + stopsFeeUsd + bagsFeeUsd + ridersFeeUsd
+
+  // Variable multipliers.
+  const nowDate = now instanceof Date ? now : new Date()
+  const peak = isPeakHour(nowDate)
+  const night = isNightHour(nowDate)
+  let trafficMultiplier
+  let trafficSource
+  if (Number.isFinite(trafficMultiplierOverride) && trafficMultiplierOverride >= 1) {
+    trafficMultiplier = Math.min(SR_TRAFFIC_MAX, trafficMultiplierOverride)
+    trafficSource = 'google'
+  } else {
+    trafficMultiplier = peak ? SR_TRAFFIC_PEAK_MULTIPLIER : 1
+    trafficSource = peak ? 'peak-proxy' : 'none'
+  }
+  const nightMultiplier = night ? SR_NIGHT_MULTIPLIER : 1
+  const scheduleMultiplier = scheduled ? SR_SCHEDULE_MULTIPLIER : 1
   const fuelMultiplier = 1 + SR_FUEL_SURCHARGE_PERCENT / 100
   const demandMultiplier = SR_DEMAND_SURGE_MULTIPLIER
-  const surgeMultiplier = Math.round(peakMultiplier * fuelMultiplier * demandMultiplier * 1000) / 1000
-  const variedUsd = baseFareUsd * fuelMultiplier * peakMultiplier * demandMultiplier
+  const combined = fuelMultiplier * trafficMultiplier * nightMultiplier * scheduleMultiplier * demandMultiplier
+  const surgeMultiplier = Math.round(combined * 1000) / 1000
+  const variedUsd = preFactorUsd * combined
 
-  // Round the charged fare UP to the nearest SR_FARE_ROUNDING_USD step (owner decision: never round a
-  // fare down; land on clean numbers like 5/10/15/20). The step is also the effective minimum fare.
+  // Round the charged fare UP to the nearest step (never round a fare down).
   const fareMinor = Math.ceil(variedUsd / SR_FARE_ROUNDING_USD) * SR_FARE_ROUNDING_USD
 
   return {
@@ -223,14 +280,26 @@ export function quoteSrRide({
     distanceKm: Math.round(distanceKm * 10) / 10,
     estimatedMinutes,
     estimated,
+    distanceSource,
     baseFareMinor: Math.ceil(baseFareUsd),
     airportSurcharge: airportSurchargeUsd,
     airportTrip,
+    stopsCount,
+    stopsFee: stopsFeeUsd,
+    bagCount: bags,
+    bagsFee: bagsFeeUsd,
+    riderCount: riders,
+    ridersFee: ridersFeeUsd,
     fuelSurchargePercent: SR_FUEL_SURCHARGE_PERCENT,
-    peakMultiplier,
+    trafficMultiplier: Math.round(trafficMultiplier * 1000) / 1000,
+    trafficSource,
+    isPeak: peak,
+    isNight: night,
+    nightMultiplier,
+    scheduled: Boolean(scheduled),
+    scheduleMultiplier,
     demandMultiplier,
     surgeMultiplier,
-    isPeak: peak,
     pickupCoords,
     dropoffCoords,
     stopCoords,

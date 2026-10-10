@@ -118,6 +118,22 @@ const copy = {
     vehicleSave: 'حفظ المركبة',
     vehicleSaved: 'تم حفظ المركبة.',
     vehicleErr: 'تعذر حفظ بيانات المركبة.',
+    vehicleCategoryL: 'فئة المركبة',
+    vehicleCategoryHint: 'اختر الفئة التي تطابق مركبتك. لا يمكنك قبول رحلة إلا إذا طابقت فئتها.',
+    vehicleCategoryChoose: 'اختر الفئة',
+    catBIKE: 'دراجة نارية (SR Bike)',
+    catECONOMY: 'اقتصادي (SR Economy)',
+    catCOMFORT: 'مريح (SR Comfort)',
+    catSUV: 'دفع رباعي (SR SUV)',
+    catVAN: 'فان (SR Van)',
+    vehicleYearL: 'سنة الصنع',
+    vehicleColorL: 'اللون',
+    registrationExpiryL: 'انتهاء رخصة السير',
+    inspectionL: 'الفحص الميكانيكي',
+    inspPENDING: 'قيد الانتظار',
+    inspPASSED: 'ناجح',
+    inspFAILED: 'راسب',
+    inspEXPIRED: 'منتهٍ',
     reportIssue: 'إبلاغ عن مشكلة',
     sos: 'طوارئ SOS',
   },
@@ -203,6 +219,22 @@ const copy = {
     vehicleSave: 'Save vehicle',
     vehicleSaved: 'Vehicle saved.',
     vehicleErr: 'Could not save the vehicle.',
+    vehicleCategoryL: 'Vehicle category',
+    vehicleCategoryHint: 'Pick the category your vehicle matches. You can only accept a ride whose category matches.',
+    vehicleCategoryChoose: 'Choose a category',
+    catBIKE: 'Bike (SR Bike)',
+    catECONOMY: 'Economy (SR Economy)',
+    catCOMFORT: 'Comfort (SR Comfort)',
+    catSUV: 'SUV (SR SUV)',
+    catVAN: 'Van (SR Van)',
+    vehicleYearL: 'Build year',
+    vehicleColorL: 'Color',
+    registrationExpiryL: 'Registration expiry',
+    inspectionL: 'Mechanical inspection',
+    inspPENDING: 'Pending',
+    inspPASSED: 'Passed',
+    inspFAILED: 'Failed',
+    inspEXPIRED: 'Expired',
     reportIssue: 'Report issue',
     sos: 'SOS emergency',
   },
@@ -288,6 +320,22 @@ const copy = {
     vehicleSave: 'Enregistrer',
     vehicleSaved: 'Véhicule enregistré.',
     vehicleErr: 'Impossible d’enregistrer le véhicule.',
+    vehicleCategoryL: 'Catégorie du véhicule',
+    vehicleCategoryHint: 'Choisissez la catégorie correspondant à votre véhicule. Vous ne pouvez accepter qu’une course de catégorie identique.',
+    vehicleCategoryChoose: 'Choisir une catégorie',
+    catBIKE: 'Moto (SR Bike)',
+    catECONOMY: 'Économique (SR Economy)',
+    catCOMFORT: 'Confort (SR Comfort)',
+    catSUV: 'SUV (SR SUV)',
+    catVAN: 'Van (SR Van)',
+    vehicleYearL: 'Année',
+    vehicleColorL: 'Couleur',
+    registrationExpiryL: 'Expiration de la carte grise',
+    inspectionL: 'Contrôle technique',
+    inspPENDING: 'En attente',
+    inspPASSED: 'Validé',
+    inspFAILED: 'Refusé',
+    inspEXPIRED: 'Expiré',
     reportIssue: 'Signaler un problème',
     sos: 'Urgence SOS',
   },
@@ -310,7 +358,12 @@ export function DriverDashboardPage({ lang }: Props) {
   const [vehicleMake, setVehicleMake] = useState('')
   const [vehicleModel, setVehicleModel] = useState('')
   const [vehiclePlate, setVehiclePlate] = useState('')
+  const [vehicleCategory, setVehicleCategory] = useState<'' | 'BIKE' | 'ECONOMY' | 'COMFORT' | 'SUV' | 'VAN'>('')
   const [vehicleStatus, setVehicleStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [vehicleYear, setVehicleYear] = useState('')
+  const [vehicleColor, setVehicleColor] = useState('')
+  const [registrationExpiresAt, setRegistrationExpiresAt] = useState('')
+  const [vehicleErrMsg, setVehicleErrMsg] = useState('')
   const [pushStatus, setPushStatus] = useState<'idle' | 'enabling' | 'enabled' | 'error'>('idle')
 
   useEffect(() => {
@@ -449,6 +502,10 @@ export function DriverDashboardPage({ lang }: Props) {
       setVehicleMake((v) => v || ov.driver.vehicleMake || '')
       setVehicleModel((v) => v || ov.driver.vehicleModel || '')
       setVehiclePlate((v) => v || ov.driver.vehiclePlate || '')
+      setVehicleCategory((v) => v || ov.driver.vehicleCategory || '')
+      setVehicleYear((v) => v || (ov.driver.vehicleYear != null ? String(ov.driver.vehicleYear) : ''))
+      setVehicleColor((v) => v || ov.driver.vehicleColor || '')
+      setRegistrationExpiresAt((v) => v || (ov.driver.registrationExpiresAt ? ov.driver.registrationExpiresAt.slice(0, 10) : ''))
       setStatus('ready')
     } catch (error) {
       setStatus('error')
@@ -459,11 +516,22 @@ export function DriverDashboardPage({ lang }: Props) {
   async function saveVehicle() {
     if (!vehicleMake.trim() || !vehicleModel.trim() || !vehiclePlate.trim()) return
     setVehicleStatus('saving')
+    setVehicleErrMsg('')
     try {
-      await saveDriverVehicle({ vehicleMake: vehicleMake.trim(), vehicleModel: vehicleModel.trim(), vehiclePlate: vehiclePlate.trim() })
+      await saveDriverVehicle({
+        vehicleMake: vehicleMake.trim(),
+        vehicleModel: vehicleModel.trim(),
+        vehiclePlate: vehiclePlate.trim(),
+        vehicleCategory: vehicleCategory || null,
+        vehicleYear: vehicleYear.trim() ? Number(vehicleYear.trim()) : null,
+        vehicleColor: vehicleColor.trim() || null,
+        registrationExpiresAt: registrationExpiresAt ? new Date(registrationExpiresAt).toISOString() : null,
+      })
       setVehicleStatus('saved')
-    } catch {
+    } catch (error) {
       setVehicleStatus('error')
+      // Surface the backend message (year/category mismatch, invalid registration date, etc.).
+      setVehicleErrMsg(error instanceof Error ? error.message : '')
     }
   }
 
@@ -643,8 +711,74 @@ export function DriverDashboardPage({ lang }: Props) {
               value={vehiclePlate}
               onChange={(event) => { setVehiclePlate(event.target.value); setVehicleStatus('idle') }}
             />
+            <label style={{ fontSize: 13, opacity: 0.85 }}>{t.vehicleYearL}</label>
+            <input
+              style={styles.vehicleInput}
+              dir="ltr"
+              type="number"
+              inputMode="numeric"
+              placeholder={t.vehicleYearL}
+              value={vehicleYear}
+              onChange={(event) => { setVehicleYear(event.target.value); setVehicleStatus('idle') }}
+            />
+            <label style={{ fontSize: 13, opacity: 0.85 }}>{t.vehicleColorL}</label>
+            <input
+              style={styles.vehicleInput}
+              placeholder={t.vehicleColorL}
+              value={vehicleColor}
+              onChange={(event) => { setVehicleColor(event.target.value); setVehicleStatus('idle') }}
+            />
+            <label style={{ fontSize: 13, opacity: 0.85 }}>{t.registrationExpiryL}</label>
+            <input
+              style={styles.vehicleInput}
+              dir="ltr"
+              type="date"
+              value={registrationExpiresAt}
+              onChange={(event) => { setRegistrationExpiresAt(event.target.value); setVehicleStatus('idle') }}
+            />
+            <label style={{ fontSize: 13, opacity: 0.85 }}>{t.vehicleCategoryL}</label>
+            <select
+              style={styles.vehicleInput}
+              value={vehicleCategory}
+              onChange={(event) => { setVehicleCategory(event.target.value as typeof vehicleCategory); setVehicleStatus('idle') }}
+            >
+              <option value="">{t.vehicleCategoryChoose}</option>
+              <option value="BIKE">{t.catBIKE}</option>
+              <option value="ECONOMY">{t.catECONOMY}</option>
+              <option value="COMFORT">{t.catCOMFORT}</option>
+              <option value="SUV">{t.catSUV}</option>
+              <option value="VAN">{t.catVAN}</option>
+            </select>
+            <span style={{ fontSize: 12, opacity: 0.7 }}>{t.vehicleCategoryHint}</span>
+            {overview?.driver.inspectionStatus && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <span style={{ opacity: 0.85 }}>{t.inspectionL}:</span>
+                <span
+                  style={{
+                    padding: '2px 10px',
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#fff',
+                    background: overview.driver.inspectionStatus === 'PASSED'
+                      ? '#1a7f37'
+                      : overview.driver.inspectionStatus === 'PENDING'
+                        ? '#9a6700'
+                        : '#b42318',
+                  }}
+                >
+                  {overview.driver.inspectionStatus === 'PASSED'
+                    ? t.inspPASSED
+                    : overview.driver.inspectionStatus === 'FAILED'
+                      ? t.inspFAILED
+                      : overview.driver.inspectionStatus === 'EXPIRED'
+                        ? t.inspEXPIRED
+                        : t.inspPENDING}
+                </span>
+              </div>
+            )}
             {vehicleStatus === 'saved' && <p style={styles.photoNote}>✓ {t.vehicleSaved}</p>}
-            {vehicleStatus === 'error' && <p style={styles.photoNote}>{t.vehicleErr}</p>}
+            {vehicleStatus === 'error' && <p style={styles.photoNote}>{vehicleErrMsg || t.vehicleErr}</p>}
             <button
               style={styles.photoSubmitButton}
               disabled={vehicleStatus === 'saving' || !vehicleMake.trim() || !vehicleModel.trim() || !vehiclePlate.trim()}

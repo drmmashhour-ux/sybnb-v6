@@ -445,6 +445,12 @@ export type PlatformDriverOverview = {
     vehicleModel?: string | null
     vehiclePlate?: string | null
     vehicleStatus?: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | null
+    vehicleCategory?: 'BIKE' | 'ECONOMY' | 'COMFORT' | 'SUV' | 'VAN' | null
+    vehicleYear?: number | null
+    vehicleColor?: string | null
+    registrationExpiresAt?: string | null
+    inspectionStatus?: 'PENDING' | 'PASSED' | 'FAILED' | 'EXPIRED' | null
+    inspectionExpiresAt?: string | null
   }
   totals: {
     assigned: number
@@ -2311,9 +2317,9 @@ export async function updatePrototypeDriverAccessibility(accessibilityCapable: b
   return response.driverProfile
 }
 
-export async function saveDriverVehicle(vehicle: { vehicleMake: string; vehicleModel: string; vehiclePlate: string }) {
+export async function saveDriverVehicle(vehicle: { vehicleMake: string; vehicleModel: string; vehiclePlate: string; vehicleCategory?: 'BIKE' | 'ECONOMY' | 'COMFORT' | 'SUV' | 'VAN' | null; vehicleYear?: number | null; vehicleColor?: string | null; registrationExpiresAt?: string | null }) {
   const session = await ensurePrototypeDriverSession()
-  const response = await apiRequest<{ ok: true; driverProfile: { vehicleMake: string; vehicleModel: string; vehiclePlate: string } }>('/api/driver/vehicle', {
+  const response = await apiRequest<{ ok: true; driverProfile: { vehicleMake: string; vehicleModel: string; vehiclePlate: string; vehicleCategory?: 'BIKE' | 'ECONOMY' | 'COMFORT' | 'SUV' | 'VAN' | null; vehicleYear?: number | null; vehicleColor?: string | null; registrationExpiresAt?: string | null; inspectionStatus?: 'PENDING' | 'PASSED' | 'FAILED' | 'EXPIRED' | null; inspectionExpiresAt?: string | null } }>('/api/driver/vehicle', {
     method: 'PUT',
     token: session.token,
     body: vehicle,

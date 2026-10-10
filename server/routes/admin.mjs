@@ -1370,7 +1370,7 @@ export async function handleAdmin(req, res, url, context) {
     const pending = await db().driverProfile.findMany({
       where: { vehicleStatus: 'PENDING_REVIEW', NOT: { vehiclePlate: null } },
       select: {
-        userId: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, updatedAt: true,
+        userId: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true, updatedAt: true,
         user: { select: { displayName: true, email: true, idDocumentStatus: true } },
       },
       orderBy: { updatedAt: 'asc' },
@@ -1383,15 +1383,59 @@ export async function handleAdmin(req, res, url, context) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
     requireAuth(context, ['ADMIN'])
     const body = await readJson(req)
-    const decision = String(body.decision || '').toUpperCase()
-    if (!['APPROVE', 'APPROVED', 'REJECT', 'REJECTED'].includes(decision)) {
-      const error = new Error('decision must be APPROVE or REJECT.')
+    // A vehicle review can now do two independent things: the existing APPROVE/REJECT decision that
+    // sets vehicleStatus, AND (admin-only) set the mechanical-inspection outcome. Either may be
+    // provided alone or together; at least one is required. The driver can never set the inspection
+    // fields themselves (the driver vehicle route ignores them) -- only an admin, here.
+    const hasDecision = body.decision !== undefined && body.decision !== null && body.decision !== ''
+    const hasInspectionStatus = body.inspectionStatus !== undefined && body.inspectionStatus !== null && body.inspectionStatus !== ''
+    const hasInspectionExpiry = body.inspectionExpiresAt !== undefined
+    if (!hasDecision && !hasInspectionStatus && !hasInspectionExpiry) {
+      const error = new Error('Provide a decision (APPROVE/REJECT) and/or an inspection update.')
       error.statusCode = 400
-      error.code = 'VEHICLE_REVIEW_DECISION_INVALID'
+      error.code = 'VEHICLE_REVIEW_EMPTY'
       error.expose = true
       throw error
     }
-    const nextStatus = decision.startsWith('APPROVE') ? 'APPROVED' : 'REJECTED'
+    let nextStatus = null
+    if (hasDecision) {
+      const decision = String(body.decision || '').toUpperCase()
+      if (!['APPROVE', 'APPROVED', 'REJECT', 'REJECTED'].includes(decision)) {
+        const error = new Error('decision must be APPROVE or REJECT.')
+        error.statusCode = 400
+        error.code = 'VEHICLE_REVIEW_DECISION_INVALID'
+        error.expose = true
+        throw error
+      }
+      nextStatus = decision.startsWith('APPROVE') ? 'APPROVED' : 'REJECTED'
+    }
+    let inspectionStatus
+    if (hasInspectionStatus) {
+      inspectionStatus = String(body.inspectionStatus).toUpperCase()
+      if (!['PENDING', 'PASSED', 'FAILED', 'EXPIRED'].includes(inspectionStatus)) {
+        const error = new Error('inspectionStatus must be one of PENDING, PASSED, FAILED, EXPIRED.')
+        error.statusCode = 400
+        error.code = 'VEHICLE_INSPECTION_STATUS_INVALID'
+        error.expose = true
+        throw error
+      }
+    }
+    let inspectionExpiresAt
+    if (hasInspectionExpiry) {
+      if (body.inspectionExpiresAt === null || body.inspectionExpiresAt === '') {
+        inspectionExpiresAt = null // explicit clear
+      } else {
+        const d = new Date(body.inspectionExpiresAt)
+        if (Number.isNaN(d.getTime())) {
+          const error = new Error('inspectionExpiresAt must be a valid ISO date.')
+          error.statusCode = 400
+          error.code = 'VEHICLE_INSPECTION_DATE_INVALID'
+          error.expose = true
+          throw error
+        }
+        inspectionExpiresAt = d
+      }
+    }
     const profile = await db().driverProfile.findUnique({
       where: { userId: vehicleReviewMatch[1] },
       select: { vehiclePlate: true },
@@ -1410,15 +1454,27 @@ export async function handleAdmin(req, res, url, context) {
       error.expose = true
       throw error
     }
+    const data = {
+      ...(nextStatus ? { vehicleStatus: nextStatus } : {}),
+      ...(inspectionStatus !== undefined ? { inspectionStatus } : {}),
+      ...(inspectionExpiresAt !== undefined ? { inspectionExpiresAt } : {}),
+    }
     const updated = await db().driverProfile.update({
       where: { userId: vehicleReviewMatch[1] },
-      data: { vehicleStatus: nextStatus },
-      select: { userId: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true },
+      data,
+      select: { userId: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true },
     })
+    // Audit action reflects what actually changed: the vehicleStatus decision when present, else an
+    // inspection-only update.
+    const auditAction = nextStatus === 'APPROVED'
+      ? 'ADMIN_VEHICLE_APPROVED'
+      : nextStatus === 'REJECTED'
+        ? 'ADMIN_VEHICLE_REJECTED'
+        : 'ADMIN_VEHICLE_INSPECTION_UPDATED'
     await db().adminAuditLog.create({
       data: {
         actorUserId: context.user.id,
-        action: nextStatus === 'APPROVED' ? 'ADMIN_VEHICLE_APPROVED' : 'ADMIN_VEHICLE_REJECTED',
+        action: auditAction,
         entityType: 'driver_profiles',
         entityId: vehicleReviewMatch[1],
         before: null,

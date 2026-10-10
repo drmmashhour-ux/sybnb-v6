@@ -6,6 +6,7 @@ import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { updateDriverLocation, getDriverLocation, getRideCoords, haversineKm, etaMinutesForKm } from '../lib/live-map.mjs'
 import { activateScheduledRides } from '../lib/ride-schedule.mjs'
 import { runDispatchSweep } from '../lib/ride-dispatch.mjs'
+import { VEHICLE_CATEGORY_VALUES, isCategoryAllowedForYear, VEHICLE_MAX_AGE_YEARS } from '../lib/vehicle-category.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
 import { settlePrepaidRide } from '../lib/finance-ledger.mjs'
@@ -71,7 +72,7 @@ export async function handleDriver(req, res, url, context) {
     if (req.method === 'GET') {
       const profile = await db().driverProfile.findUnique({
         where: { userId: context.user.id },
-        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true },
+        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true },
       })
       return json(res, 200, { ok: true, driverProfile: profile || null })
     }
@@ -87,14 +88,88 @@ export async function handleDriver(req, res, url, context) {
         error.expose = true
         throw error
       }
+      // Optional self-declared vehicle category (tier-to-vehicle enforcement). When present it must be
+      // one of the five enum values; setting/changing it is allowed and leaves the vehicleStatus
+      // review behavior untouched (make/model/plate changes still re-open review as before).
+      let vehicleCategory
+      if (body.vehicleCategory !== undefined && body.vehicleCategory !== null && body.vehicleCategory !== '') {
+        vehicleCategory = String(body.vehicleCategory)
+        if (!VEHICLE_CATEGORY_VALUES.includes(vehicleCategory)) {
+          const error = new Error('vehicleCategory must be one of BIKE, ECONOMY, COMFORT, SUV, VAN.')
+          error.statusCode = 400
+          error.code = 'VEHICLE_CATEGORY_INVALID'
+          error.expose = true
+          throw error
+        }
+      }
+      // Safety-grade vehicle profile: build year, color and registration expiry. The driver may NOT
+      // set inspectionStatus / inspectionExpiresAt here -- those are admin-only (set via the admin
+      // vehicle-review route), so any such fields in the body are simply ignored.
+      let vehicleYear
+      if (body.vehicleYear !== undefined && body.vehicleYear !== null && body.vehicleYear !== '') {
+        const y = Number(body.vehicleYear)
+        const currentYear = new Date().getFullYear()
+        if (!Number.isInteger(y) || y < 1980 || y > currentYear + 1) {
+          const error = new Error(`vehicleYear must be an integer between 1980 and ${currentYear + 1}.`)
+          error.statusCode = 400
+          error.code = 'VEHICLE_YEAR_INVALID'
+          error.expose = true
+          throw error
+        }
+        vehicleYear = y
+      }
+      let vehicleColor
+      if (body.vehicleColor !== undefined) {
+        vehicleColor = String(body.vehicleColor || '').trim().slice(0, 40)
+      }
+      let registrationExpiresAt
+      if (body.registrationExpiresAt !== undefined && body.registrationExpiresAt !== null && body.registrationExpiresAt !== '') {
+        const d = new Date(body.registrationExpiresAt)
+        if (Number.isNaN(d.getTime())) {
+          const error = new Error('registrationExpiresAt must be a valid ISO date.')
+          error.statusCode = 400
+          error.code = 'REGISTRATION_DATE_INVALID'
+          error.expose = true
+          throw error
+        }
+        registrationExpiresAt = d
+      }
+      // Year-based tier policy: when the driver sets/changes their category and a build year is known
+      // (just supplied, or already saved), the car must be young enough for that tier (BIKE is always
+      // allowed; model-based division isn't feasible without a vehicle dataset, so tiering is by age).
+      if (vehicleCategory) {
+        let effectiveYear = vehicleYear
+        if (effectiveYear === undefined) {
+          const existingYear = await db().driverProfile.findUnique({
+            where: { userId: context.user.id },
+            select: { vehicleYear: true },
+          })
+          effectiveYear = existingYear?.vehicleYear ?? undefined
+        }
+        if (effectiveYear != null && !isCategoryAllowedForYear(vehicleCategory, effectiveYear)) {
+          const maxAge = VEHICLE_MAX_AGE_YEARS[vehicleCategory]
+          const error = new Error(`This vehicle is too old for the ${vehicleCategory} category (maximum age ${maxAge} years).`)
+          error.statusCode = 400
+          error.code = 'VEHICLE_CATEGORY_YEAR_INVALID'
+          error.expose = true
+          throw error
+        }
+      }
+      // Persist the new fields alongside the category; a field absent from the body is left untouched.
+      const extraVehicleFields = {
+        ...(vehicleCategory !== undefined ? { vehicleCategory } : {}),
+        ...(vehicleYear !== undefined ? { vehicleYear } : {}),
+        ...(vehicleColor !== undefined ? { vehicleColor: vehicleColor || null } : {}),
+        ...(registrationExpiresAt !== undefined ? { registrationExpiresAt } : {}),
+      }
       // Registering or changing the vehicle sends it (back) to PENDING_REVIEW: a self-declared
       // vehicle must be reviewed before the driver can accept rides, and any later change re-opens
       // review so a driver can't swap to an unapproved car after approval.
       const profile = await db().driverProfile.upsert({
         where: { userId: context.user.id },
-        create: { userId: context.user.id, vehicleMake, vehicleModel, vehiclePlate, vehicleStatus: 'PENDING_REVIEW' },
-        update: { vehicleMake, vehicleModel, vehiclePlate, vehicleStatus: 'PENDING_REVIEW' },
-        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true },
+        create: { userId: context.user.id, vehicleMake, vehicleModel, vehiclePlate, vehicleStatus: 'PENDING_REVIEW', ...extraVehicleFields },
+        update: { vehicleMake, vehicleModel, vehiclePlate, vehicleStatus: 'PENDING_REVIEW', ...extraVehicleFields },
+        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true },
       })
       return json(res, 200, { ok: true, driverProfile: profile })
     }
@@ -219,7 +294,7 @@ export async function handleDriver(req, res, url, context) {
     const ratingSummary = await getDriverRatingSummary(context.user.id)
     const driverProfile = await db().driverProfile.findUnique({
       where: { userId: context.user.id },
-      select: { accessibilityCapable: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true },
+      select: { accessibilityCapable: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true },
     })
     // Honest earnings: COLLECTED money — the driver's actual ride-fare wallet credits (already net
     // of the SYBNB commission) — not merely the BILLED fares of completed rides, which overstated
@@ -262,6 +337,12 @@ export async function handleDriver(req, res, url, context) {
           vehicleModel: driverProfile?.vehicleModel || null,
           vehiclePlate: driverProfile?.vehiclePlate || null,
           vehicleStatus: driverProfile?.vehicleStatus || null,
+          vehicleCategory: driverProfile?.vehicleCategory || null,
+          vehicleYear: driverProfile?.vehicleYear ?? null,
+          vehicleColor: driverProfile?.vehicleColor || null,
+          registrationExpiresAt: driverProfile?.registrationExpiresAt ? driverProfile.registrationExpiresAt.toISOString() : null,
+          inspectionStatus: driverProfile?.inspectionStatus || null,
+          inspectionExpiresAt: driverProfile?.inspectionExpiresAt ? driverProfile.inspectionExpiresAt.toISOString() : null,
         },
         totals: {
           assigned: rides.length,

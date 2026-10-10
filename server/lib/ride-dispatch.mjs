@@ -44,6 +44,13 @@ export async function findNextDriverForRide(ride, excludeIds = []) {
   const accessibilitySql = ride.accessibilityRequired
     ? Prisma.sql`AND dp.accessibility_capable = true`
     : Prisma.empty
+  // Safety gates mirror the manual /claim path: registration expiry is ALWAYS enforced (added
+  // unconditionally below); the mechanical-inspection requirement is gated by the same env flag
+  // SR_REQUIRE_VEHICLE_INSPECTION (default on -- only an explicit 'false'/'0' skips it).
+  const inspectionRequired = !['false', '0'].includes(String(process.env.SR_REQUIRE_VEHICLE_INSPECTION ?? '').trim().toLowerCase())
+  const inspectionSql = inspectionRequired
+    ? Prisma.sql`AND dp.inspection_status = 'PASSED' AND (dp.inspection_expires_at IS NULL OR dp.inspection_expires_at > now())`
+    : Prisma.empty
   const rows = await db().$queryRaw(Prisma.sql`
     SELECT dp.user_id AS "userId",
            (dp.last_location_geo::geography <-> rr.pickup_geo::geography) AS "distanceM"
@@ -55,6 +62,16 @@ export async function findNextDriverForRide(ride, excludeIds = []) {
       AND u.id_document_status = 'APPROVED'
       AND dp.vehicle_plate IS NOT NULL
       AND dp.vehicle_status = 'APPROVED'
+      AND dp.vehicle_category IS NOT NULL
+      AND dp.vehicle_category::text = CASE rr.metadata->>'category'
+          WHEN 'SR Bike' THEN 'BIKE'
+          WHEN 'SR Economy' THEN 'ECONOMY'
+          WHEN 'SR Comfort' THEN 'COMFORT'
+          WHEN 'SR SUV' THEN 'SUV'
+          WHEN 'SR Van' THEN 'VAN'
+          ELSE NULL END
+      AND (dp.registration_expires_at IS NULL OR dp.registration_expires_at > now())
+      ${inspectionSql}
       AND dp.last_location_updated_at >= now() - (interval '1 second' * ${ONLINE_WINDOW_SECONDS})
       AND dp.user_id <> rr.rider_id
       AND dp.user_id <> ALL(${excludeSql})

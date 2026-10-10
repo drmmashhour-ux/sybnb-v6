@@ -31,6 +31,8 @@ import { handlePayments } from './routes/payments.mjs'
 import { handleReviews } from './routes/reviews.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
 import { handleWallet } from './routes/wallet.mjs'
+import { activateScheduledRides } from './lib/ride-schedule.mjs'
+import { runDispatchSweep } from './lib/ride-dispatch.mjs'
 
 loadEnv()
 
@@ -126,6 +128,30 @@ const PUBLIC_ACCESS_EXEMPT_PATHS = new Set(['/api/payments/webhook', '/api/payme
 const ADMIN_ACTION_RATE_WINDOW_MS = 60_000
 const ADMIN_ACTION_RATE_MAX = Number(process.env.ADMIN_ACTION_RATE_MAX || 250)
 
+// Scheduler tick: dispatch escalation + scheduled-ride activation fire on a timer (an external cron
+// POSTs here), not only when a driver happens to load the pending list. PUBLIC and no-auth by design
+// -- it exposes NO sensitive data (only counts), is side-effect-idempotent, and self-throttles: if
+// called within TICK_MIN_INTERVAL_MS of the last ACTUAL run it skips the work (prevents abuse / DB
+// hammering). Everything is wrapped so it always returns 200 {ok:true} and never leaks an error/stack.
+const TICK_MIN_INTERVAL_MS = 15_000
+let tickLastRunAt = 0
+
+async function handleInternalTick(res) {
+  try {
+    const now = Date.now()
+    if (now - tickLastRunAt < TICK_MIN_INTERVAL_MS) {
+      return json(res, 200, { ok: true, skipped: true })
+    }
+    tickLastRunAt = now
+    const activated = await activateScheduledRides()
+    const sweep = await runDispatchSweep()
+    return json(res, 200, { ok: true, activated, expired: sweep.expired, opened: sweep.opened })
+  } catch {
+    // never leak errors/stack; the tick is best-effort
+    return json(res, 200, { ok: true })
+  }
+}
+
 const server = createServer(async (req, res) => {
   const url = publicUrl(req)
   const requestId = req.headers['x-request-id'] || newRequestId()
@@ -161,6 +187,11 @@ const server = createServer(async (req, res) => {
         endpoints: API_ENDPOINTS,
         securityRules: PLATFORM_SECURITY_RULES,
       })
+    }
+
+    // Public scheduler tick (no auth, registered BEFORE getAuthContext and every gate/role check).
+    if (url.pathname === '/internal/tick' && (req.method === 'POST' || req.method === 'GET')) {
+      return handleInternalTick(res)
     }
 
     const context = await getAuthContext(req)

@@ -18,6 +18,7 @@ import {
   validateActivePromoCode,
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
+import { rideCategoryToVehicle } from '../lib/vehicle-category.mjs'
 import { notifyAdmin } from '../lib/notifications.mjs'
 import { recordWalletEntry, refundPrepaidRide } from '../lib/finance-ledger.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
@@ -126,7 +127,7 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
   }
   const claimingVehicle = await db().driverProfile.findUnique({
     where: { userId: context.user.id },
-    select: { vehiclePlate: true, vehicleStatus: true },
+    select: { vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true },
   })
   if (!claimingVehicle?.vehiclePlate) {
     const error = new Error('Register your vehicle (make, model and plate) before accepting rides.')
@@ -141,6 +142,55 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
     error.code = 'DRIVER_VEHICLE_NOT_APPROVED'
     error.expose = true
     throw error
+  }
+
+  // Tier-to-vehicle enforcement: a driver may only claim a ride whose category matches their
+  // self-declared vehicle category (so SUV/Van pricing is guaranteed and never collected by a car
+  // that doesn't match). EXACT match -- the ride's category lives in metadata->>'category'.
+  const requiredVehicleCategory = rideCategoryToVehicle(existing.metadata?.category)
+  if (!claimingVehicle.vehicleCategory) {
+    const error = new Error('Set your vehicle category before accepting rides.')
+    error.statusCode = 403
+    error.code = 'DRIVER_CATEGORY_REQUIRED'
+    error.expose = true
+    throw error
+  }
+  if (claimingVehicle.vehicleCategory !== requiredVehicleCategory) {
+    const error = new Error('Your vehicle category does not match this ride type.')
+    error.statusCode = 403
+    error.code = 'DRIVER_CATEGORY_MISMATCH'
+    error.expose = true
+    throw error
+  }
+
+  // Safety gates (2026-10-10): an unsafe or out-of-date vehicle cannot take rides. Registration
+  // expiry is ALWAYS enforced; the mechanical-inspection requirement is gated by the env flag
+  // SR_REQUIRE_VEHICLE_INSPECTION (default on -- only an explicit 'false'/'0' skips the inspection
+  // checks, and registration still blocks). Mirrors the auto-dispatch eligibility SQL exactly.
+  const safetyNow = new Date()
+  if (claimingVehicle.registrationExpiresAt && claimingVehicle.registrationExpiresAt <= safetyNow) {
+    const error = new Error('Your vehicle registration has expired \u2014 renew it to accept rides.')
+    error.statusCode = 403
+    error.code = 'DRIVER_REGISTRATION_EXPIRED'
+    error.expose = true
+    throw error
+  }
+  const inspectionRequired = !['false', '0'].includes(String(process.env.SR_REQUIRE_VEHICLE_INSPECTION ?? '').trim().toLowerCase())
+  if (inspectionRequired) {
+    if (claimingVehicle.inspectionStatus !== 'PASSED') {
+      const error = new Error('Your vehicle must pass a mechanical inspection before accepting rides.')
+      error.statusCode = 403
+      error.code = 'DRIVER_INSPECTION_NOT_PASSED'
+      error.expose = true
+      throw error
+    }
+    if (claimingVehicle.inspectionExpiresAt && claimingVehicle.inspectionExpiresAt <= safetyNow) {
+      const error = new Error('Your vehicle inspection has expired \u2014 renew it to accept rides.')
+      error.statusCode = 403
+      error.code = 'DRIVER_INSPECTION_EXPIRED'
+      error.expose = true
+      throw error
+    }
   }
 
   // Ride-pooling: real eligibility, not a decorative "Share" label. Also closes a genuine

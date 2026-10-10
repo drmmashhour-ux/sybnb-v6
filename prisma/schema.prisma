@@ -53,6 +53,21 @@ enum VehicleStatus {
   @@map("vehicle_status")
 }
 
+enum VehicleCategory {
+  BIKE
+  ECONOMY
+  COMFORT
+  SUV
+  VAN
+}
+
+enum VehicleInspectionStatus {
+  PENDING
+  PASSED
+  FAILED
+  EXPIRED
+}
+
 enum AvailabilityStatus {
   BLOCKED
   AVAILABLE
@@ -408,6 +423,12 @@ model DriverProfile {
   vehicleModel    String?  @map("vehicle_model")
   vehiclePlate    String?  @map("vehicle_plate")
   vehicleStatus   VehicleStatus @default(PENDING_REVIEW) @map("vehicle_status")
+  vehicleCategory VehicleCategory? @map("vehicle_category")
+  vehicleYear     Int?     @map("vehicle_year")
+  vehicleColor    String?  @map("vehicle_color")
+  registrationExpiresAt DateTime? @map("registration_expires_at")
+  inspectionStatus VehicleInspectionStatus @default(PENDING) @map("inspection_status")
+  inspectionExpiresAt DateTime? @map("inspection_expires_at")
   photoRef        String?  @map("photo_ref")
   photoMimeType   String?  @map("photo_mime_type")
   active          Boolean  @default(false)

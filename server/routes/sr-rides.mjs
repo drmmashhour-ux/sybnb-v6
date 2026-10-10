@@ -639,7 +639,7 @@ export async function handleSrRides(req, res, url, context) {
           },
         },
         review: true,
-        paymentProofs: { select: { id: true, status: true, amountMinor: true, currency: true }, orderBy: { createdAt: 'desc' }, take: 1 },
+        paymentProofs: { select: { id: true, status: true, amountMinor: true, currency: true, provider: true }, orderBy: { createdAt: 'desc' }, take: 5 },
         stops: { select: { address: true, lat: true, lng: true }, orderBy: { sequence: 'asc' } },
       },
     })

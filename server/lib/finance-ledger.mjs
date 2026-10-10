@@ -476,7 +476,25 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // fee) and the driver receives the rest. A CANCELLED-with-a-fee ride takes NO commission -- the
     // cancellation fee compensates the driver for a committed trip, so it stays 100% with them.
     const ride = await tx.rideRequest.findUnique({ where: { id: proof.rideId }, select: { driverId: true, status: true } })
-    if (ride?.driverId) {
+    const isTipProof = String(proof.provider || '').startsWith('tip')
+    if (isTipProof) {
+      // Tipping (SR vs. Uber parity, 2026-10-10): a tip is 100% the driver's, with NO commission.
+      // A CASH tip ('tip_cash') is already physically in the driver's hand (off-ledger), so nothing
+      // is booked for it; a wallet/card tip is credited to the driver in full here. The idempotency
+      // key is pinned to the proof, so re-approving the same tip proof never double-credits.
+      if (ride?.driverId && proof.provider !== 'tip_cash') {
+        await recordWalletEntry(tx, {
+          userId: ride.driverId,
+          type: 'CREDIT',
+          amountMinor: Math.round(proof.amountMinor || 0),
+          currency: proof.currency,
+          referenceType: 'ride_tip',
+          referenceId: proof.rideId,
+          keyParts: ['ride-tip', proof.rideId, proof.id],
+          note: 'Rider tip, paid in full to the driver (no commission).',
+        })
+      }
+    } else if (ride?.driverId) {
       // A ride is either COMPLETED (this is the fare) or CANCELLED-with-a-fee (this is the
       // cancellation fee, capsule 20) -- never both, so the ride's own status at approval time is
       // enough to label the ledger entry correctly for finance reconciliation.

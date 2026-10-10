@@ -155,7 +155,7 @@ export type PlatformRideRequest = {
     location: { lat: number; lng: number; updatedAt: string } | null
   } | null
   review?: PlatformRideReview | null
-  paymentProofs?: Array<{ id: string; status: string; amountMinor: number; currency: string }>
+  paymentProofs?: Array<{ id: string; status: string; amountMinor: number; currency: string; provider?: string }>
   pickupCoords?: { lat: number; lng: number } | null
   dropoffCoords?: { lat: number; lng: number } | null
 }
@@ -1574,6 +1574,9 @@ export async function submitPrototypeLocalWalletProof(input: {
   // method:'cash' and no reference (the driver collected the fare in cash).
   providerRef?: string
   method?: 'cash'
+  // 'tip' marks this as a separate rider tip (settled 100% to the driver, no commission) rather than
+  // the fare; the server caps the amount and skips the one-proof-per-ride fare guard for it.
+  kind?: 'tip'
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; proof: PlatformPaymentProof }>('/api/payments/local-wallet-proof', {

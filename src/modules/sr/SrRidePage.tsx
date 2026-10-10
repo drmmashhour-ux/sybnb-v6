@@ -127,6 +127,14 @@ const copy = {
     rateCommentPlaceholder: 'ملاحظة اختيارية عن الرحلة (غير إلزامية)',
     rateThanks: 'شكراً لتقييمك',
     yourRating: 'تقييمك',
+    tipTitle: 'أضف بقشيشاً للسائق',
+    tipHint: 'يذهب البقشيش بالكامل للسائق — بدون أي عمولة.',
+    tipCustom: 'مبلغ آخر',
+    tipNone: 'بدون بقشيش',
+    tipSubmit: 'إرسال البقشيش',
+    tipSubmitting: 'جارٍ الإرسال',
+    tipThanks: 'شكراً! تم تسجيل بقشيشك.',
+    tipCashNote: 'نقداً للسائق',
     cancelled: 'تم إلغاء الرحلة.',
     cancel: 'إلغاء الرحلة',
     cancelling: 'جار الإلغاء',
@@ -222,6 +230,14 @@ const copy = {
     rateCommentPlaceholder: 'Optional note about the ride',
     rateThanks: 'Thanks for your rating',
     yourRating: 'Your rating',
+    tipTitle: 'Add a tip for your driver',
+    tipHint: 'Tips go 100% to the driver — no commission is taken.',
+    tipCustom: 'Custom',
+    tipNone: 'No tip',
+    tipSubmit: 'Send tip',
+    tipSubmitting: 'Sending',
+    tipThanks: 'Thank you! Your tip was recorded.',
+    tipCashNote: 'Cash to driver',
     cancelled: 'This ride was cancelled.',
     cancel: 'Cancel ride',
     cancelling: 'Cancelling',
@@ -317,6 +333,14 @@ const copy = {
     rateCommentPlaceholder: 'Remarque facultative sur la course',
     rateThanks: 'Merci pour votre évaluation',
     yourRating: 'Votre évaluation',
+    tipTitle: 'Ajoutez un pourboire pour votre chauffeur',
+    tipHint: 'Le pourboire revient à 100 % au chauffeur — aucune commission.',
+    tipCustom: 'Autre montant',
+    tipNone: 'Pas de pourboire',
+    tipSubmit: 'Envoyer le pourboire',
+    tipSubmitting: 'Envoi',
+    tipThanks: 'Merci ! Votre pourboire a été enregistré.',
+    tipCashNote: 'Espèces au chauffeur',
     cancelled: 'Cette course a été annulée.',
     cancel: 'Annuler la course',
     cancelling: 'Annulation',
@@ -387,6 +411,10 @@ export function SrRidePage({ lang }: Props) {
   const [reviewStatus, setReviewStatus] = useState<'idle' | 'saving' | 'error'>('idle')
   const [payProviderRef, setPayProviderRef] = useState('')
   const [payStatus, setPayStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
+  const [tipStatus, setTipStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
+  const [tipAmountMinor, setTipAmountMinor] = useState(0)
+  const [tipCustom, setTipCustom] = useState('')
+  const [tipRef, setTipRef] = useState('')
   const [chatMessages, setChatMessages] = useState<PlatformMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatStatus, setChatStatus] = useState<'idle' | 'sending' | 'error'>('idle')
@@ -749,8 +777,31 @@ export function SrRidePage({ lang }: Props) {
     }
   }
 
+  async function submitTip() {
+    if (!ride || tipAmountMinor <= 0 || !tipRef.trim()) return
+    setTipStatus('saving')
+    try {
+      // A tip is a SEPARATE payment from the fare, settled 100% to the driver with no commission.
+      // The server re-caps the amount against the ride's own fare, so the client figure is advisory.
+      await submitPrototypeLocalWalletProof({
+        rideId: ride.id,
+        amountMinor: tipAmountMinor,
+        currency: ride.currency,
+        providerRef: tipRef.trim(),
+        kind: 'tip',
+      })
+      setRide(await fetchPrototypeSrRide(ride.id))
+      setTipStatus('submitted')
+    } catch (error) {
+      setTipStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    }
+  }
+
   function renderPaymentSection(title: string, copy: string) {
-    const latestProof = ride?.paymentProofs?.[0]
+    // Ignore tip proofs here -- this section is about the FARE payment state only; a tip is a
+    // separate proof (provider starts with 'tip') handled by its own panel.
+    const latestProof = (ride?.paymentProofs || []).find((p) => !(p.provider || '').startsWith('tip'))
     if (latestProof?.status === 'APPROVED') {
       return <div style={styles.message}>✓ {t.paymentConfirmed}</div>
     }
@@ -1263,6 +1314,62 @@ export function SrRidePage({ lang }: Props) {
                 </div>
               )}
               {renderPaymentSection(t.payTitle, t.payCopy)}
+              {(ride.fareMinor ?? 0) > 0 &&
+              !(ride.paymentProofs || []).some((p) => (p.provider || '').startsWith('tip')) ? (
+                tipStatus === 'submitted' ? (
+                  <div style={styles.message}>✓ {t.tipThanks}</div>
+                ) : (
+                  <div style={styles.card}>
+                    <strong>{t.tipTitle}</strong>
+                    <span style={styles.payCashHint}>{t.tipHint}</span>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {[10, 15, 20].map((pct) => {
+                        const amt = Math.round(((ride.fareMinor ?? 0) * pct) / 100)
+                        const active = tipAmountMinor === amt && tipCustom === ''
+                        return (
+                          <button
+                            key={pct}
+                            style={active ? { ...styles.secondaryButton, borderColor: '#19d7ff', color: '#19d7ff' } : styles.secondaryButton}
+                            onClick={() => {
+                              setTipCustom('')
+                              setTipAmountMinor(amt)
+                            }}
+                          >
+                            {pct}% · {moneyText(amt, ride.currency, lang)}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <input
+                      style={styles.payInput}
+                      inputMode="decimal"
+                      placeholder={t.tipCustom}
+                      value={tipCustom}
+                      onChange={(event) => {
+                        const v = event.target.value.replace(/[^0-9.]/g, '')
+                        setTipCustom(v)
+                        const major = parseFloat(v)
+                        setTipAmountMinor(Number.isFinite(major) ? Math.round(major * 100) : 0)
+                      }}
+                    />
+                    <input
+                      style={styles.payInput}
+                      placeholder={t.payReferencePlaceholder}
+                      value={tipRef}
+                      onChange={(event) => setTipRef(event.target.value)}
+                    />
+                    <button
+                      disabled={tipAmountMinor <= 0 || !tipRef.trim() || tipStatus === 'saving'}
+                      style={styles.primaryButton}
+                      onClick={() => void submitTip()}
+                    >
+                      {tipStatus === 'saving'
+                        ? t.tipSubmitting
+                        : `${t.tipSubmit}${tipAmountMinor > 0 ? ' · ' + moneyText(tipAmountMinor, ride.currency, lang) : ''}`}
+                    </button>
+                  </div>
+                )
+              ) : null}
               {ride.review ? (
                 <div style={styles.message}>
                   {t.yourRating}: {'★'.repeat(ride.review.rating)}

@@ -661,9 +661,23 @@ export async function handlePayments(req, res, url, context) {
       throw error
     }
 
+    // Tipping (SR vs. Uber parity, 2026-10-10): a tip is a SEPARATE, rider-chosen payment ON TOP of
+    // the fare, settled 100% to the driver with NO commission (see finance-ledger.mjs tip branch).
+    // Only a COMPLETED ride can be tipped, and only by its own rider (the ride lookup already scoped
+    // to this rider). The amount is client-chosen — that is the nature of a tip — but capped
+    // server-side (below) so a typo or abuse can't book an absurd driver credit.
+    const isTip = Boolean(ride) && String(body.kind || '').trim().toLowerCase() === 'tip'
+    if (isTip && ride.status !== 'COMPLETED') {
+      const error = new Error('Only a completed ride can be tipped.')
+      error.statusCode = 409
+      error.code = 'RIDE_TIP_NOT_COMPLETED'
+      error.expose = true
+      throw error
+    }
+
     // Prepaid rides (2026-10-09) were already paid from the rider's wallet at request time and
     // settle automatically on completion — a post-ride proof would double-charge, so it's refused.
-    if (ride && ride.metadata && ride.metadata.prepaid) {
+    if (ride && !isTip && ride.metadata && ride.metadata.prepaid) {
       const error = new Error('This ride was prepaid from your wallet; no payment proof is needed.')
       error.statusCode = 409
       error.code = 'RIDE_ALREADY_PREPAID'
@@ -680,11 +694,21 @@ export async function handlePayments(req, res, url, context) {
     // every local-wallet payment from the ledger). A linked ride is the same discipline: its own
     // locked fareMinor, never client input. Client input is only used for the no-booking-no-ride case
     // (e.g. a standalone seller-plan/advertising payment), which has no independent amount to check.
-    const amountMinor = booking
-      ? expectedTotalMinor(booking)
-      : ride
-        ? (ride.status === 'CANCELLED' ? ride.cancellationFeeMinor : ride.fareMinor) || 0
-        : Number(body.amountMinor || 0)
+    const amountMinor = isTip
+      ? (() => {
+          // A tip is rider-chosen, but capped to 3x the ride's own locked fare (or, if the fare is
+          // somehow zero, a flat USD-cents ceiling) so a mis-typed or malicious amount can't credit
+          // the driver an absurd sum. Negative/NaN collapse to 0 and are rejected by the >0 check.
+          const requested = Math.round(Number(body.amountMinor || 0))
+          const fareBase = Math.round(ride.fareMinor || 0)
+          const ceiling = fareBase > 0 ? fareBase * 3 : 5000
+          return Math.min(Math.max(requested, 0), ceiling)
+        })()
+      : booking
+        ? expectedTotalMinor(booking)
+        : ride
+          ? (ride.status === 'CANCELLED' ? ride.cancellationFeeMinor : ride.fareMinor) || 0
+          : Number(body.amountMinor || 0)
     if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
       const error = new Error('Payment proof amount must be greater than zero.')
       error.statusCode = 400
@@ -711,6 +735,10 @@ export async function handlePayments(req, res, url, context) {
     // already hold it as physical cash. The operator-approval step is the check that protects a driver
     // from a rider who falsely marks a ride cash-paid.
     const isCashRide = Boolean(ride) && String(body.method || body.paymentMethod || '').trim().toLowerCase() === 'cash'
+    // Distinct provider strings for tips let the ledger detect and route them 100% to the driver.
+    const walletProvider = isTip
+      ? (isCashRide ? 'tip_cash' : 'tip_local_wallet')
+      : (isCashRide ? 'cash' : 'syrian_local_wallet')
     const providerRef = body.providerRef ? String(body.providerRef).trim() : ''
     if (!isCashRide && !providerRef) {
       const error = new Error('Syrian wallet transaction reference is required.')
@@ -723,7 +751,7 @@ export async function handlePayments(req, res, url, context) {
     if (!isCashRide) {
       const duplicate = await db().paymentProof.findFirst({
         where: {
-          provider: 'syrian_local_wallet',
+          provider: walletProvider,
           providerRef,
         },
       })
@@ -737,7 +765,7 @@ export async function handlePayments(req, res, url, context) {
       }
     }
 
-    if (ride) {
+    if (ride && !isTip) {
       // A REJECTED proof must not block resubmission -- only a still-live one (awaiting review, or
       // already approved) does. Mirrors the intent of the providerRef uniqueness check above, scoped
       // to this ride instead of a global reference string.
@@ -761,7 +789,7 @@ export async function handlePayments(req, res, url, context) {
           bookingId: booking?.id || undefined,
           rideId: ride?.id || undefined,
           userId: context.user.id,
-          provider: isCashRide ? 'cash' : 'syrian_local_wallet',
+          provider: walletProvider,
           status: 'PENDING_ADMIN_REVIEW',
           amountMinor,
           currency: booking?.currency || ride?.currency || resolveClientCurrency(body.currency, defaultCurrency()),

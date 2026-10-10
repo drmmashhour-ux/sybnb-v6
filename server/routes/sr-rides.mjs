@@ -635,7 +635,7 @@ export async function handleSrRides(req, res, url, context) {
             id: true,
             displayName: true,
             idDocumentStatus: true,
-            driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, photoRef: true } },
+            driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleColor: true, vehicleYear: true, photoRef: true } },
           },
         },
         review: true,
@@ -708,6 +708,8 @@ export async function handleSrRides(req, res, url, context) {
                   vehicleMake: ride.driver.driverProfile.vehicleMake,
                   vehicleModel: ride.driver.driverProfile.vehicleModel,
                   vehiclePlate: ride.driver.driverProfile.vehiclePlate,
+                  vehicleColor: ride.driver.driverProfile.vehicleColor,
+                  vehicleYear: ride.driver.driverProfile.vehicleYear,
                   photoUrl: ride.driver.driverProfile.photoRef ? signDriverPhotoUrl(ride.driver.driverProfile.photoRef) : null,
                 }
               : null,
@@ -1299,7 +1301,7 @@ export async function handleSrRides(req, res, url, context) {
           select: {
             displayName: true,
             idDocumentStatus: true,
-            driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, photoRef: true } },
+            driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleColor: true, vehicleYear: true, photoRef: true } },
           },
         },
       },
@@ -1331,6 +1333,8 @@ export async function handleSrRides(req, res, url, context) {
                     vehicleMake: ride.driver.driverProfile.vehicleMake,
                     vehicleModel: ride.driver.driverProfile.vehicleModel,
                     vehiclePlate: ride.driver.driverProfile.vehiclePlate,
+                    vehicleColor: ride.driver.driverProfile.vehicleColor,
+                    vehicleYear: ride.driver.driverProfile.vehicleYear,
                     photoUrl: ride.driver.driverProfile.photoRef ? signDriverPhotoUrl(ride.driver.driverProfile.photoRef) : null,
                   }
                 : null,

@@ -72,6 +72,14 @@ const copy = {
     locationNotConfirmed: 'يرجى تأكيد نقطة الانطلاق والوجهة (بالكتابة أو عبر GPS) قبل طلب الرحلة.',
     driverNotAssigned: 'لم يُعيّن سائق بعد',
     verifiedDriver: 'هوية موثقة',
+    safetyTitle: 'سائقك ومركبته',
+    safetyHint: 'احتفظ بهذه التفاصيل لأمانك. إن حدث أي طارئ شاركها مع شخص تثق به.',
+    vehicleLabel: 'المركبة',
+    plateLabel: 'رقم اللوحة',
+    ratingLabel: 'التقييم',
+    saveForSafety: 'حفظ/مشاركة للأمان',
+    savedConfirm: 'تم حفظ التفاصيل',
+    copiedConfirm: 'تم نسخ التفاصيل',
     waitingForDriver: 'بانتظار قبول أحد السائقين القريبين للرحلة...',
     stillLooking: 'ما زلنا نبحث عن سائق. يمكنك متابعة الانتظار أو إلغاء الطلب.',
     etaPrefix: 'على بُعد ~',
@@ -178,6 +186,14 @@ const copy = {
     locationNotConfirmed: 'Please confirm both pickup and dropoff (by typing or via GPS) before requesting a ride.',
     driverNotAssigned: 'Not assigned yet',
     verifiedDriver: 'Verified identity',
+    safetyTitle: 'Your driver & vehicle',
+    safetyHint: 'Keep these details for your safety. If anything happens, share them with someone you trust.',
+    vehicleLabel: 'Vehicle',
+    plateLabel: 'Plate number',
+    ratingLabel: 'Rating',
+    saveForSafety: 'Save / share for safety',
+    savedConfirm: 'Details saved',
+    copiedConfirm: 'Details copied',
     waitingForDriver: 'Waiting for a nearby driver to accept the ride...',
     stillLooking: 'Still finding you a driver. You can keep waiting or cancel the request.',
     etaPrefix: '~',
@@ -284,6 +300,14 @@ const copy = {
     locationNotConfirmed: 'Veuillez confirmer le point de départ et la destination (en les saisissant ou par GPS) avant de demander une course.',
     driverNotAssigned: 'Pas encore attribué',
     verifiedDriver: 'Identité vérifiée',
+    safetyTitle: 'Votre chauffeur et son véhicule',
+    safetyHint: 'Conservez ces informations pour votre sécurité. En cas de problème, partagez-les avec une personne de confiance.',
+    vehicleLabel: 'Véhicule',
+    plateLabel: 'Plaque d’immatriculation',
+    ratingLabel: 'Note',
+    saveForSafety: 'Enregistrer / partager',
+    savedConfirm: 'Détails enregistrés',
+    copiedConfirm: 'Détails copiés',
     waitingForDriver: 'En attente qu’un chauffeur à proximité accepte la course...',
     stillLooking: 'Recherche d’un chauffeur en cours. Vous pouvez patienter ou annuler la demande.',
     etaPrefix: '~',
@@ -1277,9 +1301,11 @@ export function SrRidePage({ lang }: Props) {
               driverLocation={ride.driver?.location}
             />
           )}
-          {driverPhotoUrl && <img src={driverPhotoUrl} alt="" style={styles.driverPhoto} />}
-          {ride?.driver?.isVerified && <span style={styles.verifiedBadge}>✓ {t.verifiedDriver}</span>}
-          <Info label={t.driver} value={driverIdentityLabel(ride, t)} />
+          {ride?.driver ? (
+            <DriverSafetyCard ride={ride} driverPhotoUrl={driverPhotoUrl} t={t} lang={lang} />
+          ) : (
+            <Info label={t.driver} value={driverIdentityLabel(ride, t)} />
+          )}
           <Info label={t.pickup} value={String(ride?.metadata.pickup || pickup)} />
           {ride?.stops?.map((stop, index) => (
             <Info key={index} label={`${t.stop} ${index + 1}`} value={stop.address} />
@@ -1535,6 +1561,107 @@ export function SrRidePage({ lang }: Props) {
   )
 }
 
+// Rider safety card (2026-10-10): during an active ride the rider sees exactly who is driving them
+// and in what car -- name, photo, verified badge, make/model/colour/year, and the PLATE prominently
+// -- and can save or share it in one tap so a trusted contact has it if anything goes wrong. All
+// fields are real API data; anything the driver hasn't provided is simply omitted (noFakeTrustSignal).
+function DriverSafetyCard({
+  ride,
+  driverPhotoUrl,
+  t,
+  lang,
+}: {
+  ride: PlatformRideRequest
+  driverPhotoUrl: string | null
+  t: typeof copy.en
+  lang: Lang
+}) {
+  const [saved, setSaved] = useState<'idle' | 'shared' | 'copied'>('idle')
+  const p = ride.driver?.driverProfile
+  const vehicleParts = [p?.vehicleColor, p?.vehicleMake, p?.vehicleModel, p?.vehicleYear ? String(p.vehicleYear) : null].filter(Boolean)
+  const vehicle = vehicleParts.join(' ')
+  const plate = p?.vehiclePlate || null
+  const rating = ride.driver?.averageRating !== null && ride.driver?.averageRating !== undefined ? `★${ride.driver.averageRating} (${ride.driver.ratingCount})` : null
+  const tripId = ride.id.slice(0, 8).toUpperCase()
+
+  function buildSafetyText(): string {
+    const isAr = lang === 'ar'
+    const lines = [
+      isAr ? 'تفاصيل رحلة SYBNB SR للأمان' : lang === 'fr' ? 'Détails de sécurité — course SYBNB SR' : 'SYBNB SR ride — safety details',
+      `${t.driver}: ${ride.driver?.displayName || '-'}`,
+      vehicle ? `${t.vehicleLabel}: ${vehicle}` : null,
+      plate ? `${t.plateLabel}: ${plate}` : null,
+      rating ? `${t.ratingLabel}: ${rating}` : null,
+      `${t.rideId}: ${tripId}`,
+      `${t.pickup}: ${String(ride.metadata.pickup || '-')}`,
+      `${t.dropoff}: ${String(ride.metadata.dropoff || '-')}`,
+      new Date().toLocaleString(),
+    ].filter(Boolean)
+    return lines.join('\n')
+  }
+
+  async function saveForSafety() {
+    const text = buildSafetyText()
+    // Prefer the native share sheet (lets the rider send it straight to a trusted contact); fall
+    // back to the clipboard, then to a downloadable text file -- so there is always a way to keep it.
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ title: 'SYBNB SR', text })
+        setSaved('shared')
+        return
+      }
+    } catch {
+      // user dismissed the share sheet, or share failed -- fall through to clipboard/download
+    }
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(text)
+        setSaved('copied')
+      }
+    } catch {
+      // clipboard blocked -- offer a file download as the last resort
+    }
+    try {
+      const blob = new Blob([text], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `sybnb-sr-${tripId}.txt`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setSaved((prev) => (prev === 'shared' ? 'shared' : 'copied'))
+    } catch {
+      // nothing more we can do; leave whatever state was set above
+    }
+  }
+
+  return (
+    <div style={styles.safetyCard}>
+      <div style={styles.safetyHeader}>
+        {driverPhotoUrl && <img src={driverPhotoUrl} alt="" style={styles.driverPhoto} />}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <strong style={{ fontSize: 17 }}>{ride.driver?.displayName || t.driverNotAssigned}</strong>
+          {ride.driver?.isVerified && <span style={styles.verifiedBadge}>✓ {t.verifiedDriver}</span>}
+          {rating && <span style={styles.safetyMuted}>{t.ratingLabel}: {rating}</span>}
+        </div>
+      </div>
+      {vehicle && <Info label={t.vehicleLabel} value={vehicle} />}
+      {plate && (
+        <div style={styles.plateRow}>
+          <span style={styles.safetyMuted}>{t.plateLabel}</span>
+          <span style={styles.plateValue} dir="ltr">{plate}</span>
+        </div>
+      )}
+      <span style={styles.safetyMuted}>{t.safetyHint}</span>
+      <button style={styles.secondaryButton} onClick={() => void saveForSafety()}>
+        🛡️ {saved === 'shared' ? t.savedConfirm : saved === 'copied' ? t.copiedConfirm : t.saveForSafety}
+      </button>
+    </div>
+  )
+}
+
 // CAPSULE_RULES.noFakeTrustSignal: only ever renders real data returned by the API (driver's real
 // displayName + real vehicle fields) -- never fabricates a name or vehicle when the API omits one.
 function driverIdentityLabel(ride: PlatformRideRequest | null, t: { driverNotAssigned: string }): string {
@@ -1566,6 +1693,11 @@ const styles: Record<string, CSSProperties> = {
   grid: { display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' },
   card: { border: '1px solid #1e2a3c', borderRadius: 8, background: '#101722', padding: 16, display: 'grid', gap: 12 },
   driverPhoto: { width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', border: '2px solid #263651' },
+  safetyCard: { display: 'flex', flexDirection: 'column', gap: 10, border: '1px solid #263651', borderRadius: 12, background: '#0b1220', padding: 14 },
+  safetyHeader: { display: 'flex', gap: 12, alignItems: 'center' },
+  safetyMuted: { color: '#9aa6ba', fontSize: 13, lineHeight: 1.4 },
+  plateRow: { display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid #263651', borderRadius: 10, background: '#070b12', padding: '8px 12px' },
+  plateValue: { fontSize: 22, fontWeight: 950, letterSpacing: 3, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: '#fff' },
   verifiedBadge: { display: 'inline-block', width: 'fit-content', borderRadius: 999, background: 'rgba(32,210,155,.14)', border: '1px solid rgba(32,210,155,.4)', color: '#20d29b', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
   cardTitle: { fontSize: 22, margin: 0 },
   mapPreview: { minHeight: 170, border: '1px solid #263651', borderRadius: 8, background: 'linear-gradient(135deg,#0c1220,#122033)', display: 'grid', placeItems: 'center', textAlign: 'center', padding: 18, position: 'relative', overflow: 'hidden' },

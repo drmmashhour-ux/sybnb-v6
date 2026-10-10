@@ -150,7 +150,7 @@ export type PlatformRideRequest = {
     id: string
     displayName: string
     isVerified: boolean
-    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; photoUrl: string | null } | null
+    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; vehicleColor: string | null; vehicleYear: number | null; photoUrl: string | null } | null
     averageRating: number | null
     ratingCount: number
     location: { lat: number; lng: number; updatedAt: string } | null
@@ -2136,7 +2136,7 @@ export type PlatformSharedRide = {
   driver: {
     displayName: string
     isVerified: boolean
-    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; photoUrl: string | null } | null
+    driverProfile: { vehicleMake: string | null; vehicleModel: string | null; vehiclePlate: string | null; vehicleColor: string | null; vehicleYear: number | null; photoUrl: string | null } | null
     location: { lat: number; lng: number; updatedAt: string } | null
   } | null
 }

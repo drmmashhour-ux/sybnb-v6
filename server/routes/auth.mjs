@@ -78,6 +78,10 @@ export async function handleAuth(req, res, url, context) {
     })
   }
 
+// Self-selectable account titles (intent/type) at sign-up. Not roles -- a title never grants
+// access; it tailors the experience and is shown on the profile. DRIVER/SELLER etc. still verify.
+const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'RENTER', 'CAR_OWNER', 'HOST'])
+
   if (url.pathname === '/api/auth/register') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     if (await rateLimited(req, 'register')) return tooManyRequests(res)
@@ -166,6 +170,7 @@ export async function handleAuth(req, res, url, context) {
             phoneHash,
             passwordHash,
             displayName: body.displayName || body.email || 'SYBNB User',
+            title: ALLOWED_SIGNUP_TITLES.has(body.title) ? body.title : undefined,
             roles: { create: { role } },
             wallets: { create: { currency: defaultCurrency() } },
           },

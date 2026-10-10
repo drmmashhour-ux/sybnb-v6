@@ -29,6 +29,17 @@ type Props = {
 
 type Step = 'email' | 'password' | 'finish' | 'reset'
 
+// Self-selected account title/type at sign-up (intent, not a role grant).
+const TITLE_OPTIONS: Array<{ value: string; ar: string; en: string; fr: string }> = [
+  { value: 'CLIENT', ar: 'عميل', en: 'Client', fr: 'Client' },
+  { value: 'DRIVER', ar: 'سائق', en: 'Driver', fr: 'Chauffeur' },
+  { value: 'SELLER', ar: 'بائع', en: 'Seller', fr: 'Vendeur' },
+  { value: 'BUYER', ar: 'مشترٍ', en: 'Buyer', fr: 'Acheteur' },
+  { value: 'RENTER', ar: 'مستأجر', en: 'Renter', fr: 'Locataire' },
+  { value: 'CAR_OWNER', ar: 'مالك سيارة', en: 'Car owner', fr: 'Propriétaire de voiture' },
+  { value: 'HOST', ar: 'مضيف', en: 'Host', fr: 'Hôte' },
+]
+
 const CUSTOMER_GATE_KEY = 'sybnb-v6-customer-account-ready'
 const GUEST_RETURN_PATH_KEY = 'sybnb.v6.guestReturnPath'
 
@@ -63,6 +74,7 @@ const copy = {
     finishBody: (masked: string) => `لا يوجد حساب بهذا البريد بعد. أرسلنا رمزاً من 6 أرقام إلى ${masked}.`,
     firstName: 'الاسم الأول',
     lastName: 'اسم العائلة',
+    titleLabel: 'أنا',
     code: 'رمز التحقق',
     resend: 'إعادة إرسال الرمز',
     resent: 'تم إرسال رمز جديد.',
@@ -108,6 +120,7 @@ const copy = {
     finishBody: (masked: string) => `No account uses this email yet. We sent a 6-digit code to ${masked}.`,
     firstName: 'First name',
     lastName: 'Last name',
+    titleLabel: 'I am a',
     code: 'Verification code',
     resend: 'Resend code',
     resent: 'A new code is on its way.',
@@ -153,6 +166,7 @@ const copy = {
     finishBody: (masked: string) => `Aucun compte n’utilise encore ce courriel. Nous avons envoyé un code à 6 chiffres à ${masked}.`,
     firstName: 'Prénom',
     lastName: 'Nom',
+    titleLabel: 'Je suis',
     code: 'Code de vérification',
     resend: 'Renvoyer le code',
     resent: 'Un nouveau code est en route.',
@@ -182,6 +196,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
   const [remember, setRemember] = useState(() => getKeepSignedIn())
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
+  const [accountTitle, setAccountTitle] = useState('CLIENT')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -367,7 +382,7 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
         say(t.missingCode)
         return
       }
-      await createGuestAccountSession({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), password })
+      await createGuestAccountSession({ firstName: firstName.trim(), lastName: lastName.trim(), email: email.trim(), password, title: accountTitle })
       finishAndReturn()
     } catch (err) {
       const text = errText(err)
@@ -606,6 +621,13 @@ export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPa
                 <input style={styles.input} autoComplete="given-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder={t.firstName} aria-label={t.firstName} />
                 <input style={styles.input} autoComplete="family-name" value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder={t.lastName} aria-label={t.lastName} />
               </div>
+              <select style={styles.input} value={accountTitle} onChange={(event) => setAccountTitle(event.target.value)} aria-label={t.titleLabel}>
+                {TITLE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {t.titleLabel}: {lang === 'ar' ? o.ar : lang === 'fr' ? o.fr : o.en}
+                  </option>
+                ))}
+              </select>
               <div style={styles.passwordWrap}>
                 <input
                   dir="ltr"

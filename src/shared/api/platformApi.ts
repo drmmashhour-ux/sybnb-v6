@@ -622,6 +622,7 @@ export async function createGuestAccountSession(input: {
   email?: string
   phone?: string
   password: string
+  title?: string
 }) {
   // EMAIL is the account identity (email-first). Phone is optional contact only. Fall back to a
   // phone- or time-derived local address only when no email was provided (legacy/edge).
@@ -637,6 +638,7 @@ export async function createGuestAccountSession(input: {
     password: input.password,
     displayName,
     role: 'GUEST',
+    title: input.title,
     phone: input.phone,
   }
 
@@ -3219,6 +3221,7 @@ async function register(body: {
   displayName: string
   role: string
   phone?: string
+  title?: string
 }) {
   return apiRequest<AuthResponse>('/api/auth/register', {
     method: 'POST',

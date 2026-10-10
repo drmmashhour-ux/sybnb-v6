@@ -189,6 +189,10 @@ model User {
   defaultCardPmId   String? @map("default_card_pm_id")
   defaultCardBrand  String? @map("default_card_brand")
   defaultCardLast4  String? @map("default_card_last4")
+  // Self-selected account "title" / type picked at sign-up: CLIENT, DRIVER, SELLER, BUYER, RENTER,
+  // CAR_OWNER, HOST. This is a self-described intent shown on the profile and used to tailor the
+  // experience / route onboarding -- it is NOT a privileged role grant (driver/seller still verify).
+  title             String? @map("title")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 

@@ -4,6 +4,7 @@ import { getCity, getGovernorate, GOVERNORATE_CITY_NAME, governorateCityName, la
 import { addFavourite, createSavedSearch, fetchApprovedListings, fetchFavouriteIds, isSampleListing, removeFavourite, type PlatformListing } from '../../shared/api/platformApi'
 import { FavouriteButton } from '../listings/FavouriteButton'
 import { PropertyMap } from '../../shared/maps/PropertyMap'
+import { MarketInsightsPanel } from './MarketInsightsPanel'
 import { listingDescriptionText, statusText } from '../../shared/i18n/display'
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 import { listingPriceText } from './listingPriceText'
@@ -455,6 +456,14 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             onRetry={() => void runLiveSearch(lastSearch || undefined)}
           />
         )}
+        {hasSearched && lastQuery ? (
+          <MarketInsightsPanel
+            division={lastQuery.division}
+            city={(lastQuery.filters as { city?: string } | undefined)?.city}
+            currency={visibleListings[0]?.currency || 'USD'}
+            lang={lang}
+          />
+        ) : null}
         {visibleListings.length ? (
           viewMode === 'map' ? (
             <PropertyMap listings={visibleListings} lang={lang} />

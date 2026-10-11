@@ -4,7 +4,10 @@ import { pick, text, type Lang } from '../../engines/language/languageEngine'
 import { renterPropertyFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, governorateCityName, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
-import { fetchApprovedListings, getStoredGuestSession, sendListingInquiryMessage, uploadPaymentProofFile, type PlatformListing } from '../../shared/api/platformApi'
+import { addFavourite, createSavedSearch, fetchApprovedListings, fetchFavouriteIds, getStoredGuestSession, removeFavourite, sendListingInquiryMessage, uploadPaymentProofFile, type PlatformListing } from '../../shared/api/platformApi'
+import { FavouriteButton } from '../listings/FavouriteButton'
+import { PropertyMap } from '../../shared/maps/PropertyMap'
+import { MarketInsightsPanel } from '../search/MarketInsightsPanel'
 import { authStorage } from '../../shared/api/authStorage'
 import { listingDescriptionText, listingTitleText, statusText } from '../../shared/i18n/display'
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
@@ -468,6 +471,12 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [lastQuery, setLastQuery] = useState<{ division: string; filters?: Parameters<typeof fetchApprovedListings>[1] } | null>(null)
+  // Centris-parity (2026-10-11): map view, favourites, and save-search brought to Buy/Rent to match
+  // the other property divisions (SearchPreviewPage). Same handlers, same behaviour.
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
+  const [favIds, setFavIds] = useState<Set<string>>(new Set())
+  const [favBusy, setFavBusy] = useState<string | null>(null)
+  const [savedMsg, setSavedMsg] = useState<'idle' | 'saved' | 'error'>('idle')
   const [selectedId, setSelectedId] = useState('')
   const [documents, setDocuments] = useState<UploadedDocument[]>([])
   const [uploadingCount, setUploadingCount] = useState(0)
@@ -535,6 +544,39 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
     () => visibleListings.find((listing) => listing.id === selectedId) || visibleListings[0],
     [visibleListings, selectedId],
   )
+
+  useEffect(() => {
+    fetchFavouriteIds().then((ids) => setFavIds(new Set(ids))).catch(() => {})
+  }, [])
+
+  async function toggleFavourite(listingId: string) {
+    const active = favIds.has(listingId)
+    setFavBusy(listingId)
+    setFavIds((prev) => { const n = new Set(prev); if (active) n.delete(listingId); else n.add(listingId); return n })
+    try {
+      if (active) await removeFavourite(listingId)
+      else await addFavourite(listingId)
+    } catch (err) {
+      setFavIds((prev) => { const n = new Set(prev); if (active) n.add(listingId); else n.delete(listingId); return n })
+      if ((err as { code?: string })?.code === 'GUEST_SESSION_REQUIRED') window.location.hash = '/account'
+    } finally {
+      setFavBusy(null)
+    }
+  }
+
+  async function saveCurrentSearch() {
+    if (!lastQuery) return
+    const f = (lastQuery.filters || {}) as Record<string, unknown>
+    const attrs = (f.attributes && typeof f.attributes === 'object' ? f.attributes : {}) as Record<string, unknown>
+    const flat: Record<string, unknown> = { ...attrs, priceMin: f.priceMin, priceMax: f.priceMax, bedroomsMin: f.bedroomsMin, bathroomsMin: f.bathroomsMin, city: f.city, sort: f.sort, priceBand: f.priceBand }
+    try {
+      await createSavedSearch({ division: lastQuery.division, filters: flat })
+      setSavedMsg('saved')
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'GUEST_SESSION_REQUIRED') { window.location.hash = '/account'; return }
+      setSavedMsg('error')
+    }
+  }
 
   // UX-4B finding 1.3 -- APPLICATION/TRANSACTION state isolation, Rentals <-> Buy.
   //
@@ -937,10 +979,30 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
             <strong role="status" aria-live="polite">
               {t.availableResults}{filtersApplied && status !== 'loading' ? ` (${visibleListings.length}${nextCursor ? '+' : ''})` : ''}
             </strong>
+            {visibleListings.length ? (
+              <div style={{ display: 'inline-flex', border: '1px solid #c9d3e6', borderRadius: 999, overflow: 'hidden', marginInlineStart: 'auto' }}>
+                <button type="button" onClick={() => setViewMode('list')} style={{ padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, background: viewMode === 'list' ? '#0b1b3b' : '#fff', color: viewMode === 'list' ? '#fff' : '#0b1b3b' }}>{pick(lang, 'قائمة', 'List', 'Liste')}</button>
+                <button type="button" onClick={() => setViewMode('map')} style={{ padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, background: viewMode === 'map' ? '#0b1b3b' : '#fff', color: viewMode === 'map' ? '#fff' : '#0b1b3b' }}>{pick(lang, '🗺️ خريطة', '🗺️ Map', '🗺️ Carte')}</button>
+              </div>
+            ) : null}
+            {hasSearched && lastQuery ? (
+              <button type="button" onClick={saveCurrentSearch} style={{ padding: '6px 12px', borderRadius: 999, border: '1px solid #c9d3e6', background: savedMsg === 'saved' ? '#eafaf0' : '#fff', color: savedMsg === 'saved' ? '#1e9e62' : '#0b1b3b', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>
+                {savedMsg === 'saved' ? pick(lang, '✓ تم حفظ البحث', '✓ Search saved', '✓ Recherche sauvegardée') : pick(lang, '☆ احفظ هذا البحث', '☆ Save this search', '☆ Sauvegarder')}
+              </button>
+            ) : null}
           </div>
+          {hasSearched && lastQuery ? (
+            <MarketInsightsPanel division={lastQuery.division} city={(lastQuery.filters as { city?: string } | undefined)?.city} currency={visibleListings[0]?.currency || 'USD'} lang={lang} />
+          ) : null}
+          {viewMode === 'map' && visibleListings.length ? (
+            <PropertyMap listings={visibleListings} lang={lang} />
+          ) : (
           <div style={styles.resultGrid}>
             {visibleListings.length ? visibleListings.map((listing) => (
-              <article key={listing.id} style={selectedListing?.id === listing.id ? styles.resultCardActive : styles.resultCard}>
+              <article key={listing.id} style={{ ...(selectedListing?.id === listing.id ? styles.resultCardActive : styles.resultCard), position: 'relative' }}>
+                <div style={{ position: 'absolute', top: 8, insetInlineEnd: 8, zIndex: 3 }}>
+                  <FavouriteButton active={favIds.has(listing.id)} busy={favBusy === listing.id} onToggle={() => toggleFavourite(listing.id)} lang={lang} />
+                </div>
                 <img src={listingImage(listing, isBuyMode)} alt={listingDisplayTitle(listing, lang)} style={styles.resultImage} />
                 <div style={styles.resultBody}>
                   {listing.status !== 'APPROVED' && (
@@ -969,6 +1031,7 @@ export function RentalsPage({ lang, mode = 'rentals' }: Props) {
               </article>
             )) : status !== 'loading' ? <p style={styles.empty} role="status">{t.empty}</p> : null}
           </div>
+          )}
           {nextCursor && (
             <div style={styles.loadMoreRow}>
               <button style={styles.secondaryButton} onClick={() => void loadMoreListings()} disabled={loadingMore}>

@@ -755,16 +755,28 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               ↗
             </button>
             <div style={styles.media}>
-              <img
-                src={mediaUrls[activeMedia] || listingImage(listing)}
-                alt={title}
-                style={styles.mediaImage}
-                onError={(event) => {
-                  const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
-                  if (event.currentTarget.src.endsWith(fallback)) return
-                  event.currentTarget.src = fallback
-                }}
-              />
+              {mediaCount === 0 ? (
+                // Honesty parity with the search card + seller wizard: a listing with no real
+                // uploaded photo shows "No photos yet" here too, never a generic stock interior
+                // dressed up as the listing's own photo.
+                <div style={styles.noPhotos}>
+                  <span aria-hidden="true" style={{ fontSize: 44, lineHeight: 1 }}>🏠</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '.04em' }}>
+                    {pick(lang, 'لا توجد صور بعد', 'No photos yet', 'Aucune photo pour l’instant')}
+                  </span>
+                </div>
+              ) : (
+                <img
+                  src={mediaUrls[activeMedia]}
+                  alt={title}
+                  style={styles.mediaImage}
+                  onError={(event) => {
+                    const fallback = DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
+                    if (event.currentTarget.src.endsWith(fallback)) return
+                    event.currentTarget.src = fallback
+                  }}
+                />
+              )}
               {mediaCount > 1 && (
                 <>
                   {/* Gallery arrows only move between photos -- they never start the booking/sign-in flow. */}
@@ -1209,12 +1221,6 @@ function toISODate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-function listingImage(listing: PlatformListing) {
-  // Prefer the listing's real uploaded photo for every division; generic image is only a fallback.
-  const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
-  if (typeof mediaUrl === 'string') return mediaUrl
-  return DIVISION_IMAGES[listing.division] || '/assets/divisions/daily-rental.webp'
-}
 
 function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir?: 'ltr' | 'rtl' }) {
   return (
@@ -1521,6 +1527,7 @@ const styles: Record<string, CSSProperties> = {
   heroIconButton: { position: 'absolute', top: 18, insetInlineStart: 18, zIndex: 2, width: 52, height: 52, border: 0, borderRadius: 999, background: 'rgba(0,0,0,.42)', color: '#fff', fontSize: 28, fontWeight: 900, display: 'grid', placeItems: 'center', backdropFilter: 'blur(10px)' },
   media: { minHeight: 330, background: '#0b1120', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 950, textTransform: 'uppercase', position: 'relative', overflow: 'hidden' },
   mediaImage: { width: '100%', height: '100%', minHeight: 330, objectFit: 'cover', display: 'block' },
+  noPhotos: { width: '100%', minHeight: 330, display: 'grid', placeItems: 'center', gap: 10, color: 'rgba(148,163,184,0.85)', background: '#0b1120' },
   thumbStrip: { position: 'absolute', left: 0, right: 0, bottom: 8, display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', padding: '0 8px' },
   thumb: { width: 56, height: 42, borderRadius: 8, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.5)', padding: 0, cursor: 'pointer', background: 'transparent' },
   thumbActive: { width: 56, height: 42, borderRadius: 8, overflow: 'hidden', border: '2px solid #6f86ff', padding: 0, cursor: 'pointer', background: 'transparent' },

@@ -30,6 +30,9 @@ const copy = {
     report: 'بلاغ',
     rider: 'راكب',
     driver: 'سائق',
+    system: 'النظام',
+    revenueFlag: 'علَم إيرادات',
+    safetyAnomaly: 'شذوذ أمان',
     ride: 'الرحلة',
     reporter: 'المُبلِّغ',
     note: 'ملاحظة',
@@ -60,6 +63,9 @@ const copy = {
     report: 'Report',
     rider: 'Rider',
     driver: 'Driver',
+    system: 'System',
+    revenueFlag: 'Revenue flag',
+    safetyAnomaly: 'Safety anomaly',
     ride: 'Ride',
     reporter: 'Reporter',
     note: 'Note',
@@ -90,6 +96,9 @@ const copy = {
     report: 'Signalement',
     rider: 'Passager',
     driver: 'Chauffeur',
+    system: 'Système',
+    revenueFlag: 'Alerte revenus',
+    safetyAnomaly: 'Anomalie de sécurité',
     ride: 'Course',
     reporter: 'Déclarant',
     note: 'Note',
@@ -218,19 +227,27 @@ export function AdminIncidentsPage({ lang }: Props) {
       <div style={styles.grid}>
         {incidents.map((incident) => {
           const badge = statusBadge(incident.status)
-          const role = incident.reporterRole === 'DRIVER' ? t.driver : t.rider
+          const role = incident.reporterRole === 'SYSTEM' ? t.system : incident.reporterRole === 'DRIVER' ? t.driver : t.rider
+          const revenueFlag = incident.meta && typeof incident.meta.revenueFlag === 'string' ? incident.meta.revenueFlag : null
+          const anomaly = incident.meta && typeof incident.meta.anomaly === 'string' ? incident.meta.anomaly : null
+          const flagReason = incident.meta && typeof incident.meta.reason === 'string' ? incident.meta.reason : null
           return (
             <article key={incident.id} style={styles.card}>
               <div style={styles.cardHead}>
                 <span style={incident.type === 'SOS' ? styles.sosTag : styles.reportTag}>
                   {incident.type === 'SOS' ? `⚠ ${t.sos}` : t.report}
                 </span>
+                {revenueFlag && <span style={styles.revenueTag}>💰 {t.revenueFlag}</span>}
+                {anomaly && <span style={styles.anomalyTag}>⚙ {t.safetyAnomaly}</span>}
                 <span style={badge.style}>{badge.label}</span>
               </div>
               <span>
                 {t.reporter}: {role}
                 {typeof incident.meta?.reporterDisplayName === 'string' ? ` — ${incident.meta.reporterDisplayName}` : ''}
               </span>
+              {(revenueFlag || anomaly) && (
+                <span style={styles.flagReason}>{flagReason || revenueFlag || anomaly}</span>
+              )}
               <span dir="ltr" style={styles.dim}>{fmt(incident.createdAt)}</span>
               {incident.note && (
                 <span>
@@ -510,6 +527,9 @@ const styles: Record<string, CSSProperties> = {
   input: { minHeight: 44, border: '1px solid #263651', borderRadius: 8, background: '#070b12', color: '#fff', padding: '0 10px', fontFamily: 'inherit' },
   sosTag: { color: '#ff8aa0', fontWeight: 950 },
   reportTag: { color: '#ffd27a', fontWeight: 900 },
+  revenueTag: { borderRadius: 999, background: 'rgba(255,170,64,.16)', border: '1px solid rgba(255,170,64,.45)', color: '#ffbf5a', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
+  anomalyTag: { borderRadius: 999, background: 'rgba(150,130,255,.16)', border: '1px solid rgba(150,130,255,.45)', color: '#b3a6ff', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
+  flagReason: { color: '#ffbf5a', fontSize: 13 },
   badgeOpen: { borderRadius: 999, background: 'rgba(255,96,96,.14)', border: '1px solid rgba(255,96,96,.4)', color: '#ff8aa0', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
   badgeAck: { borderRadius: 999, background: 'rgba(255,210,122,.14)', border: '1px solid rgba(255,210,122,.4)', color: '#ffd27a', fontWeight: 900, fontSize: 12, padding: '4px 10px' },
   badgeResolved: { borderRadius: 999, background: 'rgba(32,210,155,.14)', border: '1px solid rgba(32,210,155,.4)', color: '#20d29b', fontWeight: 900, fontSize: 12, padding: '4px 10px' },

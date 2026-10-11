@@ -238,6 +238,7 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
         { key: 'saved', label: pick(lang, 'المحفوظات', 'Saved', 'Sauvegardés'), onSelect: () => go('/saved') },
         { key: 'visits', label: pick(lang, 'الزيارات', 'Visits', 'Visites'), onSelect: () => go('/visits') },
         { key: 'agents', label: pick(lang, 'الوسطاء الموثّقون', 'Verified agents', 'Agents vérifiés'), onSelect: () => go('/agents') },
+        { key: 'guides', label: pick(lang, 'أدلة إرشادية', 'Guides', 'Guides'), onSelect: () => go('/guides') },
         { key: 'sep1', separator: true },
         inHostArea
           ? { key: 'host', label: pick(lang, 'التبديل إلى السفر', 'Switch to traveling', 'Passer en mode voyage'), onSelect: () => go('/stays') }
@@ -268,6 +269,7 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
         { key: 'login', label: pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription'), onSelect: () => go('/account/open'), strong: true },
         { key: 'sep1', separator: true },
         { key: 'agents', label: pick(lang, 'الوسطاء الموثّقون', 'Verified agents', 'Agents vérifiés'), onSelect: () => go('/agents') },
+        { key: 'guides', label: pick(lang, 'أدلة إرشادية', 'Guides', 'Guides'), onSelect: () => go('/guides') },
         { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/join') },
       ]
 

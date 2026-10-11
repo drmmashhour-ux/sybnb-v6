@@ -28,6 +28,7 @@ import { AuctionPanel } from './AuctionPanel'
 import { FavouriteButton } from './FavouriteButton'
 import { AffordabilityCalculator } from './AffordabilityCalculator'
 import { ScheduleVisitPanel } from './ScheduleVisitPanel'
+import { NearbyTags } from './NearbyTags'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey, type GoogleMapTarget } from '../../shared/maps/googleMapCapsule'
 import { cancellationRuleText, freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { localeForLang } from '../../shared/country/presentation'
@@ -839,6 +840,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
             <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
             <ListingSpecs division={listing.division} metadata={listing.metadata} lang={lang} />
+            <NearbyTags metadata={listing.metadata} lang={lang} />
             {(listing.division === 'BUY' || listing.division === 'NEW_CONSTRUCTION') && (
               <AffordabilityCalculator priceMinor={listing.priceMinor} currency={listing.currency} lang={lang} />
             )}

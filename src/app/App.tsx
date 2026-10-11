@@ -42,6 +42,7 @@ const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDet
 const SavedPage = lazyNamed(() => import('../modules/listings/SavedPage'), 'SavedPage')
 const VisitsPage = lazyNamed(() => import('../modules/listings/VisitsPage'), 'VisitsPage')
 const AgentsPage = lazyNamed(() => import('../modules/listings/AgentsPage'), 'AgentsPage')
+const GuidesPage = lazyNamed(() => import('../modules/listings/GuidesPage'), 'GuidesPage')
 const OperationsCalendarPage = lazyNamed(() => import('../modules/operations/OperationsCalendarPage'), 'OperationsCalendarPage')
 const PaymentReceiptPage = lazyNamed(() => import('../modules/payments/PaymentReceiptPage'), 'PaymentReceiptPage')
 const PlatformStatusPage = lazyNamed(() => import('../modules/status/PlatformStatusPage'), 'PlatformStatusPage')
@@ -215,6 +216,8 @@ export function App() {
           <DashboardPage lang={lang} />
         ) : path === '/host/profile' ? (
           <HostProfilePage lang={lang} />
+        ) : path === '/guides' ? (
+          <GuidesPage lang={lang} />
         ) : path === '/agents' ? (
           <AgentsPage lang={lang} />
         ) : agentProfileMatch ? (

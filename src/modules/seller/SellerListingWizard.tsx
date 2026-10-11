@@ -8,6 +8,7 @@ import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGr
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
+import { PROXIMITY_TAGS, PROXIMITY_DIVISIONS } from '../../shared/listing/proximityTags'
 
 type Props = {
   lang: Lang
@@ -189,6 +190,7 @@ export function SellerListingWizard({ lang }: Props) {
   const [auctionDurationDays, setAuctionDurationDays] = useState('7')
   const [auctionDepositMode, setAuctionDepositMode] = useState<'NONE' | 'REQUIRED'>('NONE')
   const [auctionDeposit, setAuctionDeposit] = useState('')
+  const [proximity, setProximity] = useState<string[]>([])
   const [adPlacement, setAdPlacement] = useState(pick(lang, 'الرئيسية', 'Landing page', 'Page d’accueil'))
   const [adDuration, setAdDuration] = useState(pick(lang, 'أسبوع واحد', 'One week', 'Une semaine'))
   // Real per-slot banner/logo uploads (slot id -> uploaded file). Replaces a prior version of this
@@ -412,6 +414,7 @@ export function SellerListingWizard({ lang }: Props) {
             bathrooms: toNumber(bathrooms),
             visualFilters,
             saleMode: division === 'CARS' ? saleMode : undefined,
+            proximity: PROXIMITY_DIVISIONS.has(division) ? proximity : undefined,
           },
         })
         if (division === 'CARS' && saleMode === 'AUCTION') {
@@ -766,6 +769,28 @@ export function SellerListingWizard({ lang }: Props) {
                       )}
                     </>
                   )}
+                </div>
+              )}
+              {PROXIMITY_DIVISIONS.has(division) && (
+                <div className="seller-wide-field" style={{ display: 'grid', gap: 10 }}>
+                  <strong>{pick(lang, 'ما حول العقار (اختياري)', 'What’s nearby (optional)', 'À proximité (optionnel)')}</strong>
+                  <small style={{ color: '#64748b' }}>{pick(lang, 'اختر ما يوجد قرب العقار لمساعدة الباحثين.', 'Pick what’s near the property to help searchers.', 'Sélectionnez ce qui se trouve à proximité.')}</small>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {PROXIMITY_TAGS.map((t) => {
+                      const on = proximity.includes(t.key)
+                      return (
+                        <button
+                          type="button"
+                          key={t.key}
+                          onClick={() => setProximity((cur) => (on ? cur.filter((k) => k !== t.key) : [...cur, t.key]))}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 999, cursor: 'pointer', fontSize: 13, border: on ? '2px solid #0b1b3b' : '1px solid #c9d3e6', background: on ? '#0b1b3b' : '#fff', color: on ? '#fff' : '#0b1b3b', fontWeight: 600 }}
+                        >
+                          <span aria-hidden="true">{t.icon}</span>
+                          <span>{pick(lang, t.ar, t.en, t.fr)}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
               {division === 'STAYS' && (

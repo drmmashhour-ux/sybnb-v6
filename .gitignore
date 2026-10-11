@@ -12,3 +12,4 @@ server/uploads/
 
 # local editor backups (auto-created during edits)
 *.bak
+android/.idea/

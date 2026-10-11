@@ -66,3 +66,10 @@ deploy the backend (CORS) and, once iOS pods install, to wire native GPS + push.
 - Disk cleanup in progress: Archive (4.1G) and sybnb-extra (3.5G) copied and verified on Danny SSD at Mac_Offload_2026-10-11/ (127,386 and 17,809 files); originals to be removed by the user. Also clearing Cursor caches, com.docker.install (2.1G), brew + ~/Library caches.
 - Unexplained: home folder is ~51G of 228G used; ~175G is outside ~ (check /Applications, /Library, /private/var, Docker).
 - Resume: free >=10 GB (>=25 GB for Xcode), then Device Manager -> Add device -> Pixel 8, API 36 (stable) -> Run app.
+
+## Update 2026-10-11 (late) - Android emulator smoke test PASSED
+- Pixel 8 / API 36 (Google Play ARM64) emulator created after disk cleanup (20 GB free). App installed and launched from Android Studio.
+- Verified in emulator: Arabic home renders RTL; FR/EN/AR switcher; native city picker; Search (Damascus) returned 2 live stays + market insights (avg 310,000 SYP) from https://sybnb-backend.onrender.com -> native CORS origins work.
+- Not yet tested on device: native GPS (Geolocation plugin wiring pending), push (needs FCM google-services.json), SR ride flow, login/OTP.
+- NEXT (user action, needs a password I must not handle): Build > Generate Signed Bundle > Android App Bundle; create keystore OUTSIDE git, back it up; then Play Console closed test (12+ testers, 14 days).
+- Housekeeping: android/.idea is untracked - add `android/.idea/` to .gitignore.

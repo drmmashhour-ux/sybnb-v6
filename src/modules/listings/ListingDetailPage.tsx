@@ -1390,6 +1390,7 @@ function syncListingReturnPath(division: string) {
     const storedDivisionPath = Object.values(DIVISION_PATHS).find((path) => stored === path || stored.startsWith(`${path}?`) || stored.startsWith(`${path}/`))
     if (!stored || (storedDivisionPath && storedDivisionPath !== target)) {
       sessionStorage.setItem('sybnb-v6-listing-return-path', target)
+      window.dispatchEvent(new Event('sybnb:listing-return-path'))
     }
   } catch {
     // storage unavailable: breadcrumb falls back to its default

@@ -39,6 +39,15 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
   const isDriver = Boolean(guestSession?.user.roles?.includes('DRIVER'))
   // /host/why (public landing) and /host/join (host entrance) are not the host area.
   const inHostArea = path.startsWith('/host') && path !== '/host/why' && path !== '/host/join'
+  // A directly-opened (or cross-division) /listing/:id first renders the breadcrumb from the
+  // stale stored return path; once the listing loads, ListingDetailPage rewrites that path to the
+  // listing's own division and fires this event so the breadcrumb re-reads it and matches the page.
+  const [, bumpBreadcrumb] = useState(0)
+  useEffect(() => {
+    function onReturnPathChange() { bumpBreadcrumb((n) => n + 1) }
+    window.addEventListener('sybnb:listing-return-path', onReturnPathChange)
+    return () => window.removeEventListener('sybnb:listing-return-path', onReturnPathChange)
+  }, [])
 
   function goBack() {
     navigate(routeContext.backPath)

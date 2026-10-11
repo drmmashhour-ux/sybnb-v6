@@ -159,11 +159,11 @@ function BookingProtectionHub({ lang, bookingId }: { lang: Lang; bookingId: stri
       <h2 className="trust-section-title">{isAr ? 'ما الذي تتم حمايته؟' : 'What is protected?'}</h2>
       <section className="protection-list">
         {(isAr
-          ? ['مبلغ الدفع محفوظ', 'الإلغاء من المضيف محمي', 'اختلاف الوصف محمي', 'دعم النزاع المتاح']
-          : ['Payment amount is held', 'Host cancellation protected', 'Misrepresentation protected', 'Dispute support available']
+          ? ['يُحتجز المبلغ بانتظار التسوية', 'تُطبَّق سياسة إلغاء المضيف', 'تُراجَع بلاغات اختلاف الوصف', 'مراجعة النزاعات متاحة']
+          : ['Payment held pending settlement', 'Host-cancellation policy applies', 'Misrepresentation reports reviewed', 'Dispute review available']
         ).map((label, index) => <article key={label}><b>{index === 3 ? '✓' : '✓'}</b><span>{label}</span></article>)}
       </section>
-      <span className="protection-badge">{isAr ? 'حماية SYBNB الكاملة' : 'Full SYBNB protection'}</span>
+      <span className="protection-badge">{isAr ? 'حماية الحجز عبر SYBNB' : 'SYBNB booking protection'}</span>
       <button className="trust-primary" onClick={() => (window.location.hash = `/booking/guarantee/${bookingId}`)}>{isAr ? 'عرض تفاصيل الحماية' : 'View protection details'}</button>
     </main>
   )
@@ -216,7 +216,7 @@ function PaymentProofStatus({ lang, bookingId }: { lang: Lang; bookingId: string
         ))}
       </section>
       <section className="safe-money-card">
-        <strong>♢ {isAr ? 'مبلغك محمي' : 'Your money is protected'}</strong>
+        <strong>♢ {isAr ? 'ادفع عبر قنوات SYBNB المعتمدة فقط' : 'Pay only through SYBNB-approved channels'}</strong>
         <p>{isAr ? 'لن يتحول للمضيف حتى تأكيد الحجز. أموالك في أمان تام خلال فترة المراجعة.' : 'Funds are not released to the host until booking confirmation.'}</p>
       </section>
       <p className="trust-muted">◷ {isAr ? 'مراجعة الدفع تستغرق 1-2 ساعة عمل' : 'Payment review takes 1-2 business hours'}</p>

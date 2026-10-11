@@ -509,6 +509,38 @@ function getRouteContext(path: string, lang: Lang) {
       nextPath: '/dashboard',
     }
   }
+  if (path === '/saved') {
+    return {
+      section: pick(lang, 'حساب العميل', 'Guest account', 'Compte voyageur'),
+      page: pick(lang, 'المحفوظات', 'Saved', 'Favoris'),
+      backPath: home,
+      nextPath: '',
+    }
+  }
+  if (path === '/visits') {
+    return {
+      section: pick(lang, 'حساب العميل', 'Guest account', 'Compte voyageur'),
+      page: pick(lang, 'الزيارات', 'Visits', 'Visites'),
+      backPath: home,
+      nextPath: '',
+    }
+  }
+  if (path === '/profile') {
+    return {
+      section: pick(lang, 'حساب العميل', 'Guest account', 'Compte voyageur'),
+      page: pick(lang, 'ملفي', 'My profile', 'Mon profil'),
+      backPath: home,
+      nextPath: '',
+    }
+  }
+  if (path === '/guides') {
+    return {
+      section: pick(lang, 'أدلة', 'Guides', 'Guides'),
+      page: pick(lang, 'أدلة SYBNB', 'SYBNB guides', 'Guides SYBNB'),
+      backPath: home,
+      nextPath: '',
+    }
+  }
   if (path.startsWith('/host')) {
     if (path === '/host/why') {
       return {

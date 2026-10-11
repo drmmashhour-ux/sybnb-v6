@@ -411,6 +411,14 @@ function getRouteContext(path: string, lang: Lang) {
       nextPath: '',
     }
   }
+  if (path.startsWith('/buy')) {
+    return {
+      section: pick(lang, 'شراء عقار', 'Buy property', 'Acheter un bien'),
+      page: pick(lang, 'بحث العقارات للبيع', 'Properties for sale', 'Biens à vendre'),
+      backPath: home,
+      nextPath: '',
+    }
+  }
   if (path.startsWith('/cars')) {
     return {
       section: pick(lang, 'المركبات', 'Cars', 'Véhicules'),

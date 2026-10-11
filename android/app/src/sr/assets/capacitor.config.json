@@ -1,0 +1,16 @@
+{
+	"appId": "app.sybnb.sr",
+	"appName": "SYBNB Rides",
+	"webDir": "dist",
+	"appendUserAgent": "SYBNBMode/sr",
+	"plugins": {
+		"SplashScreen": {
+			"launchShowDuration": 1200,
+			"backgroundColor": "#07090f",
+			"showSpinner": false
+		},
+		"PushNotifications": {
+			"presentationOptions": ["badge", "sound", "alert"]
+		}
+	}
+}

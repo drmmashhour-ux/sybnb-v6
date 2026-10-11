@@ -16,6 +16,20 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    flavorDimensions "app"
+    productFlavors {
+        full {
+            dimension "app"
+        }
+        sr {
+            dimension "app"
+            applicationId "app.sybnb.sr"
+        }
+        str {
+            dimension "app"
+            applicationId "app.sybnb.str"
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false

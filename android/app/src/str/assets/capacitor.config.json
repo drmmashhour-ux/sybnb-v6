@@ -1,0 +1,16 @@
+{
+	"appId": "app.sybnb.str",
+	"appName": "SYBNB Stays",
+	"webDir": "dist",
+	"appendUserAgent": "SYBNBMode/str",
+	"plugins": {
+		"SplashScreen": {
+			"launchShowDuration": 1200,
+			"backgroundColor": "#07090f",
+			"showSpinner": false
+		},
+		"PushNotifications": {
+			"presentationOptions": ["badge", "sound", "alert"]
+		}
+	}
+}

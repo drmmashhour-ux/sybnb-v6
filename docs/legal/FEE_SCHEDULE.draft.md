@@ -22,7 +22,7 @@ SYBNB charges nothing.
 
 | Division | Intended fee | Basis |
 |----------|--------------|-------|
-| Daily Stays | **10%** | commission on the booking amount |
+| Daily Stays | **15%** (owner confirmed 2026-10-11; supersedes 10%) | commission on the booking amount |
 | Long-Term Rentals | **50% of one month's rent** | one-time placement fee |
 | Real-estate — Buyer | **Free** | — |
 | Real-estate — Seller | **1%** | of the sale amount |

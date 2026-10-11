@@ -5,7 +5,7 @@ import { currentAccountIsHost, getStoredGuestSession } from '../../shared/api/pl
 
 // "Why host on SYBNB" — public host landing page (/host/why), open to signed-out visitors.
 // Everything here describes what the code actually does today:
-//  - Stays (STR) commission: STR_ADMIN_COMMISSION_RATE = 0.12 in server/lib/finance-ledger.mjs,
+//  - Stays (STR) commission: STR_COMMISSION_RATE = 0.15 in server/lib/booking-policy.mjs (owner confirmed 15%),
 //    deducted from the host payout. Other divisions charge 0% per-booking commission and
 //    monetize via the seller-plan fee instead (same file). Platform sale: 5% on close
 //    (SellerEntryPage). If those values change, update this copy too.
@@ -18,7 +18,7 @@ import { currentAccountIsHost, getStoredGuestSession } from '../../shared/api/pl
 
 type Props = { lang: Lang }
 
-const STR_COMMISSION_PERCENT = 12
+const STR_COMMISSION_PERCENT = 15
 const PLATFORM_SALE_COMMISSION_PERCENT = 5
 
 type Copy = {

@@ -271,7 +271,7 @@ Answer these in Play Console. Items marked **DECIDE** need the owner; do not gue
 | Form | Answer |
 |---|---|
 | App access | **Restricted** (login required). Give reviewers a demo rider account (email + password or OTP bypass). Do not use real people's credentials. |
-| Ads | **DECIDE.** The app shows first-party sponsored banners bought through "Reserve ad space" (admin-approved). No third-party ad SDK. Play counts that as "contains ads" = **Yes** (safest). |
+| Ads | **DECIDED 2026-10-11: Yes, contains ads.** The app shows first-party sponsored banners bought through "Reserve ad space" (admin-approved). No third-party ad SDK. Play counts that as "contains ads" = **Yes** (safest). |
 | Target audience | **18+** (rides, payments, marketplace). Not designed for children. |
 | Content rating (IARC) | Category: Social / Utility. Answer **user-generated content: Yes** (listings, reviews, chat) with reporting + moderation. No violence, sexual content, gambling. |
 | News app | No |
@@ -296,7 +296,7 @@ For every item: **collected = Yes, required for core function, encrypted in tran
 | Device or other IDs | Push token (once push is enabled) | Notifications |
 
 **Sharing:** with the other party of a trip or booking, with service providers (hosting, maps, email, payment processing), and with authorities where legally required. State this plainly.
-**DECIDE before ticking "Audio":** if `SR_AUDIO_RECORDING_ENABLED` is turned on for rides, add **Audio** (voice or sound recordings) and update the privacy policy first. Keep it OFF for the closed test unless the legal text is ready.
+**DECIDED 2026-10-11: audio recording stays OFF for the closed test (code default is off; privacy policy has no audio text). Do not tick "Audio".** If `SR_AUDIO_RECORDING_ENABLED` is turned on for rides, add **Audio** (voice or sound recordings) and update the privacy policy first. Keep it OFF for the closed test unless the legal text is ready.
 
 ### Permissions to justify
 - **Location (foreground):** pickup point, nearby search, trip tracking while the app is open.

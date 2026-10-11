@@ -58,3 +58,11 @@ deploy the backend (CORS) and, once iOS pods install, to wire native GPS + push.
 - Mobile fixes committed: f55ddf4 (Buy/Rent overflow), beb6810 (neutral protection copy + docs/HANDOFF_GAP_REPORT.md).
 - Android remaining: emulator smoke test -> signed AAB (keystore outside git) -> Play Console closed test (>=12 testers, 14 days).
 - Security note: never paste passwords into the terminal or chat; rotate any that were.
+
+## Update 2026-10-11 (night) - Android Studio set up, disk full
+- Android SDK installed (default location ~/Library/Android/sdk; platform 37.0, build-tools 36, platform-tools, emulator) and licenses accepted by the user.
+- Gradle sync of android/ succeeded (BUILD SUCCESSFUL). Fix needed: use "Apply compatible Gradle JDK configuration" (Gradle 8.11.1 is incompatible with JDK 25). AGP/Kotlin upgrade prompts deliberately ignored.
+- Emulator NOT created: Pixel 8 / API 36 Google Play ARM64 image (1.8 GB) failed with "No space left on device". Mac internal disk was 228G/229G used (394 MB free).
+- Disk cleanup in progress: Archive (4.1G) and sybnb-extra (3.5G) copied and verified on Danny SSD at Mac_Offload_2026-10-11/ (127,386 and 17,809 files); originals to be removed by the user. Also clearing Cursor caches, com.docker.install (2.1G), brew + ~/Library caches.
+- Unexplained: home folder is ~51G of 228G used; ~175G is outside ~ (check /Applications, /Library, /private/var, Docker).
+- Resume: free >=10 GB (>=25 GB for Xcode), then Device Manager -> Add device -> Pixel 8, API 36 (stable) -> Run app.

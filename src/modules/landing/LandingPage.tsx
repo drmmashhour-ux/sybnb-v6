@@ -135,7 +135,10 @@ const ABOUT_COPY = {
 export function LandingPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const about = ABOUT_COPY[lang]
-  const movieSrc = isAr ? '/assets/videos/str-promo-ar.mp4' : '/assets/videos/str-promo-en.mp4'
+  // Native app builds strip the ~110 MB of promo video from the bundle and stream it from the website
+  // instead (VITE_MEDIA_BASE_URL, e.g. https://sybnb.app). Unset on the web = same-origin path, unchanged.
+  const mediaBase = String(import.meta.env.VITE_MEDIA_BASE_URL || '').replace(/\/$/, '')
+  const movieSrc = `${mediaBase}${isAr ? '/assets/videos/str-promo-ar.mp4' : '/assets/videos/str-promo-en.mp4'}`
   const [moviePlaying, setMoviePlaying] = useState(false)
   const activeCount = DIVISIONS.filter((division) => division.status === 'active').length
   const showAbout = () => document.getElementById('platform-about')?.scrollIntoView({ behavior: 'smooth', block: 'start' })

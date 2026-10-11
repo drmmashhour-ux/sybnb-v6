@@ -760,7 +760,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                 // uploaded photo shows "No photos yet" here too, never a generic stock interior
                 // dressed up as the listing's own photo.
                 <div style={styles.noPhotos}>
-                  <span aria-hidden="true" style={{ fontSize: 44, lineHeight: 1 }}>🏠</span>
+                  <span aria-hidden="true" style={{ fontSize: 44, lineHeight: 1 }}>{divisionPlaceholderEmoji(listing.division)}</span>
                   <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '.04em' }}>
                     {pick(lang, 'لا توجد صور بعد', 'No photos yet', 'Aucune photo pour l’instant')}
                   </span>
@@ -1229,6 +1229,15 @@ function Info({ label, value, dir = 'ltr' }: { label: string; value: string; dir
       <strong dir={dir}>{value}</strong>
     </article>
   )
+}
+
+function divisionPlaceholderEmoji(division: string): string {
+  switch (division) {
+    case 'CARS': return '🚗'
+    case 'MARKETPLACE': return '🛍️'
+    case 'NEW_CONSTRUCTION': return '🏗️'
+    default: return '🏠'
+  }
 }
 
 function actionForDivision(division: string, lang: Lang) {

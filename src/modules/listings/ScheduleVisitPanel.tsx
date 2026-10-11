@@ -29,6 +29,7 @@ function visitSubjectNoun(division: string, lang: Lang): string {
   switch (division) {
     case 'CARS': return pick(lang, 'المركبة', 'the vehicle', 'le véhicule')
     case 'MARKETPLACE': return pick(lang, 'الغرض', 'the item', 'l’article')
+    case 'NEW_CONSTRUCTION': return pick(lang, 'المشروع', 'the project', 'le projet')
     default: return pick(lang, 'العقار', 'the property', 'le bien')
   }
 }

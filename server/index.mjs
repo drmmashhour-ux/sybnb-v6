@@ -93,10 +93,18 @@ const DEFAULT_CORS_ORIGIN = [
   'http://127.0.0.1:5180',
   'http://localhost:5180',
 ].join(',')
-const CORS_ORIGINS = (process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean)
+// The native mobile shell's origin is NOT the web domain: Capacitor serves the app from
+// capacitor://localhost (iOS) / https://localhost (Android). These must always be allowed so the
+// iOS/Android apps can call the API, regardless of how CORS_ORIGIN is configured — appended here
+// (not via the env var) so setting CORS_ORIGIN can never accidentally drop them or the web origins.
+const NATIVE_APP_ORIGINS = ['capacitor://localhost', 'https://localhost']
+const CORS_ORIGINS = Array.from(new Set([
+  ...(process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN)
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+  ...NATIVE_APP_ORIGINS,
+]))
 // Routes that must stay reachable even while gates.publicAccess is closed -- see the check below.
 const PUBLIC_ACCESS_EXEMPT_PREFIXES = ['/api/auth', '/api/otp', '/api/webhooks', '/api/legal']
 // A security audit found the payment webhook intake routes live under /api/payments/, not

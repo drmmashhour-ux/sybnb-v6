@@ -5,6 +5,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { publicListingVisibilityWhere } from '../lib/host-verification.mjs'
 
 const PRO_TYPES = ['broker', 'agency', 'developer']
 
@@ -65,7 +66,7 @@ export async function handleAgents(req, res, url, context) {
     const ownerIds = sellers.map((s) => s.user.id)
     let countMap = new Map()
     if (ownerIds.length) {
-      const counts = await db().listing.groupBy({ by: ['ownerId'], where: { ownerId: { in: ownerIds }, status: 'APPROVED' }, _count: { _all: true } })
+      const counts = await db().listing.groupBy({ by: ['ownerId'], where: { ownerId: { in: ownerIds }, status: 'APPROVED', ...publicListingVisibilityWhere() }, _count: { _all: true } })
       countMap = new Map(counts.map((c) => [c.ownerId, c._count._all]))
     }
     const agents = sellers
@@ -85,7 +86,9 @@ export async function handleAgents(req, res, url, context) {
     })
     if (!sp) return json(res, 200, { ok: true, agent: null, listings: [] })
     const listings = await db().listing.findMany({
-      where: { ownerId: userId, status: 'APPROVED' },
+      // Host-visibility parity: a gated-division (STAYS) listing from a non-verified owner stays hidden
+      // on the public agent profile too, matching comparables/reviews/market/search.
+      where: { ownerId: userId, status: 'APPROVED', ...publicListingVisibilityWhere() },
       include: { media: { orderBy: { sortOrder: 'asc' }, take: 1 }, location: true },
       orderBy: { approvedAt: 'desc' },
       take: 60,

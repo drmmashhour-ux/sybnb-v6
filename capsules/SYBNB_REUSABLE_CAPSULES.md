@@ -14,6 +14,7 @@ This folder records the shared capsule system used across STR, rentals, seller, 
 - Case Status Capsule: dispute/complaint status shown only from a real fetched status field; steps and copy are derived from the status enum, never hardcoded as complete.
 - Trust Signal Rule: the Filter Capsule and any badge/checkbox implying vetting (verified, checked, approved) must be backed by a real backend field. No matching field means the option is removed, not shown decoratively or pre-checked.
 - Revenue Guard Capsule: every commission-earning division runs an automated revenue-assurance sweep (`server/lib/revenue-guard.mjs`, doc `REVENUE_GUARD_CAPSULE.md`). It catches money leaving the platform — a transaction that reached fulfilment then was cancelled (off-platform cash completion), a provider+consumer pair cancelling repeatedly with zero completions (collusion), and high-cancel providers — and raises an admin incident/notification, never an automated penalty.
+- SYBNB Guard Capsule: an unattended maintenance & early-warning monitor (recurring scheduled task, doc `SYBNB_GUARD_CAPSULE.md`). Reads backend + DB health every few hours, surfaces SOS/revenue-guard/anomaly/dispute/stuck-state issues, and drafts fixes/replies — strictly read-only and advisory, never acting on its own. Pairs with the Revenue Guard (it's how a human learns what the Revenue Guard flagged).
 
 ## Hard Rule
 

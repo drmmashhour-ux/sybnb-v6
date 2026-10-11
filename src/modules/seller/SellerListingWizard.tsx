@@ -831,7 +831,7 @@ export function SellerListingWizard({ lang }: Props) {
               )}
               {division === 'STAYS' && (
                 <div className="seller-wide-field seller-money-note">
-                  {pick(lang, 'تخصم SYBNB عمولة خدمة 12% من إجمالي قيمة الحجز (عدا رسوم الحماية) من مستحقاتك عند كل حجز مكتمل.', 'SYBNB deducts a 12% service commission of the total booking amount (excluding the protection fee) from your payout on every completed booking.', 'SYBNB déduit de votre versement une commission de service de 12 % du montant total de la réservation (hors frais de protection) pour chaque réservation terminée.')}
+                  {pick(lang, 'تخصم SYBNB عمولة خدمة 15% من إجمالي قيمة الحجز (عدا رسوم الحماية) من مستحقاتك عند كل حجز مكتمل.', 'SYBNB deducts a 15% service commission of the total booking amount (excluding the protection fee) from your payout on every completed booking.', 'SYBNB déduit de votre versement une commission de service de 15 % du montant total de la réservation (hors frais de protection) pour chaque réservation terminée.')}
                 </div>
               )}
               <div className="seller-wide-field">

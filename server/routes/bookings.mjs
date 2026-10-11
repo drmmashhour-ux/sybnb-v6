@@ -8,6 +8,7 @@ import {
   readListingFees,
 } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { getOrCreateBookingInvoice, renderInvoiceHtml } from '../lib/invoices.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { bookingPolicySettings } from '../lib/country.mjs'
 import {
@@ -401,6 +402,24 @@ export async function handleBookings(req, res, url, context) {
     })
 
     return json(res, 200, { ok: true, booking })
+  }
+
+  // SYBNB-generated STR invoice for a booking (STR-000123). JSON, or `.html` for the branded,
+  // print-ready document. Lazily minted on first request after the booking is paid/confirmed.
+  const invoiceMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/invoice(\.html)?$/)
+  if (invoiceMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    const invoice = await getOrCreateBookingInvoice({ bookingId: invoiceMatch[1], requester: { id: context.user.id, roles: context.roles } })
+    if (invoiceMatch[2]) {
+      const base = process.env.PUBLIC_APP_URL ? process.env.PUBLIC_APP_URL.replace(/\/$/, '') : ''
+      const logoUrl = base ? `${base}/assets/logos/sybnb-platform.png` : undefined
+      const html = renderInvoiceHtml(invoice, { logoUrl })
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, max-age=0' })
+      res.end(html)
+      return
+    }
+    return json(res, 200, { ok: true, invoice })
   }
 
   const bookingMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)$/)

@@ -3,6 +3,7 @@
 // STR-000123 (stays), CARS-/MKT-/NC-/RENT-/BUY-. Invoices are SYBNB's own records (not Stripe's).
 import { db } from './prisma.mjs'
 import { withTx } from './tx-scope.mjs'
+import { expectedTotalMinor } from './finance-ledger.mjs'
 
 // Division code -> label shown on the invoice. The code IS the number prefix.
 export const INVOICE_DIVISIONS = {
@@ -122,6 +123,76 @@ export async function getOrCreateRideInvoice({ rideId, requester }) {
   return created
 }
 
+// Lazily mint (or fetch) the STR invoice for a paid/confirmed booking. Idempotent per booking.
+// The booking's own guest, or an admin/support operator, may fetch it. Total is the authoritative
+// expectedTotalMinor (rent + service/cleaning/tax + protection) — the same figure every rail charges.
+export async function getOrCreateBookingInvoice({ bookingId, requester }) {
+  const booking = await db().booking.findUnique({
+    where: { id: bookingId },
+    select: {
+      id: true, guestId: true, status: true, amountMinor: true, currency: true, metadata: true,
+      checkIn: true, checkOut: true,
+      listing: { select: { titleAr: true, titleEn: true, division: true, metadata: true } },
+      payments: { select: { provider: true, status: true, amountMinor: true }, orderBy: { createdAt: 'desc' }, take: 10 },
+    },
+  })
+  if (!booking) { const e = new Error('Booking not found.'); e.statusCode = 404; e.code = 'BOOKING_NOT_FOUND'; e.expose = true; throw e }
+  const roles = requester?.roles || []
+  const isStaff = roles.includes('ADMIN') || roles.includes('SUPPORT')
+  if (!isStaff && booking.guestId !== requester?.id) {
+    const e = new Error('This invoice is not available for this account.'); e.statusCode = 403; e.code = 'INVOICE_FORBIDDEN'; e.expose = true; throw e
+  }
+  const approvedPayment = (booking.payments || []).find((p) => p.status === 'APPROVED')
+  const ready = Boolean(approvedPayment) || ['CONFIRMED', 'COMPLETED'].includes(booking.status)
+  if (!ready) {
+    const e = new Error('An invoice is available only after the booking is paid or confirmed.')
+    e.statusCode = 409; e.code = 'INVOICE_NOT_READY'; e.expose = true; throw e
+  }
+
+  const existing = await db().invoice.findFirst({ where: { bookingId: booking.id } })
+  if (existing) return existing
+
+  const totalMinor = expectedTotalMinor(booking)
+  const rentMinor = Math.round(booking.amountMinor || 0)
+  const extrasMinor = Math.max(0, totalMinor - rentMinor)
+  const currency = booking.currency || 'SYP'
+  const method = approvedPayment
+    ? (approvedPayment.provider === 'cash' ? 'cash' : approvedPayment.provider === 'stripe' ? 'card' : 'wallet/transfer')
+    : 'unpaid'
+  const fmtDate = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null)
+  const stayLabel = `Stay${booking.checkIn && booking.checkOut ? ` (${fmtDate(booking.checkIn)} \u2192 ${fmtDate(booking.checkOut)})` : ''}`
+  const title = booking.listing?.titleEn || booking.listing?.titleAr || 'Stay'
+
+  const data = {
+    division: 'STR',
+    kind: 'stay_booking',
+    listingTitle: title,
+    billedToLabel: 'Guest',
+    referenceLabel: 'Booking',
+    referenceValue: booking.id.slice(0, 8).toUpperCase(),
+    method,
+    checkIn: fmtDate(booking.checkIn),
+    checkOut: fmtDate(booking.checkOut),
+    lineItems: [
+      { label: stayLabel, amountMinor: rentMinor },
+      ...(extrasMinor > 0 ? [{ label: 'Service, cleaning, tax & protection', amountMinor: extrasMinor }] : []),
+    ],
+    subtotalMinor: rentMinor,
+    totalMinor,
+    issuedFor: booking.guestId,
+  }
+
+  const created = await withTx(async (tx) => {
+    const dup = await tx.invoice.findFirst({ where: { bookingId: booking.id } })
+    if (dup) return dup
+    const { seq, number } = await nextInvoiceNumber(tx, 'STR')
+    return tx.invoice.create({
+      data: { number, division: 'STR', seq, bookingId: booking.id, userId: booking.guestId, amountMinor: totalMinor, currency, data },
+    })
+  })
+  return created
+}
+
 // Branded, print-ready SYBNB invoice HTML (navy + cyan, contact info@sybnb.app). Self-contained so it
 // can be opened in a tab and saved as PDF by the browser. `logoUrl` is optional (absolute).
 export function renderInvoiceHtml(invoice, { logoUrl } = {}) {
@@ -171,8 +242,8 @@ export function renderInvoiceHtml(invoice, { logoUrl } = {}) {
   </div>
   <div class="body">
     <div class="meta">
-      <div><div class="b">Billed to</div><div>Rider ${escapeHtml((d.issuedFor || invoice.userId || '').slice(0, 8).toUpperCase())}</div></div>
-      <div><div class="b">Reference</div><div>Ride ${escapeHtml(d.rideRef || '')}</div></div>
+      <div><div class="b">Billed to</div><div>${escapeHtml(d.billedToLabel || 'Rider')} ${escapeHtml((d.issuedFor || invoice.userId || '').slice(0, 8).toUpperCase())}</div></div>
+      <div><div class="b">Reference</div><div>${escapeHtml(d.referenceLabel || 'Ride')} ${escapeHtml(d.referenceValue || d.rideRef || '')}</div></div>
       <div><div class="b">Payment</div><div><span class="pill">${escapeHtml(d.method || '-')}</span></div></div>
     </div>
     ${d.pickup || d.dropoff ? `<div class="meta"><div><div class="b">From</div><div>${escapeHtml(d.pickup || '-')}</div></div><div><div class="b">To</div><div>${escapeHtml(d.dropoff || '-')}</div></div>${d.distanceKm != null ? `<div><div class="b">Distance</div><div>${escapeHtml(String(d.distanceKm))} km</div></div>` : ''}</div>` : ''}

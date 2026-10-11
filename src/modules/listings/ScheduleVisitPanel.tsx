@@ -25,6 +25,14 @@ function statusLabel(status: PlatformVisit['status'], lang: Lang): string {
   }
 }
 
+function visitSubjectNoun(division: string, lang: Lang): string {
+  switch (division) {
+    case 'CARS': return pick(lang, 'المركبة', 'the vehicle', 'le véhicule')
+    case 'MARKETPLACE': return pick(lang, 'الغرض', 'the item', 'l’article')
+    default: return pick(lang, 'العقار', 'the property', 'le bien')
+  }
+}
+
 function fmt(dt: string, lang: Lang): string {
   try { return new Date(dt).toLocaleString(localeForLang(lang), { dateStyle: 'medium', timeStyle: 'short' }) } catch { return dt }
 }
@@ -85,7 +93,7 @@ export function ScheduleVisitPanel({ listing, lang }: Props) {
         </div>
       ) : (
         <>
-          <p style={styles.muted}>{pick(lang, 'اقترح موعداً لزيارة العقار، ويؤكده المالك.', 'Propose a time to view the property — the owner confirms it.', 'Proposez une heure de visite — le propriétaire confirme.')}</p>
+          <p style={styles.muted}>{pick(lang, `اقترح موعداً لمعاينة ${visitSubjectNoun(listing.division, 'ar')}، ويؤكده المالك.`, `Propose a time to view ${visitSubjectNoun(listing.division, 'en')} — the owner confirms it.`, `Proposez une heure pour voir ${visitSubjectNoun(listing.division, 'fr')} — le propriétaire confirme.`)}</p>
           <label style={styles.field}>
             <span>{pick(lang, 'التاريخ والوقت', 'Date & time', 'Date et heure')}</span>
             <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} style={styles.input} />

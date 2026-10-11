@@ -45,5 +45,7 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SYBNB uses your location to set your pickup point, find nearby listings, and let drivers share their position during a ride.</string>
 </dict>
 </plist>

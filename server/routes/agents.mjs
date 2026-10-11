@@ -3,7 +3,8 @@
 // are APPROVED (verified). Contact details are never exposed here — buyers reach them through a
 // listing's existing contact flow.
 import { db } from '../lib/prisma.mjs'
-import { json } from '../lib/responses.mjs'
+import { requireAuth } from '../lib/auth-context.mjs'
+import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 
 const PRO_TYPES = ['broker', 'agency', 'developer']
 
@@ -24,7 +25,7 @@ function toPublicListing(l) {
     metadata,
     media: l.media,
     location: l.location
-      ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area }
+      ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area, lat: l.location.lat ?? null, lng: l.location.lng ?? null }
       : null,
   }
 }
@@ -41,6 +42,13 @@ function toPublicAgent(sp, listingCount) {
     listingCount: listingCount ?? 0,
     verified: true,
   }
+}
+
+
+async function agentRating(userId) {
+  const agg = await db().agentReview.aggregate({ where: { agentId: userId }, _avg: { rating: true }, _count: { _all: true } })
+  const count = agg._count._all || 0
+  return { average: count ? Math.round((agg._avg.rating || 0) * 10) / 10 : null, count }
 }
 
 export async function handleAgents(req, res, url, context) {
@@ -82,7 +90,55 @@ export async function handleAgents(req, res, url, context) {
       orderBy: { approvedAt: 'desc' },
       take: 60,
     })
-    return json(res, 200, { ok: true, agent: toPublicAgent(sp, listings.length), listings: listings.map(toPublicListing) })
+    const rating = await agentRating(userId)
+    return json(res, 200, { ok: true, agent: { ...toPublicAgent(sp, listings.length), rating }, listings: listings.map(toPublicListing) })
+  }
+
+  // /api/agents/:id/reviews — list (GET) or create/update (POST, one per author per agent)
+  const reviewsMatch = path.match(/^\/api\/agents\/([^/]+)\/reviews$/)
+  if (reviewsMatch) {
+    const agentId = decodeURIComponent(reviewsMatch[1])
+    if (req.method === 'GET') {
+      const reviews = await db().agentReview.findMany({
+        where: { agentId },
+        include: { author: { select: { id: true, displayName: true } } },
+        orderBy: { updatedAt: 'desc' },
+        take: 100,
+      })
+      const rating = await agentRating(agentId)
+      return json(res, 200, { ok: true, reviews, ...rating })
+    }
+    if (req.method === 'POST') {
+      requireAuth(context, ['GUEST'])
+      if (agentId === context.user.id) {
+        const error = new Error('You cannot review your own profile.')
+        error.statusCode = 400; error.code = 'AGENT_REVIEW_SELF'; error.expose = true
+        throw error
+      }
+      // The target must be a verified professional.
+      const sp = await db().sellerProfile.findFirst({ where: { userId: agentId, sellerType: { in: PRO_TYPES }, documentStatus: 'APPROVED' }, select: { id: true } })
+      if (!sp) {
+        const error = new Error('Agent not found.')
+        error.statusCode = 404; error.code = 'AGENT_NOT_FOUND'; error.expose = true
+        throw error
+      }
+      const body = await readJson(req)
+      const rating = Number(body.rating)
+      if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+        const error = new Error('rating must be an integer from 1 to 5.')
+        error.statusCode = 400; error.code = 'AGENT_REVIEW_RATING_INVALID'; error.expose = true
+        throw error
+      }
+      const comment = typeof body.comment === 'string' ? body.comment.trim().slice(0, 1500) || null : null
+      const review = await db().agentReview.upsert({
+        where: { agentId_authorId: { agentId, authorId: context.user.id } },
+        update: { rating, comment },
+        create: { agentId, authorId: context.user.id, rating, comment },
+        include: { author: { select: { id: true, displayName: true } } },
+      })
+      return json(res, 201, { ok: true, review })
+    }
+    return methodNotAllowed(res, ['GET', 'POST'])
   }
 
   return false

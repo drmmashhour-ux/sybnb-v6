@@ -124,7 +124,7 @@ function toPublicListing(l) {
     metadata,
     media: l.media,
     location: l.location
-      ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area }
+      ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area, lat: l.location.lat ?? null, lng: l.location.lng ?? null }
       : null,
     owner: l.owner ? { id: l.owner.id, displayName: l.owner.displayName } : undefined,
   }
@@ -507,12 +507,16 @@ export async function handleListings(req, res, url, context) {
       const areaSource = body.area || body.metadata?.area
       const cityName = resolveListingCityName(govSource)
       if (cityName) {
+        const latRaw = Number(body.lat ?? body.metadata?.lat)
+        const lngRaw = Number(body.lng ?? body.metadata?.lng)
         const location = await db().location.create({
           data: {
             country: 'SY',
             governorate: cityName,
             city: cityName,
             area: areaSource ? String(areaSource) : undefined,
+            lat: Number.isFinite(latRaw) && latRaw !== 0 ? latRaw : undefined,
+            lng: Number.isFinite(lngRaw) && lngRaw !== 0 ? lngRaw : undefined,
           },
         })
         locationId = location.id
@@ -668,6 +672,43 @@ export async function handleListings(req, res, url, context) {
     const count = reviews.length
     const average = count ? Math.round((reviews.reduce((sum, review) => sum + review.rating, 0) / count) * 10) / 10 : null
     return json(res, 200, { ok: true, reviews, average, count })
+  }
+
+  // Comparable / similar listings (migration 064). Centris "similar properties nearby": same
+  // division, same city when known, asking price within +/-35%, excluding the listing itself.
+  const comparablesMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/comparables$/)
+  if (comparablesMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    const base = await db().listing.findFirst({
+      where: { id: comparablesMatch[1], status: 'APPROVED' },
+      include: { location: true },
+    })
+    if (!base) return json(res, 200, { ok: true, listings: [] })
+    const lo = Math.round(base.priceMinor * 0.65)
+    const hi = Math.round(base.priceMinor * 1.35)
+    const city = base.location?.city
+    const where = {
+      status: 'APPROVED',
+      division: base.division,
+      id: { not: base.id },
+      priceMinor: { gte: lo, lte: hi },
+      ...(city ? { location: { city: { equals: city, mode: 'insensitive' } } } : {}),
+    }
+    let rows = await db().listing.findMany({
+      where,
+      include: { location: true, media: { orderBy: { sortOrder: 'asc' }, take: 1 } },
+      take: 12,
+    })
+    // If a city filter leaves too few, widen to division-only within the price band.
+    if (rows.length < 3 && city) {
+      rows = await db().listing.findMany({
+        where: { status: 'APPROVED', division: base.division, id: { not: base.id }, priceMinor: { gte: lo, lte: hi } },
+        include: { location: true, media: { orderBy: { sortOrder: 'asc' }, take: 1 } },
+        take: 12,
+      })
+    }
+    rows.sort((a, b) => Math.abs(a.priceMinor - base.priceMinor) - Math.abs(b.priceMinor - base.priceMinor))
+    return json(res, 200, { ok: true, listings: rows.slice(0, 6).map(toPublicListing) })
   }
 
   const mediaMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/media$/)

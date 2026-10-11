@@ -228,6 +228,9 @@ model User {
   // Schedule-a-visit (migration 062): visits this user requested, and visits for listings they own.
   visitsRequested   VisitRequest[]    @relation("VisitRequester")
   visitsToHost      VisitRequest[]    @relation("VisitOwner")
+  // Agent reviews (migration 064): reviews written about this agent, and reviews this user authored.
+  agentReviewsReceived AgentReview[]  @relation("AgentReviewed")
+  agentReviewsWritten  AgentReview[]  @relation("AgentReviewAuthor")
   savedPlaces       SavedPlace[]
   promoRedemptions  PromoRedemption[]
   pushSubscriptions PushSubscription[]
@@ -477,6 +480,8 @@ model Location {
   street      String?
   addressLine String?  @map("address_line")
   geo         Unsupported("geometry(Point,4326)")?
+  lat         Float?
+  lng         Float?
   createdAt   DateTime @default(now()) @map("created_at")
 
   listings       Listing[]
@@ -524,6 +529,8 @@ model Listing {
   favouritedBy   Favourite[]
   // Scheduled visit requests for this listing (migration 062).
   visitRequests  VisitRequest[]
+  // Seller-published viewing windows (migration 064).
+  openHouses     OpenHouse[]
 
   @@index([division, status])
   @@index([ownerId])
@@ -1893,4 +1900,46 @@ model RideRecording {
   @@index([uploaderId])
   @@index([status, expiresAt])
   @@map("ride_recordings")
+}
+
+
+// ---------------------------------------------------------------------------
+// Centris-depth (migration 064, 2026-10-11): open houses + agent reviews.
+// OpenHouse is a seller-published viewing window on a property (group viewing, vs the 1:1
+// VisitRequest). AgentReview is a buyer's 1-5 rating + comment about a verified agent/broker, one
+// per author per agent (upserted). UUID ids/FKs match this DB.
+// ---------------------------------------------------------------------------
+
+model OpenHouse {
+  id        String   @id @default(uuid())
+  listingId String   @map("listing_id")
+  startsAt  DateTime @map("starts_at")
+  endsAt    DateTime @map("ends_at")
+  note      String?
+  status    String   @default("SCHEDULED")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+  @@index([startsAt])
+  @@map("open_houses")
+}
+
+model AgentReview {
+  id        String   @id @default(uuid())
+  agentId   String   @map("agent_id")
+  authorId  String   @map("author_id")
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  agent  User @relation("AgentReviewed", fields: [agentId], references: [id], onDelete: Cascade)
+  author User @relation("AgentReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, authorId])
+  @@index([agentId])
+  @@map("agent_reviews")
 }

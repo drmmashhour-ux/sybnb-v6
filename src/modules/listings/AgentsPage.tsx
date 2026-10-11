@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { moneyText } from '../../shared/i18n/display'
 import { fetchAgent, fetchAgents, type PlatformAgent, type PlatformListing } from '../../shared/api/platformApi'
+import { AgentReviewsPanel } from './AgentReviewsPanel'
 
 type Props = { lang: Lang; agentId?: string }
 
@@ -78,6 +79,7 @@ function AgentProfile({ lang, agentId }: { lang: Lang; agentId: string }) {
         <div style={{ display: 'grid', gap: 4 }}>
           <h1 style={styles.h1}>{agent.displayName}</h1>
           <span style={styles.badge}>{typeLabel(agent.sellerType, lang)} · ✓ {pick(lang, 'موثّق', 'Verified', 'Vérifié')}</span>
+          {agent.rating && agent.rating.count > 0 && agent.rating.average != null ? <span style={styles.muted}>{'★'.repeat(Math.round(agent.rating.average))} {agent.rating.average.toFixed(1)} ({agent.rating.count})</span> : null}
           {agent.city ? <span style={styles.muted}>{agent.city}</span> : null}
           {agent.languages?.length ? <span style={styles.muted}>{pick(lang, 'اللغات', 'Languages', 'Langues')}: {agent.languages.join(', ')}</span> : null}
         </div>
@@ -101,6 +103,8 @@ function AgentProfile({ lang, agentId }: { lang: Lang; agentId: string }) {
           })}
         </div>
       )}
+
+      <AgentReviewsPanel agentId={agentId} lang={lang} />
     </main>
   )
 }

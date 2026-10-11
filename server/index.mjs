@@ -21,6 +21,8 @@ import { handleAuctions, closeDueAuctions } from './routes/auctions.mjs'
 import { handleEngagement } from './routes/engagement.mjs'
 import { handleVisits } from './routes/visits.mjs'
 import { handleAgents } from './routes/agents.mjs'
+import { handleOpenHouses } from './routes/open-houses.mjs'
+import { handleMarket } from './routes/market.mjs'
 import { handleRideRecordings, purgeExpiredRecordings } from './routes/ride-recordings.mjs'
 import { runSavedSearchAlerts } from './lib/saved-search-alerts.mjs'
 import { handleMe } from './routes/me.mjs'
@@ -271,6 +273,8 @@ async function dispatch(req, res, url, context) {
     handleEngagement,
     handleVisits,
     handleAgents,
+    handleOpenHouses,
+    handleMarket,
     handleListings,
     handleBookings,
     handlePayments,

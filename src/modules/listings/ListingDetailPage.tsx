@@ -29,6 +29,9 @@ import { FavouriteButton } from './FavouriteButton'
 import { AffordabilityCalculator } from './AffordabilityCalculator'
 import { ScheduleVisitPanel } from './ScheduleVisitPanel'
 import { NearbyTags } from './NearbyTags'
+import { VirtualTourEmbed } from './VirtualTourEmbed'
+import { OpenHousesPanel } from './OpenHousesPanel'
+import { ComparablesPanel } from './ComparablesPanel'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey, type GoogleMapTarget } from '../../shared/maps/googleMapCapsule'
 import { cancellationRuleText, freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { localeForLang } from '../../shared/country/presentation'
@@ -847,6 +850,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             {(['BUY', 'RENTALS', 'NEW_CONSTRUCTION', 'CARS'].includes(listing.division)) && (
               <ScheduleVisitPanel listing={listing} lang={lang} />
             )}
+
+            <VirtualTourEmbed listing={listing} lang={lang} />
+            {(['BUY', 'RENTALS', 'NEW_CONSTRUCTION'].includes(listing.division)) && (
+              <OpenHousesPanel listing={listing} lang={lang} />
+            )}
+            <ComparablesPanel listingId={listing.id} lang={lang} />
 
             <div style={styles.tabRow} role="tablist" aria-label={pick(lang, 'تفاصيل الإعلان', 'Listing details', 'Détails de l’annonce')}>
               {(['terms', 'host', 'location', 'reviews'] as const).map((tab) => (

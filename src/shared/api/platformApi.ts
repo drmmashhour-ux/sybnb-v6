@@ -3772,6 +3772,7 @@ export type PlatformAgent = {
   languages: string[]
   listingCount: number
   verified: boolean
+  rating?: { average: number | null; count: number }
 }
 
 export async function fetchAgents(): Promise<PlatformAgent[]> {
@@ -3853,4 +3854,110 @@ export async function attachRecordingReport(recordingId: string, note?: string):
 export async function declineRideRecordingConsent(rideId: string): Promise<void> {
   const session = await ensurePrototypeGuestSession()
   await apiRequest<{ ok: true }>(`/api/sr/rides/${encodeURIComponent(rideId)}/cancel`, { method: 'PATCH', token: session.token, body: { reason: 'recording_consent' } })
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Centris-depth (2026-10-11): comparables, open houses, market insights, agent reviews.
+// ---------------------------------------------------------------------------------------------
+
+export async function fetchComparables(listingId: string): Promise<PlatformListing[]> {
+  try {
+    const res = await apiRequest<{ ok: true; listings: PlatformListing[] }>(`/api/listings/${encodeURIComponent(listingId)}/comparables`)
+    return res.listings
+  } catch {
+    return []
+  }
+}
+
+export type PlatformOpenHouse = {
+  id: string
+  listingId: string
+  startsAt: string
+  endsAt: string
+  note: string | null
+  status: string
+  listing?: {
+    id: string
+    titleAr: string
+    titleEn: string | null
+    division: string
+    priceMinor: number
+    currency: string
+    media?: Array<Record<string, unknown>>
+    location?: { city?: string; area?: string | null; governorate?: string } | null
+  }
+}
+
+export async function fetchOpenHouses(listingId: string): Promise<PlatformOpenHouse[]> {
+  try {
+    const res = await apiRequest<{ ok: true; openHouses: PlatformOpenHouse[] }>(`/api/listings/${encodeURIComponent(listingId)}/open-houses`)
+    return res.openHouses
+  } catch {
+    return []
+  }
+}
+
+export async function fetchUpcomingOpenHouses(division?: string): Promise<PlatformOpenHouse[]> {
+  const qs = division ? `?division=${encodeURIComponent(division)}` : ''
+  const res = await apiRequest<{ ok: true; openHouses: PlatformOpenHouse[] }>(`/api/open-houses/upcoming${qs}`)
+  return res.openHouses
+}
+
+export async function createOpenHouse(listingId: string, input: { startsAt: string; endsAt: string; note?: string }): Promise<PlatformOpenHouse> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; openHouse: PlatformOpenHouse }>(`/api/listings/${encodeURIComponent(listingId)}/open-houses`, { method: 'POST', token: session.token, body: input })
+  return res.openHouse
+}
+
+export async function cancelOpenHouse(id: string): Promise<void> {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/open-houses/${encodeURIComponent(id)}`, { method: 'DELETE', token: session.token })
+}
+
+export type MarketAreaStat = { area: string; count: number; avg: number; median: number; min: number; max: number }
+export type MarketInsights = {
+  currency: string
+  division: string | null
+  city: string | null
+  overall: { count: number; avg: number; median: number; min: number; max: number } | null
+  byArea: MarketAreaStat[]
+  disclaimer: string
+}
+
+export async function fetchMarketInsights(input: { division?: string; city?: string; currency?: string } = {}): Promise<MarketInsights> {
+  const qs = new URLSearchParams()
+  if (input.division) qs.set('division', input.division)
+  if (input.city) qs.set('city', input.city)
+  if (input.currency) qs.set('currency', input.currency)
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  const res = await apiRequest<{ ok: true } & MarketInsights>(`/api/market/insights${suffix}`)
+  return res
+}
+
+export type PlatformAgentReview = {
+  id: string
+  rating: number
+  comment: string | null
+  createdAt: string
+  updatedAt: string
+  author: { id: string; displayName: string }
+}
+
+export async function fetchAgentReviews(agentId: string): Promise<{ reviews: PlatformAgentReview[]; average: number | null; count: number }> {
+  const res = await apiRequest<{ ok: true; reviews: PlatformAgentReview[]; average: number | null; count: number }>(`/api/agents/${encodeURIComponent(agentId)}/reviews`)
+  return { reviews: res.reviews, average: res.average, count: res.count }
+}
+
+export async function submitAgentReview(agentId: string, input: { rating: number; comment?: string }): Promise<PlatformAgentReview> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; review: PlatformAgentReview }>(`/api/agents/${encodeURIComponent(agentId)}/reviews`, { method: 'POST', token: session.token, body: input })
+  return res.review
+}
+
+export function listingCoords(l: PlatformListing): { lat: number; lng: number } | null {
+  const loc = (l.location || {}) as { lat?: unknown; lng?: unknown }
+  const lat = Number(loc.lat), lng = Number(loc.lng)
+  if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0) return { lat, lng }
+  return null
 }

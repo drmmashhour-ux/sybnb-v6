@@ -9,6 +9,7 @@ import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../eng
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { PROXIMITY_TAGS, PROXIMITY_DIVISIONS } from '../../shared/listing/proximityTags'
+import { LocationPicker, type LatLng } from '../../shared/maps/LocationPicker'
 
 type Props = {
   lang: Lang
@@ -191,6 +192,8 @@ export function SellerListingWizard({ lang }: Props) {
   const [auctionDepositMode, setAuctionDepositMode] = useState<'NONE' | 'REQUIRED'>('NONE')
   const [auctionDeposit, setAuctionDeposit] = useState('')
   const [proximity, setProximity] = useState<string[]>([])
+  const [coords, setCoords] = useState<LatLng | null>(null)
+  const [virtualTourUrl, setVirtualTourUrl] = useState('')
   const [adPlacement, setAdPlacement] = useState(pick(lang, 'الرئيسية', 'Landing page', 'Page d’accueil'))
   const [adDuration, setAdDuration] = useState(pick(lang, 'أسبوع واحد', 'One week', 'Une semaine'))
   // Real per-slot banner/logo uploads (slot id -> uploaded file). Replaces a prior version of this
@@ -415,6 +418,9 @@ export function SellerListingWizard({ lang }: Props) {
             visualFilters,
             saleMode: division === 'CARS' ? saleMode : undefined,
             proximity: PROXIMITY_DIVISIONS.has(division) ? proximity : undefined,
+            lat: coords?.lat,
+            lng: coords?.lng,
+            virtualTourUrl: PROXIMITY_DIVISIONS.has(division) ? (virtualTourUrl.trim() || undefined) : undefined,
           },
         })
         if (division === 'CARS' && saleMode === 'AUCTION') {
@@ -683,9 +689,9 @@ export function SellerListingWizard({ lang }: Props) {
                   value={address}
                 />
               </label>
-              <div className="seller-map-placeholder">
-                <strong>{pick(lang, 'تصحيح الموقع لاحقاً', 'Location correction later', 'Correction de l’emplacement plus tard')}</strong>
-                <span>{pick(lang, 'سيتم ربط الخريطة بعد تثبيت محرك البحث والمواقع.', 'Map will connect after the search and location engine is stabilized.', 'La carte sera connectée une fois le moteur de recherche et de localisation stabilisé.')}</span>
+              <div className="seller-wide-field" style={{ display: 'grid', gap: 8 }}>
+                <strong>{pick(lang, 'موقع العقار على الخريطة', 'Property location on the map', 'Emplacement du bien sur la carte')}</strong>
+                <LocationPicker value={coords} onChange={setCoords} lang={lang} />
               </div>
             </div>
           )}
@@ -792,6 +798,17 @@ export function SellerListingWizard({ lang }: Props) {
                     })}
                   </div>
                 </div>
+              )}
+              {PROXIMITY_DIVISIONS.has(division) && (
+                <label className="seller-wide-field">
+                  <span>{pick(lang, 'رابط الجولة الافتراضية (اختياري)', 'Virtual tour link (optional)', 'Lien de visite virtuelle (optionnel)')}</span>
+                  <input
+                    onChange={(event) => setVirtualTourUrl(event.target.value)}
+                    placeholder="https://… (YouTube, Matterport)"
+                    value={virtualTourUrl}
+                    dir="ltr"
+                  />
+                </label>
               )}
               {division === 'STAYS' && (
                 <label className="seller-wide-field seller-instant-book-toggle">

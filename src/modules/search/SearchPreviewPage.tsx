@@ -3,6 +3,7 @@ import { pick, type Lang } from '../../engines/language/languageEngine'
 import { getCity, getGovernorate, GOVERNORATE_CITY_NAME, governorateCityName, labelFor, listingMatchesKeyword, SYRIA_GOVERNORATES } from '../../engines/search'
 import { addFavourite, createSavedSearch, fetchApprovedListings, fetchFavouriteIds, isSampleListing, removeFavourite, type PlatformListing } from '../../shared/api/platformApi'
 import { FavouriteButton } from '../listings/FavouriteButton'
+import { PropertyMap } from '../../shared/maps/PropertyMap'
 import { listingDescriptionText, statusText } from '../../shared/i18n/display'
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 import { listingPriceText } from './listingPriceText'
@@ -214,6 +215,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   const [state, setState] = useState<'loading' | 'empty' | 'error'>('empty')
   const [lastSearch, setLastSearch] = useState<UnifiedSearchValue | null>(null)
   const [listings, setListings] = useState<PlatformListing[]>([])
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [lastQuery, setLastQuery] = useState<{ division: string; filters?: Parameters<typeof fetchApprovedListings>[1] } | null>(null)
@@ -422,6 +424,16 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           ) : hasSearched ? (
             <strong>{countText}</strong>
           ) : null}
+          {hasSearched && visibleListings.length ? (
+            <div style={{ display: 'inline-flex', border: '1px solid #c9d3e6', borderRadius: 999, overflow: 'hidden', marginInlineStart: 'auto' }}>
+              <button type="button" onClick={() => setViewMode('list')} style={{ padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, background: viewMode === 'list' ? '#0b1b3b' : '#fff', color: viewMode === 'list' ? '#fff' : '#0b1b3b' }}>
+                {pick(lang, 'قائمة', 'List', 'Liste')}
+              </button>
+              <button type="button" onClick={() => setViewMode('map')} style={{ padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700, background: viewMode === 'map' ? '#0b1b3b' : '#fff', color: viewMode === 'map' ? '#fff' : '#0b1b3b' }}>
+                {pick(lang, '🗺️ خريطة', '🗺️ Map', '🗺️ Carte')}
+              </button>
+            </div>
+          ) : null}
           {hasSearched && lastQuery ? (
             <button
               type="button"
@@ -444,6 +456,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           />
         )}
         {visibleListings.length ? (
+          viewMode === 'map' ? (
+            <PropertyMap listings={visibleListings} lang={lang} />
+          ) : (
           <div className="search-result-grid">
             {visibleListings.map((listing) => {
               const card = cardText(listing, lang)
@@ -493,6 +508,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               )
             })}
           </div>
+          )
         ) : null}
         {nextCursor && (
           <div className="search-results-load-more">

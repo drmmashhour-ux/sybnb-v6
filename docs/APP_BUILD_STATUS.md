@@ -50,3 +50,11 @@ deploy the backend (CORS) and, once iOS pods install, to wire native GPS + push.
 - Register the push token via `@capacitor/push-notifications` and POST it to the backend;
   wire the backend send-path (needs APNs `.p8` + Firebase `google-services.json` from you).
 - Generate the app icon + splash from your logo → `npx @capacitor/assets generate`.
+
+## Update 2026-10-11 (evening)
+- Android Studio 2026.2.1.8 installed via Homebrew (/Applications/Android Studio.app). Next: open it once (SDK setup), then `npx cap open android`.
+- Web bundle rebuilt against live backend and `cap sync android` succeeded (5 plugins: app, geolocation, push-notifications, splash-screen, status-bar).
+- iOS still blocked: full Xcode not installed (only Command Line Tools). After install: `sudo xcodebuild -license accept && bash fix-ios.sh && npx cap open ios`.
+- Mobile fixes committed: f55ddf4 (Buy/Rent overflow), beb6810 (neutral protection copy + docs/HANDOFF_GAP_REPORT.md).
+- Android remaining: emulator smoke test -> signed AAB (keystore outside git) -> Play Console closed test (>=12 testers, 14 days).
+- Security note: never paste passwords into the terminal or chat; rotate any that were.

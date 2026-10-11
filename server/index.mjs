@@ -42,6 +42,7 @@ import { handleWallet } from './routes/wallet.mjs'
 import { activateScheduledRides } from './lib/ride-schedule.mjs'
 import { runDispatchSweep } from './lib/ride-dispatch.mjs'
 import { detectRideAnomalies } from './lib/ride-anomaly.mjs'
+import { runRevenueGuard } from './lib/revenue-guard.mjs'
 
 loadEnv()
 
@@ -160,7 +161,10 @@ async function handleInternalTick(res) {
     // Safety Phase 2 (2026-10-10): scan active rides for time/signal anomalies on the same timer.
     // detectRideAnomalies() is best-effort and never throws; the extra .catch is pure belt-and-braces.
     const anomalies = await detectRideAnomalies().catch(() => ({ scanned: 0, flagged: 0 }))
-    return json(res, 200, { ok: true, activated, expired: sweep.expired, opened: sweep.opened, anomaliesFlagged: anomalies.flagged, auctionsClosed: auctionsClosed.closed, alertsSent: alerts.notified, recordingsPurged: purged.purged })
+    // Revenue Guard (2026-10-11): sweep rides + bookings for off-platform cash completion,
+    // collusion pairs and high-cancel providers. Best-effort; never throws.
+    const revenue = await runRevenueGuard().catch(() => ({}))
+    return json(res, 200, { ok: true, activated, expired: sweep.expired, opened: sweep.opened, anomaliesFlagged: anomalies.flagged, auctionsClosed: auctionsClosed.closed, alertsSent: alerts.notified, recordingsPurged: purged.purged, revenueFlags: revenue })
   } catch {
     // never leak errors/stack; the tick is best-effort
     return json(res, 200, { ok: true })
@@ -412,6 +416,7 @@ async function runDispatchHeartbeat() {
     await activateScheduledRides()
     await runDispatchSweep()
     await detectRideAnomalies().catch(() => ({ scanned: 0, flagged: 0 }))
+    await runRevenueGuard().catch(() => ({}))
     await closeDueAuctions().catch(() => ({ closed: 0 }))
     await runSavedSearchAlerts().catch(() => ({ notified: 0 }))
     await purgeExpiredRecordings().catch(() => ({ purged: 0 }))

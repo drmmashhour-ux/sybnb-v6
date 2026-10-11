@@ -164,6 +164,28 @@ const TEMPLATES = {
     en: (d) => ({ subject: 'SYBNB admin: anomaly detected on an active ride', body: `The system detected ${d.anomaly} on ride ${d.rideId}. Incident ${d.incidentId}. Open the incidents console to review.` }),
     fr: (d) => ({ subject: 'SYBNB admin : anomalie détectée sur une course active', body: `Le système a détecté ${d.anomaly} sur la course ${d.rideId}. Incident ${d.incidentId}. Ouvrez la console des incidents pour vérifier.` }),
   },
+  // Revenue Guard (2026-10-11): an automated revenue-assurance flag raised by runRevenueGuard()
+  // (server/lib/revenue-guard.mjs). Catches off-platform cash completion (a ride that reached
+  // pickup/in-progress then was cancelled), collusion pairs (same provider+consumer cancelling
+  // repeatedly with zero completions), and high-cancel providers. Idempotency-keyed so repeated
+  // sweeps never re-send. d.kind selects the summary; d.incidentId (when present) is the console key.
+  admin_revenue_flag: {
+    ar: (d) => {
+      if (d.kind === 'OFFPLATFORM_SUSPECTED') return { subject: `SYBNB: اشتباه بإتمام رحلة خارج المنصة`, body: `الرحلة ${d.rideId} وصلت مرحلة الالتقاء/التنفيذ ثم أُلغيت — احتمال إتمامها نقداً خارج المنصة. السائق ${d.driverId}، الراكب ${d.riderId}. رقم البلاغ: ${d.incidentId}. افتح لوحة الإيرادات للمراجعة.` }
+      if (d.kind === 'COLLUSION_PAIR') return { subject: `SYBNB: اشتباه بتواطؤ على الإلغاء`, body: `${d.domain === 'STAYS' ? 'مضيف' : 'سائق'} ${d.driverId || d.hostId} و${d.domain === 'STAYS' ? 'ضيف' : 'راكب'} ${d.riderId || d.guestId} ألغيا ${d.cancels} طلبات معاً دون أي إتمام — احتمال اتفاق خارج المنصة.` }
+      return { subject: `SYBNB: مزوّد بمعدل إلغاء مرتفع`, body: `${d.domain === 'STAYS' ? 'مضيف' : 'سائق'} ${d.driverId || d.hostId} ألغى ${d.cancels} من ${d.total} طلباً (نسبة ${Math.round((d.cancelRate || 0) * 100)}٪). افتح لوحة الإيرادات للمراجعة.` }
+    },
+    en: (d) => {
+      if (d.kind === 'OFFPLATFORM_SUSPECTED') return { subject: `SYBNB admin: suspected off-platform ride completion`, body: `Ride ${d.rideId} reached pickup/in-progress then was cancelled — possible off-platform cash completion. Driver ${d.driverId}, rider ${d.riderId}. Incident ${d.incidentId}. Open the revenue console to review.` }
+      if (d.kind === 'COLLUSION_PAIR') return { subject: `SYBNB admin: suspected cancellation collusion`, body: `${d.domain === 'STAYS' ? 'Host' : 'Driver'} ${d.driverId || d.hostId} and ${d.domain === 'STAYS' ? 'guest' : 'rider'} ${d.riderId || d.guestId} cancelled ${d.cancels} orders together with zero completions — possible off-platform arrangement.` }
+      return { subject: `SYBNB admin: high-cancel provider`, body: `${d.domain === 'STAYS' ? 'Host' : 'Driver'} ${d.driverId || d.hostId} cancelled ${d.cancels} of ${d.total} orders (${Math.round((d.cancelRate || 0) * 100)}% rate). Open the revenue console to review.` }
+    },
+    fr: (d) => {
+      if (d.kind === 'OFFPLATFORM_SUSPECTED') return { subject: `SYBNB admin : course probablement terminée hors plateforme`, body: `La course ${d.rideId} a atteint la prise en charge/en cours puis a été annulée — possible paiement en espèces hors plateforme. Chauffeur ${d.driverId}, passager ${d.riderId}. Incident ${d.incidentId}. Ouvrez la console des revenus.` }
+      if (d.kind === 'COLLUSION_PAIR') return { subject: `SYBNB admin : collusion d'annulation suspectée`, body: `${d.domain === 'STAYS' ? "L'hote" : 'Le chauffeur'} ${d.driverId || d.hostId} et ${d.domain === 'STAYS' ? "l'invite" : 'le passager'} ${d.riderId || d.guestId} ont annule ${d.cancels} commandes ensemble sans aucune realisation — possible arrangement hors plateforme.` }
+      return { subject: `SYBNB admin : prestataire a fort taux d'annulation`, body: `${d.domain === 'STAYS' ? "L'hote" : 'Le chauffeur'} ${d.driverId || d.hostId} a annule ${d.cancels} commandes sur ${d.total} (taux ${Math.round((d.cancelRate || 0) * 100)}%). Ouvrez la console des revenus.` }
+    },
+  },
   // Centris / SR-feature notifications (2026-10-11): sent to USERS via push + email, localized.
   // Subjects keep the "SYBNB:" prefix for email; renderPush() strips it for a clean push title.
   visit_requested: {

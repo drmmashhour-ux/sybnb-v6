@@ -7843,7 +7843,10 @@ a {
   }
 
   .rentals-layout {
-    grid-template-columns: 1fr !important;
+    /* minmax(0, 1fr), NOT 1fr: plain 1fr carries an implicit min-content floor, so a wide child
+       (e.g. a listing-card image) inflates the single column past the device width -> horizontal
+       scroll on phones. minmax(0, 1fr) lets the column shrink to the viewport. */
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 }
 

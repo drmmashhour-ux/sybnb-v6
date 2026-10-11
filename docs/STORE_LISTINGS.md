@@ -6,7 +6,7 @@ Prepared for submission of two apps to **Apple App Store** and **Google Play**:
 2. **SYBNB Driver** — the driver app for SR rides.
 
 Bundle / application id: `app.sybnb` (consumer). Use `app.sybnb.driver` for the driver app.
-Support & developer contact: **info@sybnb.app**. Privacy policy: **https://sybnb-web.onrender.com/privacy.html** (replace with your final public domain before submitting).
+Support & developer contact: **info@sybnb.app**. Privacy policy: **https://sybnb.app/privacy.html** (replace with your final public domain before submitting).
 
 > Character limits are marked so copy can be pasted straight in. Apple: app name ≤30, subtitle ≤30, promotional text ≤170, keywords ≤100, description ≤4000. Google Play: title ≤30, short description ≤80, full description ≤4000.
 
@@ -24,16 +24,16 @@ Support & developer contact: **info@sybnb.app**. Privacy policy: **https://sybnb
 - **Arabic short description:** `احجز رحلات SR، إقامات يومية، سيارات، عقارات والسوق المحلي — بتطبيق واحد.`
 
 ### Apple promotional text (≤170, updatable anytime)
-`New: SR rides across Syria — upfront fares, verified drivers, live tracking, a pickup code, and pay by cash, wallet or card. Your whole city, one app.` *(150)*
+`New: SR rides across Syria — upfront fares, approved drivers, live tracking, a pickup code, and pay by cash, wallet or card. Your whole city, one app.` *(150)*
 
 ### Full description (English, ≤4000)
 ```
-SYBNB is Syria's all-in-one app for getting around, finding a place to stay, and buying what you need — with safe, upfront, and trusted transactions from start to finish.
+SYBNB is an all-in-one app for Syria: get around, find a place to stay, and buy what you need — with upfront pricing and clear steps from start to finish.
 
 RIDES (SR)
 Request a ride in seconds and see the fare before you book — no surprises. Choose the car that fits: Bike, Economy, Comfort, SUV or Van. Watch your driver arrive live on the map, follow your trip end to end, and pay the way that works for you: cash, local wallet/transfer, or card.
 • Upfront pricing — you see the fare before you confirm
-• Verified drivers with photo, vehicle details and plate
+• Drivers approved by SYBNB, with photo, vehicle details and plate
 • A pickup code that confirms you and your driver match before the trip starts
 • Live map tracking and trip sharing
 • An SOS button and a saveable trip-safety card (driver + plate) for peace of mind
@@ -41,7 +41,7 @@ Request a ride in seconds and see the fare before you book — no surprises. Cho
 • Optional tip — 100% goes to your driver
 
 STAYS, RENTALS & PROPERTY
-Find daily stays, long-term rentals, and property to buy across Syria. Clear listings, honest pricing, protected booking and payment, and support after you book.
+Find daily stays, long-term rentals, and property to buy across Syria. Clear listings, upfront pricing, booking and payment through SYBNB checkout, and support after you book.
 
 CARS & MARKETPLACE
 Browse cars and the local marketplace. Search all of Syria or filter to your city.
@@ -50,7 +50,7 @@ WHY SYBNB
 • One app for rides, stays, cars, property and the market
 • Pay by cash, Sham Cash / local wallet, or card
 • Built for Syria — Arabic, English and French
-• Clear fees, real reviews, and a team that reviews payments and resolves disputes
+• Clear fees, real reviews, and a support team that reviews payments and disputes
 
 Download SYBNB and do more, with less hassle, wherever you are in Syria.
 
@@ -64,7 +64,7 @@ Questions or support: info@sybnb.app
 الرحلات (SR)
 اطلب رحلة خلال ثوانٍ وشاهد الأجرة قبل الحجز — بدون مفاجآت. اختر السيارة المناسبة: دراجة، اقتصادي، مريح، SUV أو فان. تابع وصول سائقك مباشرة على الخريطة، وتابع رحلتك من البداية للنهاية، وادفع بالطريقة التي تناسبك: نقداً، محفظة/تحويل محلي، أو بطاقة.
 • سعر مُسبق — ترى الأجرة قبل التأكيد
-• سائقون موثّقون بالصورة وتفاصيل المركبة ورقم اللوحة
+• سائقون معتمدون من سيبنب بالصورة وتفاصيل المركبة ورقم اللوحة
 • رمز استلام يؤكّد تطابقك مع سائقك قبل بدء الرحلة
 • تتبّع مباشر على الخريطة ومشاركة الرحلة
 • زر طوارئ (SOS) وبطاقة أمان قابلة للحفظ (السائق واللوحة) لراحة بالك
@@ -72,7 +72,7 @@ Questions or support: info@sybnb.app
 • بقشيش اختياري — يذهب بالكامل للسائق
 
 الإقامات والإيجارات والعقارات
-ابحث عن إقامات يومية، إيجارات طويلة، وعقارات للشراء في كل سوريا. قوائم واضحة، أسعار صادقة، حجز ودفع محميان، ودعم بعد الحجز.
+ابحث عن إقامات يومية، إيجارات طويلة، وعقارات للشراء في كل سوريا. قوائم واضحة، أسعار صادقة، حجز ودفع عبر صفحة الدفع في سيبنب، ودعم بعد الحجز.
 
 السيارات والسوق
 تصفّح السيارات والسوق المحلي. ابحث في كل سوريا أو حسب مدينتك.
@@ -243,9 +243,9 @@ App reviewers must be able to exercise the full flow. Provide a demo login in Ap
 
 ## WHAT'S NEW (release notes for the first SR launch)
 
-**EN:** `SR rides are here: upfront fares, verified drivers, live tracking, a pickup code to confirm your driver, and pay by cash, wallet or card. Plus a saveable trip-safety card and optional tipping.`
+**EN:** `SR rides are here: upfront fares, approved drivers, live tracking, a pickup code to confirm your driver, and pay by cash, wallet or card. Plus a saveable trip-safety card and optional tipping.`
 
-**AR:** `رحلات SR وصلت: أسعار مُسبقة، سائقون موثّقون، تتبّع مباشر، رمز استلام لتأكيد سائقك، والدفع نقداً أو بالمحفظة أو بالبطاقة. بالإضافة إلى بطاقة أمان قابلة للحفظ وبقشيش اختياري.`
+**AR:** `رحلات SR وصلت: أسعار مُسبقة، سائقون معتمدون، تتبّع مباشر، رمز استلام لتأكيد سائقك، والدفع نقداً أو بالمحفظة أو بالبطاقة. بالإضافة إلى بطاقة أمان قابلة للحفظ وبقشيش اختياري.`
 
 ---
 
@@ -260,3 +260,63 @@ App reviewers must be able to exercise the full flow. Provide a demo login in Ap
 - [ ] Icons + screenshots + (Play) feature graphic uploaded for both apps.
 - [ ] Age rating questionnaires completed (UGC present).
 ```
+
+---
+
+## GOOGLE PLAY CONSOLE — CLOSED-TEST FORM ANSWERS (consumer app `app.sybnb`)
+
+Answer these in Play Console. Items marked **DECIDE** need the owner; do not guess them.
+
+### App content declarations
+| Form | Answer |
+|---|---|
+| App access | **Restricted** (login required). Give reviewers a demo rider account (email + password or OTP bypass). Do not use real people's credentials. |
+| Ads | **DECIDE.** The app shows first-party sponsored banners bought through "Reserve ad space" (admin-approved). No third-party ad SDK. Play counts that as "contains ads" = **Yes** (safest). |
+| Target audience | **18+** (rides, payments, marketplace). Not designed for children. |
+| Content rating (IARC) | Category: Social / Utility. Answer **user-generated content: Yes** (listings, reviews, chat) with reporting + moderation. No violence, sexual content, gambling. |
+| News app | No |
+| Government app | No |
+| Health features | No |
+| Financial features | Declare wallet / payments honestly (payments via Stripe card, cash, local wallet reference). Not a bank, loan or investment app. |
+| Data deletion | In-app: Account → Delete account. Email route: info@sybnb.app. Add a web URL if Play asks. |
+| Privacy policy URL | https://sybnb.app/privacy.html (open it in a browser first) |
+
+### Data safety (Google Play categories)
+For every item: **collected = Yes, required for core function, encrypted in transit = Yes, user can request deletion = Yes**, **sold = No**, **third-party advertising = No**.
+
+| Play category | Data | Purpose |
+|---|---|---|
+| Personal info | Name, email, phone number | Account, ride/booking, support |
+| Location | Approximate + precise location | Pickup point, nearby listings, active-trip tracking (driver app: continuous while online) |
+| Financial info | Payment method type, transaction reference/proof (no full card number stored; cards handled by Stripe) | Payments, refunds, payouts |
+| Photos and videos | Profile photo, ID image (drivers / verified hosts), listing photos | Verification, listings |
+| Messages | In-app messages, support requests | Rides, bookings, disputes |
+| App activity | Searches, saved items, bookings | App function |
+| App info and performance | Diagnostics / crash and basic logs | Reliability |
+| Device or other IDs | Push token (once push is enabled) | Notifications |
+
+**Sharing:** with the other party of a trip or booking, with service providers (hosting, maps, email, payment processing), and with authorities where legally required. State this plainly.
+**DECIDE before ticking "Audio":** if `SR_AUDIO_RECORDING_ENABLED` is turned on for rides, add **Audio** (voice or sound recordings) and update the privacy policy first. Keep it OFF for the closed test unless the legal text is ready.
+
+### Permissions to justify
+- **Location (foreground):** pickup point, nearby search, trip tracking while the app is open.
+- **Notifications:** ride and booking updates.
+- No background location in this build. If it is added later for drivers, Play requires a separate disclosure and a demo video.
+
+### Closed-test setup (Testing → Closed testing)
+1. Create track "closed-alpha". Upload `app-release.aab` (let Play manage app signing).
+2. Countries: add Syria plus where your testers live (for example Canada, if testers are there).
+3. Testers: an email list with **12 or more** people; share the opt-in link; they must stay opted in **14 days** (a new personal developer account). An organization account with D-U-N-S verification is exempt.
+4. Release notes (EN): `First closed test of SYBNB: search stays, rentals, cars and property; request SR rides; switch Arabic / English / French. Please tell us anything that breaks.`
+5. Release notes (AR): `أول نسخة تجريبية من سيبنب: ابحث عن الإقامات والإيجارات والسيارات والعقارات، اطلب رحلات SR، وبدّل بين العربية والإنجليزية والفرنسية. أخبرنا بأي خلل تواجهه.`
+
+### What to ask testers to try (paste into the invite)
+1. Open the app and switch the language (AR / EN / FR).
+2. Search stays in your city and open a listing.
+3. Create an account and log in (OTP by email).
+4. Open **SR Rides**, allow location when asked, and check your pickup point is detected.
+5. Save a listing, then reopen the app after closing it.
+6. Send us a screenshot of anything that looks wrong.
+
+### Do-not-claim list (store text, screenshots, descriptions)
+No "10K+ users", no "first in Syria", no "guaranteed", "100% secure", "escrow", "fully protected", or "enterprise-grade". Describe what exists: upfront fares, approved drivers, booking through SYBNB checkout, dispute review.

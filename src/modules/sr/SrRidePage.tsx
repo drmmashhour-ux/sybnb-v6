@@ -47,6 +47,7 @@ import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/Vi
 import { RideMap } from '../../shared/maps/RideMap'
 import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
 import { srFallbackFareMinor } from './srFareModel'
+import { RecordingControls } from './RecordingControls'
 
 type Props = {
   lang: Lang
@@ -1433,7 +1434,12 @@ export function SrRidePage({ lang }: Props) {
             />
           )}
           {ride?.driver ? (
-            <DriverSafetyCard ride={ride} driverPhotoUrl={driverPhotoUrl} t={t} lang={lang} />
+            <>
+              <DriverSafetyCard ride={ride} driverPhotoUrl={driverPhotoUrl} t={t} lang={lang} />
+              {ride && ride.id && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'COMPLETED'].includes(ride.status) && (
+                <RecordingControls rideId={ride.id} lang={lang} />
+              )}
+            </>
           ) : (
             <Info label={t.driver} value={driverIdentityLabel(ride, t)} />
           )}

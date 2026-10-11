@@ -181,6 +181,9 @@ model User {
   // Stays owned by an account with this NULL are hidden from public listing endpoints and refused
   // by POST /api/bookings (server/lib/host-verification.mjs).
   hostVerifiedAt   DateTime? @map("host_verified_at")
+  // SR in-ride audio recording preference (migration 063): OFF | ON_DEMAND | NIGHT_ONLY | EVERY_RIDE.
+  // Lyft-parity safety feature; actual capture is additionally gated by SR_AUDIO_RECORDING_ENABLED.
+  srRecordingMode  String?   @default("OFF") @map("sr_recording_mode")
   hostVerifiedById String?   @map("host_verified_by_id")
   // Stripe-for-SR Option B (saved-card auto-charge). The rider's Stripe Customer and their one saved
   // default card, captured once via a Checkout session in setup mode. Only non-sensitive descriptors
@@ -211,6 +214,7 @@ model User {
   auditLogs         AdminAuditLog[]   @relation("AuditActor")
   listingReviews    ListingReview[]   @relation("ReviewGuest")
   rideReviews       RideReview[]      @relation("RideReviewRider")
+  rideRecordings    RideRecording[]   @relation("RecordingUploader")
   sentMessages      Message[]         @relation("MessageSender")
   paymentProofs     PaymentProof[]    @relation("PaymentPayer")
   listingInquiries  MessageThread[]   @relation("ListingInquiryGuest")
@@ -1350,6 +1354,7 @@ model RideRequest {
   // (CREATED/OFFERED/ACCEPTED/.../SOS/...) reconstructing exactly what happened on this trip.
   // Cascade so a deleted ride takes its events with it; audit rows never outlive their ride.
   events         RideEvent[]
+  recordings     RideRecording[]
   messageThread  MessageThread?
   stops          RideStop[]
   promoCode      PromoCode?      @relation(fields: [promoCodeId], references: [id])
@@ -1854,4 +1859,38 @@ model VisitRequest {
   @@index([ownerId, status])
   @@index([listingId])
   @@map("visit_requests")
+}
+
+
+// ---------------------------------------------------------------------------
+// SR in-ride audio recording (migration 063, 2026-10-11). Lyft-parity safety feature: either party
+// may record; recordings are private, encrypted at rest in a signed-URL-only bucket, retained 7 days
+// (expiresAt), and reachable by admin/Safety ONLY once attached to an Incident (attachedIncidentId).
+// The row is part of the ride "black box" (shares rideId with RideEvent). Actual capture is gated by
+// the SR_AUDIO_RECORDING_ENABLED flag; the framework exists regardless. UUID ids/FKs match this DB.
+// ---------------------------------------------------------------------------
+
+model RideRecording {
+  id                 String    @id @default(uuid())
+  rideId             String    @map("ride_id")
+  uploaderId         String    @map("uploader_id")
+  role               String    // RIDER | DRIVER
+  storageKey         String    @map("storage_key")
+  contentType        String    @map("content_type")
+  durationSec        Int?      @map("duration_sec")
+  sizeBytes          Int?      @map("size_bytes")
+  startedAt          DateTime? @map("started_at")
+  status             String    @default("STORED") // STORED | PURGED
+  attachedIncidentId String?   @map("attached_incident_id")
+  expiresAt          DateTime  @map("expires_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  ride     RideRequest @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  uploader User        @relation("RecordingUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([rideId])
+  @@index([uploaderId])
+  @@index([status, expiresAt])
+  @@map("ride_recordings")
 }

@@ -779,9 +779,20 @@ export async function handleSrRides(req, res, url, context) {
       && existing.updatedAt
       && (Date.now() - new Date(existing.updatedAt).getTime() < RIDE_CANCEL_GRACE_MS)
     const driverAlreadyCommitted = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(existing.status) && !withinGraceWindow
-    const cancellationFeeMinor = driverAlreadyCommitted && existing.fareMinor
+    let cancellationFeeMinor = driverAlreadyCommitted && existing.fareMinor
       ? Math.round((existing.fareMinor * RIDE_CANCELLATION_FEE_PERCENT) / 100)
       : null
+    // Lyft-parity consent exit (2026-10-11): a rider who cancels specifically because the matched
+    // driver may record audio is NOT charged a cancellation fee, even past the grace window. Only
+    // honoured when the driver genuinely has a recording preference enabled, so it can't be abused
+    // as a blanket fee bypass.
+    if (cancellationFeeMinor && existing.driverId) {
+      const cancelBody = await readJson(req).catch(() => ({}))
+      if (cancelBody && cancelBody.reason === 'recording_consent') {
+        const drv = await db().user.findUnique({ where: { id: existing.driverId }, select: { srRecordingMode: true } })
+        if (drv?.srRecordingMode && drv.srRecordingMode !== 'OFF') cancellationFeeMinor = null
+      }
+    }
 
     // SEC-002R round 3, item 3. Class A: `cancellationFeeMinor` is a REAL money field, computed from
     // the ride's own locked fareMinor, and there is no endpoint anywhere that reverses it -- once

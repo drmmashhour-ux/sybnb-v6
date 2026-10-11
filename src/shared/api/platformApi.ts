@@ -3783,3 +3783,74 @@ export async function fetchAgent(id: string): Promise<{ agent: PlatformAgent | n
   const res = await apiRequest<{ ok: true; agent: PlatformAgent | null; listings: PlatformListing[] }>(`/api/agents/${encodeURIComponent(id)}`)
   return { agent: res.agent, listings: res.listings }
 }
+
+// ---------------------------------------------------------------------------------------------
+// SR in-ride audio recording (2026-10-11, Lyft-parity safety). Rider-scoped via the guest session.
+// Actual capture is additionally gated server-side by SR_AUDIO_RECORDING_ENABLED (captureEnabled).
+// ---------------------------------------------------------------------------------------------
+
+export type RecordingMode = 'OFF' | 'ON_DEMAND' | 'NIGHT_ONLY' | 'EVERY_RIDE'
+
+export type RecordingContext = {
+  myRole: 'RIDER' | 'DRIVER'
+  myMode: RecordingMode
+  captureEnabled: boolean
+  counterpartyMayRecord: boolean
+}
+
+export type RideRecordingMeta = {
+  id: string
+  role: string
+  durationSec: number | null
+  startedAt: string | null
+  createdAt: string
+  expiresAt: string
+  attachedIncidentId: string | null
+}
+
+export async function fetchRecordingPreference(): Promise<{ mode: RecordingMode; captureEnabled: boolean }> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; mode: RecordingMode; captureEnabled: boolean }>('/api/sr/recording/preference', { token: session.token })
+  return { mode: res.mode, captureEnabled: res.captureEnabled }
+}
+
+export async function setRecordingPreference(mode: RecordingMode): Promise<{ mode: RecordingMode; captureEnabled: boolean }> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; mode: RecordingMode; captureEnabled: boolean }>('/api/sr/recording/preference', { method: 'PUT', token: session.token, body: { mode } })
+  return { mode: res.mode, captureEnabled: res.captureEnabled }
+}
+
+export async function fetchRecordingContext(rideId: string): Promise<RecordingContext | null> {
+  const session = getStoredGuestSession()
+  if (!session) return null
+  try {
+    const res = await apiRequest<{ ok: true } & RecordingContext>(`/api/sr/rides/${encodeURIComponent(rideId)}/recording-context`, { token: session.token })
+    return { myRole: res.myRole, myMode: res.myMode, captureEnabled: res.captureEnabled, counterpartyMayRecord: res.counterpartyMayRecord }
+  } catch {
+    return null
+  }
+}
+
+export async function uploadRideRecording(rideId: string, input: { base64: string; contentType: string; durationSec?: number; startedAt?: string }): Promise<{ id: string; expiresAt: string }> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; recording: { id: string; expiresAt: string } }>(`/api/sr/rides/${encodeURIComponent(rideId)}/recordings`, { method: 'POST', token: session.token, body: input })
+  return res.recording
+}
+
+export async function fetchRideRecordings(rideId: string): Promise<RideRecordingMeta[]> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; recordings: RideRecordingMeta[] }>(`/api/sr/rides/${encodeURIComponent(rideId)}/recordings`, { token: session.token })
+  return res.recordings
+}
+
+export async function attachRecordingReport(recordingId: string, note?: string): Promise<{ incidentId: string }> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; incidentId: string }>(`/api/sr/recordings/${encodeURIComponent(recordingId)}/attach-report`, { method: 'POST', token: session.token, body: { note } })
+  return { incidentId: res.incidentId }
+}
+
+// Fee-free consent exit: cancel the ride because the matched driver may record audio (Lyft-parity).
+export async function declineRideRecordingConsent(rideId: string): Promise<void> {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/sr/rides/${encodeURIComponent(rideId)}/cancel`, { method: 'PATCH', token: session.token, body: { reason: 'recording_consent' } })
+}

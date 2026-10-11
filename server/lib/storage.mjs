@@ -25,6 +25,11 @@ const EXT_BY_MIME = {
   'image/png': 'png',
   'image/webp': 'webp',
   'application/pdf': 'pdf',
+  'audio/webm': 'weba',
+  'audio/mp4': 'm4a',
+  'audio/mpeg': 'mp3',
+  'audio/ogg': 'ogg',
+  'audio/aac': 'aac',
 }
 
 // Per-bucket policy: whether objects are private (signed retrieval only), allowed MIME types, and
@@ -36,6 +41,7 @@ const BUCKETS = {
   'listing-media': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
   'driver-photo': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
   'host-photo': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
+  'ride-recording': { private: true, mime: ['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/ogg', 'audio/aac'], maxBytes: 8 * 1024 * 1024 },
 }
 
 function bucketPolicy(bucket) {

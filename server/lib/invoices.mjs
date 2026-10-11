@@ -31,7 +31,7 @@ async function nextInvoiceNumber(tx, division) {
 }
 
 function moneyText(amountMinor, currency) {
-  const n = Math.round(amountMinor || 0) / 100
+  const n = Math.round(amountMinor || 0) // whole currency units (money model is whole units, not cents)
   try {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD' }).format(n)
   } catch {

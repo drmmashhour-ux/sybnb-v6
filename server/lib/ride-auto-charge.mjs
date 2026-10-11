@@ -45,10 +45,10 @@ export async function maybeAutoChargeRideCard({ rideId }) {
   })
   if (!rider?.defaultCardPmId || !rider?.stripeCustomerId) return { attempted: false, reason: 'no_saved_card' }
 
-  // SR fares are USD minor units; with STRIPE_CURRENCY=usd they map 1:1 to the charge. Stripe's
-  // minimum chargeable amount is $0.50, so floor at 50 cents (a sub-50c fare is implausible anyway).
+  // SR fares are WHOLE USD units (e.g. 4 = $4), so convert to cents for Stripe (x100). Stripe's
+  // minimum chargeable amount is $0.50, so floor at 50 cents.
   const chargeCurrency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
-  const unitAmount = Math.max(50, amountMinor)
+  const unitAmount = Math.max(50, amountMinor * 100)
 
   let intent
   try {

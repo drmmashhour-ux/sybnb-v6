@@ -4,6 +4,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { publicListingVisibilityWhere } from '../lib/host-verification.mjs'
 
 function toPublicOpenHouse(o) {
   return {
@@ -49,7 +50,7 @@ export async function handleOpenHouses(req, res, url, context) {
       where: {
         status: 'SCHEDULED',
         endsAt: { gte: now },
-        listing: { status: 'APPROVED', ...(division ? { division } : {}) },
+        listing: { status: 'APPROVED', ...(division ? { division } : {}), ...publicListingVisibilityWhere(division || undefined) },
       },
       include: {
         listing: { include: { media: { orderBy: { sortOrder: 'asc' }, take: 1 }, location: true } },
@@ -67,7 +68,7 @@ export async function handleOpenHouses(req, res, url, context) {
     if (req.method === 'GET') {
       const now = new Date()
       const rows = await db().openHouse.findMany({
-        where: { listingId, status: 'SCHEDULED', endsAt: { gte: now } },
+        where: { listingId, status: 'SCHEDULED', endsAt: { gte: now }, listing: { status: 'APPROVED', ...publicListingVisibilityWhere() } },
         orderBy: { startsAt: 'asc' },
         take: 30,
       })

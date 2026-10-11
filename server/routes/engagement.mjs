@@ -4,6 +4,7 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, readJson } from '../lib/responses.mjs'
+import { isListingPubliclyVisible } from '../lib/host-verification.mjs'
 
 const DIVISIONS = new Set(['STAYS', 'RENTALS', 'BUY', 'CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION'])
 
@@ -69,9 +70,9 @@ export async function handleEngagement(req, res, url, context) {
         where: { userId: context.user.id },
         orderBy: { createdAt: 'desc' },
         take: 200,
-        include: { listing: { include: { media: { orderBy: { sortOrder: 'asc' }, take: 1 }, location: true } } },
+        include: { listing: { include: { media: { orderBy: { sortOrder: 'asc' }, take: 1 }, location: true, owner: { select: { hostVerifiedAt: true } } } } },
       })
-      return json(res, 200, { ok: true, favourites: rows.map((r) => ({ id: r.id, listingId: r.listingId, createdAt: r.createdAt, listing: toPublicListing(r.listing) })) })
+      return json(res, 200, { ok: true, favourites: rows.map((r) => ({ id: r.id, listingId: r.listingId, createdAt: r.createdAt, listing: isListingPubliclyVisible(r.listing, r.listing?.owner) ? toPublicListing(r.listing) : null })) })
     }
     if (req.method === 'POST') {
       requireAuth(context)

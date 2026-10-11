@@ -786,7 +786,7 @@ export async function handleSrRides(req, res, url, context) {
     // driver may record audio is NOT charged a cancellation fee, even past the grace window. Only
     // honoured when the driver genuinely has a recording preference enabled, so it can't be abused
     // as a blanket fee bypass.
-    if (cancellationFeeMinor && existing.driverId) {
+    if (process.env.SR_AUDIO_RECORDING_ENABLED === 'true' && cancellationFeeMinor && existing.driverId) {
       const cancelBody = await readJson(req).catch(() => ({}))
       if (cancelBody && cancelBody.reason === 'recording_consent') {
         const drv = await db().user.findUnique({ where: { id: existing.driverId }, select: { srRecordingMode: true } })

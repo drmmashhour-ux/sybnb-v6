@@ -260,7 +260,7 @@ export async function handlePayments(req, res, url, context) {
       const chargeCurrency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
       const unitAmount =
         ride.currency === 'USD' && chargeCurrency === 'usd'
-          ? Math.max(50, Math.round(amountDue))
+          ? Math.max(50, Math.round(amountDue * 100))
           : stripeChargeAmount(amountDue).unitAmount
 
       const session = await stripe.checkout.sessions.create({

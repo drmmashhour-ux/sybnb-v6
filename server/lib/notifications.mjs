@@ -24,7 +24,7 @@ const TWO_DECIMAL_CURRENCIES = new Set(['USD', 'EUR', 'CAD', 'GBP'])
 export function formatMoney(minor, currency) {
   const code = String(currency || '').toUpperCase()
   const amount = Number(minor) || 0
-  if (TWO_DECIMAL_CURRENCIES.has(code)) return `${(amount / 100).toFixed(2)} ${code}`
+  // Money model is whole currency units (not cents), so render verbatim with thousands separators.
   return `${Math.round(amount).toLocaleString('en-US')} ${code}`
 }
 

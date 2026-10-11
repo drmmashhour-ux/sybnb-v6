@@ -36,9 +36,9 @@ function depositChargeable() {
 }
 
 const MAX_DURATION_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
-const DEFAULT_MIN_INCREMENT_MINOR = 5000 // $50 in USD cents
+const DEFAULT_MIN_INCREMENT_MINOR = 50 // $50 (whole USD units; money model is whole units, not cents)
 const DEFAULT_DEPOSIT_RATE = 0.05
-const MIN_DEPOSIT_MINOR = 5000
+const MIN_DEPOSIT_MINOR = 50 // $50 floor (whole USD units)
 
 function badRequest(message, code = 'BAD_REQUEST', statusCode = 400) {
   const err = new Error(message)

@@ -9,6 +9,7 @@
 // tiny and JS keeps the filter semantics in one readable place, consistent with how a human reads the
 // saved filters.
 import { db } from './prisma.mjs'
+import { publicListingVisibilityWhere } from './host-verification.mjs'
 import { sendPushNotification } from './push-notifications.mjs'
 import { log } from './logger.mjs'
 
@@ -84,7 +85,7 @@ export async function runSavedSearchAlerts() {
       let candidates = []
       try {
         candidates = await db().listing.findMany({
-          where: { status: 'APPROVED', division: ss.division, approvedAt: { gt: since } },
+          where: { status: 'APPROVED', division: ss.division, approvedAt: { gt: since }, ...publicListingVisibilityWhere(ss.division) },
           include: { location: true },
           orderBy: { approvedAt: 'asc' },
           take: 50,
@@ -93,8 +94,11 @@ export async function runSavedSearchAlerts() {
         log.warn('saved_search_query_failed', { savedSearchId: ss.id, message: err?.message })
         continue
       }
-      // Advance the watermark every run so a listing is never counted twice.
-      await db().savedSearch.update({ where: { id: ss.id }, data: { lastCheckedAt: runStart } }).catch(() => {})
+      // Advance the watermark so a listing is never counted twice. If we hit the page cap (50), there
+      // may be more approved rows after the newest one we fetched, so only advance to that row's
+      // approvedAt (the rest are picked up next run) instead of jumping to runStart and skipping them.
+      const watermark = candidates.length === 50 ? candidates[candidates.length - 1].approvedAt : runStart
+      await db().savedSearch.update({ where: { id: ss.id }, data: { lastCheckedAt: watermark } }).catch(() => {})
       if (!candidates.length) continue
       const matches = candidates.filter((l) => listingMatchesSavedFilters(l, ss.filters))
       if (!matches.length) continue

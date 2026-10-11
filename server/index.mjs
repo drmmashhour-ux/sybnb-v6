@@ -423,6 +423,14 @@ const dispatchTickTimer = setInterval(runDispatchHeartbeat, DISPATCH_TICK_INTERV
 dispatchTickTimer.unref()
 
 let shuttingDown = false
+// Top-level safety net: a stray floating rejection would otherwise terminate the single replica.
+process.on('unhandledRejection', (reason) => {
+  log.error('unhandled_rejection', { message: reason instanceof Error ? reason.message : String(reason) })
+})
+process.on('uncaughtException', (err) => {
+  log.error('uncaught_exception', { message: err?.message })
+  if (!shuttingDown) { shuttingDown = true; setTimeout(() => process.exit(1), 100) }
+})
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, async () => {
     if (shuttingDown) return

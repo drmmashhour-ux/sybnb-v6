@@ -663,6 +663,8 @@ export async function handleListings(req, res, url, context) {
   const reviewsMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/reviews$/)
   if (reviewsMatch) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    const rl = await db().listing.findUnique({ where: { id: reviewsMatch[1] }, select: { status: true, division: true, owner: { select: { hostVerifiedAt: true } } } })
+    if (!rl || !isListingPubliclyVisible(rl, rl.owner)) return json(res, 200, { ok: true, reviews: [], average: null, count: 0 })
     const reviews = await db().listingReview.findMany({
       where: { listingId: reviewsMatch[1], hiddenAt: null },
       include: { guest: { select: { id: true, displayName: true } } },
@@ -681,9 +683,9 @@ export async function handleListings(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     const base = await db().listing.findFirst({
       where: { id: comparablesMatch[1], status: 'APPROVED' },
-      include: { location: true },
+      include: { location: true, owner: { select: { hostVerifiedAt: true } } },
     })
-    if (!base) return json(res, 200, { ok: true, listings: [] })
+    if (!base || !isListingPubliclyVisible(base, base.owner)) return json(res, 200, { ok: true, listings: [] })
     const lo = Math.round(base.priceMinor * 0.65)
     const hi = Math.round(base.priceMinor * 1.35)
     const city = base.location?.city
@@ -692,6 +694,7 @@ export async function handleListings(req, res, url, context) {
       division: base.division,
       id: { not: base.id },
       priceMinor: { gte: lo, lte: hi },
+      ...publicListingVisibilityWhere(base.division),
       ...(city ? { location: { city: { equals: city, mode: 'insensitive' } } } : {}),
     }
     let rows = await db().listing.findMany({
@@ -702,7 +705,7 @@ export async function handleListings(req, res, url, context) {
     // If a city filter leaves too few, widen to division-only within the price band.
     if (rows.length < 3 && city) {
       rows = await db().listing.findMany({
-        where: { status: 'APPROVED', division: base.division, id: { not: base.id }, priceMinor: { gte: lo, lte: hi } },
+        where: { status: 'APPROVED', division: base.division, id: { not: base.id }, priceMinor: { gte: lo, lte: hi }, ...publicListingVisibilityWhere(base.division) },
         include: { location: true, media: { orderBy: { sortOrder: 'asc' }, take: 1 } },
         take: 12,
       })

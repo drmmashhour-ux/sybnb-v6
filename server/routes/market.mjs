@@ -3,6 +3,7 @@
 // prices. Grows into true history as sales accumulate. Public, read-only.
 import { db } from '../lib/prisma.mjs'
 import { json, methodNotAllowed } from '../lib/responses.mjs'
+import { publicListingVisibilityWhere } from '../lib/host-verification.mjs'
 
 function median(nums) {
   if (!nums.length) return null
@@ -36,6 +37,7 @@ export async function handleMarket(req, res, url, context) {
       status: 'APPROVED',
       currency,
       ...(division ? { division } : {}),
+      ...publicListingVisibilityWhere(division || undefined),
       ...(city ? { location: { city: { equals: city, mode: 'insensitive' } } } : {}),
     },
     select: { priceMinor: true, location: { select: { city: true, area: true } } },

@@ -3704,3 +3704,82 @@ export async function updateSavedSearch(id: string, patch: { notifyOnNew?: boole
   const session = await ensurePrototypeGuestSession()
   await apiRequest<{ ok: true }>(`/api/saved-searches/${encodeURIComponent(id)}`, { method: 'PATCH', token: session.token, body: patch })
 }
+
+// ---------------------------------------------------------------------------------------------
+// Schedule-a-visit (2026-10-11). A buyer/renter requests a viewing time; the owner confirms/declines.
+// ---------------------------------------------------------------------------------------------
+
+export type PlatformVisit = {
+  id: string
+  listingId: string
+  listingTitle: string
+  proposedAt: string
+  status: 'PENDING' | 'CONFIRMED' | 'DECLINED' | 'CANCELLED'
+  note: string | null
+  responseNote: string | null
+  confirmedAt: string | null
+  createdAt: string
+  viewpoint: 'requester' | 'owner' | null
+  requesterName: string | null
+  ownerName: string | null
+}
+
+export async function requestVisit(input: { listingId: string; proposedAt: string; note?: string }): Promise<PlatformVisit> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; visit: PlatformVisit }>('/api/visits', { method: 'POST', token: session.token, body: input })
+  return res.visit
+}
+
+export async function fetchVisits(): Promise<{ asRequester: PlatformVisit[]; asOwner: PlatformVisit[] }> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; asRequester: PlatformVisit[]; asOwner: PlatformVisit[] }>('/api/visits', { token: session.token })
+  return { asRequester: res.asRequester, asOwner: res.asOwner }
+}
+
+export async function fetchVisitForListing(listingId: string): Promise<PlatformVisit | null> {
+  const session = getStoredGuestSession()
+  if (!session) return null
+  try {
+    const res = await apiRequest<{ ok: true; visit: PlatformVisit | null }>(`/api/visits/for-listing/${encodeURIComponent(listingId)}`, { token: session.token })
+    return res.visit
+  } catch {
+    return null
+  }
+}
+
+export async function respondVisit(id: string, status: 'CONFIRMED' | 'DECLINED', responseNote?: string): Promise<PlatformVisit> {
+  const session = await ensurePrototypeGuestSession()
+  const res = await apiRequest<{ ok: true; visit: PlatformVisit }>(`/api/visits/${encodeURIComponent(id)}`, { method: 'PATCH', token: session.token, body: { status, responseNote } })
+  return res.visit
+}
+
+export async function cancelVisit(id: string): Promise<void> {
+  const session = await ensurePrototypeGuestSession()
+  await apiRequest<{ ok: true }>(`/api/visits/${encodeURIComponent(id)}/cancel`, { method: 'POST', token: session.token })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Verified agent / agency directory (2026-10-11). Public, read-only. Centris-parity "Find a broker".
+// ---------------------------------------------------------------------------------------------
+
+export type PlatformAgent = {
+  id: string
+  displayName: string
+  legalName: string
+  sellerType: string
+  city: string | null
+  about: string | null
+  languages: string[]
+  listingCount: number
+  verified: boolean
+}
+
+export async function fetchAgents(): Promise<PlatformAgent[]> {
+  const res = await apiRequest<{ ok: true; agents: PlatformAgent[] }>('/api/agents')
+  return res.agents
+}
+
+export async function fetchAgent(id: string): Promise<{ agent: PlatformAgent | null; listings: PlatformListing[] }> {
+  const res = await apiRequest<{ ok: true; agent: PlatformAgent | null; listings: PlatformListing[] }>(`/api/agents/${encodeURIComponent(id)}`)
+  return { agent: res.agent, listings: res.listings }
+}

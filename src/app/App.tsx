@@ -40,6 +40,8 @@ const LandingPage = lazyNamed(() => import('../modules/landing/LandingPage'), 'L
 const LegalDocumentPage = lazyNamed(() => import('../modules/legal/LegalDocumentPage'), 'LegalDocumentPage')
 const ListingDetailPage = lazyNamed(() => import('../modules/listings/ListingDetailPage'), 'ListingDetailPage')
 const SavedPage = lazyNamed(() => import('../modules/listings/SavedPage'), 'SavedPage')
+const VisitsPage = lazyNamed(() => import('../modules/listings/VisitsPage'), 'VisitsPage')
+const AgentsPage = lazyNamed(() => import('../modules/listings/AgentsPage'), 'AgentsPage')
 const OperationsCalendarPage = lazyNamed(() => import('../modules/operations/OperationsCalendarPage'), 'OperationsCalendarPage')
 const PaymentReceiptPage = lazyNamed(() => import('../modules/payments/PaymentReceiptPage'), 'PaymentReceiptPage')
 const PlatformStatusPage = lazyNamed(() => import('../modules/status/PlatformStatusPage'), 'PlatformStatusPage')
@@ -150,6 +152,7 @@ export function App() {
   // session must exist before the claim screens render — otherwise the only thing standing between
   // the user and a silently-failing claim call is a fake local "create account" step that never
   // talks to the server.
+  const agentProfileMatch = path.match(/^\/agent\/([^/]+)$/)
   const giftClaimRoute = path === '/wallet/gift/claim' || /^\/wallet\/gift\/claim\/[^/]+$/.test(path)
     || path === '/wallet/gift/code' || /^\/wallet\/gift\/code\/[^/]+$/.test(path)
   const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/profile' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
@@ -212,6 +215,12 @@ export function App() {
           <DashboardPage lang={lang} />
         ) : path === '/host/profile' ? (
           <HostProfilePage lang={lang} />
+        ) : path === '/agents' ? (
+          <AgentsPage lang={lang} />
+        ) : agentProfileMatch ? (
+          <AgentsPage lang={lang} agentId={agentProfileMatch[1]} />
+        ) : path === '/visits' ? (
+          <VisitsPage lang={lang} />
         ) : path === '/saved' ? (
           <SavedPage lang={lang} />
         ) : path === '/profile' ? (

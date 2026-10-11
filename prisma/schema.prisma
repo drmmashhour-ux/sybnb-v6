@@ -221,6 +221,9 @@ model User {
   // Centris-parity Phase 1 (migration 061): saved listings + saved searches with new-listing alerts.
   favourites        Favourite[]       @relation("UserFavourites")
   savedSearches     SavedSearch[]     @relation("UserSavedSearches")
+  // Schedule-a-visit (migration 062): visits this user requested, and visits for listings they own.
+  visitsRequested   VisitRequest[]    @relation("VisitRequester")
+  visitsToHost      VisitRequest[]    @relation("VisitOwner")
   savedPlaces       SavedPlace[]
   promoRedemptions  PromoRedemption[]
   pushSubscriptions PushSubscription[]
@@ -515,6 +518,8 @@ model Listing {
   auction        Auction?
   // Users who saved this listing to their favourites (migration 061).
   favouritedBy   Favourite[]
+  // Scheduled visit requests for this listing (migration 062).
+  visitRequests  VisitRequest[]
 
   @@index([division, status])
   @@index([ownerId])
@@ -1810,4 +1815,43 @@ model SavedSearch {
   @@index([userId])
   @@index([notifyOnNew, lastCheckedAt])
   @@map("saved_searches")
+}
+
+
+// ---------------------------------------------------------------------------
+// Schedule-a-visit (migration 062, 2026-10-11). Centris-parity: a real date/time viewing request a
+// buyer/renter sends and the listing owner confirms or declines (replacing a plain contact thread).
+// UUID ids/FKs match this DB.
+// ---------------------------------------------------------------------------
+
+enum VisitStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+  CANCELLED
+
+  @@map("visit_status")
+}
+
+model VisitRequest {
+  id           String      @id @default(uuid())
+  listingId    String      @map("listing_id")
+  requesterId  String      @map("requester_id")
+  ownerId      String      @map("owner_id")
+  proposedAt   DateTime    @map("proposed_at")
+  status       VisitStatus @default(PENDING)
+  note         String?
+  responseNote String?     @map("response_note")
+  confirmedAt  DateTime?   @map("confirmed_at")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  requester User    @relation("VisitRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  owner     User    @relation("VisitOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([requesterId])
+  @@index([ownerId, status])
+  @@index([listingId])
+  @@map("visit_requests")
 }

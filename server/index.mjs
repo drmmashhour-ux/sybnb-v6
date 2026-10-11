@@ -19,6 +19,8 @@ import { handleHost } from './routes/host.mjs'
 import { handleListings } from './routes/listings.mjs'
 import { handleAuctions, closeDueAuctions } from './routes/auctions.mjs'
 import { handleEngagement } from './routes/engagement.mjs'
+import { handleVisits } from './routes/visits.mjs'
+import { handleAgents } from './routes/agents.mjs'
 import { runSavedSearchAlerts } from './lib/saved-search-alerts.mjs'
 import { handleMe } from './routes/me.mjs'
 import { handleHostProfile } from './routes/host-profile.mjs'
@@ -265,6 +267,8 @@ async function dispatch(req, res, url, context) {
     handlePaymentIntents,
     handleAuctions,
     handleEngagement,
+    handleVisits,
+    handleAgents,
     handleListings,
     handleBookings,
     handlePayments,

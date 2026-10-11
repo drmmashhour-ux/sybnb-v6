@@ -27,6 +27,7 @@ import { ListingSpecs } from './ListingSpecs'
 import { AuctionPanel } from './AuctionPanel'
 import { FavouriteButton } from './FavouriteButton'
 import { AffordabilityCalculator } from './AffordabilityCalculator'
+import { ScheduleVisitPanel } from './ScheduleVisitPanel'
 import { googleMapsEmbedUrl, googleMapsSearchUrl, listingMapTarget, offlineMapSnapshot, offlineMapStorageKey, type GoogleMapTarget } from '../../shared/maps/googleMapCapsule'
 import { cancellationRuleText, freeCancellationLabel } from '../../shared/booking/cancellationPolicy'
 import { localeForLang } from '../../shared/country/presentation'
@@ -840,6 +841,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <ListingSpecs division={listing.division} metadata={listing.metadata} lang={lang} />
             {(listing.division === 'BUY' || listing.division === 'NEW_CONSTRUCTION') && (
               <AffordabilityCalculator priceMinor={listing.priceMinor} currency={listing.currency} lang={lang} />
+            )}
+            {(['BUY', 'RENTALS', 'NEW_CONSTRUCTION', 'CARS'].includes(listing.division)) && (
+              <ScheduleVisitPanel listing={listing} lang={lang} />
             )}
 
             <div style={styles.tabRow} role="tablist" aria-label={pick(lang, 'تفاصيل الإعلان', 'Listing details', 'Détails de l’annonce')}>

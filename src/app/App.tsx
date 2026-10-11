@@ -24,6 +24,7 @@ const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'
 const GuestAccountPage = lazyNamed(() => import('../modules/account/GuestAccountPage'), 'GuestAccountPage')
 const BecomeHostPage = lazyNamed(() => import('../modules/account/BecomeHostPage'), 'BecomeHostPage')
 const HostWhyPage = lazyNamed(() => import('../modules/account/HostWhyPage'), 'HostWhyPage')
+const GetAppPage = lazyNamed(() => import('../modules/app/GetAppPage'), 'GetAppPage')
 const HostJoinPage = lazyNamed(() => import('../modules/account/HostJoinPage'), 'HostJoinPage')
 const AdminHostsPage = lazyNamed(() => import('../modules/admin/AdminHostsPage'), 'AdminHostsPage')
 const HostDashboardPage = lazyNamed(() => import('../modules/host/HostDashboardPage'), 'HostDashboardPage')
@@ -194,6 +195,8 @@ export function App() {
           <BecomeHostPage lang={lang} returnPath={path} />
         ) : staffRequiredRole && !hasStaffSession ? (
           <StaffAccessPage lang={lang} role={staffRequiredRole} returnPath={path} />
+        ) : path === '/get-app' ? (
+          <GetAppPage lang={lang} />
         ) : path === '/host/why' ? (
           // Public "Why host on SYBNB" landing (exempt from the HOST gate in getStaffRequiredRole).
           <HostWhyPage lang={lang} />

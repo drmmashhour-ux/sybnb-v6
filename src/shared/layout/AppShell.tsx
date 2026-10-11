@@ -267,6 +267,7 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
         { key: 'visits', label: pick(lang, 'الزيارات', 'Visits', 'Visites'), onSelect: () => go('/visits') },
         { key: 'agents', label: pick(lang, 'الوسطاء الموثّقون', 'Verified agents', 'Agents vérifiés'), onSelect: () => go('/agents') },
         { key: 'guides', label: pick(lang, 'أدلة إرشادية', 'Guides', 'Guides'), onSelect: () => go('/guides') },
+        { key: 'get-app', label: pick(lang, 'حمّل التطبيق', 'Get the app', 'Obtenir l’application'), onSelect: () => go('/get-app') },
         { key: 'sep1', separator: true },
         inHostArea
           ? { key: 'host', label: pick(lang, 'التبديل إلى السفر', 'Switch to traveling', 'Passer en mode voyage'), onSelect: () => go('/stays') }
@@ -298,6 +299,7 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
         { key: 'sep1', separator: true },
         { key: 'agents', label: pick(lang, 'الوسطاء الموثّقون', 'Verified agents', 'Agents vérifiés'), onSelect: () => go('/agents') },
         { key: 'guides', label: pick(lang, 'أدلة إرشادية', 'Guides', 'Guides'), onSelect: () => go('/guides') },
+        { key: 'get-app', label: pick(lang, 'حمّل التطبيق', 'Get the app', 'Obtenir l’application'), onSelect: () => go('/get-app') },
         { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/join') },
       ]
 
@@ -546,6 +548,14 @@ function getRouteContext(path: string, lang: Lang) {
     return {
       section: pick(lang, 'حساب العميل', 'Guest account', 'Compte voyageur'),
       page: pick(lang, 'ملفي', 'My profile', 'Mon profil'),
+      backPath: home,
+      nextPath: '',
+    }
+  }
+  if (path === '/get-app') {
+    return {
+      section: pick(lang, 'التطبيق', 'The app', 'L’application'),
+      page: pick(lang, 'حمّل التطبيق', 'Get the app', 'Obtenir l’application'),
       backPath: home,
       nextPath: '',
     }

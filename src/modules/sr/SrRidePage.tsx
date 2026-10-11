@@ -62,6 +62,8 @@ const copy = {
     pickup: 'نقطة الانطلاق',
     dropoff: 'الوجهة',
     category: 'الفئة',
+    rideOptions: 'خيارات الرحلة',
+    selected: 'محدد',
     fare: 'الأجرة التقديرية',
     distance: 'المسافة التقديرية',
     distanceApprox: '(تقريبية بحسب العنوان)',
@@ -185,6 +187,8 @@ const copy = {
     pickup: 'Pickup',
     dropoff: 'Dropoff',
     category: 'Category',
+    rideOptions: 'Ride options',
+    selected: 'selected',
     fare: 'Estimated fare',
     distance: 'Estimated distance',
     distanceApprox: '(approximate, from address text)',
@@ -308,6 +312,8 @@ const copy = {
     pickup: 'Point de départ',
     dropoff: 'Destination',
     category: 'Catégorie',
+    rideOptions: 'Options de course',
+    selected: 'sélectionné(s)',
     fare: 'Tarif estimé',
     distance: 'Distance estimée',
     distanceApprox: '(approximative, d’après l’adresse saisie)',
@@ -1246,8 +1252,8 @@ export function SrRidePage({ lang }: Props) {
 
           <section style={styles.touchFilters}>
             <div style={styles.filtersHead}>
-              <strong>{t.category}</strong>
-              <span>{selectedFilterLabels(rideFilterGroups, rideFilters, lang).length}</span>
+              <strong>{t.rideOptions}</strong>
+              <span>{selectedFilterLabels(rideFilterGroups, rideFilters, lang).length} {t.selected}</span>
             </div>
             <VisualFilterPanel
               compact

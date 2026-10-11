@@ -379,6 +379,14 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
 
 function getRouteContext(path: string, lang: Lang) {
   const home = '/'
+  if (path === '/ride' || path === '/ride-preview') {
+    return {
+      section: pick(lang, 'نقل SR', 'SR rides', 'Courses SR'),
+      page: pick(lang, 'طلب رحلة', 'Ride request', 'Demande de course'),
+      backPath: home,
+      nextPath: '',
+    }
+  }
   if (path === '/stays') {
     return {
       section: pick(lang, 'الإيجار اليومي', 'Short-term rental', 'Location à court terme'),

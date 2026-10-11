@@ -1,6 +1,8 @@
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { isRateLimited } from '../lib/rateLimit.mjs'
+import { notifyUserMulti } from '../lib/notifications.mjs'
 import { isBookingViewable } from './bookings.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 
@@ -167,6 +169,35 @@ async function ensureRideThread(rideId) {
   })
 }
 
+// Message moderation (2026-10-11). Keep deals on-platform and curb abuse: redact contact details
+// (email / URL / phone-shaped numbers) from message bodies, and rate-limit sends per user. The
+// redactor is conservative — it targets emails, links, international (+/00) numbers, separator-
+// grouped numbers, and Syrian 09xxxxxxxx mobiles, but deliberately leaves bare long numbers (e.g. a
+// SYP price like 35000000) alone so negotiation isn't mangled.
+const CONTACT_HIDDEN = '[contact hidden]'
+function redactContactInfo(text) {
+  if (!text) return text
+  let out = text
+  out = out.replace(/\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b/gi, CONTACT_HIDDEN) // emails
+  out = out.replace(/\b(?:https?:\/\/|www\.)[^\s]+/gi, CONTACT_HIDDEN)      // urls
+  out = out.replace(/(?:wa\.me|t\.me|telegram\.me)\/[^\s]*/gi, CONTACT_HIDDEN) // messaging links
+  out = out.replace(/(?:\+|00)\d[\d\s().-]{6,}\d/g, CONTACT_HIDDEN)          // intl phone
+  out = out.replace(/\b0?9\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b/g, CONTACT_HIDDEN) // Syrian mobile 09xxxxxxxx
+  out = out.replace(/\b\d{2,4}[\s.-]\d{3,4}[\s.-]\d{3,4}\b/g, CONTACT_HIDDEN) // separator-grouped phone
+  return out
+}
+async function assertMessageRateOk(userId) {
+  // 20 messages / minute / user across all threads.
+  const limited = await isRateLimited(`msg-send:${userId}`, 60_000, 20).catch(() => false)
+  if (limited) {
+    const error = new Error('You are sending messages too quickly. Please wait a moment.')
+    error.statusCode = 429
+    error.code = 'MESSAGE_RATE_LIMITED'
+    error.expose = true
+    throw error
+  }
+}
+
 export async function handleMessages(req, res, url, context) {
   const listingThreadMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/thread$/)
   if (listingThreadMatch) {
@@ -236,6 +267,9 @@ export async function handleMessages(req, res, url, context) {
       throw error
     }
 
+    await assertMessageRateOk(context.user.id)
+    const safeText = redactContactInfo(text)
+
     const guestId = isOwner ? String(body.guestId || '') : context.user.id
     if (isOwner && !guestId) {
       const error = new Error('guestId is required for the listing owner.')
@@ -262,7 +296,7 @@ export async function handleMessages(req, res, url, context) {
         threadId: thread.id,
         senderUserId: context.user.id,
         senderRole: listingSenderRoleFor(listing, context),
-        body: text,
+        body: safeText,
       },
       include: { sender: { select: { id: true, displayName: true } } },
     })
@@ -346,13 +380,16 @@ export async function handleMessages(req, res, url, context) {
       throw error
     }
 
+    await assertMessageRateOk(context.user.id)
+    const safeText = redactContactInfo(text)
+
     const thread = await ensureThread(booking.id)
     const message = await db().message.create({
       data: {
         threadId: thread.id,
         senderUserId: context.user.id,
         senderRole: senderRoleFor(booking, context),
-        body: text,
+        body: safeText,
       },
       include: { sender: { select: { id: true, displayName: true } } },
     })
@@ -398,13 +435,16 @@ export async function handleMessages(req, res, url, context) {
       throw error
     }
 
+    await assertMessageRateOk(context.user.id)
+    const safeText = redactContactInfo(text)
+
     const thread = await ensureRideThread(ride.id)
     const message = await db().message.create({
       data: {
         threadId: thread.id,
         senderUserId: context.user.id,
         senderRole: rideSenderRoleFor(ride, context),
-        body: text,
+        body: safeText,
       },
       include: { sender: { select: { id: true, displayName: true } } },
     })
@@ -413,11 +453,7 @@ export async function handleMessages(req, res, url, context) {
     // fire-and-forget, never fails the send itself.
     const recipientId = ride.driverId === context.user.id ? ride.riderId : ride.driverId
     if (recipientId) {
-      void sendPushNotification(recipientId, {
-        title: `${message.sender.displayName} sent a message`,
-        body: text.length > 120 ? `${text.slice(0, 117)}...` : text,
-        url: '/#/ride',
-      })
+      notifyUserMulti('new_message', recipientId, { senderName: message.sender.displayName, preview: safeText.length > 120 ? `${safeText.slice(0, 117)}...` : safeText, url: '/#/ride' }, `msg-${message.id}`)
     }
 
     return json(res, 201, { ok: true, message })

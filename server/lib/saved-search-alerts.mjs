@@ -11,6 +11,7 @@
 import { db } from './prisma.mjs'
 import { publicListingVisibilityWhere } from './host-verification.mjs'
 import { sendPushNotification } from './push-notifications.mjs'
+import { notifyUserMulti } from './notifications.mjs'
 import { log } from './logger.mjs'
 
 const SINGLE_ATTRS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType', 'marketCategory']
@@ -104,11 +105,7 @@ export async function runSavedSearchAlerts() {
       if (!matches.length) continue
       const n = matches.length
       const label = divisionLabel(ss.division)
-      await sendPushNotification(ss.userId, {
-        title: `${n} new ${label}${n > 1 ? 's' : ''} for you`,
-        body: ss.label ? `New matches for your saved search “${ss.label}”.` : `New ${label} listings match your saved search.`,
-        url: '/#/saved',
-      }).catch(() => {})
+      notifyUserMulti('saved_search_match', ss.userId, { count: n, searchLabel: ss.label || null, url: '/#/saved' }, `ss-${ss.id}-${watermark instanceof Date ? watermark.getTime() : Date.now()}`)
       notified += 1
     }
   } catch (err) {

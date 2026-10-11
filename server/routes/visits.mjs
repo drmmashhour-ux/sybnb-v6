@@ -4,7 +4,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, readJson } from '../lib/responses.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
-import { notifyAdmin } from '../lib/notifications.mjs'
+import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
 
 function badRequest(message, code = 'BAD_REQUEST', statusCode = 400) {
   const err = new Error(message)
@@ -70,11 +70,7 @@ export async function handleVisits(req, res, url, context) {
       })
     }
 
-    sendPushNotification(listing.ownerId, {
-      title: 'New visit request',
-      body: `Someone asked to view ${listingTitle(listing)}.`,
-      url: '/#/visits',
-    }).catch(() => {})
+    notifyUserMulti('visit_requested', listing.ownerId, { listingTitle: listingTitle(listing), url: '/#/visits' }, `visit-req-${visit.id}`)
     notifyAdmin('listing_visit_requested', { visitId: visit.id, listingId, requesterId: context.user.id }, `visit-req-${visit.id}`)
 
     const full = await db().visitRequest.findUnique({ where: { id: visit.id }, include: { listing: true, owner: true } })
@@ -126,11 +122,7 @@ export async function handleVisits(req, res, url, context) {
       data: { status: decision, responseNote, confirmedAt: decision === 'CONFIRMED' ? new Date() : null },
       include: { listing: true, owner: true },
     })
-    sendPushNotification(v.requesterId, {
-      title: decision === 'CONFIRMED' ? 'Visit confirmed' : 'Visit request declined',
-      body: decision === 'CONFIRMED' ? `Your visit to ${listingTitle(updated.listing)} is confirmed.` : `Your visit request for ${listingTitle(updated.listing)} was declined.`,
-      url: '/#/visits',
-    }).catch(() => {})
+    notifyUserMulti(decision === 'CONFIRMED' ? 'visit_confirmed' : 'visit_declined', v.requesterId, { listingTitle: listingTitle(updated.listing), url: '/#/visits' }, `visit-resp-${v.id}-${decision}`)
     return json(res, 200, { ok: true, visit: toPublicVisit(updated, { viewpoint: 'owner' }) })
   }
 
@@ -144,7 +136,7 @@ export async function handleVisits(req, res, url, context) {
     if (v.requesterId !== context.user.id) throw badRequest('Only the requester can cancel this request.', 'FORBIDDEN', 403)
     if (v.status === 'CANCELLED') return json(res, 200, { ok: true })
     const updated = await db().visitRequest.update({ where: { id }, data: { status: 'CANCELLED' }, include: { listing: true, owner: true } })
-    sendPushNotification(v.ownerId, { title: 'Visit cancelled', body: 'A visit request was cancelled.', url: '/#/visits' }).catch(() => {})
+    notifyUserMulti('visit_cancelled', v.ownerId, { url: '/#/visits' }, `visit-cancel-${v.id}`)
     return json(res, 200, { ok: true, visit: toPublicVisit(updated, { viewpoint: 'requester' }) })
   }
 

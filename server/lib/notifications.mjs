@@ -17,6 +17,7 @@
 
 import { emailProviderStatus, sendEmail } from './email.mjs'
 import { db } from './prisma.mjs'
+import { sendPushNotification } from './push-notifications.mjs'
 import { log } from './logger.mjs'
 
 const TWO_DECIMAL_CURRENCIES = new Set(['USD', 'EUR', 'CAD', 'GBP'])
@@ -163,6 +164,58 @@ const TEMPLATES = {
     en: (d) => ({ subject: 'SYBNB admin: anomaly detected on an active ride', body: `The system detected ${d.anomaly} on ride ${d.rideId}. Incident ${d.incidentId}. Open the incidents console to review.` }),
     fr: (d) => ({ subject: 'SYBNB admin : anomalie détectée sur une course active', body: `Le système a détecté ${d.anomaly} sur la course ${d.rideId}. Incident ${d.incidentId}. Ouvrez la console des incidents pour vérifier.` }),
   },
+  // Centris / SR-feature notifications (2026-10-11): sent to USERS via push + email, localized.
+  // Subjects keep the "SYBNB:" prefix for email; renderPush() strips it for a clean push title.
+  visit_requested: {
+    ar: (d) => ({ subject: `SYBNB: طلب زيارة جديد`, body: `طلب أحدهم زيارة ${d.listingTitle}. افتح «الزيارات» للرد.` }),
+    en: (d) => ({ subject: `SYBNB: new visit request`, body: `Someone asked to view ${d.listingTitle}. Open Visits to respond.` }),
+    fr: (d) => ({ subject: `SYBNB : nouvelle demande de visite`, body: `Quelqu'un souhaite visiter ${d.listingTitle}. Ouvrez « Visites » pour répondre.` }),
+  },
+  visit_confirmed: {
+    ar: (d) => ({ subject: `SYBNB: تم تأكيد الزيارة`, body: `تم تأكيد زيارتك لـ ${d.listingTitle}.` }),
+    en: (d) => ({ subject: `SYBNB: visit confirmed`, body: `Your visit to ${d.listingTitle} is confirmed.` }),
+    fr: (d) => ({ subject: `SYBNB : visite confirmée`, body: `Votre visite à ${d.listingTitle} est confirmée.` }),
+  },
+  visit_declined: {
+    ar: (d) => ({ subject: `SYBNB: تم رفض طلب الزيارة`, body: `تم رفض طلب زيارتك لـ ${d.listingTitle}.` }),
+    en: (d) => ({ subject: `SYBNB: visit request declined`, body: `Your visit request for ${d.listingTitle} was declined.` }),
+    fr: (d) => ({ subject: `SYBNB : demande de visite refusée`, body: `Votre demande de visite pour ${d.listingTitle} a été refusée.` }),
+  },
+  visit_cancelled: {
+    ar: () => ({ subject: `SYBNB: تم إلغاء زيارة`, body: `تم إلغاء أحد طلبات الزيارة.` }),
+    en: () => ({ subject: `SYBNB: visit cancelled`, body: `A visit request was cancelled.` }),
+    fr: () => ({ subject: `SYBNB : visite annulée`, body: `Une demande de visite a été annulée.` }),
+  },
+  auction_won: {
+    ar: (d) => ({ subject: `SYBNB: فزت بالمزاد`, body: `لقد فزت بمزاد ${d.carName}.` }),
+    en: (d) => ({ subject: `SYBNB: you won the auction`, body: `You won the auction for ${d.carName}.` }),
+    fr: (d) => ({ subject: `SYBNB : vous avez gagné l'enchère`, body: `Vous avez gagné l'enchère pour ${d.carName}.` }),
+  },
+  auction_sold: {
+    ar: (d) => ({ subject: `SYBNB: تم بيع مزادك`, body: `أُغلق مزاد ${d.carName} بمزايدة فائزة.` }),
+    en: (d) => ({ subject: `SYBNB: your auction sold`, body: `Your auction for ${d.carName} closed with a winning bid.` }),
+    fr: (d) => ({ subject: `SYBNB : votre enchère est vendue`, body: `Votre enchère pour ${d.carName} s'est terminée avec une offre gagnante.` }),
+  },
+  auction_outbid: {
+    ar: () => ({ subject: `SYBNB: تمت المزايدة فوقك`, body: `قدّم أحدهم مزايدة أعلى. زايد مجدداً للبقاء في الصدارة.` }),
+    en: () => ({ subject: `SYBNB: you were outbid`, body: `Someone placed a higher bid. Bid again to stay in front.` }),
+    fr: () => ({ subject: `SYBNB : vous avez été surenchéri`, body: `Quelqu'un a surenchéri. Enchérissez à nouveau pour rester en tête.` }),
+  },
+  saved_search_match: {
+    ar: (d) => ({ subject: `SYBNB: إعلانات جديدة تطابق بحثك`, body: d.searchLabel ? `${d.count} إعلان جديد يطابق بحثك المحفوظ «${d.searchLabel}».` : `${d.count} إعلان جديد يطابق بحثك المحفوظ.` }),
+    en: (d) => ({ subject: `SYBNB: new listings match your search`, body: d.searchLabel ? `${d.count} new listing(s) match your saved search “${d.searchLabel}”.` : `${d.count} new listing(s) match your saved search.` }),
+    fr: (d) => ({ subject: `SYBNB : de nouvelles annonces correspondent`, body: d.searchLabel ? `${d.count} nouvelle(s) annonce(s) correspondent à « ${d.searchLabel} ».` : `${d.count} nouvelle(s) annonce(s) correspondent à votre recherche enregistrée.` }),
+  },
+  new_message: {
+    ar: (d) => ({ subject: `SYBNB: رسالة جديدة`, body: `${d.senderName}: ${d.preview}` }),
+    en: (d) => ({ subject: `SYBNB: new message`, body: `${d.senderName}: ${d.preview}` }),
+    fr: (d) => ({ subject: `SYBNB : nouveau message`, body: `${d.senderName}: ${d.preview}` }),
+  },
+  ride_driver_assigned: {
+    ar: (d) => ({ subject: `SYBNB: تم تعيين سائق`, body: `${d.driverName} في الطريق إلى نقطة انطلاقك.` }),
+    en: (d) => ({ subject: `SYBNB: driver assigned`, body: `${d.driverName} is on the way to your pickup.` }),
+    fr: (d) => ({ subject: `SYBNB : chauffeur assigné`, body: `${d.driverName} est en route vers votre point de départ.` }),
+  },
 }
 
 export const NOTIFICATION_KINDS = Object.freeze(Object.keys(TEMPLATES))
@@ -258,6 +311,40 @@ export function notifyUser(kind, userId, data = {}, idempotencyKey) {
     .then(async () => {
       const user = await db().user.findUnique({ where: { id: userId }, select: { email: true, locale: true } })
       if (!user) return
+      await deliver(kind, { to: user.email, locale: user.locale, data, idempotencyKey })
+    })
+    .catch((error) => {
+      log.warn('notification_failed', { kind, code: error?.code, message: error instanceof Error ? error.message : String(error) })
+    })
+}
+
+
+// Push rendering (2026-10-11): the recipient's primary language only, with the "SYBNB:" email prefix
+// stripped for a clean notification title. Returns { title, body, url }.
+export function renderPush(kind, locale, data = {}) {
+  const template = TEMPLATES[kind]
+  if (!template) throw new Error(`Unknown notification kind '${kind}'.`)
+  const lang = languagesForLocale(locale)[0]
+  const part = (template[lang] || template.en)(data)
+  const title = String(part.subject || '').replace(/^SYBNB\s*(?:admin)?\s*:?\s*/i, '').trim() || 'SYBNB'
+  return { title, body: part.body, url: data.url || null }
+}
+
+// Multi-channel user notification (2026-10-11): localized web push AND a localized email fallback, so
+// a user who never granted push permission (or is on a platform where push is unavailable) is still
+// reached. Fire-and-forget by contract — never throws, never blocks the caller. Push failure never
+// prevents the email, and vice versa.
+export function notifyUserMulti(kind, userId, data = {}, idempotencyKey) {
+  Promise.resolve()
+    .then(async () => {
+      const user = await db().user.findUnique({ where: { id: userId }, select: { email: true, locale: true } })
+      if (!user) return
+      try {
+        const push = renderPush(kind, user.locale, data)
+        await sendPushNotification(userId, { title: push.title, body: push.body, url: data.url })
+      } catch (err) {
+        log.warn('push_failed', { kind, message: err instanceof Error ? err.message : String(err) })
+      }
       await deliver(kind, { to: user.email, locale: user.locale, data, idempotencyKey })
     })
     .catch((error) => {

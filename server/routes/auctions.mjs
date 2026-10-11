@@ -23,7 +23,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, readJson } from '../lib/responses.mjs'
 import { log } from '../lib/logger.mjs'
-import { notifyAdmin } from '../lib/notifications.mjs'
+import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
@@ -209,16 +209,8 @@ export async function finalizeAuction(auctionId) {
       }
       const listing = await db().listing.findUnique({ where: { id: result.listingId }, select: { titleEn: true, titleAr: true, ownerId: true } })
       const carName = listing?.titleEn || listing?.titleAr || 'your car'
-      sendPushNotification(result.winnerId, {
-        title: 'You won the auction',
-        body: `You won the auction for ${carName}.`,
-        url: `/#/listing/${result.listingId}`,
-      }).catch(() => {})
-      sendPushNotification(result.sellerId, {
-        title: 'Your auction sold',
-        body: `Your auction for ${carName} closed with a winning bid.`,
-        url: `/#/listing/${result.listingId}`,
-      }).catch(() => {})
+      notifyUserMulti('auction_won', result.winnerId, { carName, url: `/#/listing/${result.listingId}` }, `auction-won-${result.id}`)
+      notifyUserMulti('auction_sold', result.sellerId, { carName, url: `/#/listing/${result.listingId}` }, `auction-sold-${result.id}`)
       notifyAdmin('car_auction_settled', { auctionId: result.id, listingId: result.listingId, winnerId: result.winnerId, winningBidMinor: result.winningBidMinor, depositCharged: Boolean(charge.charged) }, `auction-settled-${result.id}`)
     } else {
       notifyAdmin('car_auction_closed_no_sale', { auctionId: result.id, listingId: result.listingId, reserveMet: result.reserveMet }, `auction-nosale-${result.id}`)
@@ -459,7 +451,7 @@ export async function handleAuctions(req, res, url, context) {
     if (finalAuction._prevHighBidId) {
       const prev = await db().bid.findUnique({ where: { id: finalAuction._prevHighBidId }, select: { bidderId: true } })
       if (prev?.bidderId && prev.bidderId !== context.user.id) {
-        sendPushNotification(prev.bidderId, { title: 'You were outbid', body: 'Someone placed a higher bid. Bid again to stay in front.', url: `/#/listing/${finalAuction.listingId}` }).catch(() => {})
+        notifyUserMulti('auction_outbid', prev.bidderId, { url: `/#/listing/${finalAuction.listingId}` }, `auction-outbid-${finalAuction.id}-${prev.bidderId}`)
       }
     }
     return json(res, 201, { ok: true, auction: toPublicAuction(finalAuction, { viewerId: context.user.id, admin: isAdmin(context) }) })

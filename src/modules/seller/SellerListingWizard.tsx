@@ -171,15 +171,13 @@ export function SellerListingWizard({ lang }: Props) {
   const [stepIndex, setStepIndex] = useState(0)
   const [division, setDivision] = useState<ListingDivision>(draft.division || 'STAYS')
   const [selectedType, setSelectedType] = useState(draft.selectedType || PROPERTY_TYPES[0].en)
-  const [title, setTitle] = useState(draft.title ?? (pick(lang, 'شقة مفروشة قرب المالكي', 'Furnished apartment near Malki', 'Appartement meublé près de Malki')))
-  const [description, setDescription] = useState(
-    draft.description ?? (pick(lang, 'شقة جاهزة للسكن مع وصول سريع للخدمات.', 'Ready-to-live apartment with quick service access.', 'Appartement prêt à habiter avec un accès rapide aux services.')),
-  )
+  const [title, setTitle] = useState(draft.title ?? '')
+  const [description, setDescription] = useState(draft.description ?? '')
   const [governorate, setGovernorate] = useState(draft.governorate || 'damascus')
   const [city, setCity] = useState(draft.city || 'damascus-city')
   const [area, setArea] = useState(draft.area || 'old-city')
-  const [address, setAddress] = useState(draft.address ?? (pick(lang, 'قرب شارع رئيسي', 'Near a main street', 'Près d’une rue principale')))
-  const [price, setPrice] = useState(draft.price || '250000')
+  const [address, setAddress] = useState(draft.address ?? '')
+  const [price, setPrice] = useState(draft.price || '')
   const [currency, setCurrency] = useState(draft.currency || 'SYP')
   const [size, setSize] = useState(draft.size || '110')
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
@@ -363,6 +361,16 @@ export function SellerListingWizard({ lang }: Props) {
       if (!agreementAccepted) {
         setSubmitState('error')
         setSubmitError(pick(lang, 'وافق على اتفاقية النشر قبل الإرسال.', 'Accept the listing agreement before submitting.', 'Acceptez l’entente de publication avant l’envoi.'))
+        return
+      }
+      if (!title.trim()) {
+        setSubmitState('error')
+        setSubmitError(pick(lang, 'أدخل عنوان الإعلان قبل الإرسال.', 'Enter a listing title before submitting.', 'Saisissez un titre d’annonce avant l’envoi.'))
+        return
+      }
+      if (!(toNumber(price) > 0)) {
+        setSubmitState('error')
+        setSubmitError(pick(lang, 'أدخل سعراً صحيحاً أكبر من صفر.', 'Enter a valid price greater than zero.', 'Saisissez un prix valide supérieur à zéro.'))
         return
       }
 

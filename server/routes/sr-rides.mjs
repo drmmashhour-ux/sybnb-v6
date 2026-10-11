@@ -20,7 +20,7 @@ import {
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { rideCategoryToVehicle } from '../lib/vehicle-category.mjs'
-import { notifyAdmin } from '../lib/notifications.mjs'
+import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
 import { recordWalletEntry, refundPrepaidRide } from '../lib/finance-ledger.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
 // file -- promo-code creation, promo-code activation toggling, and business-account onboarding --
@@ -325,11 +325,7 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
 
   // SR Ride vs. Uber gap-closure (P1 #7): fire-and-forget, never fails the claim itself.
   // context.user is the claiming driver -- real name, not a relation this query never included.
-  void sendPushNotification(ride.riderId, {
-    title: 'Driver assigned',
-    body: `${context.user.displayName} is on the way to your pickup.`,
-    url: '/#/ride',
-  })
+  notifyUserMulti('ride_driver_assigned', ride.riderId, { driverName: context.user.displayName, url: '/#/ride' }, `ride-driver-${ride.id}`)
 
   // Safety Phase 2 (2026-10-10): the driver claims/accepts the ride here -- strip the rider's pickup
   // PIN from this response too, so a driver never receives it in any payload (the rider shows it in

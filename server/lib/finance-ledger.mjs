@@ -64,7 +64,7 @@ export function giftReviewThresholdMinor(currency) {
 // Single source of truth for these rates is server/lib/booking-policy.mjs (pure, unit-tested);
 // re-exported here under their historical names so existing importers keep working unchanged.
 export const CANCELLATION_PROTECTION_RATE = PROTECTION_RATE
-// Contractual STR (STAYS/short-term-rental) platform commission — owner-confirmed at 12%.
+// Contractual STR (STAYS/short-term-rental) platform commission — owner-confirmed at 15% (STR_COMMISSION_RATE).
 export const STR_ADMIN_COMMISSION_RATE = STR_COMMISSION_RATE
 export const STR_CLEANING_RATE = POLICY_STR_CLEANING_RATE
 export const STR_TAX_RATE = POLICY_STR_TAX_RATE
@@ -932,7 +932,7 @@ export const CANCELLATION_POLICY_VERSION = 'SYBNB_CANCELLATION_RULES_2026_10_08'
 // the commission recipient, host share Hg HELD (or RELEASEd), protection fee F CREDITed -- and the
 // cancellation snapshot (refund R to the guest, retained T = paid - R), this posts:
 //   1. DEBIT  commission recipient: A - commission(retained stay)   [commission on the REFUNDED part
-//      is reversed; 12% of the retained stay part stays with SYBNB]
+//      is reversed; 15% of the retained stay part stays with SYBNB]
 //   2. host:  if the payout was already RELEASED -> DEBIT clawback of Hg - hostShare(retained stay);
 //             otherwise                           -> RELEASE hostShare(retained stay) to the host now
 //             (the stay will not happen, so there is no completion/hold window left to wait for;

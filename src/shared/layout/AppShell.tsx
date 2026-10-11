@@ -129,6 +129,25 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
           ) : (
             <span className="flow-nav-placeholder" aria-hidden="true" />
           )}
+          {/* The seller/advertising tunnel hides the global top-nav (account menu + Sign out). Without
+              this, a signed-in user part-way through the listing wizard has no way to reach their
+              account or sign out (reported: stuck on the submit step with no documents). Surface the
+              same AccountMenu here so the escape hatch always exists inside the tunnel. */}
+          {isAdvertisingTunnel && guestSession && (
+            <div className="flow-nav-account">
+              <AccountMenu
+                lang={lang}
+                path={path}
+                displayName={guestSession.user.displayName || ''}
+                signedIn
+                isHost={isHost}
+                isAdmin={isAdmin}
+                isDriver={isDriver}
+                inHostArea={inHostArea}
+                onSignOut={signOutGuest}
+              />
+            </div>
+          )}
         </div>
       )}
       {children}

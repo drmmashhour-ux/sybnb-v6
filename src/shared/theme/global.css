@@ -8747,3 +8747,7 @@ a {
     grid-template-areas: 'head' 'panel' 'steps';
   }
 }
+
+/* Account menu surfaced inside the seller/advertising tunnel's flow nav (AppShell): pushes to the
+   trailing edge so Sign out / My account are always reachable even when the global top-nav is hidden. */
+.flow-nav-account { margin-inline-start: auto; display: inline-flex; align-items: center; }

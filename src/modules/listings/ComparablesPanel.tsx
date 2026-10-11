@@ -12,7 +12,25 @@ function firstPhoto(l: PlatformListing): string | null {
   return m?.url || m?.src || m?.assetUrl || null
 }
 
-export function ComparablesPanel({ listingId, lang }: { listingId: string; lang: Lang }) {
+function divisionEmoji(division: string | undefined): string {
+  switch (division) {
+    case 'CARS': return '🚗'
+    case 'MARKETPLACE': return '🛍️'
+    case 'NEW_CONSTRUCTION': return '🏗️'
+    default: return '🏠'
+  }
+}
+
+function comparablesTitle(division: string | undefined, lang: Lang): string {
+  switch (division) {
+    case 'CARS': return pick(lang, 'مركبات مشابهة', 'Similar vehicles', 'Véhicules similaires')
+    case 'MARKETPLACE': return pick(lang, 'عروض مشابهة', 'Similar items', 'Articles similaires')
+    case 'NEW_CONSTRUCTION': return pick(lang, 'مشاريع مشابهة', 'Similar projects', 'Projets similaires')
+    default: return pick(lang, 'عقارات مشابهة', 'Similar properties', 'Propriétés similaires')
+  }
+}
+
+export function ComparablesPanel({ listingId, lang, division }: { listingId: string; lang: Lang; division?: string }) {
   const isAr = lang === 'ar'
   const [items, setItems] = useState<PlatformListing[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -27,7 +45,7 @@ export function ComparablesPanel({ listingId, lang }: { listingId: string; lang:
 
   return (
     <section style={styles.wrap} dir={isAr ? 'rtl' : 'ltr'}>
-      <strong style={styles.title}>🔁 {pick(lang, 'عقارات مشابهة', 'Similar properties', 'Propriétés similaires')}</strong>
+      <strong style={styles.title}>🔁 {comparablesTitle(division || items[0]?.division, lang)}</strong>
       <div style={styles.row}>
         {items.map((l) => {
           const photo = firstPhoto(l)
@@ -36,7 +54,7 @@ export function ComparablesPanel({ listingId, lang }: { listingId: string; lang:
           return (
             <a key={l.id} href={`#/listing/${l.id}`} style={styles.card}>
               <div style={{ ...styles.thumb, backgroundImage: photo ? `url(${photo})` : undefined }} aria-hidden>
-                {!photo && <span style={styles.thumbFallback}>🏠</span>}
+                {!photo && <span style={styles.thumbFallback}>{divisionEmoji(l.division)}</span>}
               </div>
               <div style={styles.cardBody}>
                 <strong style={styles.price} dir={isAr ? 'rtl' : 'ltr'}>{moneyText(l.priceMinor, l.currency, lang)}</strong>

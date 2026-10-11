@@ -867,7 +867,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             {(['BUY', 'RENTALS', 'NEW_CONSTRUCTION'].includes(listing.division)) && (
               <OpenHousesPanel listing={listing} lang={lang} />
             )}
-            <ComparablesPanel listingId={listing.id} lang={lang} />
+            <ComparablesPanel listingId={listing.id} lang={lang} division={listing.division} />
 
             <div style={styles.tabRow} role="tablist" aria-label={pick(lang, 'تفاصيل الإعلان', 'Listing details', 'Détails de l’annonce')}>
               {(['terms', 'host', 'location', 'reviews'] as const).map((tab) => (

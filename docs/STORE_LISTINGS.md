@@ -320,3 +320,26 @@ For every item: **collected = Yes, required for core function, encrypted in tran
 
 ### Do-not-claim list (store text, screenshots, descriptions)
 No "10K+ users", no "first in Syria", no "guaranteed", "100% secure", "escrow", "fully protected", or "enterprise-grade". Describe what exists: upfront fares, approved drivers, booking through SYBNB checkout, dispute review.
+
+
+---
+
+## SR AND STR STANDALONE APPS (Android flavors)
+
+| App | Package | Opens on | Bundle |
+|---|---|---|---|
+| SYBNB | app.sybnb | Home | android/app/full/release/app-full-release.aab |
+| SYBNB Rides | app.sybnb.sr | /ride (SR rides) | android/app/sr/release/app-sr-release.aab |
+| SYBNB Stays | app.sybnb.str | /stays (Daily stays) | android/app/str/release/app-str-release.aab |
+
+Graphics (icon 512x512, feature graphic 1024x500) are in docs/store-assets/.
+
+**SYBNB Rides** - short: Request rides in Syria with approved drivers and clear fares.
+Full: SYBNB Rides lets you request a ride, see the fare before you confirm, and follow your trip. Drivers on the platform are approved by SYBNB. Arabic, English and French. Category: Maps & Navigation or Travel & Local.
+Data safety: precise/approximate location (pickup), name, phone, trip and payment status. Not sold. Encrypted in transit.
+
+**SYBNB Stays** - short: Book daily stays in Syria and pay through SYBNB checkout.
+Full: SYBNB Stays lets you browse daily rentals, see the price and cancellation policy, and book and pay through SYBNB checkout. Payment is held pending settlement until the stay is confirmed. Hosts can list properties and manage bookings. Category: Travel & Local.
+Data safety: name, phone, email, booking details, approximate location for search. Not sold. Encrypted in transit.
+
+Stays commission (host payout): 15% of the booking amount, excluding the protection fee (owner confirmed 2026-10-11).

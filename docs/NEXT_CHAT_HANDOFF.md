@@ -15,3 +15,8 @@ Suggested: commit (1) separately after re-running tests; keep (2)/(3) off produc
 
 ## Next product goal
 Make SR and STR simple for clients with weak internet (lean first screen, no video, light images, offline-friendly shell, SMS/short flows).
+
+## Owner priorities for the next chat (2026-10-15)
+1. SR + STR light: separate, fast apps/pages that clients open straight from the phone, for users with weak internet and little patience for complexity (lean first screen, no video, small images, offline-friendly shell, few steps). Android flavors app.sybnb.sr / app.sybnb.str already exist; PWA install page is #/get-app.
+2. MSH token: intended to help clients and drivers do quick, easy jobs (rewards/payment convenience). Keep it testnet/read-only until legal + treasury review; do not issue real tokens or change money logic without explicit owner approval.
+3. Then finish Google Play (testers, publish internal track, developer verification, declarations).

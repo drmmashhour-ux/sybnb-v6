@@ -2105,12 +2105,14 @@ export async function createPrototypeSrRide(input: {
   features?: string[]
   scheduledFor?: string
   accessibilityRequired?: boolean
+  deliveryOnly?: boolean
   stops?: string[]
   promoCode?: string
   billToBusinessAccount?: boolean
   shareable?: boolean
   riderCount?: number
   bagCount?: number
+  bonusMinor?: number
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
@@ -2125,12 +2127,14 @@ export async function createPrototypeSrRide(input: {
       pickupCoords: input.pickupCoords,
       scheduledFor: input.scheduledFor,
       accessibilityRequired: input.accessibilityRequired,
+      deliveryOnly: input.deliveryOnly,
       stops: input.stops,
       promoCode: input.promoCode,
       billToBusinessAccount: input.billToBusinessAccount,
       shareable: input.shareable,
       riderCount: input.riderCount,
       bagCount: input.bagCount,
+      bonusMinor: input.bonusMinor,
       metadata: {
         accuracyMeters: input.accuracyMeters,
         locationSource: input.accuracyMeters ? 'gps' : 'manual',
@@ -3960,4 +3964,397 @@ export function listingCoords(l: PlatformListing): { lat: number; lng: number } 
   const lat = Number(loc.lat), lng = Number(loc.lng)
   if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0) return { lat, lng }
   return null
+}
+
+export async function fetchMyMshRewardsPreview() {
+  const token = anyUserToken()
+  if (!token) throw new Error('Not signed in')
+  const r = await apiRequest<{ ok: true; rewards: import('../../modules/msh/mshRewardsDraft').MshRewardActivity }>('/api/me/msh-rewards-preview', { token })
+  return r.rewards
+}
+
+// ============================================================================
+// SE (Eats) — Phase 2 client (2026-10-15). Same bearer-token discipline as SR:
+// customers and merchant OWNERS act on the guest session; couriers on the driver session.
+// All pricing happens server-side — these wrappers never send a price for an order.
+// ============================================================================
+
+export type FoodPhotoStatus = 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED'
+
+export type FoodPhotoMeta = {
+  width?: number
+  height?: number
+  bytes?: number
+  format?: string
+  editorSignature?: string | null
+}
+
+export type FoodMerchant = {
+  id: string
+  name: string
+  nameAr?: string | null
+  category: string
+  city: string
+  address: string
+  phone?: string | null
+  status: 'PENDING_REVIEW' | 'APPROVED' | 'SUSPENDED'
+  active: boolean
+  // Order experience: store position for the order map + the busy switch.
+  lat?: number | null
+  lng?: number | null
+  acceptingOrders?: boolean
+  defaultPrepMinutes?: number | null
+  // Menu Studio: cover photo. photoUrl is null unless APPROVED (or the owner is looking).
+  photoUrl?: string | null
+  photoStatus?: FoodPhotoStatus | null
+  photoReviewNote?: string | null
+  photoMeta?: FoodPhotoMeta
+}
+
+export type FoodMenuItem = {
+  id: string
+  merchantId: string
+  name: string
+  nameAr?: string | null
+  description?: string | null
+  priceMinor: number
+  currency: string
+  available: boolean
+  sortOrder: number
+  // Menu Studio: what an order would actually cost right now (promo applied when active).
+  effectivePriceMinor?: number
+  promoActive?: boolean
+  promoLabel?: string | null
+  promoEndsAt?: string | null
+  // Owner-only fields (absent in the customer view):
+  promoPriceMinor?: number | null
+  promoStartsAt?: string | null
+  photoUrl?: string | null
+  photoStatus?: FoodPhotoStatus | null
+  photoReviewNote?: string | null
+  photoMeta?: FoodPhotoMeta
+}
+
+// Signed photo URLs come back as API-relative paths in the local-storage provider; prefix them so
+// an <img> on the app origin (5390/5399) reaches the API origin (3051).
+export function foodPhotoSrc(photoUrl: string | null | undefined): string | null {
+  if (!photoUrl) return null
+  return photoUrl.startsWith('http') ? photoUrl : `${API_BASE_URL}${photoUrl}`
+}
+
+export type FoodOrderItemRow = {
+  id: string
+  menuItemId?: string | null
+  nameSnapshot: string
+  priceMinorSnapshot: number
+  quantity: number
+}
+
+export type FoodOrder = {
+  id: string
+  merchantId: string
+  customerId: string
+  courierId?: string | null
+  status: 'PLACED' | 'ACCEPTED' | 'PREPARING' | 'READY_FOR_PICKUP' | 'PICKED_UP' | 'DELIVERED' | 'CANCELLED' | 'REJECTED'
+  subtotalMinor: number
+  deliveryFeeMinor: number
+  serviceFeeMinor: number
+  totalMinor: number
+  currency: string
+  paymentMethod: string
+  deliveryAddress: string
+  deliveryLat?: number | null
+  deliveryLng?: number | null
+  // Order experience: pickup vs delivery, the ETA promise, delays and scheduling.
+  fulfillment?: 'delivery' | 'pickup'
+  etaAt?: string | null
+  delayedCount?: number
+  scheduledFor?: string | null
+  notes?: string | null
+  createdAt: string
+  items?: FoodOrderItemRow[]
+  merchant?: { name: string; city: string; address: string; lat?: number | null; lng?: number | null }
+}
+
+export type FoodOrderTracking = {
+  merchant: { lat: number; lng: number } | null
+  delivery: { lat: number; lng: number } | null
+  courier: { lat: number; lng: number; updatedAt?: string } | null
+  courierEtaMinutes: number | null
+}
+
+export type FoodOrderMessage = {
+  id: string
+  orderId: string
+  senderId: string
+  senderRole: 'customer' | 'merchant' | 'courier' | 'admin'
+  body: string
+  createdAt: string
+}
+
+export async function listFoodMerchants(city?: string) {
+  const session = await ensurePrototypeGuestSession()
+  const qs = city ? `?city=${encodeURIComponent(city)}` : ''
+  const r = await apiRequest<{ ok: true; merchants: FoodMerchant[] }>(`/api/food/merchants${qs}`, { token: session.token })
+  return r.merchants
+}
+
+export async function fetchFoodMenu(merchantId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; merchant: FoodMerchant; items: FoodMenuItem[] }>(`/api/food/merchants/${merchantId}/menu`, { token: session.token })
+  return r
+}
+
+export async function placeFoodOrder(input: {
+  merchantId: string
+  deliveryAddress: string
+  notes?: string
+  items: Array<{ menuItemId: string; quantity: number }>
+  fulfillment?: 'delivery' | 'pickup'
+  scheduledFor?: string
+  deliveryLat?: number
+  deliveryLng?: number
+}) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; order: FoodOrder }>('/api/food/orders', {
+    method: 'POST',
+    token: session.token,
+    body: { ...input, paymentMethod: 'cash' },
+  })
+  return r.order
+}
+
+// Order + live tracking (restaurant pin, delivery pin, courier position while carrying).
+export async function fetchFoodOrderTracked(orderId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; order: FoodOrder; tracking: FoodOrderTracking }>(`/api/food/orders/${orderId}`, { token: session.token })
+  return r
+}
+
+export async function fetchFoodOrderMessages(orderId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; messages: FoodOrderMessage[]; viewerRole: string }>(`/api/food/orders/${orderId}/messages`, { token: session.token })
+  return r
+}
+
+export async function sendFoodOrderMessage(orderId: string, body: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; message: FoodOrderMessage }>(`/api/food/orders/${orderId}/messages`, { method: 'POST', token: session.token, body: { body } })
+  return r.message
+}
+
+export async function fetchMyFoodOrders() {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; orders: FoodOrder[] }>('/api/food/orders', { token: session.token })
+  return r.orders
+}
+
+export async function fetchFoodOrder(orderId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; order: FoodOrder }>(`/api/food/orders/${orderId}`, { token: session.token })
+  return r.order
+}
+
+export async function cancelFoodOrder(orderId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; order: FoodOrder }>(`/api/food/orders/${orderId}/status`, {
+    method: 'PATCH',
+    token: session.token,
+    body: { status: 'CANCELLED' },
+  })
+  return r.order
+}
+
+// ---- Merchant owner (guest session; ownership checked server-side) ----
+
+export async function registerFoodMerchant(input: { name: string; nameAr?: string; category?: string; city: string; address: string; phone?: string }) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; merchant: FoodMerchant }>('/api/food/merchants', { method: 'POST', token: session.token, body: input })
+  return r.merchant
+}
+
+export async function fetchMyFoodMerchants() {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; merchants: FoodMerchant[] }>('/api/food/merchants/mine', { token: session.token })
+  return r.merchants
+}
+
+export async function addFoodMenuItem(merchantId: string, input: { name: string; nameAr?: string; description?: string; priceMinor: number; available?: boolean; sortOrder?: number }) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; item: FoodMenuItem }>(`/api/food/merchants/${merchantId}/menu`, { method: 'POST', token: session.token, body: input })
+  return r.item
+}
+
+export async function updateFoodMenuItem(
+  menuItemId: string,
+  input: Partial<{
+    name: string
+    nameAr: string
+    description: string
+    priceMinor: number
+    available: boolean
+    sortOrder: number
+    // Menu Studio promotions: promoPriceMinor null clears the promo (and its window/label).
+    promoPriceMinor: number | null
+    promoLabel: string | null
+    promoStartsAt: string | null
+    promoEndsAt: string | null
+  }>,
+) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; item: FoodMenuItem }>(`/api/food/menu/${menuItemId}`, { method: 'PATCH', token: session.token, body: input })
+  return r.item
+}
+
+// ---- Menu Studio: photo uploads (owner) + admin review ----
+
+export async function uploadMenuItemPhoto(menuItemId: string, fileBase64: string, mimeType: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; item: FoodMenuItem }>(`/api/food/menu/${menuItemId}/photo`, {
+    method: 'PATCH',
+    token: session.token,
+    body: { fileBase64, mimeType },
+  })
+  return r.item
+}
+
+export async function uploadFoodMerchantPhoto(merchantId: string, fileBase64: string, mimeType: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; merchant: FoodMerchant }>(`/api/food/merchants/${merchantId}/photo`, {
+    method: 'PATCH',
+    token: session.token,
+    body: { fileBase64, mimeType },
+  })
+  return r.merchant
+}
+
+export type FoodPhotoQueueEntry = {
+  kind: 'merchant' | 'menu-item'
+  id: string
+  merchantName: string
+  itemName: string | null
+  city: string
+  photoUrl: string | null
+  photoMeta: FoodPhotoMeta
+  submittedAt: string | null
+}
+
+export async function fetchFoodPhotoQueue() {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; queue: FoodPhotoQueueEntry[]; count: number }>('/api/food/admin/photos', { token }),
+  )
+  return response.queue
+}
+
+export async function reviewFoodPhoto(kind: 'merchant' | 'menu-item', id: string, decision: 'APPROVE' | 'REJECT', note?: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; kind: string; id: string; photoStatus: FoodPhotoStatus }>(
+      `/api/food/admin/photos/${kind}/${encodeURIComponent(id)}`,
+      { method: 'PATCH', token, body: { decision, ...(note ? { note } : {}) } },
+    ),
+  )
+  return response
+}
+
+export type AdminFoodMerchant = FoodMerchant & {
+  ownerEmail: string | null
+  ownerName: string | null
+  menuItemCount: number
+  orderCount: number
+  createdAt: string
+}
+
+export async function fetchAdminFoodMerchants(status?: 'PENDING_REVIEW' | 'APPROVED' | 'SUSPENDED') {
+  const qs = status ? `?status=${status}` : ''
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; merchants: AdminFoodMerchant[] }>(`/api/food/admin/merchants${qs}`, { token }),
+  )
+  return response.merchants
+}
+
+export async function setFoodMerchantStatus(merchantId: string, status: 'APPROVED' | 'SUSPENDED' | 'PENDING_REVIEW') {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; merchant: FoodMerchant }>(`/api/food/merchants/${encodeURIComponent(merchantId)}/status`, {
+      method: 'PATCH',
+      token,
+      body: { status },
+    }),
+  )
+  return response.merchant
+}
+
+export async function fetchMerchantFoodOrders(merchantId: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; orders: FoodOrder[] }>(`/api/food/orders?merchantId=${encodeURIComponent(merchantId)}`, { token: session.token })
+  return r.orders
+}
+
+export async function updateFoodOrderStatusAsMerchant(
+  orderId: string,
+  status: 'ACCEPTED' | 'REJECTED' | 'PREPARING' | 'READY_FOR_PICKUP' | 'DELIVERED',
+  options?: { prepMinutes?: number },
+) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; order: FoodOrder }>(`/api/food/orders/${orderId}/status`, {
+    method: 'PATCH',
+    token: session.token,
+    body: { status, ...(options?.prepMinutes ? { prepMinutes: options.prepMinutes } : {}) },
+  })
+  return r.order
+}
+
+// Busy mode, store position and usual prep time — the merchant's own switches.
+export async function updateFoodMerchantSettings(
+  merchantId: string,
+  input: Partial<{ acceptingOrders: boolean; lat: number; lng: number; defaultPrepMinutes: number | null }>,
+) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; merchant: FoodMerchant }>(`/api/food/merchants/${merchantId}/settings`, { method: 'PATCH', token: session.token, body: input })
+  return r.merchant
+}
+
+// The restaurant moves the promise; the customer gets their cancel right back.
+export async function delayFoodOrder(orderId: string, extraMinutes: number) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; order: FoodOrder }>(`/api/food/orders/${orderId}/delay`, { method: 'PATCH', token: session.token, body: { extraMinutes } })
+  return r.order
+}
+
+// ---- Courier (driver session) ----
+
+export async function fetchPendingFoodDeliveries() {
+  const session = await ensurePrototypeDriverSession()
+  const r = await apiRequest<{ ok: true; orders: FoodOrder[] }>('/api/food/courier/pending', { token: session.token })
+  return r.orders
+}
+
+export async function fetchMyFoodDeliveries() {
+  const session = await ensurePrototypeDriverSession()
+  const r = await apiRequest<{ ok: true; orders: FoodOrder[] }>('/api/food/orders?courier=1', { token: session.token })
+  return r.orders
+}
+
+export async function claimFoodDelivery(orderId: string) {
+  const session = await ensurePrototypeDriverSession()
+  const r = await apiRequest<{ ok: true; order: FoodOrder }>(`/api/food/orders/${orderId}/claim`, { method: 'PATCH', token: session.token })
+  return r.order
+}
+
+export async function updateFoodOrderStatusAsCourier(orderId: string, status: 'PICKED_UP' | 'DELIVERED') {
+  const session = await ensurePrototypeDriverSession()
+  const r = await apiRequest<{ ok: true; order: FoodOrder }>(`/api/food/orders/${orderId}/status`, { method: 'PATCH', token: session.token, body: { status } })
+  return r.order
+}
+
+// Courier-side chat (driver session; same endpoint, access decided server-side).
+export async function fetchFoodOrderMessagesAsCourier(orderId: string) {
+  const session = await ensurePrototypeDriverSession()
+  const r = await apiRequest<{ ok: true; messages: FoodOrderMessage[]; viewerRole: string }>(`/api/food/orders/${orderId}/messages`, { token: session.token })
+  return r
+}
+
+export async function sendFoodOrderMessageAsCourier(orderId: string, body: string) {
+  const session = await ensurePrototypeDriverSession()
+  const r = await apiRequest<{ ok: true; message: FoodOrderMessage }>(`/api/food/orders/${orderId}/messages`, { method: 'POST', token: session.token, body: { body } })
+  return r.message
 }

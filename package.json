@@ -65,7 +65,13 @@
     "test:e2e:admin-rate-limit": "node tests/e2e/admin-action-rate-limit.e2e.mjs",
     "test:e2e:all": "bash scripts/run-all-e2e.sh",
     "test:e2e:payment-regression": "PAYMENT_ONLY=1 bash scripts/run-all-e2e.sh",
-    "start:render": "prisma migrate deploy && node server/index.mjs"
+    "start:render": "prisma migrate deploy && node server/index.mjs",
+    "dev:sr": "vite --config apps/sr/vite.config.ts",
+    "build:sr": "tsc -p apps && vite build --config apps/sr/vite.config.ts",
+    "dev:str": "vite --config apps/str/vite.config.ts",
+    "build:str": "tsc -p apps && vite build --config apps/str/vite.config.ts",
+    "build:se": "tsc -p apps && vite build --config apps/se/vite.config.ts",
+    "build:apps": "npm run build:sr && npm run build:str && npm run build:se"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",

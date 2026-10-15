@@ -50,6 +50,15 @@ const RIDE_MATCH_TIMEOUT_MS = (() => {
   return (Number.isFinite(raw) && raw > 0 ? raw : 300) * 1000
 })()
 
+// SR Ride vs. Yallago gap-closure #3 (2026-10-15): cap for the optional rider-offered driver bonus
+// (same USD units as fareMinor). A bonus raises the fare the rider pays and the driver earns, so it
+// is validated fail-closed below and recorded in fareFactors — never a silent fare change. Env
+// SR_MAX_DRIVER_BONUS_USD (default 20, clamped 0..100).
+const SR_MAX_DRIVER_BONUS_MINOR = (() => {
+  const raw = Number(process.env.SR_MAX_DRIVER_BONUS_USD)
+  return Number.isFinite(raw) && raw >= 0 && raw <= 100 ? Math.trunc(raw) : 20
+})()
+
 // SR cancellation policy (owner decision 2026-10-09, Uber-aligned). The fee percentage and the
 // free-cancel grace window are both env-tunable for operational tuning; the defaults below are the
 // confirmed launch values (15% of the locked fare, 120s grace after a driver is assigned). A rider
@@ -458,7 +467,33 @@ export async function handleSrRides(req, res, url, context) {
     // driver's claim checks against), but the fare itself starts undiscounted; the claim route
     // below applies applyShareDiscount() only once poolClaimEligibility() confirms a genuine pool.
     const shareable = Boolean(body.shareable)
-    const finalFareMinor = quote.fareMinor - discountMinor
+
+    // SR Ride vs. Yallago gap-closure #3 (2026-10-15): an optional rider-offered driver BONUS to
+    // get picked up faster in high demand (Yallago's driver-bonus feature). Added ON TOP of the
+    // quoted fare AFTER any promo discount — a promo discounts the ride's own fare, never the
+    // tip-like bonus the rider chose to offer. Fail-closed validation: a supplied bonus must be a
+    // whole USD amount within 0..SR_MAX_DRIVER_BONUS_MINOR, otherwise the request is rejected
+    // rather than silently clamped — a rider must never be charged a different bonus than typed.
+    let bonusMinor = 0
+    if (body.bonusMinor != null) {
+      const rawBonus = Number(body.bonusMinor)
+      if (!Number.isInteger(rawBonus) || rawBonus < 0 || rawBonus > SR_MAX_DRIVER_BONUS_MINOR) {
+        const error = new Error(`Driver bonus must be a whole amount between 0 and ${SR_MAX_DRIVER_BONUS_MINOR}.`)
+        error.statusCode = 400
+        error.code = 'RIDE_BONUS_INVALID'
+        error.expose = true
+        throw error
+      }
+      bonusMinor = rawBonus
+    }
+
+    // SR Ride vs. Yallago gap-closure #4b (2026-10-15): package delivery. The rider sends a package
+    // instead of riding (Uber Connect-style) — same fare, same dispatch, same driver; the flag is
+    // recorded so the driver knows to expect a package handoff, not a passenger. This is the
+    // rides-fleet delivery primitive, NOT a food/merchant marketplace.
+    const deliveryOnly = Boolean(body.deliveryOnly)
+
+    const finalFareMinor = quote.fareMinor - discountMinor + bonusMinor
 
     const rideData = {
       riderId: context.user.id,
@@ -487,10 +522,14 @@ export async function handleSrRides(req, res, url, context) {
         // Safety Phase 2 (2026-10-10): the 4-digit pickup PIN. Set here, AFTER the `...(body.metadata
         // || {})` spread above, so a client can never inject or override its own code.
         pickupCode: generatePickupCode(),
+        // Package delivery (gap-closure #4b): set after the spread for the same anti-injection reason.
+        deliveryOnly,
         // Pricing factors captured at booking time (audit trail of why this fare was charged).
         fareFactors: {
           baseFareMinor: quote.baseFareMinor,
           airportSurcharge: quote.airportSurcharge,
+          internationalSurcharge: quote.internationalSurcharge,
+          internationalTrip: quote.internationalTrip,
           stopsCount: quote.stopsCount,
           stopsFee: quote.stopsFee,
           riderCount: quote.riderCount,
@@ -506,6 +545,9 @@ export async function handleSrRides(req, res, url, context) {
           scheduleMultiplier: quote.scheduleMultiplier,
           demandMultiplier: quote.demandMultiplier,
           surgeMultiplier: quote.surgeMultiplier,
+          // Rider-offered driver bonus (gap-closure #3): included in fareMinor above; recorded
+          // here so the driver UI can show it and the audit trail explains the fare.
+          bonusMinor,
         },
       },
     }

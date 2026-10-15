@@ -27,6 +27,15 @@ import {
   type DriverPayoutInfo,
 } from '../../shared/api/platformApi'
 import { moneyText, statusText } from '../../shared/i18n/display'
+import {
+  claimFoodDelivery,
+  fetchFoodOrderMessagesAsCourier,
+  sendFoodOrderMessageAsCourier,
+  fetchMyFoodDeliveries,
+  fetchPendingFoodDeliveries,
+  updateFoodOrderStatusAsCourier,
+  type FoodOrder,
+} from '../../shared/api/platformApi'
 
 type Props = {
   lang: Lang
@@ -158,6 +167,7 @@ const copy = {
     catCOMFORT: 'مريح (SR Comfort)',
     catSUV: 'دفع رباعي (SR SUV)',
     catVAN: 'فان (SR Van)',
+    catVIP: 'فاخرة VIP (SR VIP)',
     vehicleYearL: 'سنة الصنع',
     vehicleColorL: 'اللون',
     registrationExpiryL: 'انتهاء رخصة السير',
@@ -290,6 +300,7 @@ const copy = {
     catCOMFORT: 'Comfort (SR Comfort)',
     catSUV: 'SUV (SR SUV)',
     catVAN: 'Van (SR Van)',
+    catVIP: 'VIP (SR VIP)',
     vehicleYearL: 'Build year',
     vehicleColorL: 'Color',
     registrationExpiryL: 'Registration expiry',
@@ -422,6 +433,7 @@ const copy = {
     catCOMFORT: 'Confort (SR Comfort)',
     catSUV: 'SUV (SR SUV)',
     catVAN: 'Van (SR Van)',
+    catVIP: 'VIP (SR VIP)',
     vehicleYearL: 'Année',
     vehicleColorL: 'Couleur',
     registrationExpiryL: 'Expiration de la carte grise',
@@ -818,6 +830,16 @@ export function DriverDashboardPage({ lang }: Props) {
                   ) : null}
                   <span>↓ {String(pendingRide.metadata.dropoff || '-')}</span>
                   <b dir="ltr">{moneyText(pendingRide.fareMinor || 0, pendingRide.currency, lang)}</b>
+                  {(pendingRide.metadata as Record<string, any>)?.deliveryOnly ? (
+                    <span style={{ marginInlineStart: 8, padding: '2px 8px', borderRadius: 999, background: 'rgba(56,189,248,0.18)', color: '#38bdf8', fontWeight: 700, fontSize: 12 }}>
+                      {lang === 'ar' ? 'توصيل طرد' : lang === 'fr' ? 'Colis' : 'Package'}
+                    </span>
+                  ) : null}
+                  {Number((pendingRide.metadata as Record<string, any>)?.fareFactors?.bonusMinor) > 0 ? (
+                    <span style={{ marginInlineStart: 8, padding: '2px 8px', borderRadius: 999, background: 'rgba(212,175,55,0.18)', color: '#d4af37', fontWeight: 700, fontSize: 12 }}>
+                      {lang === 'ar' ? 'مكافأة' : lang === 'fr' ? 'Bonus' : 'Bonus'} +${(pendingRide.metadata as Record<string, any>).fareFactors.bonusMinor}
+                    </span>
+                  ) : null}
                   <small dir="ltr" style={{ color: '#7dd3b0' }}>
                     {t.netEarn}: {moneyText(Math.round((pendingRide.fareMinor || 0) * (1 - (overview?.totals.commissionRate ?? 0.15))), pendingRide.currency, lang)}
                   </small>
@@ -869,6 +891,8 @@ export function DriverDashboardPage({ lang }: Props) {
           </div>
         </article>
       </section>
+
+      <FoodDeliveriesPanel lang={lang} />
 
       {payoutInfo && (
         <section style={styles.dispatchPanel}>
@@ -1058,6 +1082,7 @@ export function DriverDashboardPage({ lang }: Props) {
               <option value="COMFORT">{t.catCOMFORT}</option>
               <option value="SUV">{t.catSUV}</option>
               <option value="VAN">{t.catVAN}</option>
+              <option value="VIP">{t.catVIP}</option>
             </select>
             <span style={{ fontSize: 12, opacity: 0.7 }}>{t.vehicleCategoryHint}</span>
             {overview?.driver.inspectionStatus && (
@@ -1552,6 +1577,154 @@ function DispatchItem({ label, value, tone }: { label: string; value: string; to
       <span>{label}</span>
       <strong style={{ color: tone }}>{value}</strong>
     </article>
+  )
+}
+
+// SE (Eats) Phase 2 — the courier side on the SAME driver fleet: a pending-deliveries queue
+// (claim = atomic server-side, same vetting gates as ride claims) and the courier's own worklist
+// with the two road-side transitions (picked up -> delivered). Self-contained so the ride dashboard
+// above stays untouched.
+function FoodDeliveriesPanel({ lang }: { lang: Lang }) {
+  const t = {
+    title: lang === 'ar' ? 'توصيل الطلبات (SE Eats)' : lang === 'fr' ? 'Livraisons (SE Eats)' : 'Food deliveries (SE Eats)',
+    refresh: lang === 'ar' ? 'تحديث' : lang === 'fr' ? 'Actualiser' : 'Refresh',
+    pending: lang === 'ar' ? 'طلبات متاحة' : lang === 'fr' ? 'Commandes disponibles' : 'Available orders',
+    mine: lang === 'ar' ? 'توصيلاتي الحالية' : lang === 'fr' ? 'Mes livraisons' : 'My deliveries',
+    none: lang === 'ar' ? 'لا شيء حاليًا.' : lang === 'fr' ? 'Rien pour le moment.' : 'Nothing right now.',
+    claim: lang === 'ar' ? 'قبول التوصيل' : lang === 'fr' ? 'Accepter' : 'Claim delivery',
+    pickedUp: lang === 'ar' ? 'استلمت الطلب' : lang === 'fr' ? 'Colis récupéré' : 'Picked up',
+    delivered: lang === 'ar' ? 'تم التسليم' : lang === 'fr' ? 'Livré' : 'Delivered',
+    cashNote: lang === 'ar' ? 'الدفع نقدًا عند التسليم — حصّل الإجمالي من الزبون.' : lang === 'fr' ? 'Paiement en espèces à la livraison — encaissez le total.' : 'Cash on delivery — collect the total from the customer.',
+    error: lang === 'ar' ? 'حدث خطأ، حاول مرة أخرى.' : lang === 'fr' ? 'Erreur, réessayez.' : 'Something went wrong, try again.',
+  }
+  const [pending, setPending] = useState<FoodOrder[]>([])
+  const [mine, setMine] = useState<FoodOrder[]>([])
+  const [note, setNote] = useState('')
+  // Order chat with the customer / restaurant, only for deliveries this courier carries.
+  const [chatOpen, setChatOpen] = useState('')
+  const [chatLog, setChatLog] = useState<Record<string, Array<{ id: string; senderRole: string; body: string }>>>({})
+  const [chatDraft, setChatDraft] = useState<Record<string, string>>({})
+
+  async function toggleChat(orderId: string) {
+    setChatOpen((prev) => (prev === orderId ? '' : orderId))
+    try {
+      const r = await fetchFoodOrderMessagesAsCourier(orderId)
+      setChatLog((prev) => ({ ...prev, [orderId]: r.messages }))
+    } catch {
+      setNote(t.error)
+    }
+  }
+
+  async function sendChat(orderId: string) {
+    const body = (chatDraft[orderId] || '').trim()
+    if (!body) return
+    setChatDraft((prev) => ({ ...prev, [orderId]: '' }))
+    try {
+      const message = await sendFoodOrderMessageAsCourier(orderId, body)
+      setChatLog((prev) => ({ ...prev, [orderId]: [...(prev[orderId] || []), message] }))
+    } catch (err) {
+      setNote((err as Error).message || t.error)
+    }
+  }
+
+  async function reload() {
+    try {
+      const [pendingRows, mineRows] = await Promise.all([fetchPendingFoodDeliveries(), fetchMyFoodDeliveries()])
+      setPending(pendingRows)
+      setMine(mineRows)
+      setNote('')
+    } catch {
+      setNote(t.error)
+    }
+  }
+
+  useEffect(() => {
+    void reload()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function claim(orderId: string) {
+    try {
+      await claimFoodDelivery(orderId)
+      await reload()
+    } catch (err) {
+      setNote((err as Error).message || t.error)
+    }
+  }
+
+  async function move(orderId: string, status: 'PICKED_UP' | 'DELIVERED') {
+    try {
+      await updateFoodOrderStatusAsCourier(orderId, status)
+      await reload()
+    } catch (err) {
+      setNote((err as Error).message || t.error)
+    }
+  }
+
+  const orderLine = (order: FoodOrder) => (
+    <div style={{ display: 'grid', gap: 4 }}>
+      <strong dir="auto">{order.merchant?.name || ''} → {order.deliveryAddress}</strong>
+      <span style={{ color: '#9aa6ba', fontSize: 12.5 }} dir="auto">
+        {(order.items || []).map((line) => `${line.quantity}× ${line.nameSnapshot}`).join(' · ')}
+      </span>
+      <span dir="ltr" style={{ fontWeight: 800 }}>{moneyText(order.totalMinor, order.currency, lang)}</span>
+    </div>
+  )
+
+  return (
+    <section style={styles.dispatchPanel}>
+      <article style={styles.docsPanel}>
+        <h2>{t.title}</h2>
+        <p style={{ color: '#9aa6ba', fontSize: 13, margin: 0 }}>{t.cashNote}</p>
+        <button type="button" style={styles.secondaryButton} onClick={() => void reload()}>{t.refresh}</button>
+        {note ? <p role="alert" style={{ color: '#f87171', fontWeight: 700, fontSize: 13, margin: 0 }}>{note}</p> : null}
+        <h3 style={{ margin: '8px 0 0', fontSize: 14 }}>{t.mine}</h3>
+        {mine.length === 0 ? <div style={styles.panel}>{t.none}</div> : mine.map((order) => (
+          <article key={order.id} style={styles.verifyBox}>
+            {orderLine(order)}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {order.status === 'READY_FOR_PICKUP' ? (
+                <button type="button" style={styles.secondaryButton} onClick={() => void move(order.id, 'PICKED_UP')}>{t.pickedUp}</button>
+              ) : null}
+              {order.status === 'PICKED_UP' ? (
+                <button type="button" style={styles.secondaryButton} onClick={() => void move(order.id, 'DELIVERED')}>{t.delivered}</button>
+              ) : null}
+              {order.status !== 'READY_FOR_PICKUP' && order.status !== 'PICKED_UP' ? (
+                <span style={{ color: '#9aa6ba', fontSize: 12.5 }}>{statusText(order.status, lang)}</span>
+              ) : null}
+              <button type="button" style={styles.secondaryButton} onClick={() => void toggleChat(order.id)}>💬 {lang === 'ar' ? 'محادثة' : 'Chat'}</button>
+            </div>
+            {chatOpen === order.id ? (
+              <div style={{ display: 'grid', gap: 6 }}>
+                {(chatLog[order.id] || []).map((m) => (
+                  <div key={m.id} style={{ color: '#9aa6ba', fontSize: 13 }} dir="auto">
+                    <strong>{m.senderRole}:</strong> {m.body}
+                  </div>
+                ))}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    dir="auto"
+                    style={{ ...styles.vehicleInput, flex: 1 }}
+                    value={chatDraft[order.id] || ''}
+                    placeholder={lang === 'ar' ? 'اكتب للزبون أو المطعم…' : 'Message the customer or restaurant…'}
+                    onChange={(event) => setChatDraft((prev) => ({ ...prev, [order.id]: event.target.value }))}
+                    onKeyDown={(event) => { if (event.key === 'Enter') void sendChat(order.id) }}
+                  />
+                  <button type="button" style={styles.secondaryButton} onClick={() => void sendChat(order.id)}>{lang === 'ar' ? 'إرسال' : 'Send'}</button>
+                </div>
+              </div>
+            ) : null}
+          </article>
+        ))}
+        <h3 style={{ margin: '8px 0 0', fontSize: 14 }}>{t.pending}</h3>
+        {pending.length === 0 ? <div style={styles.panel}>{t.none}</div> : pending.map((order) => (
+          <article key={order.id} style={styles.verifyBox}>
+            {orderLine(order)}
+            <button type="button" style={styles.secondaryButton} onClick={() => void claim(order.id)}>{t.claim}</button>
+          </article>
+        ))}
+      </article>
+    </section>
   )
 }
 

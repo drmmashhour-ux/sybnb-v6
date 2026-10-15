@@ -19,6 +19,7 @@ const CompetitorsPage = lazyNamed(() => import('../modules/competitors/Competito
 const DashboardPage = lazyNamed(() => import('../modules/dashboard/DashboardPage'), 'DashboardPage')
 const DivisionLivePage = lazyNamed(() => import('../modules/divisions/DivisionLivePage'), 'DivisionLivePage')
 const DriverDashboardPage = lazyNamed(() => import('../modules/driver/DriverDashboardPage'), 'DriverDashboardPage')
+const MerchantDashboardPage = lazyNamed(() => import('../modules/food/MerchantDashboardPage'), 'MerchantDashboardPage')
 const FinanceReconciliationPage = lazyNamed(() => import('../modules/finance/FinanceReconciliationPage'), 'FinanceReconciliationPage')
 const GiftFlowRoutes = lazyNamed(() => import('../modules/wallet/GiftFlowRoutes'), 'GiftFlowRoutes')
 const GuestAccountPage = lazyNamed(() => import('../modules/account/GuestAccountPage'), 'GuestAccountPage')
@@ -57,6 +58,7 @@ const AdminBusinessAccountsPage = lazyNamed(() => import('../modules/sr/AdminBus
 const AdminIncidentsPage = lazyNamed(() => import('../modules/admin/AdminIncidentsPage'), 'AdminIncidentsPage')
 const AdminVehiclesPage = lazyNamed(() => import('../modules/admin/AdminVehiclesPage'), 'AdminVehiclesPage')
 const AdminLiveRidesPage = lazyNamed(() => import('../modules/admin/AdminLiveRidesPage'), 'AdminLiveRidesPage')
+const AdminFoodPage = lazyNamed(() => import('../modules/admin/AdminFoodPage'), 'AdminFoodPage')
 const BusinessAccountPage = lazyNamed(() => import('../modules/sr/BusinessAccountPage'), 'BusinessAccountPage')
 const StaffAccessPage = lazyNamed(() => import('../modules/account/StaffAccessPage'), 'StaffAccessPage')
 const SyrianLocalWalletPaymentPage = lazyNamed(
@@ -64,6 +66,7 @@ const SyrianLocalWalletPaymentPage = lazyNamed(
   'SyrianLocalWalletPaymentPage',
 )
 const TrustProtectionRoutes = lazyNamed(() => import('../modules/trust/TrustProtectionRoutes'), 'TrustProtectionRoutes')
+const MshDashboardPage = lazyNamed(() => import('../modules/msh/MshDashboardPage'), 'MshDashboardPage')
 const WalletPage = lazyNamed(() => import('../modules/wallet-live/WalletPage'), 'WalletPage')
 
 function lazyNamed<T extends Record<string, unknown>, K extends keyof T>(
@@ -157,8 +160,8 @@ export function App() {
   const agentProfileMatch = path.match(/^\/agent\/([^/]+)$/)
   const giftClaimRoute = path === '/wallet/gift/claim' || /^\/wallet\/gift\/claim\/[^/]+$/.test(path)
     || path === '/wallet/gift/code' || /^\/wallet\/gift\/code\/[^/]+$/.test(path)
-  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/profile' || path === '/wallet' || path === '/ride' || path === '/ride-preview' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
-  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/profile' || path === '/wallet' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch ? 'generic' : 'stays'
+  const guestProtectedRoute = path === '/dashboard' || path === '/account' || path === '/profile' || (path === '/wallet' || path === '/wallet/msh') || path === '/ride' || path === '/ride-preview' || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch || Boolean(bookingMatch || bookingPaymentMatch || paymentReceiptMatch)
+  const guestGateFlow = path === '/ride' || path === '/ride-preview' ? 'ride' : path === '/account/open' || path === '/dashboard' || path === '/account' || path === '/profile' || (path === '/wallet' || path === '/wallet/msh') || path === '/business/account' || path === '/trust-center/verification' || giftClaimRoute || trustBookingSubRouteMatch ? 'generic' : 'stays'
   const hasGuestSession = typeof window !== 'undefined' && Boolean(authStorage.getItem('sybnb-v6-guest-token'))
   const staffRequiredRole = getStaffRequiredRole(path)
   const hasStaffSession = typeof window !== 'undefined' && hasRequiredStaffSession(staffRequiredRole)
@@ -250,6 +253,8 @@ export function App() {
           <HostInquiriesPage lang={lang} />
         ) : path === '/driver' ? (
           <DriverDashboardPage lang={lang} />
+        ) : path === '/merchant' ? (
+          <MerchantDashboardPage lang={lang} />
         ) : path === '/immocontact' ? (
           <ImmocontactPage lang={lang} />
         ) : path === '/admin/sr/promo-codes' ? (
@@ -260,6 +265,8 @@ export function App() {
           <AdminIncidentsPage lang={lang} />
         ) : path === '/admin/vehicles' ? (
           <AdminVehiclesPage lang={lang} />
+        ) : path === '/admin/food' ? (
+          <AdminFoodPage lang={lang} />
         ) : path === '/admin/sr/rides' ? (
           <AdminLiveRidesPage lang={lang} />
         ) : path === '/business/account' ? (
@@ -331,6 +338,8 @@ export function App() {
             amountMinor={Number(bookingPaymentMatch[2])}
             currency={decodeURIComponent(bookingPaymentMatch[3])}
           />
+        ) : path === '/wallet/msh' ? (
+          <MshDashboardPage lang={lang} />
         ) : path === '/wallet' ? (
           <WalletPage lang={lang} />
         ) : division ? (

@@ -9,9 +9,10 @@ export const RIDE_CATEGORY_TO_VEHICLE = {
   'SR Comfort': 'COMFORT',
   'SR SUV': 'SUV',
   'SR Van': 'VAN',
+  'SR VIP': 'VIP',
 }
 
-export const VEHICLE_CATEGORY_VALUES = ['BIKE', 'ECONOMY', 'COMFORT', 'SUV', 'VAN']
+export const VEHICLE_CATEGORY_VALUES = ['BIKE', 'ECONOMY', 'COMFORT', 'SUV', 'VAN', 'VIP']
 
 // Map a ride category string to its VehicleCategory enum value, or null if unknown/missing.
 export function rideCategoryToVehicle(cat) {
@@ -36,6 +37,9 @@ export const VEHICLE_MAX_AGE_YEARS = {
   COMFORT: envNum('SR_VEHICLE_MAX_AGE_COMFORT', 12),
   SUV: envNum('SR_VEHICLE_MAX_AGE_SUV', 12),
   VAN: envNum('SR_VEHICLE_MAX_AGE_VAN', 15),
+  // VIP (2026-10-15, Yallago gap-closure #2): the luxury tier carries the strictest age limit —
+  // a premium fare must mean a recent premium car.
+  VIP: envNum('SR_VEHICLE_MAX_AGE_VIP', 6),
 }
 
 // True when a vehicle of the given build year may serve the given category. Permissive on missing

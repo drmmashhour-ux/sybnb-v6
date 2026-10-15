@@ -38,6 +38,7 @@ import { handlePaymentIntents } from './routes/payment-intents.mjs'
 import { handlePayments } from './routes/payments.mjs'
 import { handleReviews } from './routes/reviews.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
+import { handleFood } from './routes/food.mjs'
 import { handleWallet } from './routes/wallet.mjs'
 import { activateScheduledRides } from './lib/ride-schedule.mjs'
 import { runDispatchSweep } from './lib/ride-dispatch.mjs'
@@ -303,6 +304,7 @@ async function dispatch(req, res, url, context) {
     handleMessages,
     handlePush,
     handleBusiness,
+    handleFood,
   ]) {
     const handled = await handler(req, res, url, context)
     if (handled !== false) return handled

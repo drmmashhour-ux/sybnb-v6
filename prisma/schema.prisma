@@ -59,6 +59,7 @@ enum VehicleCategory {
   COMFORT
   SUV
   VAN
+  VIP
 }
 
 enum VehicleInspectionStatus {
@@ -246,8 +247,199 @@ model User {
   hostActivationCodes          HostActivationCode[] @relation("HostActivationCodeHost")
   hostActivationCodesIssued    HostActivationCode[] @relation("HostActivationCodeIssuedBy")
   loyaltyAccount               LoyaltyAccount?
+  merchants                    Merchant[]      @relation("MerchantOwner")
+  foodOrders                   FoodOrder[]     @relation("FoodOrderCustomer")
+  courierFoodOrders            FoodOrder[]     @relation("FoodOrderCourier")
+  foodOrderMessages            FoodOrderMessage[] @relation("FoodOrderMessageSender")
 
   @@map("users")
+}
+
+// ============================================================================
+// SE (Eats) — food & grocery delivery vertical (Phase 1, 2026-10-15).
+// Separate customer app, SAME platform: one account, one driver fleet (couriers are DRIVER users),
+// one admin. Phase 1 is cash-on-delivery only — wallet/ledger integration is an explicit later
+// phase (AGENTS.md §6: money semantics never change as a side effect). Pricing is always computed
+// server-side from the menu snapshot; a client can never supply a price.
+// ============================================================================
+
+enum MerchantStatus {
+  PENDING_REVIEW
+  APPROVED
+  SUSPENDED
+}
+
+enum FoodOrderStatus {
+  PLACED
+  ACCEPTED
+  PREPARING
+  READY_FOR_PICKUP
+  PICKED_UP
+  DELIVERED
+  CANCELLED
+  REJECTED
+}
+
+// Menu Studio (migration 067): every uploaded photo is moderated. PENDING_REVIEW on upload;
+// only APPROVED photos are ever shown to customers (fail-closed, like merchant approval).
+enum FoodPhotoStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+}
+
+model Merchant {
+  id        String         @id @default(uuid())
+  ownerId   String         @map("owner_id")
+  name      String
+  nameAr    String?        @map("name_ar")
+  category  String         @default("restaurant")
+  city      String
+  address   String
+  phone     String?
+  status    MerchantStatus @default(PENDING_REVIEW)
+  active    Boolean        @default(true)
+  // Order experience (068): store position for the order map (plain lat/lng, display-only like
+  // SavedPlace), the merchant's own busy switch, and their usual prep time.
+  lat                Float?
+  lng                Float?
+  acceptingOrders    Boolean @default(true) @map("accepting_orders")
+  defaultPrepMinutes Int?    @map("default_prep_minutes")
+  // Menu Studio (067): moderated cover photo. photoMeta holds the standards-check evidence
+  // (dimensions, byte size, editor-signature heuristics) shown to the reviewing admin.
+  photoRef         String?          @map("photo_ref")
+  photoMimeType    String?          @map("photo_mime_type")
+  photoStatus      FoodPhotoStatus? @map("photo_status")
+  photoReviewNote  String?          @map("photo_review_note")
+  photoMeta        Json             @default("{}") @map("photo_meta")
+  photoSubmittedAt DateTime?        @map("photo_submitted_at")
+  photoReviewedAt  DateTime?        @map("photo_reviewed_at")
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  owner     User        @relation("MerchantOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  menuItems MenuItem[]
+  orders    FoodOrder[]
+
+  @@index([ownerId])
+  @@index([status, active, city])
+  @@index([photoStatus])
+  @@map("merchants")
+}
+
+model MenuItem {
+  id          String   @id @default(uuid())
+  merchantId  String   @map("merchant_id")
+  name        String
+  nameAr      String?  @map("name_ar")
+  description String?
+  priceMinor  Int      @map("price_minor")
+  currency    String
+  available   Boolean  @default(true)
+  sortOrder   Int      @default(0) @map("sort_order")
+  // Menu Studio (067): moderated item photo — same review discipline as the merchant cover.
+  photoRef         String?          @map("photo_ref")
+  photoMimeType    String?          @map("photo_mime_type")
+  photoStatus      FoodPhotoStatus? @map("photo_status")
+  photoReviewNote  String?          @map("photo_review_note")
+  photoMeta        Json             @default("{}") @map("photo_meta")
+  photoSubmittedAt DateTime?        @map("photo_submitted_at")
+  photoReviewedAt  DateTime?        @map("photo_reviewed_at")
+  // Promotions (067): a time-windowed promo price. The EFFECTIVE price (promo when active, base
+  // otherwise) is computed server-side at order time and snapshotted — explicit, tested money
+  // semantics (AGENTS.md §6), never a client-supplied number.
+  promoPriceMinor Int?      @map("promo_price_minor")
+  promoLabel      String?   @map("promo_label")
+  promoStartsAt   DateTime? @map("promo_starts_at")
+  promoEndsAt     DateTime? @map("promo_ends_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  merchant   Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  orderItems FoodOrderItem[]
+
+  @@index([merchantId, available])
+  @@index([photoStatus])
+  @@map("menu_items")
+}
+
+model FoodOrder {
+  id               String          @id @default(uuid())
+  merchantId       String          @map("merchant_id")
+  customerId       String          @map("customer_id")
+  courierId        String?         @map("courier_id")
+  status           FoodOrderStatus @default(PLACED)
+  subtotalMinor    Int             @map("subtotal_minor")
+  deliveryFeeMinor Int             @default(0) @map("delivery_fee_minor")
+  serviceFeeMinor  Int             @default(0) @map("service_fee_minor")
+  totalMinor       Int             @map("total_minor")
+  currency         String
+  paymentMethod    String          @default("cash") @map("payment_method")
+  deliveryAddress  String          @map("delivery_address")
+  deliveryLat      Float?          @map("delivery_lat")
+  deliveryLng      Float?          @map("delivery_lng")
+  // Order experience (068): 'delivery' | 'pickup' (pickup = no courier, no delivery fee);
+  // etaAt = the promise shown to the customer (accept sets it, delay moves it); delayedCount > 0
+  // reopens the customer's cancel right; scheduledFor = a "next time" order.
+  fulfillment      String          @default("delivery")
+  etaAt            DateTime?       @map("eta_at")
+  delayedCount     Int             @default(0) @map("delayed_count")
+  scheduledFor     DateTime?       @map("scheduled_for")
+  notes            String?
+  metadata         Json            @default("{}")
+  acceptedAt       DateTime?       @map("accepted_at")
+  readyAt          DateTime?       @map("ready_at")
+  pickedUpAt       DateTime?       @map("picked_up_at")
+  deliveredAt      DateTime?       @map("delivered_at")
+  cancelledAt      DateTime?       @map("cancelled_at")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  merchant Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer User               @relation("FoodOrderCustomer", fields: [customerId], references: [id], onDelete: Cascade)
+  courier  User?              @relation("FoodOrderCourier", fields: [courierId], references: [id], onDelete: SetNull)
+  items    FoodOrderItem[]
+  messages FoodOrderMessage[]
+
+  @@index([merchantId, status])
+  @@index([customerId])
+  @@index([courierId])
+  @@index([status])
+  @@map("food_orders")
+}
+
+model FoodOrderItem {
+  id                 String  @id @default(uuid())
+  orderId            String  @map("order_id")
+  menuItemId         String? @map("menu_item_id")
+  // Name/price SNAPSHOT at order time: a later menu edit must never change what an order says it
+  // cost (same reasoning as SR's fareFactors audit trail).
+  nameSnapshot       String  @map("name_snapshot")
+  priceMinorSnapshot Int     @map("price_minor_snapshot")
+  quantity           Int
+
+  order    FoodOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem? @relation(fields: [menuItemId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@map("food_order_items")
+}
+
+// Order experience (068): per-order chat between customer, merchant owner and courier. Polled by
+// the clients; senderRole recorded at send time so the transcript stays honest later.
+model FoodOrderMessage {
+  id         String   @id @default(uuid())
+  orderId    String   @map("order_id")
+  senderId   String   @map("sender_id")
+  senderRole String   @map("sender_role")
+  body       String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  order  FoodOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sender User      @relation("FoodOrderMessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@map("food_order_messages")
 }
 
 // Loyalty program (migration 051). Points are earned when a booking completes and can be redeemed

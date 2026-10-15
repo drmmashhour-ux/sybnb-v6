@@ -217,7 +217,7 @@ export async function handleDriver(req, res, url, context) {
         throw error
       }
       if (!VEHICLE_CATEGORY_VALUES.includes(vehicleCategory)) {
-        const error = new Error('vehicleCategory must be one of BIKE, ECONOMY, COMFORT, SUV, VAN.')
+        const error = new Error('vehicleCategory must be one of BIKE, ECONOMY, COMFORT, SUV, VAN, VIP.')
         error.statusCode = 400
         error.code = 'VEHICLE_CATEGORY_INVALID'
         error.expose = true

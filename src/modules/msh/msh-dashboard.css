@@ -1,0 +1,19 @@
+.msh-dashboard {max-width:900px;margin:40px auto;padding:28px;color:#edf2fa;background:#101b2e;border:1px solid #314563;border-radius:20px;line-height:1.6}
+.msh-dashboard a {color:#91cbff;text-decoration:underline}
+.msh-dashboard h1 {font-size:clamp(28px,5vw,42px);margin:8px 0 20px}
+.msh-dashboard-eyebrow {font-size:12px;letter-spacing:.12em;color:#9ab4d6;margin-top:28px}
+.msh-dashboard-notice {background:#3c310e;border:1px solid #987a20;padding:18px;border-radius:12px}
+.msh-dashboard-consent {display:flex;gap:12px;align-items:center;margin:24px 0}
+.msh-dashboard-actions {display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}
+.msh-dashboard button {padding:12px 20px;background:#2563eb;color:white;border:1px solid #6294ff;border-radius:10px;font:inherit;cursor:pointer}
+.msh-dashboard button:disabled {opacity:.5;cursor:default}
+.msh-dashboard-balance,.msh-dashboard-contract {border-top:1px solid #314563;padding-top:24px;margin-top:24px}
+.msh-dashboard-balance strong {display:block;font-size:clamp(30px,6vw,52px);margin:6px 0 24px;overflow-wrap:anywhere}
+.msh-dashboard dt {color:#9ab4d6;margin-top:14px}
+.msh-dashboard dd {margin:0;overflow-wrap:anywhere}
+.msh-dashboard-contract p {overflow-wrap:anywhere}
+@media(max-width:600px){.msh-dashboard{margin:16px 12px;padding:20px}.msh-dashboard-actions button{width:100%}}
+.msh-rewards-preview form {display:grid;gap:14px;margin:20px 0}
+.msh-rewards-preview label {display:grid;gap:6px}
+.msh-rewards-preview input {padding:10px;border:1px solid #6294ff;border-radius:8px;background:#17263b;color:#edf2fa;font:inherit;width:100%;box-sizing:border-box}
+.msh-rewards-preview ul {max-height:300px;overflow:auto;overflow-wrap:anywhere;padding-inline-start:24px}

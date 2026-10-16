@@ -4,6 +4,7 @@
 // Resend is an EMAIL API (not SMS). Selection via env EMAIL_PROVIDER:
 //   'sandbox' (default) — does NOT send anything. Returns a synthetic id. Never logs the email body
 //                         (which may contain an OTP). Used for local/dev/staging + governed tests.
+//   'ses'               — Amazon SES v2 via SigV4 (AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, EMAIL_FROM).
 //   'resend'            — POSTs to https://api.resend.com/emails. Requires RESEND_API_KEY and
 //                         EMAIL_FROM; throws EMAIL_PROVIDER_NOT_CONFIGURED if missing (prepared but
 //                         inert until real credentials are supplied — a reserved owner action).
@@ -11,7 +12,7 @@
 // The API key is NEVER logged, returned, or committed. The sending domain + SPF/DKIM/DMARC must be
 // verified before launch (see docs/launch/RESEND_CERTIFICATION.md).
 
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { db } from './prisma.mjs'
 
 function providerName() {
@@ -29,7 +30,58 @@ export function emailProviderStatus() {
     // Report configuration WITHOUT exposing the key (boolean only).
     return { provider, configured: Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM), live: true }
   }
+  if (provider === 'ses') {
+    // Boolean only: never expose key material.
+    return { provider, configured: Boolean(sesConfig()), live: true }
+  }
   return { provider, configured: false, live: true }
+}
+
+
+// Amazon SES (API v2) over HTTPS with AWS Signature V4, implemented with node:crypto so no SDK
+// dependency is added. Env: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, EMAIL_FROM.
+// Credentials are never logged, returned, or included in errors.
+function sesConfig() {
+  const region = process.env.AWS_REGION
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
+  const from = process.env.EMAIL_FROM
+  if (!region || !accessKeyId || !secretAccessKey || !from) return null
+  return { region, accessKeyId, secretAccessKey, from }
+}
+
+function sha256Hex(data) {
+  return createHash('sha256').update(data).digest('hex')
+}
+
+function hmac(key, data) {
+  return createHmac('sha256', key).update(data).digest()
+}
+
+async function sesRequest(cfg, body) {
+  const host = `email.${cfg.region}.amazonaws.com`
+  const path = '/v2/email/outbound-emails'
+  const now = new Date()
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
+  const dateStamp = amzDate.slice(0, 8)
+  const contentType = 'application/json'
+  const payloadHash = sha256Hex(body)
+  const canonicalHeaders = `content-type:${contentType}\nhost:${host}\nx-amz-date:${amzDate}\n`
+  const signedHeaders = 'content-type;host;x-amz-date'
+  const canonicalRequest = ['POST', path, '', canonicalHeaders, signedHeaders, payloadHash].join('\n')
+  const scope = `${dateStamp}/${cfg.region}/ses/aws4_request`
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, sha256Hex(canonicalRequest)].join('\n')
+  const kDate = hmac(`AWS4${cfg.secretAccessKey}`, dateStamp)
+  const kRegion = hmac(kDate, cfg.region)
+  const kService = hmac(kRegion, 'ses')
+  const kSigning = hmac(kService, 'aws4_request')
+  const signature = createHmac('sha256', kSigning).update(stringToSign).digest('hex')
+  const authorization = `AWS4-HMAC-SHA256 Credential=${cfg.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`
+  return fetch(`https://${host}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': contentType, 'x-amz-date': amzDate, authorization },
+    body,
+  })
 }
 
 // sendEmail({ to, subject, text, html?, purpose, idempotencyKey? }) -> { provider, messageId, delivered }
@@ -81,6 +133,37 @@ export async function sendEmail({ to, subject, text, html, purpose, idempotencyK
     let data = {}
     try { data = await res.json() } catch { /* provider may return empty body */ }
     return { provider: 'resend', messageId: data.id || `resend-${Date.now()}`, delivered: true }
+  }
+
+  if (provider === 'ses') {
+    const cfg = sesConfig()
+    if (!cfg) {
+      const error = new Error('Email provider is not configured for live delivery.')
+      error.statusCode = 503
+      error.code = 'EMAIL_PROVIDER_NOT_CONFIGURED'
+      error.expose = true
+      throw error
+    }
+    const recipients = Array.isArray(to) ? to : [to]
+    const content = { Subject: { Data: subject, Charset: 'UTF-8' }, Body: { Text: { Data: text, Charset: 'UTF-8' } } }
+    if (html) content.Body.Html = { Data: html, Charset: 'UTF-8' }
+    const body = JSON.stringify({
+      FromEmailAddress: cfg.from,
+      Destination: { ToAddresses: recipients },
+      Content: { Simple: content },
+    })
+    const res = await sesRequest(cfg, body)
+    if (!res.ok) {
+      // Never include the request body (it carries the OTP) or credentials in the error.
+      const error = new Error('Email provider rejected the message.')
+      error.statusCode = 502
+      error.code = 'EMAIL_SEND_FAILED'
+      error.expose = true
+      throw error
+    }
+    let data = {}
+    try { data = await res.json() } catch { /* empty body */ }
+    return { provider: 'ses', messageId: data.MessageId || `ses-${Date.now()}`, delivered: true }
   }
 
   const error = new Error(`Unknown email provider "${provider}".`)

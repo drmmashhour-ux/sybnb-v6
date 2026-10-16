@@ -45,6 +45,8 @@ const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRE
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { RideMap } from '../../shared/maps/RideMap'
+import { RiderSignInGate } from '../../shared/auth/RiderSignInGate'
+import { getStoredGuestSession } from '../../shared/api/platformApi'
 import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
 import { srFallbackFareMinor } from './srFareModel'
 import { RecordingControls } from './RecordingControls'
@@ -477,6 +479,7 @@ export function SrRidePage({ lang }: Props) {
   const [ride, setRide] = useState<PlatformRideRequest | null>(null)
   const [driverPhotoUrl, setDriverPhotoUrl] = useState<string | null>(null)
   const [quote, setQuote] = useState<PlatformSrQuote | null>(null)
+  const [hasRiderSession, setHasRiderSession] = useState(() => Boolean(getStoredGuestSession()))
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
     srRideRoute: 'cityRide',
@@ -618,7 +621,7 @@ export function SrRidePage({ lang }: Props) {
       fetchSrQuote({ pickup, dropoff, category, lowDataMode, pickupCoords, stops: trimmedStops, riderCount, bagCount, scheduled: scheduleForLater }).then(setQuote).catch(() => setQuote(null))
     }, 400)
     return () => window.clearTimeout(timer)
-  }, [pickup, dropoff, category, lowDataMode, pickupCoords, ride, trimmedStops, riderCount, bagCount, scheduleForLater])
+  }, [pickup, dropoff, category, lowDataMode, pickupCoords, ride, trimmedStops, riderCount, bagCount, scheduleForLater, hasRiderSession])
 
   useEffect(() => {
     fetchSavedPlaces().then(setSavedPlaces).catch(() => setSavedPlaces([]))
@@ -1105,6 +1108,7 @@ export function SrRidePage({ lang }: Props) {
         </section>
       )}
 
+      {!hasRiderSession ? <RiderSignInGate lang={lang} onSignedIn={() => setHasRiderSession(true)} /> : null}
       <section style={styles.grid}>
         <article style={styles.card}>
           <strong style={{ display: "block", marginBottom: 6 }}>{t.location}</strong>

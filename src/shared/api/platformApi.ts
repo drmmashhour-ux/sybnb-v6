@@ -666,6 +666,19 @@ export async function signInGuestAccount(email: string, password: string) {
   return session
 }
 
+// Passenger / guest sign-in with a verified email code (POST /api/auth/guest-session). No password
+// and no sign-up form. Stores the session exactly like the other guest sign-in paths.
+export async function signInRiderWithEmailCode(email: string): Promise<PlatformAuthSession> {
+  const response = await apiRequest<AuthResponse>('/api/auth/guest-session', {
+    method: 'POST',
+    body: { email: email.trim().toLowerCase() },
+  })
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(response))
+  authStorage.setItem(GUEST_SESSION_TOKEN_KEY, response.token)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return response
+}
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

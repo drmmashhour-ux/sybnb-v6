@@ -323,6 +323,89 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
     })
   }
 
+  // Passwordless rider/guest session: a verified 'guest-login' email code (POST /api/otp/verify)
+  // is consumed single-use and exchanged for a normal GUEST session. No password, no sign-up form.
+  // A partner email (driver, host, seller, admin, or any non-GUEST role, or a suspended account) is
+  // refused here: partner accounts keep their password sign-in and are never reachable by email code.
+  if (url.pathname === '/api/auth/guest-session') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    if (await rateLimited(req, 'guest-session')) return tooManyRequests(res)
+    const body = await readJson(req)
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
+    if (!email) {
+      const error = new Error('An email is required.')
+      error.statusCode = 400
+      error.code = 'GUEST_SESSION_EMAIL_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    const codeRequired = () => {
+      const error = new Error('Verify your email with a code first.')
+      error.statusCode = 403
+      error.code = 'GUEST_SESSION_CODE_REQUIRED'
+      error.expose = true
+      return error
+    }
+    const verified = await db().verificationCode.findFirst({
+      where: {
+        identifierHash: hashEmail(email),
+        purpose: 'guest-login',
+        status: 'VERIFIED',
+        verifiedAt: { gt: new Date(Date.now() - OTP_BIND_WINDOW_MS) },
+      },
+      orderBy: { verifiedAt: 'desc' },
+    })
+    if (!verified) throw codeRequired()
+    // Single-use: only a still-VERIFIED row flips, so one code yields exactly one session.
+    const consumed = await db().verificationCode.updateMany({
+      where: { id: verified.id, status: 'VERIFIED' },
+      data: { status: 'CANCELLED' },
+    })
+    if (consumed.count === 0) throw codeRequired()
+
+    let user = await db().user.findUnique({ where: { email }, include: { roles: true } })
+    if (user) {
+      const roles = user.roles.map((item) => item.role)
+      if (user.status !== 'ACTIVE' || roles.some((role) => role !== 'GUEST')) {
+        const error = new Error('This email belongs to a partner account. Please sign in with your password.')
+        error.statusCode = 403
+        error.code = 'GUEST_SESSION_NOT_ALLOWED'
+        error.expose = true
+        throw error
+      }
+    } else {
+      try {
+        user = await db().user.create({
+          data: {
+            email,
+            displayName: email,
+            roles: { create: { role: 'GUEST' } },
+            wallets: { create: { currency: defaultCurrency() } },
+          },
+          include: { roles: true },
+        })
+      } catch (error) {
+        if (error?.code === 'P2002') {
+          const conflict = new Error('Please try again.')
+          conflict.statusCode = 409
+          conflict.code = 'GUEST_SESSION_RETRY'
+          conflict.expose = true
+          throw conflict
+        }
+        throw error
+      }
+    }
+
+    const session = await issueUserSession(user, req)
+    return json(res, 200, {
+      ok: true,
+      user: publicUser(user),
+      token: session.token,
+      sessionId: session.sessionId,
+      expiresAt: session.expiresAt,
+    })
+  }
+
   return false
 }
 

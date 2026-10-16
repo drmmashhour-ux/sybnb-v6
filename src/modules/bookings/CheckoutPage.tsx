@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
+import { RiderSignInGate } from '../../shared/auth/RiderSignInGate'
 import {
   createPrototypeBooking,
   createStripeCheckoutSession,
@@ -402,12 +403,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
 
             {!signedIn && !blocked && (
               <section className="checkout-account" aria-label={t('signInTitle')}>
-                <GuestAccountPage
-                  lang={lang}
-                  embedded
-                  embeddedTitle={t('signInTitle')}
-                  onSignedIn={() => setSignedIn(true)}
-                />
+                <RiderSignInGate lang={lang} onSignedIn={() => setSignedIn(true)} />
               </section>
             )}
 

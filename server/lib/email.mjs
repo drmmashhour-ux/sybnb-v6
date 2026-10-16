@@ -147,11 +147,14 @@ export async function sendEmail({ to, subject, text, html, purpose, idempotencyK
     const recipients = Array.isArray(to) ? to : [to]
     const content = { Subject: { Data: subject, Charset: 'UTF-8' }, Body: { Text: { Data: text, Charset: 'UTF-8' } } }
     if (html) content.Body.Html = { Data: html, Charset: 'UTF-8' }
-    const body = JSON.stringify({
+    const payload = {
       FromEmailAddress: cfg.from,
       Destination: { ToAddresses: recipients },
       Content: { Simple: content },
-    })
+    }
+    // Bounce/complaint events are published to SNS through this configuration set (see ses-webhooks.mjs).
+    if (process.env.SES_CONFIGURATION_SET) payload.ConfigurationSetName = process.env.SES_CONFIGURATION_SET
+    const body = JSON.stringify(payload)
     const res = await sesRequest(cfg, body)
     if (!res.ok) {
       // Never include the request body (it carries the OTP) or credentials in the error.

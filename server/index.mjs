@@ -13,6 +13,7 @@ import { log, logRequest, newRequestId } from './lib/logger.mjs'
 import { handleAdmin } from './routes/admin.mjs'
 import { handleAuth } from './routes/auth.mjs'
 import { handleWebhooks } from './routes/webhooks.mjs'
+import { handleSesWebhooks } from './routes/ses-webhooks.mjs'
 import { handleBookings } from './routes/bookings.mjs'
 import { handleDriver } from './routes/driver.mjs'
 import { handleHost } from './routes/host.mjs'
@@ -277,6 +278,7 @@ const server = createServer(async (req, res) => {
 async function dispatch(req, res, url, context) {
   for (const handler of [
     handleWebhooks,
+    handleSesWebhooks,
     handleAuth,
     handleOtp,
     handleStorage,

@@ -1107,11 +1107,9 @@ export function SrRidePage({ lang }: Props) {
 
       <section style={styles.grid}>
         <article style={styles.card}>
-          <div style={styles.mapPreview}>
-            <span style={styles.dot} />
-            <strong>{t.location}</strong>
-            <p>{t.manualHint}</p>
-          </div>
+          <strong style={{ display: "block", marginBottom: 6 }}>{t.location}</strong>
+          <p style={{ margin: "0 0 8px" }}>{t.manualHint}</p>
+          <RideMap pickup={pickupCoords ?? quote?.pickupCoords} dropoff={quote?.dropoffCoords} height={220} />
 
           <button style={styles.secondaryButton} onClick={() => void useCurrentLocation()}>
             {t.gps}

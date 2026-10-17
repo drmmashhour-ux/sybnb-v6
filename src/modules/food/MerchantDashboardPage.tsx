@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { optimizePhoto } from '../../shared/lib/image-compress'
+import { createOrderAlarm, shouldRing, pendingOrderCount } from '../../shared/lib/order-alarm'
 import type { Lang } from '../../engines/language/languageEngine'
 import { pick } from '../../engines/language/languageEngine'
 import { HostAccountForm } from '../account/HostJoinPage'
@@ -240,6 +241,20 @@ export function MerchantDashboardPage({ lang }: Props) {
   // the page is visible, refresh the moment the tab is shown again or the network returns, and tell the
   // kitchen plainly when the connection is down so they do not assume "no new orders".
   const [ordersStale, setOrdersStale] = useState(false)
+  const alarm = useMemo(() => createOrderAlarm(), [])
+  const [alarmOn, setAlarmOn] = useState(false)
+  useEffect(() => { alarm.ring(shouldRing(alarmOn, orders)) }, [alarm, alarmOn, orders])
+  useEffect(() => {
+    if (!alarmOn) return undefined
+    const onVis = () => { if (!document.hidden) void alarm.reacquire() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [alarm, alarmOn])
+  useEffect(() => () => { void alarm.disable() }, [alarm])
+  async function toggleAlarm() {
+    if (alarmOn) { await alarm.disable(); setAlarmOn(false); return }
+    setAlarmOn(await alarm.enable())
+  }
   const selectedId = selected?.id
   useEffect(() => {
     if (!hasSession || !selectedId) return undefined
@@ -443,6 +458,20 @@ export function MerchantDashboardPage({ lang }: Props) {
             </div>
             {selected.acceptingOrders === false ? (
               <p style={styles.muted}>Busy mode is ON — new instant orders are refused; customers are offered scheduling or other restaurants.</p>
+            ) : null}
+            <button
+              type="button"
+              style={alarmOn ? styles.dangerBtnSm : styles.primaryBtnSm}
+              onClick={() => void toggleAlarm()}
+            >
+              {alarmOn
+                ? pick(lang, '🔔 الصوت مفعّل — اضغط للإيقاف', '🔔 Sound ON — tap to stop', '🔔 Son activé — appuyer pour arrêter')
+                : pick(lang, '🔕 ابدأ استقبال الطلبات (تفعيل الصوت)', '🔕 Start taking orders (turn sound on)', '🔕 Commencer à recevoir les commandes (activer le son)')}
+            </button>
+            {alarmOn && pendingOrderCount(orders) > 0 ? (
+              <p style={{ ...styles.muted, color: '#b42318', fontWeight: 700 }}>
+                {pick(lang, `🔔 ${pendingOrderCount(orders)} طلب بانتظار القبول`, `🔔 ${pendingOrderCount(orders)} order(s) waiting to be accepted`, `🔔 ${pendingOrderCount(orders)} commande(s) en attente`)}
+              </p>
             ) : null}
             <button type="button" style={styles.secondaryBtn} onClick={() => void selectMerchant(selected)}>{t.refresh}</button>
             {ordersStale ? (

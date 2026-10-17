@@ -1,3 +1,5 @@
+import { waiveRideCancellationFee } from '../lib/ride-fee-waiver.mjs'
+import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, executeManualRailRefund, finalizeCancellationLedgerEffects, markPayoutRequestPaid, recordWalletEntry, rejectPayoutRequest, reverseBookingPlatformShare, reverseRidePayment } from '../lib/finance-ledger.mjs'
@@ -1296,9 +1298,11 @@ export async function handleAdmin(req, res, url, context) {
     requireAuth(context, ['ADMIN', 'SUPPORT'])
     const statusParam = url.searchParams.get('status')
     const ACTIVE_STATUSES = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'DISPUTED']
-    const where = statusParam
-      ? { status: statusParam }
-      : { status: { in: ACTIVE_STATUSES } }
+    const where = statusParam === 'FEE_CONTEST'
+      ? { status: 'CANCELLED', metadata: { path: ['feeContest', 'status'], equals: 'OPEN' } }
+      : statusParam
+        ? { status: statusParam }
+        : { status: { in: ACTIVE_STATUSES } }
     const rows = await db().rideRequest.findMany({
       where,
       select: {
@@ -1315,9 +1319,74 @@ export async function handleAdmin(req, res, url, context) {
     const rides = rows.map((row) => {
       const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
       const { metadata: _omit, ...rest } = row
-      return { ...rest, matchConfirmed: Boolean(meta.pickupVerifiedAt), matchConfirmedAt: meta.pickupVerifiedAt || null }
+      return { ...rest, matchConfirmed: Boolean(meta.pickupVerifiedAt), matchConfirmedAt: meta.pickupVerifiedAt || null, feeContest: meta.feeContest || null, noShow: meta.noShow === true }
     })
     return json(res, 200, { ok: true, rides, count: rides.length })
+  }
+
+  // Resolve a rider's contest of a cancellation / no-show fee (2026-10-17): WAIVE removes the fee and
+  // makes every party whole (see server/lib/ride-fee-waiver.mjs); UPHOLD keeps it. Closing the
+  // contest is recorded on the ride and in the audit log, and the rider is told by push.
+  const feeContestMatch = url.pathname.match(/^\/api\/admin\/sr\/rides\/([^/]+)\/resolve-fee-contest$/)
+  if (feeContestMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['ADMIN'])
+    const body = await readJson(req)
+    const resolution = String(body.resolution || '').toUpperCase()
+    const fail = (statusCode, code, message) => {
+      const error = new Error(message)
+      error.statusCode = statusCode
+      error.code = code
+      error.expose = true
+      throw error
+    }
+    if (!['WAIVE', 'UPHOLD'].includes(resolution)) fail(400, 'FEE_CONTEST_RESOLUTION_INVALID', 'resolution must be WAIVE or UPHOLD.')
+    const reason = body.reason ? String(body.reason).slice(0, 500) : `Fee contest resolved (${resolution}).`
+    const existing = await db().rideRequest.findUnique({ where: { id: feeContestMatch[1] } })
+    if (!existing) fail(404, 'RIDE_NOT_FOUND', 'Ride not found.')
+    const meta = existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}
+    if (existing.status !== 'CANCELLED' || meta.feeContest?.status !== 'OPEN') fail(400, 'FEE_CONTEST_NOT_OPEN', 'There is no open fee contest on this ride.')
+    if (resolution === 'WAIVE' && meta.prepaid) {
+      authorizePaymentOperation({
+        operation: 'refund', rail: 'manual_proof', provider: 'manual', division: 'SR',
+        country: activePolicyCountryKey(), environment: policyEnvironment(), actor: { roles: context.roles },
+      })
+    }
+    const result = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, { action: 'ADMIN_RIDE_FEE_CONTEST_RESOLVED', requiredRoles: ['ADMIN'] })
+      let waiver = null
+      if (resolution === 'WAIVE') waiver = await waiveRideCancellationFee(tx, { ride: existing, reason })
+      const metadata = {
+        ...meta,
+        feeContest: {
+          ...meta.feeContest,
+          status: resolution === 'WAIVE' ? 'WAIVED' : 'UPHELD',
+          resolvedReason: reason,
+          resolvedByUserId: context.user.id,
+          resolvedAt: new Date().toISOString(),
+          originalFeeMinor: existing.cancellationFeeMinor,
+        },
+      }
+      await tx.rideRequest.update({ where: { id: existing.id }, data: { metadata } })
+      await tx.adminAuditLog.create({
+        data: {
+          actorUserId: context.user.id,
+          action: 'ADMIN_RIDE_FEE_CONTEST_RESOLVED',
+          entityType: 'ride_requests',
+          entityId: existing.id,
+          before: existing,
+          after: { resolution, waiver },
+        },
+      })
+      return { waiver }
+    })
+    const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
+    void sendPushNotification(ride.riderId, {
+      title: resolution === 'WAIVE' ? 'Your fee was waived' : 'Your fee was reviewed',
+      body: resolution === 'WAIVE' ? 'We reviewed your request and removed the cancellation fee.' : 'We reviewed your request and the fee stays. Contact support for more details.',
+      url: '/#/ride',
+    })
+    return json(res, 200, { ok: true, ride, resolution, waiver: result.waiver })
   }
 
   // 2026-10-09: reverse an approved ride payment (correction/refund). Rides have no HOLD/dispute

@@ -909,6 +909,42 @@ export async function handleSrRides(req, res, url, context) {
     return json(res, 200, { ok: true, ride })
   }
 
+  // Contest a cancellation / no-show fee (2026-10-17, Uber-style). The rider says the fee is unfair; an
+  // admin then waives or upholds it (PATCH /api/admin/sr/rides/:id/resolve-fee-contest). Contesting
+  // changes no money by itself.
+  const contestFeeMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/contest-fee$/)
+  if (contestFeeMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['GUEST'])
+    const body = await readJson(req)
+    const reason = body.reason ? String(body.reason).trim().slice(0, 1000) : ''
+    const fail = (statusCode, code, message) => {
+      const error = new Error(message)
+      error.statusCode = statusCode
+      error.code = code
+      error.expose = true
+      throw error
+    }
+    if (reason.length < 5) fail(400, 'FEE_CONTEST_REASON_REQUIRED', 'Please tell us briefly why the fee is not fair.')
+    const existing = await db().rideRequest.findUnique({ where: { id: contestFeeMatch[1] } })
+    if (!existing || existing.riderId !== context.user.id) fail(404, 'RIDE_NOT_FOUND', 'Ride not found for this account.')
+    if (existing.status !== 'CANCELLED' || !existing.cancellationFeeMinor) fail(400, 'RIDE_HAS_NO_FEE', 'This ride has no cancellation fee to contest.')
+    const meta = existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}
+    if (meta.feeContest) fail(409, 'FEE_ALREADY_CONTESTED', 'This fee was already contested.')
+    const metadata = { ...meta, feeContest: { status: 'OPEN', reason, openedAt: new Date().toISOString() } }
+    const updated = await db().rideRequest.updateMany({
+      where: { id: existing.id, status: 'CANCELLED', riderId: context.user.id },
+      data: { metadata },
+    })
+    if (updated.count !== 1) fail(409, 'RIDE_CHANGED', 'The ride changed. Reload and try again.')
+    const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
+    await db().adminAuditLog.create({
+      data: { actorUserId: context.user.id, action: 'SR_RIDE_FEE_CONTESTED', entityType: 'ride_requests', entityId: ride.id, before: existing, after: ride },
+    })
+    notifyAdmin('admin_ride_fee_contested', { rideId: ride.id, feeMinor: ride.cancellationFeeMinor, currency: ride.currency }, `admin_ride_fee_contested:${ride.id}`)
+    return json(res, 200, { ok: true, ride })
+  }
+
   // Ride dispute (2026-10-09): either party to a COMPLETED ride (the rider or the assigned driver)
   // may open a dispute, moving it to DISPUTED with a reason, so a contested fare/ride has a
   // structured hold an admin resolves (confirm, or reverse the payment) instead of ad-hoc handling.

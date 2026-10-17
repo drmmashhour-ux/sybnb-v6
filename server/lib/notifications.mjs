@@ -225,6 +225,11 @@ const TEMPLATES = {
     en: (d) => ({ subject: 'SYBNB admin: ride dispute opened', body: `The ${String(d.openedBy || '').toLowerCase()} opened a dispute on ride ${d.rideId}. Review it in the rides console.` }),
     fr: (d) => ({ subject: 'SYBNB admin : litige sur une course', body: `Le ${String(d.openedBy || '').toLowerCase() === 'driver' ? 'chauffeur' : 'passager'} a ouvert un litige sur la course ${d.rideId}. À examiner dans la console des courses.` }),
   },
+  admin_ride_fee_contested: {
+    ar: (d) => ({ subject: 'SYBNB: اعتراض على رسوم إلغاء', body: `اعترض الراكب على رسوم الإلغاء (${d.feeMinor} ${d.currency || ''}) في الرحلة ${d.rideId}. راجع الطلب في لوحة الرحلات واتخذ قرار الإلغاء أو التأييد.` }),
+    en: (d) => ({ subject: 'SYBNB admin: cancellation fee contested', body: `The rider contested the cancellation fee (${d.feeMinor} ${d.currency || ''}) on ride ${d.rideId}. Review it in the rides console and waive or uphold it.` }),
+    fr: (d) => ({ subject: 'SYBNB admin : frais d’annulation contestés', body: `Le passager conteste les frais d’annulation (${d.feeMinor} ${d.currency || ''}) de la course ${d.rideId}. À examiner dans la console des courses : annuler ou maintenir.` }),
+  },
   car_auction_settled: {
     ar: (d) => ({ subject: 'SYBNB: أُغلق مزاد سيارة بنجاح', body: `المزاد ${d.auctionId} (الإعلان ${d.listingId}) أُغلق بمزايدة فائزة قيمتها ${d.winningBidMinor}. ${d.depositCharged ? 'تم تحصيل العربون.' : 'لم يُحصَّل العربون بعد — راجعه.'}` }),
     en: (d) => ({ subject: 'SYBNB admin: car auction settled', body: `Auction ${d.auctionId} (listing ${d.listingId}) closed with a winning bid of ${d.winningBidMinor}. ${d.depositCharged ? 'Deposit charged.' : 'Deposit NOT charged yet — please review.'}` }),

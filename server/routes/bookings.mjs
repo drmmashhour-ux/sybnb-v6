@@ -1,3 +1,4 @@
+import { assertNotInPast, parseGuests } from '../lib/stay-rules.mjs'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import {
@@ -496,6 +497,7 @@ export async function handleBookings(req, res, url, context) {
   requireAuth(context, ['GUEST'])
   const body = await readJson(req)
   const { checkIn, checkOut } = parseStayDates(body.checkIn, body.checkOut)
+  assertNotInPast(checkIn)
 
   const listing = await db().listing.findFirst({
     where: {
@@ -539,6 +541,7 @@ export async function handleBookings(req, res, url, context) {
   }
 
   const isShortStay = listing.division === 'STAYS'
+  const guestCount = isShortStay ? parseGuests(body.guests, listing.metadata) : null
 
   // The overlap check and the create used to be two separate, unguarded round-trips: two guests
   // requesting the same listing/dates within a race window could both pass the check before
@@ -572,7 +575,7 @@ export async function handleBookings(req, res, url, context) {
         checkOut,
         amountMinor: quote.totalMinor,
         currency: listing.currency,
-        metadata: buildBookingMetadata(body, listing, quote.totalMinor),
+        metadata: { ...buildBookingMetadata(body, listing, quote.totalMinor), ...(guestCount ? { guests: guestCount } : {}) },
       },
     })
   })

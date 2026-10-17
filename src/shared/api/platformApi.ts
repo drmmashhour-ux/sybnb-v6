@@ -2975,6 +2975,7 @@ export async function createPrototypeBooking(input: {
   currency: string
   checkIn?: string
   checkOut?: string
+  guests?: number
   cancellationProtectionPurchased?: boolean
   cancellationProtection?: boolean
   cancellationProtectionFeeMinor?: number

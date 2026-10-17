@@ -195,6 +195,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
           currency: listing.currency,
           checkIn: dateRange.checkIn,
           checkOut: dateRange.checkOut,
+          guests,
           cancellationProtectionPurchased: protection,
           cancellationProtectionFeeMinor: protection ? quote.protectionMinor : undefined,
           acceptedTerms: true,

@@ -17,10 +17,12 @@
 //   ACCEPTED → PREPARING → READY_FOR_PICKUP (merchant)
 //   READY_FOR_PICKUP → PICKED_UP → DELIVERED (the assigned courier)
 import { db } from '../lib/prisma.mjs'
+import { Prisma } from '@prisma/client'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { defaultCurrency } from '../lib/country.mjs'
 import { notifyAdmin } from '../lib/notifications.mjs'
+import { validateOpeningHours, isOpenNow } from '../lib/merchant-hours.mjs'
 import { saveFoodPhoto, deleteFoodPhoto, signFoodPhotoUrl } from '../lib/food-photo-storage.mjs'
 import { checkPhotoStandards } from '../lib/photo-standards.mjs'
 import { getDriverLocation, etaMinutesBetween } from '../lib/live-map.mjs'
@@ -108,8 +110,26 @@ function publicMerchant(m, opts = {}) {
     lat: m.lat ?? null, lng: m.lng ?? null,
     acceptingOrders: m.acceptingOrders !== false,
     defaultPrepMinutes: m.defaultPrepMinutes ?? null,
+    // Opening hours + minimum order + average rating (072). openNow is computed server-side so every
+    // client agrees; a store with no hours is always open.
+    openingHours: m.openingHours ?? null,
+    openNow: isOpenNow(m.openingHours ?? null),
+    minOrderMinor: m.minOrderMinor ?? null,
+    rating: opts.rating ?? { average: null, count: 0 },
     ...photoFields(m, opts),
   }
+}
+
+// Average star rating per merchant, in one grouped query.
+async function ratingsFor(merchantIds) {
+  if (!merchantIds.length) return new Map()
+  const rows = await db().foodOrder.groupBy({
+    by: ['merchantId'],
+    where: { merchantId: { in: merchantIds }, ratingStars: { not: null } },
+    _avg: { ratingStars: true },
+    _count: { ratingStars: true },
+  })
+  return new Map(rows.map((r) => [r.merchantId, { average: Math.round((r._avg.ratingStars || 0) * 10) / 10, count: r._count.ratingStars }]))
 }
 
 const MAX_SCHEDULE_AHEAD_MS = 7 * 24 * 3600 * 1000
@@ -187,7 +207,8 @@ export async function handleFood(req, res, url, context) {
         orderBy: { createdAt: 'desc' },
         take: 100,
       })
-      return json(res, 200, { ok: true, merchants: merchants.map((m) => publicMerchant(m)) })
+      const ratings = await ratingsFor(merchants.map((m) => m.id))
+      return json(res, 200, { ok: true, merchants: merchants.map((m) => publicMerchant(m, { rating: ratings.get(m.id) })) })
     }
     return methodNotAllowed(res, ['GET', 'POST'])
   }
@@ -196,7 +217,8 @@ export async function handleFood(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
     const merchants = await db().merchant.findMany({ where: { ownerId: context.user.id }, orderBy: { createdAt: 'desc' } })
-    return json(res, 200, { ok: true, merchants: merchants.map((m) => publicMerchant(m, { owner: true })) })
+    const ratings = await ratingsFor(merchants.map((m) => m.id))
+    return json(res, 200, { ok: true, merchants: merchants.map((m) => publicMerchant(m, { owner: true, rating: ratings.get(m.id) })) })
   }
 
   // ---- Order experience: merchant self-serve settings (owner) -----------------------------------
@@ -219,6 +241,21 @@ export async function handleFood(req, res, url, context) {
           throw httpError(400, 'MERCHANT_PREP_INVALID', `defaultPrepMinutes must be ${MIN_PREP_MINUTES}..${MAX_PREP_MINUTES}.`)
         }
         data.defaultPrepMinutes = minutes
+      }
+    }
+    if (body.openingHours !== undefined) {
+      const hours = validateOpeningHours(body.openingHours)
+      // Json? columns need an explicit DB NULL to clear (plain null is rejected by Prisma).
+      data.openingHours = hours === null ? Prisma.DbNull : hours
+    }
+    if (body.minOrderMinor !== undefined) {
+      if (body.minOrderMinor === null || body.minOrderMinor === '') data.minOrderMinor = null
+      else {
+        const minOrder = Number(body.minOrderMinor)
+        if (!Number.isInteger(minOrder) || minOrder < 0 || minOrder > 100_000_000) {
+          throw httpError(400, 'MERCHANT_MIN_ORDER_INVALID', 'minOrderMinor must be a whole amount of zero or more.')
+        }
+        data.minOrderMinor = minOrder || null
       }
     }
     if (body.lat !== undefined || body.lng !== undefined) {
@@ -529,6 +566,12 @@ export async function handleFood(req, res, url, context) {
         throw httpError(409, 'MERCHANT_BUSY', 'This restaurant has paused new orders. Choose another restaurant or schedule for later.')
       }
 
+      // Opening hours: a closed store refuses NEW immediate orders (scheduling for later stays allowed,
+      // like the busy switch). The customer is told the real hours so they can choose.
+      if (!scheduledFor && !isOpenNow(merchant.openingHours ?? null)) {
+        throw httpError(409, 'MERCHANT_CLOSED', 'This restaurant is closed right now. Check its opening hours or schedule for later.')
+      }
+
       // Server-side pricing from the merchant's OWN menu rows: quantity validated per line, item
       // must belong to this merchant and be available. Client prices are never read.
       const wanted = lines.map((line) => ({ menuItemId: String(line.menuItemId || ''), quantity: Number(line.quantity) }))
@@ -557,6 +600,11 @@ export async function handleFood(req, res, url, context) {
           const item = byId.get(line.menuItemId)
           return { menuItemId: item.id, basePriceMinor: item.priceMinor, promoPriceMinor: item.promoPriceMinor }
         })
+      if (merchant.minOrderMinor && subtotalMinor < merchant.minOrderMinor) {
+        const error = httpError(400, 'ORDER_BELOW_MINIMUM', `The minimum order for this restaurant is ${merchant.minOrderMinor}.`)
+        error.details = { minOrderMinor: merchant.minOrderMinor, subtotalMinor }
+        throw error
+      }
       const serviceFeeMinor = Math.round((subtotalMinor * SERVICE_FEE_PERCENT) / 100)
       // Explicit money rule (068): a PICKUP order charges no delivery fee.
       const deliveryFeeMinor = fulfillment === 'pickup' ? 0 : DELIVERY_FEE_MINOR
@@ -620,6 +668,26 @@ export async function handleFood(req, res, url, context) {
   // Not a status change: the promise (etaAt) moves and delayedCount increments, which reopens the
   // customer's cancel right (see the status route). The client tells the customer and offers the
   // real choices: wait, cancel, or order elsewhere.
+  // Customer rating of a delivered order (2026-10-17): 1..5 stars + optional comment, once per order.
+  const ratingMatch = url.pathname.match(/^\/api\/food\/orders\/([^/]+)\/rating$/)
+  if (ratingMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+    const body = await readJson(req)
+    const stars = Number(body.stars)
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) throw httpError(400, 'RATING_INVALID', 'stars must be a whole number from 1 to 5.')
+    const comment = trimmed(body.comment, 500)
+    const order = await db().foodOrder.findUnique({ where: { id: ratingMatch[1] } })
+    if (!order || order.customerId !== context.user.id) throw httpError(404, 'ORDER_NOT_FOUND', 'Order not found for this account.')
+    if (order.status !== 'DELIVERED') throw httpError(409, 'ORDER_NOT_DELIVERED', 'You can rate an order after it is delivered.')
+    const updated = await db().foodOrder.updateMany({
+      where: { id: order.id, customerId: context.user.id, status: 'DELIVERED', ratingStars: null },
+      data: { ratingStars: stars, ratingComment: comment || null, ratedAt: new Date() },
+    })
+    if (updated.count !== 1) throw httpError(409, 'ORDER_ALREADY_RATED', 'This order was already rated.')
+    return json(res, 200, { ok: true, ratingStars: stars })
+  }
+
   const delayMatch = url.pathname.match(/^\/api\/food\/orders\/([^/]+)\/delay$/)
   if (delayMatch) {
     if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])

@@ -305,6 +305,9 @@ model Merchant {
   lng                Float?
   acceptingOrders    Boolean @default(true) @map("accepting_orders")
   defaultPrepMinutes Int?    @map("default_prep_minutes")
+  // Opening hours + minimum order (072). openingHours null = always open (busy switch still applies).
+  openingHours       Json?   @map("opening_hours")
+  minOrderMinor      Int?    @map("min_order_minor")
   // Menu Studio (067): moderated cover photo. photoMeta holds the standards-check evidence
   // (dimensions, byte size, editor-signature heuristics) shown to the reviewing admin.
   photoRef         String?          @map("photo_ref")
@@ -391,6 +394,10 @@ model FoodOrder {
   readyAt          DateTime?       @map("ready_at")
   pickedUpAt       DateTime?       @map("picked_up_at")
   deliveredAt      DateTime?       @map("delivered_at")
+  // Customer rating of a delivered order (072): 1..5 stars, once.
+  ratingStars      Int?            @map("rating_stars")
+  ratingComment    String?         @map("rating_comment")
+  ratedAt          DateTime?       @map("rated_at")
   cancelledAt      DateTime?       @map("cancelled_at")
   createdAt        DateTime        @default(now()) @map("created_at")
   updatedAt        DateTime        @updatedAt @map("updated_at")
@@ -405,6 +412,7 @@ model FoodOrder {
   @@index([customerId])
   @@index([courierId])
   @@index([status])
+  @@index([merchantId, ratingStars])
   @@map("food_orders")
 }
 

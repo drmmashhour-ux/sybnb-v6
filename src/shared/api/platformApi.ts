@@ -2719,6 +2719,37 @@ export type PlatformRideTrail = {
   incidents: PlatformIncident[]
 }
 
+export type PlatformListingReport = {
+  id: string
+  listingId: string
+  reporterId: string
+  reason: ListingReportReason
+  note: string | null
+  status: 'OPEN' | 'RESOLVED' | 'DISMISSED'
+  createdAt: string
+  resolvedAt: string | null
+  resolutionNote: string | null
+  listing: { id: string; titleEn: string | null; titleAr: string | null; division: string; status: string } | null
+}
+
+export async function fetchAdminListingReports(status: 'OPEN' | 'RESOLVED' | 'DISMISSED' = 'OPEN') {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; reports: PlatformListingReport[]; count: number }>(`/api/admin/listing-reports?status=${status}`, { token }),
+  )
+  return response.reports
+}
+
+export async function decideAdminListingReport(reportId: string, input: { status: 'RESOLVED' | 'DISMISSED'; note?: string }) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; report: PlatformListingReport }>(`/api/admin/listing-reports/${reportId}`, {
+      method: 'PATCH',
+      token,
+      body: input,
+    }),
+  )
+  return response.report
+}
+
 export async function fetchAdminIncidents(status?: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED') {
   const query = status ? `?status=${encodeURIComponent(status)}` : ''
   const response = await runAdminRequest((token) =>

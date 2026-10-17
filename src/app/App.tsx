@@ -56,6 +56,7 @@ const SharedRidePage = lazyNamed(() => import('../modules/sr/SharedRidePage'), '
 const AdminPromoCodesPage = lazyNamed(() => import('../modules/sr/AdminPromoCodesPage'), 'AdminPromoCodesPage')
 const AdminBusinessAccountsPage = lazyNamed(() => import('../modules/sr/AdminBusinessAccountsPage'), 'AdminBusinessAccountsPage')
 const AdminIncidentsPage = lazyNamed(() => import('../modules/admin/AdminIncidentsPage'), 'AdminIncidentsPage')
+const AdminListingReportsPage = lazyNamed(() => import('../modules/admin/AdminListingReportsPage'), 'AdminListingReportsPage')
 const AdminVehiclesPage = lazyNamed(() => import('../modules/admin/AdminVehiclesPage'), 'AdminVehiclesPage')
 const AdminLiveRidesPage = lazyNamed(() => import('../modules/admin/AdminLiveRidesPage'), 'AdminLiveRidesPage')
 const AdminFoodPage = lazyNamed(() => import('../modules/admin/AdminFoodPage'), 'AdminFoodPage')
@@ -263,6 +264,8 @@ export function App() {
           <AdminBusinessAccountsPage lang={lang} />
         ) : path === '/admin/sr/incidents' ? (
           <AdminIncidentsPage lang={lang} />
+        ) : path === '/admin/listing-reports' ? (
+          <AdminListingReportsPage lang={lang} />
         ) : path === '/admin/vehicles' ? (
           <AdminVehiclesPage lang={lang} />
         ) : path === '/admin/food' ? (

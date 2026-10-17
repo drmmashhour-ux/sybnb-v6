@@ -656,6 +656,14 @@ function getRouteContext(path: string, lang: Lang) {
       nextPath: '/finance',
     }
   }
+  if (path === '/admin/listing-reports') {
+    return {
+      section: pick(lang, 'الإدارة', 'Admin', 'Administration'),
+      page: pick(lang, 'بلاغات الإعلانات', 'Listing reports', 'Signalements d’annonces'),
+      backPath: '/admin/review',
+      nextPath: '',
+    }
+  }
   if (path === '/admin/sr/incidents') {
     return {
       section: pick(lang, 'الإدارة', 'Admin', 'Administration'),

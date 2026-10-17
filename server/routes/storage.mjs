@@ -1,5 +1,34 @@
 import { getObjectBytes, verifySignedObject, contentTypeForKey } from '../lib/storage.mjs'
 import { methodNotAllowed } from '../lib/responses.mjs'
+import { db } from '../lib/prisma.mjs'
+import { createHash } from 'node:crypto'
+
+// Security audit trail for forged/expired signed links. Only attempts that CARRY a signature are
+// logged (an unsigned probe is noise), and writes are capped per minute so an anonymous attacker
+// cannot turn this into a database-flooding vector.
+let auditWindowStart = 0
+let auditWindowCount = 0
+const AUDIT_MAX_PER_MINUTE = 30
+async function auditInvalidSignature(req, bucket, key, exp) {
+  try {
+    const now = Date.now()
+    if (now - auditWindowStart > 60_000) { auditWindowStart = now; auditWindowCount = 0 }
+    if (auditWindowCount >= AUDIT_MAX_PER_MINUTE) return
+    auditWindowCount += 1
+    const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim()
+    await db().adminAuditLog.create({
+      data: {
+        action: 'STORAGE_SIGNATURE_INVALID',
+        entityType: 'storage_object',
+        entityId: `${bucket}/${key}`.slice(0, 200),
+        after: { exp: exp ? String(exp).slice(0, 20) : null },
+        ipHash: ip ? createHash('sha256').update(ip).digest('hex').slice(0, 32) : null,
+      },
+    })
+  } catch {
+    // Auditing must never turn a refusal into a 500.
+  }
+}
 
 // Signed, time-limited retrieval for private objects. The signature (minted only by the server via
 // signObjectUrl) is the capability — an unsigned or expired request is rejected. Keys are validated
@@ -14,6 +43,7 @@ export async function handleStorage(req, res, url, _context) {
   const sig = url.searchParams.get('sig')
 
   if (!verifySignedObject(bucket, key, exp, sig)) {
+    if (sig) void auditInvalidSignature(req, bucket, key, exp)
     res.writeHead(403, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ ok: false, error: { code: 'STORAGE_SIGNATURE_INVALID', message: 'This link is invalid or has expired.' } }))
     return true

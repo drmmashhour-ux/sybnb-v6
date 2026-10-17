@@ -84,6 +84,22 @@ export function translateDbError(error) {
     error.code = 'INVALID_ID'
     error.expose = true
     error.message = 'An id in the request is not valid.'
+  } else if (
+    error.code === 'P2020'
+    || error.meta?.code === '22003'
+    || /out of range for (the )?type|numeric value out of range|integer out of range/i.test(text)
+  ) {
+    // A number too big for the 32-bit integer columns (prices, amounts): the caller's mistake.
+    error.statusCode = 400
+    error.code = 'NUMBER_OUT_OF_RANGE'
+    error.expose = true
+    error.message = 'A number in the request is too large.'
+  } else if (error.name === 'PrismaClientValidationError' && /Expected Int|provided Float|Int\b.*Float|Invalid value provided/i.test(text)) {
+    // e.g. 10.5 sent for a whole-number (minor unit) field.
+    error.statusCode = 400
+    error.code = 'NUMBER_NOT_WHOLE'
+    error.expose = true
+    error.message = 'A number in the request must be a whole number.'
   }
   return error
 }

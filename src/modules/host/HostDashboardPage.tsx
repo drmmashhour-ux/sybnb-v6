@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { priceFreshness } from '../../shared/listing/priceFreshness'
+import { PriceFreshnessTag } from '../../shared/listing/PriceFreshnessTag'
+import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties, ReactNode } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
@@ -10,6 +13,7 @@ import {
   markHostGuestCheckpoint,
   submitHostIdDocument,
   updatePrototypeHostInstantBook,
+  confirmListingPrice,
   updatePrototypeHostListingStatus,
   type HostDashboardMode,
   type PlatformHostEarnings,
@@ -579,6 +583,22 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     }
   }
 
+  async function reverifyPrice(listingId: string) {
+    setStatus('saving')
+    setActiveListingId(listingId)
+    setMessage('')
+    try {
+      await confirmListingPrice(listingId, mode)
+      setOverview(await fetchPrototypeHostOverview(mode))
+      setStatus('ready')
+    } catch (error) {
+      setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setActiveListingId('')
+    }
+  }
+
   async function toggleInstantBook(listingId: string, enabled: boolean) {
     setStatus('saving')
     setActiveListingId(listingId)
@@ -781,6 +801,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
           onAddFiles={addHostDocumentFiles}
           title={hostDocumentsCopy.title}
         />
+        <IdPrivacyBadge lang={lang} />
         {hostDocumentUploadError && <p style={styles.errorText}>{hostDocumentUploadError}</p>}
         <button
           disabled={!hostDocumentPendingFile || hostDocumentUploadStatus === 'uploading' || isDocumentVerified || isDocumentPendingReview}
@@ -822,6 +843,16 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
               <Info label={t.division} value={divisionText(listing.division, lang)} dir={isAr ? 'rtl' : 'ltr'} />
               <Info label={t.status} value={statusText(listing.status, lang)} dir={isAr ? 'rtl' : 'ltr'} />
               <Info label={t.price} value={moneyText(listing.priceMinor, listing.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} />
+              <PriceFreshnessTag listing={listing} lang={lang} />
+              {priceFreshness(listing).applies && (
+                <button
+                  style={priceFreshness(listing).stale ? styles.primaryButton : styles.secondaryButton}
+                  disabled={status === 'saving'}
+                  onClick={() => void reverifyPrice(listing.id)}
+                >
+                  {pick(lang, 'تأكيد السعر الحالي', 'Re-verify price', 'Reconfirmer le prix')}
+                </button>
+              )}
               {listing.expiresAt && (
                 <Info
                   label={t.expiresOn}

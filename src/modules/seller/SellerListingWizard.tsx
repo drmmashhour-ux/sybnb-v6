@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { GridSpecFields } from './GridSpecFields'
+import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
@@ -616,6 +618,9 @@ export function SellerListingWizard({ lang }: Props) {
                   }}
                 />
               )}
+              {!isAdvertisingFlow && division === 'STAYS' && (
+                <GridSpecFields lang={lang} selection={visualFilters} onChange={setVisualFilters} />
+              )}
               <label className="seller-wide-field">
                 <span>{isAdvertisingFlow ? (pick(lang, 'اسم الحملة الإعلانية', 'Campaign name', 'Nom de la campagne')) : pick(lang, 'عنوان الإعلان', 'Listing title', 'Titre de l’annonce')}</span>
                 <input
@@ -1054,6 +1059,7 @@ function IdDocumentCard({
           )}
         </p>
       </div>
+      <IdPrivacyBadge lang={lang} />
       <p data-testid="wizard-id-status" style={{ color: tone.color, fontWeight: 700, margin: '8px 0' }}>
         {statusText}
         {fileName && (status === 'PENDING_REVIEW' || status === 'APPROVED') ? ` · ${fileName}` : ''}

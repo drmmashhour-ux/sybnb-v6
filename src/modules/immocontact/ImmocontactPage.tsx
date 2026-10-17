@@ -41,6 +41,8 @@ type Thread = {
   type: 'booking' | 'payment' | 'ride' | 'gift' | 'inquiry'
   listingId?: string
   priority: 'urgent' | 'waiting' | 'new' | 'closed'
+  // Context-aware inbox: keeps travel/property logistics apart from vehicle & marketplace deals.
+  group: 'stays' | 'wheels' | 'other'
 }
 
 const copy = {
@@ -205,6 +207,7 @@ export function ImmocontactPage({ lang }: Props) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [message, setMessage] = useState('')
   const [activeType, setActiveType] = useState<Thread['type'] | 'all'>('all')
+  const [activeGroup, setActiveGroup] = useState<Thread['group'] | 'all'>('all')
   const [activeThreadId, setActiveThreadId] = useState('')
   const [threadMessages, setThreadMessages] = useState<PlatformMessage[]>([])
   const [messagesStatus, setMessagesStatus] = useState<'idle' | 'loading' | 'locked' | 'error'>('idle')
@@ -265,15 +268,24 @@ export function ImmocontactPage({ lang }: Props) {
     () => [...bookingThreads, ...paymentThreads, ...rideThreads, ...giftThreads, ...inquiryThreads],
     [bookingThreads, giftThreads, paymentThreads, rideThreads, inquiryThreads],
   )
-  const visibleThreads = activeType === 'all' ? allThreads : allThreads.filter((thread) => thread.type === activeType)
+  const groupThreads = activeGroup === 'all' ? allThreads : allThreads.filter((thread) => thread.group === activeGroup)
+  const visibleThreads = activeType === 'all' ? groupThreads : groupThreads.filter((thread) => thread.type === activeType)
+  const groupItems: Array<{ id: Thread['group'] | 'all'; label: string; count: number }> = [
+    { id: 'all', label: t.all, count: allThreads.length },
+    { id: 'stays', label: pick(lang, '🏠 الإقامات والعقارات', '🏠 Stays & Property', '🏠 Séjours et immobilier'), count: allThreads.filter((x) => x.group === 'stays').length },
+    { id: 'wheels', label: pick(lang, '🚗 السيارات والسوق', '🚗 Wheels & Market', '🚗 Auto et marché'), count: allThreads.filter((x) => x.group === 'wheels').length },
+    ...(allThreads.some((x) => x.group === 'other')
+      ? [{ id: 'other' as const, label: pick(lang, 'المحفظة والهدايا', 'Wallet & gifts', 'Portefeuille et cadeaux'), count: allThreads.filter((x) => x.group === 'other').length }]
+      : []),
+  ]
   const activeThread = visibleThreads.find((thread) => thread.id === activeThreadId) || visibleThreads[0]
   const filterItems: Array<{ id: Thread['type'] | 'all'; label: string; count: number }> = [
-    { id: 'all', label: t.all, count: allThreads.length },
-    { id: 'booking', label: t.bookings, count: bookingThreads.length },
-    { id: 'payment', label: t.payments, count: paymentThreads.length },
-    { id: 'ride', label: t.rides, count: rideThreads.length },
-    { id: 'gift', label: t.gifts, count: giftThreads.length },
-    { id: 'inquiry', label: t.inquiries, count: inquiryThreads.length },
+    { id: 'all', label: t.all, count: groupThreads.length },
+    { id: 'booking', label: t.bookings, count: groupThreads.filter((x) => x.type === 'booking').length },
+    { id: 'payment', label: t.payments, count: groupThreads.filter((x) => x.type === 'payment').length },
+    { id: 'ride', label: t.rides, count: groupThreads.filter((x) => x.type === 'ride').length },
+    { id: 'gift', label: t.gifts, count: groupThreads.filter((x) => x.type === 'gift').length },
+    { id: 'inquiry', label: t.inquiries, count: groupThreads.filter((x) => x.type === 'inquiry').length },
   ]
 
   async function loadOverview() {
@@ -417,6 +429,23 @@ export function ImmocontactPage({ lang }: Props) {
           <div className="immo-section-head">
             <span>{t.unified}</span>
             <strong>{visibleThreads.length}</strong>
+          </div>
+          <div className="immo-filter-row" role="tablist" aria-label="inbox-groups">
+            {groupItems.map((item) => (
+              <button
+                role="tab"
+                aria-selected={activeGroup === item.id}
+                className={activeGroup === item.id ? 'active' : ''}
+                key={`g-${item.id}`}
+                onClick={() => {
+                  setActiveGroup(item.id)
+                  setActiveType('all')
+                  setActiveThreadId('')
+                }}
+              >
+                {item.label} <b>{item.count}</b>
+              </button>
+            ))}
           </div>
           <div className="immo-filter-row">
             {filterItems.map((item) => (
@@ -619,6 +648,11 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
+// STAYS / RENTALS / BUY / NEW_CONSTRUCTION -> 🏠 Stays & Property; CARS / MARKETPLACE -> 🚗 Wheels & Market.
+function groupForDivision(division?: string | null): Thread['group'] {
+  return division === 'CARS' || division === 'MARKETPLACE' ? 'wheels' : 'stays'
+}
+
 function bookingThread(booking: PlatformBooking & { listing?: StaffBookingListing }, lang: Lang): Thread {
   const listing = booking.listing
   const title = listing ? listingTitleText(listing, lang) : booking.id
@@ -630,6 +664,7 @@ function bookingThread(booking: PlatformBooking & { listing?: StaffBookingListin
     rawStatus: booking.status,
     href: `/booking/${booking.id}`,
     type: 'booking',
+    group: groupForDivision(booking.listing && (booking.listing as { division?: string }).division),
     priority: booking.status === 'DISPUTED' ? 'urgent' : booking.status === 'REQUESTED' ? 'new' : 'waiting',
   }
 }
@@ -642,6 +677,7 @@ function paymentThread(payment: PlatformPaymentProof, lang: Lang): Thread {
     status: statusText(payment.status, lang),
     href: `/payment/receipt/${payment.id}`,
     type: 'payment',
+    group: payment.rideId ? 'wheels' : 'stays',
     priority: payment.status === 'PENDING_ADMIN_REVIEW' ? 'urgent' : payment.status === 'APPROVED' ? 'closed' : 'waiting',
   }
 }
@@ -654,6 +690,7 @@ function rideThread(ride: PlatformRideRequest, lang: Lang): Thread {
     status: statusText(ride.status, lang),
     href: '/ride',
     type: 'ride',
+    group: 'wheels',
     priority: ride.status === 'REQUESTED' ? 'new' : ride.status === 'COMPLETED' ? 'closed' : 'waiting',
   }
 }
@@ -669,6 +706,7 @@ function inquiryThread(thread: PlatformMyInquiryThread, lang: Lang): Thread {
     status: lastMessage ? (lastMessage.senderRole === 'GUEST' ? (pick(lang, 'بانتظار الرد', 'Awaiting reply', 'En attente de réponse')) : (pick(lang, 'تم الرد', 'Replied', 'Répondu'))) : (pick(lang, 'جديد', 'New', 'Nouveau')),
     href: listing ? `/listing/${listing.id}` : '/',
     type: 'inquiry',
+    group: groupForDivision(listing?.division),
     priority: lastMessage?.senderRole === 'GUEST' ? 'waiting' : 'new',
   }
 }
@@ -681,6 +719,7 @@ function giftThread(gift: Record<string, unknown>, direction: 'sent' | 'claimed'
     status: statusText(String(gift.status || '-'), lang),
     href: '/wallet',
     type: 'gift',
+    group: 'other',
     priority: String(gift.status || '').includes('PENDING') ? 'waiting' : 'closed',
   }
 }

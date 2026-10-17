@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { GRID_SPECS, gridSpecLabel } from '../../shared/listing/gridSpec'
 import type { CSSProperties } from 'react'
 import { pick, text, type Lang } from '../../engines/language/languageEngine'
 import {
@@ -137,6 +138,12 @@ export function listingSpecRows(division: string, metadata: Record<string, unkno
     const size = firstValue(md.sizeSqm, md.areaSqm, md.surfaceSqm, md.area_m2, md.sqm)
     add('size', pick(lang, 'المساحة', 'Area', 'Superficie'), size ? `${numberText(size, lang)} ${pick(lang, 'م²', 'm²', 'm²')}` : '')
     add('furnished', pick(lang, 'مفروش', 'Furnished', 'Meublé'), furnishedValue(md, vf, lang))
+    if (division === 'STAYS') {
+      for (const spec of GRID_SPECS) {
+        const value = firstValue(vf[spec.key], md[spec.key])
+        add(spec.key, `${spec.icon} ${pick(lang, ...spec.title)}`, value ? gridSpecLabel(spec, value, lang) : '')
+      }
+    }
     if (division === 'NEW_CONSTRUCTION') {
       add('phase', pick(lang, 'مرحلة المشروع', 'Project phase', 'Phase du projet'), firstValue(md.projectPhase))
     }

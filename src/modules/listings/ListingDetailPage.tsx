@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { PriceFreshnessTag } from '../../shared/listing/PriceFreshnessTag'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { ReportListingButton } from './ReportListingButton'
@@ -834,6 +835,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                   <FavouriteButton active={isFav} busy={favBusy} onToggle={toggleFavourite} lang={lang} variant="inline" />
                 </span>
               </div>
+              <PriceFreshnessTag listing={listing} lang={lang} />
               {(isStays || feesStandard.totalMinor !== listing.priceMinor) && !(isDemoListing && !isStays) && (
                 <small style={styles.priceSub}>
                   {quoteLoading

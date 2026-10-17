@@ -544,7 +544,8 @@ export async function handleListings(req, res, url, context) {
           currency,
           instantBookEnabled: Boolean(body.instantBookEnabled),
           expiresAt,
-          metadata: listingMetadata,
+          // priceConfirmedAt is server-controlled: set now, never taken from the client.
+          metadata: { ...listingMetadata, priceConfirmedAt: new Date().toISOString() },
         },
       })
 

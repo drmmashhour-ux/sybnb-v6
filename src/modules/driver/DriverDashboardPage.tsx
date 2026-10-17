@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
@@ -982,6 +983,7 @@ export function DriverDashboardPage({ lang }: Props) {
                 />
                 {idFile ? idFile.name : t.uploadId}
               </label>
+              <IdPrivacyBadge lang={lang} />
               {idStatus === 'submitted' && <p style={styles.photoNote}>✓ {t.idSubmitted}</p>}
               {idStatus === 'error' && <p style={styles.photoNote}>{idError || t.photoError}</p>}
               <button

@@ -4478,3 +4478,14 @@ export async function fetchSplitStay(city: string, checkIn: string, checkOut: st
   const query = new URLSearchParams({ city, checkIn, checkOut })
   return apiRequest<{ ok: true } & SplitStayResult>(`/api/split-stay?${query.toString()}`)
 }
+
+// Owner re-verifies the price of a volatile-price listing (property, cars). Does not send the
+// listing back to review.
+export async function confirmListingPrice(listingId: string, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(
+    `/api/host/listings/${listingId}/confirm-price`,
+    { method: 'POST', token: session.token },
+  )
+  return response.listing
+}

@@ -690,6 +690,9 @@ export async function handleHost(req, res, url, context) {
         // keys already on the listing (visualFilters, bedrooms/bathrooms, uploaded document/ad file
         // references, etc.) that this specific edit never intended to touch.
         data.metadata = { ...(existing.metadata || {}), ...(body.metadata || {}) }
+        // priceConfirmedAt is server-controlled (price-confirm route / price change below); a client
+        // patch can never set or back-date it.
+        data.metadata.priceConfirmedAt = existing.metadata?.priceConfirmedAt
         // Keep the Location relation in sync if the edit changes governorate/area — otherwise city
         // browse silently goes stale after an edit (M2).
         const govSource = data.metadata?.governorate
@@ -713,6 +716,10 @@ export async function handleHost(req, res, url, context) {
           throw error
         }
         data.priceMinor = priceMinor
+        // Changing the price is itself a fresh confirmation by the owner.
+        if (priceMinor !== existing.priceMinor) {
+          data.metadata = { ...(data.metadata || existing.metadata || {}), priceConfirmedAt: new Date().toISOString() }
+        }
       }
       // A content edit to a live/approved listing sends it back through admin review.
       if (Object.keys(data).length && ['APPROVED', 'REJECTED', 'EXPIRED'].includes(existing.status)) {

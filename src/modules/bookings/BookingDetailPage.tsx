@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
@@ -432,6 +433,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
             cta={t.idGateUpload}
             emptyText={t.idGateEmpty}
           />
+          <IdPrivacyBadge lang={lang} />
           {idSaveState === 'error' && <small style={{ color: '#ff9aac' }}>{t.idGateError}</small>}
           <button style={styles.primaryButton} disabled={!idFile || idSaveState === 'saving'} onClick={() => void saveIdDocument()}>
             {idSaveState === 'saving' ? t.saving : t.idGateSubmit}

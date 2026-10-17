@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import type { Lang } from '../../engines/language/languageEngine'
 import { disputePrototypeBooking, fetchPrototypeBooking, submitGuestIdDocument, type PlatformBooking, type PlatformListing } from '../../shared/api/platformApi'
 import { listingTitleText } from '../../shared/i18n/display'
@@ -83,6 +84,7 @@ function TrustVerification({ lang }: { lang: Lang }) {
         />
         ▣<span>{file ? file.name : (isAr ? 'ارفع صورة الهوية الوطنية' : 'Upload your national ID photo')}</span>
       </label>
+      <IdPrivacyBadge lang={lang} />
       <p className="trust-note">ⓘ {isAr ? 'بياناتك مشفرة بالكامل ولن يتم مشاركتها مع أي طرف ثالث.' : 'Your data is encrypted and will not be shared with third parties.'}</p>
       {status === 'submitted' && (
         <p className="trust-note">✓ {isAr ? 'تم إرسال طلب التوثيق للمراجعة. ستظهر حالة الطلب في حسابك بعد مراجعة الإدارة.' : 'Verification was submitted for review. The status will appear on your account once admin reviews it.'}</p>

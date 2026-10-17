@@ -59,6 +59,7 @@
     "test:e2e:concurrent-booking": "node tests/e2e/concurrent-booking.e2e.mjs",
     "test:e2e:split-stay": "node tests/e2e/split-stay.e2e.mjs",
     "test:e2e:booking-no-overlap-db": "node tests/e2e/booking-no-overlap-db.e2e.mjs",
+    "test:e2e:audit-log-append-only": "node tests/e2e/audit-log-append-only.e2e.mjs",
     "test:e2e:price-confirm": "node tests/e2e/price-confirm.e2e.mjs",
     "test:e2e:project-units": "node tests/e2e/project-units.e2e.mjs",
     "test:e2e:auction-anti-snipe": "node tests/e2e/auction-anti-snipe.e2e.mjs",

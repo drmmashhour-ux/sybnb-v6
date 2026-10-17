@@ -23,9 +23,23 @@ export function arrivalRadiusMeters(env = process.env) {
   return envNumber('RIDE_ARRIVAL_RADIUS_METERS', 300, 50, 2000, env)
 }
 
+// Smallest cancellation / no-show fee that is ever charged (owner decision 2026-10-17: $1). Fares are
+// whole-dollar amounts, so 1 minor unit = $1. Never more than the fare itself.
+export function minCancellationFeeMinor(env = process.env) {
+  return envNumber('RIDE_MIN_CANCEL_FEE_MINOR', 1, 0, 1_000_000, env)
+}
+export function withMinCancellationFee(feeMinor, fareMinor, env = process.env) {
+  if (feeMinor == null || !fareMinor || fareMinor <= 0) return feeMinor
+  const min = minCancellationFeeMinor(env)
+  if (min <= 0) return feeMinor
+  return Math.min(Math.max(feeMinor, min), fareMinor)
+}
+
 export function noShowFeeMinor(fareMinor, env = process.env) {
   if (!fareMinor || fareMinor <= 0) return null
-  return Math.round((fareMinor * noShowFeePercent(env)) / 100)
+  const percent = noShowFeePercent(env)
+  const fee = Math.round((fareMinor * percent) / 100)
+  return percent > 0 ? withMinCancellationFee(fee, fareMinor, env) : fee
 }
 
 export function isNearPickup(driverLocation, pickup, env = process.env) {

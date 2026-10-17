@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { rideWaitMs, noShowFeePercent, noShowFeeMinor, isNearPickup, waitState } from '../../server/lib/ride-wait.mjs'
+import { withMinCancellationFee, rideWaitMs, noShowFeePercent, noShowFeeMinor, isNearPickup, waitState } from '../../server/lib/ride-wait.mjs'
 
 test('defaults: 10 minute wait, 100% no-show fee', () => {
   assert.equal(rideWaitMs({}), 600_000)
@@ -30,4 +30,14 @@ test('isNearPickup uses a distance radius', () => {
   assert.equal(isNearPickup({ lat: 33.5139, lng: 36.2766 }, p, {}), true)
   assert.equal(isNearPickup({ lat: 33.53, lng: 36.30 }, p, {}), false)
   assert.equal(isNearPickup(null, p, {}), false)
+})
+
+test('minimum cancellation fee is $1 but never above the fare', () => {
+  assert.equal(withMinCancellationFee(0, 3, {}), 1)
+  assert.equal(withMinCancellationFee(1, 20, {}), 1)
+  assert.equal(withMinCancellationFee(5, 20, {}), 5)
+  assert.equal(withMinCancellationFee(null, 20, {}), null)
+  assert.equal(withMinCancellationFee(0, 0, {}), 0)
+  assert.equal(noShowFeeMinor(3, { RIDE_NO_SHOW_FEE_PERCENT: '10' }), 1)
+  assert.equal(noShowFeeMinor(3, { RIDE_NO_SHOW_FEE_PERCENT: '0' }), 0)
 })

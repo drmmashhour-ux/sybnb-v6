@@ -9,7 +9,7 @@ import { resolveTrafficDistance } from '../lib/traffic-distance.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { getDriverLocation, getRideCoords, etaMinutesBetween } from '../lib/live-map.mjs'
-import { waitState, noShowFeeMinor } from '../lib/ride-wait.mjs'
+import { waitState, noShowFeeMinor, withMinCancellationFee } from '../lib/ride-wait.mjs'
 import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
 import { defaultCurrency } from '../lib/country.mjs'
 import { activateScheduledRides, MIN_SCHEDULE_LEAD_MS } from '../lib/ride-schedule.mjs'
@@ -836,7 +836,9 @@ export async function handleSrRides(req, res, url, context) {
       && (Date.now() - new Date(existing.updatedAt).getTime() < RIDE_CANCEL_GRACE_MS)
     const driverAlreadyCommitted = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(existing.status) && !withinGraceWindow
     let cancellationFeeMinor = driverAlreadyCommitted && existing.fareMinor
-      ? Math.round((existing.fareMinor * RIDE_CANCELLATION_FEE_PERCENT) / 100)
+      ? (RIDE_CANCELLATION_FEE_PERCENT > 0
+          ? withMinCancellationFee(Math.round((existing.fareMinor * RIDE_CANCELLATION_FEE_PERCENT) / 100), existing.fareMinor)
+          : 0)
       : null
     // Driver already waiting at the pickup point (2026-10-17): no grace window applies, and the fee is
     // the no-show fee (default 100% = no refund), the same as if the rider never came out.

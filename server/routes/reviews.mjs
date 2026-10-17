@@ -33,16 +33,16 @@ export async function handleReviews(req, res, url, context) {
   })
 
   if (!booking) {
-    const error = new Error('Booking not found for this guest account.')
-    error.statusCode = 404
-    error.code = 'BOOKING_NOT_FOUND'
+    const error = new Error('You can only review a stay you completed.')
+    error.statusCode = 403
+    error.code = 'REVIEW_NOT_ALLOWED'
     error.expose = true
     throw error
   }
 
   if (booking.status !== 'COMPLETED') {
     const error = new Error('Only completed stays can be reviewed.')
-    error.statusCode = 400
+    error.statusCode = 403
     error.code = 'REVIEW_BOOKING_NOT_COMPLETED'
     error.expose = true
     throw error

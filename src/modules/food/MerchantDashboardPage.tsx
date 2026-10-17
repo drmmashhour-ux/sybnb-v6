@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { optimizePhoto } from '../../shared/lib/image-compress'
 import type { Lang } from '../../engines/language/languageEngine'
 import { pick } from '../../engines/language/languageEngine'
 import { HostAccountForm } from '../account/HostJoinPage'
@@ -23,21 +24,9 @@ import {
   type FoodOrder,
 } from '../../shared/api/platformApi'
 
-// Menu Studio: read a picked file as base64 for the upload API. The server enforces the standards
-// (min 640×480, sane aspect, JPEG/PNG/WebP ≤5MB) and every photo goes to admin review before
-// customers can see it — this helper only moves bytes.
-function readFileAsBase64(file: File): Promise<{ base64: string; mimeType: string }> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error('read failed'))
-    reader.onload = () => {
-      const result = String(reader.result || '')
-      const comma = result.indexOf(',')
-      resolve({ base64: comma >= 0 ? result.slice(comma + 1) : result, mimeType: file.type })
-    }
-    reader.readAsDataURL(file)
-  })
-}
+// Menu Studio: photos are resized/WebP-compressed in the browser before upload; the server still
+// enforces the standards and every photo goes to admin review.
+const readFileAsBase64 = optimizePhoto
 
 // datetime-local <input> value ↔ ISO string.
 function toLocalInput(iso: string | null | undefined): string {

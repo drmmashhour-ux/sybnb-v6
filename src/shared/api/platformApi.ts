@@ -526,6 +526,7 @@ export const STAFF_SESSION_KEY = 'sybnb.v6.staffSession'
 export const STAFF_SESSION_TOKEN_KEY = 'sybnb-v6-staff-token'
 
 export { authStorage } from './authStorage'
+import { optimizePhoto } from '../lib/image-compress'
 import { authStorage } from './authStorage'
 export type HostDashboardMode = 'host' | 'seller'
 
@@ -763,7 +764,7 @@ export async function submitGuestIdDocument(file: File) {
 // pattern, so the ID always lands on the signed-in driver.
 export async function submitDriverIdDocument(file: File) {
   const session = await ensurePrototypeDriverSession()
-  const fileBase64 = await readFileAsBase64(file)
+  const { base64: fileBase64, mimeType } = await optimizePhoto(file)
   const response = await apiRequest<{
     ok: true
     user: { id: string; idDocumentRef: string; idDocumentSubmittedAt: string; idDocumentStatus: string }
@@ -1076,11 +1077,11 @@ export async function saveHostProfile(input: { about: string; city: string; lang
 }
 
 export async function uploadHostPhoto(file: File) {
-  const fileBase64 = await readFileAsBase64(file)
+  const { base64: fileBase64, mimeType } = await optimizePhoto(file)
   const result = await apiRequest<{ ok: true; profile: HostProfile }>('/api/host/profile/photo', {
     method: 'PATCH',
     token: hostToken(),
-    body: { fileBase64, mimeType: file.type },
+    body: { fileBase64, mimeType },
   })
   return result.profile
 }
@@ -1937,8 +1938,8 @@ export async function updateMyDisplayName(displayName: string) {
 export async function uploadMyAvatar(file: File) {
   const token = anyUserToken()
   if (!token) throw new Error('Not signed in')
-  const fileBase64 = await readFileAsBase64(file)
-  await apiRequest<{ ok: true }>('/api/me/avatar', { method: 'PATCH', token, body: { fileBase64, mimeType: file.type } })
+  const { base64: fileBase64, mimeType } = await optimizePhoto(file)
+  await apiRequest<{ ok: true }>('/api/me/avatar', { method: 'PATCH', token, body: { fileBase64, mimeType } })
 }
 
 export async function fetchMyAvatarBlobUrl() {
@@ -2504,11 +2505,11 @@ export async function fetchPrototypeDriverOverview() {
 
 export async function submitDriverPhoto(file: File) {
   const session = await ensurePrototypeDriverSession()
-  const fileBase64 = await readFileAsBase64(file)
+  const { base64: fileBase64, mimeType } = await optimizePhoto(file)
   const response = await apiRequest<{ ok: true; driverProfile: { photoRef: string; photoMimeType: string } }>('/api/driver/photo', {
     method: 'PATCH',
     token: session.token,
-    body: { fileBase64, mimeType: file.type },
+    body: { fileBase64, mimeType },
   })
   return response.driverProfile
 }

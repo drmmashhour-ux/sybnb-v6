@@ -1,3 +1,4 @@
+import { gridFilterCondition } from '../lib/grid-filter.mjs'
 import { db } from '../lib/prisma.mjs'
 import { dateBlockingBookingWhere } from '../lib/booking-policy.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
@@ -213,9 +214,8 @@ export async function handleListings(req, res, url, context) {
       const attributeConditions = []
       for (const key of attributeKeys) {
         const value = url.searchParams.get(key)
-        if (value && value !== 'any') {
-          attributeConditions.push({ metadata: { path: ['visualFilters', key], equals: value } })
-        }
+        const condition = gridFilterCondition(key, value)
+        if (condition) attributeConditions.push(condition)
       }
       // Multi-select attribute filters (amenities/views/access) — comma-separated ids, e.g.
       // ?amenities=wifi,parking. A listing must have ALL selected values, not just one.

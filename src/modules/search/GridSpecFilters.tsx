@@ -1,6 +1,13 @@
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { GRID_SPECS } from '../../shared/listing/gridSpec'
 
+// "Has it" choices (match several stored options): most guests only need the thing to exist.
+const HAS_OPTIONS: Record<string, { id: string; label: [string, string, string] }> = {
+  connectivity: { id: 'has', label: ['يوجد إنترنت (أي نوع)', 'Has internet (any)', 'Internet disponible (tout type)'] },
+  waterSystem: { id: 'hasTank', label: ['يوجد خزان مياه', 'Has a water tank', 'Avec réservoir d’eau'] },
+  powerSource: { id: 'backup', label: ['كهرباء بديلة (شمسية/مولد)', 'Has backup power (solar/generator)', 'Électricité de secours (solaire/groupe)'] },
+}
+
 // Optional "power / water / internet" filters for stays. Only listings whose host filled the field
 // can match, so choosing one narrows results to hosts who published that fact.
 export function GridSpecFilters({ lang, value, onChange }: { lang: Lang; value: Record<string, string>; onChange: (next: Record<string, string>) => void }) {
@@ -19,6 +26,7 @@ export function GridSpecFilters({ lang, value, onChange }: { lang: Lang; value: 
             }}
           >
             <option value="">{pick(lang, 'أي', 'Any', 'Tous')}</option>
+            {HAS_OPTIONS[spec.key] && <option value={HAS_OPTIONS[spec.key].id}>{pick(lang, ...HAS_OPTIONS[spec.key].label)}</option>}
             {spec.options.map((o) => <option key={o.id} value={o.id}>{pick(lang, ...o.label)}</option>)}
           </select>
         </label>

@@ -288,9 +288,15 @@ export function renderNotification(kind, locale, data = {}) {
   const langs = languagesForLocale(locale)
   const parts = langs.map((lang) => template[lang](data))
   const url = data.url ? `\n${data.url}` : ''
+  const VERIFY = {
+    ar: 'لتأكيد بريدك وفتح حجزك اضغط على الرابط (صالح 72 ساعة ويُستخدم مرة واحدة):',
+    en: 'To confirm your email and open your booking, tap this link (valid 72 hours, one use):',
+    fr: 'Pour confirmer votre e-mail et ouvrir votre réservation, touchez ce lien (valable 72 h, usage unique) :',
+  }
+  const verify = (lang) => (data.verifyUrl ? `\n\n${VERIFY[lang]}\n${data.verifyUrl}` : '')
   return {
     subject: parts[0].subject,
-    text: parts.map((p) => `${p.body}${url}`).join('\n\n———\n\n'),
+    text: parts.map((p, index) => `${p.body}${url}${verify(langs[index])}`).join('\n\n———\n\n'),
   }
 }
 

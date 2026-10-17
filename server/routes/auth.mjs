@@ -6,6 +6,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { channelEnabled, defaultCurrency } from '../lib/country.mjs'
 import { isRateLimited, clientIp } from '../lib/rateLimit.mjs'
 import { loginPausedFor } from '../lib/login-pause.mjs'
+import { consumeMagicLink } from '../lib/magic-link.mjs'
 import { ADMIN_LOGIN_OTP_PURPOSE, ADMIN_LOGIN_OTP_WINDOW_MS, requiresAdminLoginCode } from '../lib/admin-login.mjs'
 
 // DRIVER is intentionally NOT self-registerable: an unvetted self-registered driver could claim
@@ -335,6 +336,37 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
       token: session.token,
       sessionId: session.sessionId,
       expiresAt: session.expiresAt,
+    })
+  }
+
+  // Emailed "open my booking" link: single-use token -> mailbox proven -> flag cleared + session.
+  // Guest-only accounts only (partner/staff accounts keep password sign-in), same as guest-session.
+  if (url.pathname === '/api/auth/magic-link') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    if (await rateLimited(req, 'magic-link')) return tooManyRequests(res)
+    const body = await readJson(req)
+    const invalid = () => {
+      const error = new Error('This link is invalid or has expired. Request a new code instead.')
+      error.statusCode = 400
+      error.code = 'MAGIC_LINK_INVALID'
+      error.expose = true
+      return error
+    }
+    const link = await consumeMagicLink(body.token)
+    if (!link) throw invalid()
+    let user = await db().user.findUnique({ where: { id: link.userId }, include: { roles: true } })
+    if (!user || user.status !== 'ACTIVE' || user.roles.some((item) => item.role !== 'GUEST')) throw invalid()
+    if (user.emailUnverified) {
+      user = await db().user.update({ where: { id: user.id }, data: { emailUnverified: false }, include: { roles: true } })
+    }
+    const session = await issueUserSession(user, req)
+    return json(res, 200, {
+      ok: true,
+      user: publicUser(user),
+      token: session.token,
+      sessionId: session.sessionId,
+      expiresAt: session.expiresAt,
+      bookingId: link.bookingId,
     })
   }
 

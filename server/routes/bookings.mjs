@@ -21,7 +21,8 @@ import {
   protectionFeeMinor,
 } from '../lib/booking-policy.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
-import { formatMoney, notifyBooking } from '../lib/notifications.mjs'
+import { appLink, formatMoney, notifyBooking } from '../lib/notifications.mjs'
+import { createMagicLink } from '../lib/magic-link.mjs'
 import { clientIp, isRateLimited } from '../lib/rateLimit.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { isListingPubliclyVisible, requiresHostVerification } from '../lib/host-verification.mjs'
@@ -580,10 +581,21 @@ export async function handleBookings(req, res, url, context) {
     })
   })
 
+  // A guest who skipped the code at checkout gets a one-time link in the confirmation email that
+  // opens the booking and proves the mailbox. Failure to create it never blocks the booking.
+  let verifyUrl = ''
+  if (context.user.emailUnverified) {
+    try {
+      const token = await createMagicLink({ userId: context.user.id, bookingId: booking.id })
+      verifyUrl = appLink(`/#/open/${token}`)
+    } catch { /* link is a convenience; the code flow still works */ }
+  }
+
   notifyBooking('guest_request_received', booking.id, {
     total: formatMoney(expectedTotalMinor({ ...booking, listing }), booking.currency),
     expiryHours: bookingPolicySettings().unpaidExpiryHours,
     expiresAt: bookingExpiresAt(booking, bookingPolicySettings()) || '',
+    ...(verifyUrl ? { verifyUrl } : {}),
   })
 
   return json(res, 201, { ok: true, booking: withExpiry(booking) })

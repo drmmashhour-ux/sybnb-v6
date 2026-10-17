@@ -719,6 +719,19 @@ export async function signInRiderWithEmailCode(email: string, options: { skipCod
   return response
 }
 
+// Redeems the one-time emailed link: signs the guest in, marks the email verified, returns the
+// booking to open.
+export async function redeemEmailLoginLink(token: string): Promise<{ bookingId: string | null }> {
+  const response = await apiRequest<AuthResponse & { bookingId?: string | null }>('/api/auth/magic-link', {
+    method: 'POST',
+    body: { token },
+  })
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify({ ok: true, user: response.user, token: response.token }))
+  authStorage.setItem(GUEST_SESSION_TOKEN_KEY, response.token)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  return { bookingId: response.bookingId || null }
+}
+
 export function isGuestEmailUnverified(): boolean {
   return getStoredGuestSession()?.user?.emailUnverified === true
 }

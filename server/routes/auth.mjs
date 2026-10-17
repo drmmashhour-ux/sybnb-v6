@@ -87,6 +87,9 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     if (await rateLimited(req, 'register')) return tooManyRequests(res)
     const body = await readJson(req)
+    if (loginPausedFor(body.email)) {
+      return json(res, 503, { ok: false, error: { code: 'LOGIN_PAUSED', message: 'Sign-in and sign-up are temporarily paused for maintenance. Please try again later.' } })
+    }
     const role = body.role || 'GUEST'
     if (!PUBLIC_REGISTER_ROLES.has(role)) {
       const error = new Error('This role cannot be self-registered.')

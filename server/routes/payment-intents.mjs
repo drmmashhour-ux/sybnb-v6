@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { db } from '../lib/prisma.mjs'
 import { expireUnpaidBookings } from '../lib/booking-lifecycle.mjs'
-import { requireAuth } from '../lib/auth-context.mjs'
+import { requireAuth, requireVerifiedEmail } from '../lib/auth-context.mjs'
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { verifyWebhook, targetStatusFor, canTransition, paymentWebhookSecret } from '../lib/payment-webhook.mjs'
@@ -381,6 +381,7 @@ export async function handlePaymentIntents(req, res, url, context) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requirePaymentIntentsEnabled()
     requireAuth(context)
+    requireVerifiedEmail(context)
     const body = await readJson(req)
 
     let amountMinor

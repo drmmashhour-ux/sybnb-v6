@@ -338,6 +338,44 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
     })
   }
 
+  // A guest who started checkout without a code proves their email afterwards: a verified
+  // 'guest-login' code for the signed-in account's own address clears users.email_unverified.
+  if (url.pathname === '/api/auth/verify-email') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context)
+    if (await rateLimited(req, 'verify-email')) return tooManyRequests(res)
+    const email = (context.user.email || '').trim().toLowerCase()
+    if (!email) {
+      const error = new Error('This account has no email to verify.')
+      error.statusCode = 400
+      error.code = 'VERIFY_EMAIL_NONE'
+      error.expose = true
+      throw error
+    }
+    if (!context.user.emailUnverified) return json(res, 200, { ok: true, emailUnverified: false })
+    const verified = await db().verificationCode.findFirst({
+      where: {
+        identifierHash: hashEmail(email),
+        purpose: 'guest-login',
+        status: 'VERIFIED',
+        verifiedAt: { gt: new Date(Date.now() - OTP_BIND_WINDOW_MS) },
+      },
+      orderBy: { verifiedAt: 'desc' },
+    })
+    const consumed = verified
+      ? await db().verificationCode.updateMany({ where: { id: verified.id, status: 'VERIFIED' }, data: { status: 'CANCELLED' } })
+      : { count: 0 }
+    if (consumed.count === 0) {
+      const error = new Error('Verify your email with a code first.')
+      error.statusCode = 403
+      error.code = 'GUEST_SESSION_CODE_REQUIRED'
+      error.expose = true
+      throw error
+    }
+    await db().user.update({ where: { id: context.user.id }, data: { emailUnverified: false } })
+    return json(res, 200, { ok: true, emailUnverified: false })
+  }
+
   // Passwordless rider/guest session: a verified 'guest-login' email code (POST /api/otp/verify)
   // is consumed single-use and exchanged for a normal GUEST session. No password, no sign-up form.
   // A partner email (driver, host, seller, admin, or any non-GUEST role, or a suspended account) is
@@ -370,15 +408,31 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
       },
       orderBy: { verifiedAt: 'desc' },
     })
-    if (!verified) throw codeRequired()
-    // Single-use: only a still-VERIFIED row flips, so one code yields exactly one session.
-    const consumed = await db().verificationCode.updateMany({
-      where: { id: verified.id, status: 'VERIFIED' },
-      data: { status: 'CANCELLED' },
-    })
-    if (consumed.count === 0) throw codeRequired()
+    // Code-free checkout (body.skipCode): allowed ONLY for an email with no account yet. An existing
+    // account always needs the emailed code, so nobody can reach another person's account by typing
+    // their address. The new account is flagged email_unverified (see requireVerifiedEmail).
+    const skipCode = body.skipCode === true && !verified
+    if (!verified && !skipCode) throw codeRequired()
+    if (verified) {
+      // Single-use: only a still-VERIFIED row flips, so one code yields exactly one session.
+      const consumed = await db().verificationCode.updateMany({
+        where: { id: verified.id, status: 'VERIFIED' },
+        data: { status: 'CANCELLED' },
+      })
+      if (consumed.count === 0) throw codeRequired()
+    }
 
     let user = await db().user.findUnique({ where: { email }, include: { roles: true } })
+    if (skipCode && user) throw codeRequired()
+    if (verified && user?.emailUnverified) {
+      // The real owner just proved the email: clear the flag and revoke every session issued while it
+      // was unproven (bumping the epoch invalidates them all), so a squatter keeps nothing.
+      user = await db().user.update({
+        where: { id: user.id },
+        data: { emailUnverified: false, sessionEpoch: { increment: 1 } },
+        include: { roles: true },
+      })
+    }
     if (user) {
       const roles = user.roles.map((item) => item.role)
       if (user.status !== 'ACTIVE' || roles.some((role) => role !== 'GUEST')) {
@@ -394,6 +448,7 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
           data: {
             email,
             displayName: email,
+            emailUnverified: skipCode,
             roles: { create: { role: 'GUEST' } },
             wallets: { create: { currency: defaultCurrency() } },
           },
@@ -432,5 +487,6 @@ function publicUser(user) {
     locale: user.locale,
     status: user.status,
     roles: user.roles.map((item) => item.role),
+    emailUnverified: Boolean(user.emailUnverified),
   }
 }

@@ -197,6 +197,10 @@ model User {
   // CAR_OWNER, HOST. This is a self-described intent shown on the profile and used to tailor the
   // experience / route onboarding -- it is NOT a privileged role grant (driver/seller still verify).
   title             String? @map("title")
+  // Migration 073: true only for a guest account created by the code-free checkout path (email typed,
+  // never proven). Payment proof upload, online card checkout and host messaging are refused until the
+  // owner verifies the email; a later verified email code from the real owner also clears the flag.
+  emailUnverified   Boolean @default(false) @map("email_unverified")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
 

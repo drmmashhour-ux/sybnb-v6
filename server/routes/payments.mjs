@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
-import { requireAuth } from '../lib/auth-context.mjs'
+import { requireAuth, requireVerifiedEmail } from '../lib/auth-context.mjs'
 import { expectedTotalMinor, isProviderRefUniqueViolation, sypPerUsd } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
@@ -158,6 +158,7 @@ export async function handlePayments(req, res, url, context) {
   if (url.pathname === '/api/payments/proof-upload') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context)
+    requireVerifiedEmail(context)
     const body = await readJson(req)
     const stored = await putObject('payment-proof', { base64: body.fileBase64, contentType: body.contentType })
     return json(res, 201, { ok: true, proofAssetUrl: `payment-proof://${stored.key}` })
@@ -196,6 +197,7 @@ export async function handlePayments(req, res, url, context) {
   if (url.pathname === '/api/payments/stripe/create-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
+    requireVerifiedEmail(context)
     requireStripe()
 
     const body = await readJson(req)
@@ -875,6 +877,7 @@ export async function handlePayments(req, res, url, context) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
 
     requireAuth(context)
+    requireVerifiedEmail(context)
     const body = await readJson(req)
     const booking = body.bookingId
       ? await db().booking.findFirst({

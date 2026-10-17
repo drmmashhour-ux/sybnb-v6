@@ -180,6 +180,18 @@ export async function getAuthContext(req) {
   }
 }
 
+// Guests who skipped the emailed code at checkout (users.email_unverified) may request a booking, but
+// must verify their email before uploading payment proof, paying online or messaging a host.
+export function requireVerifiedEmail(context) {
+  if (context?.user?.emailUnverified) {
+    const error = new Error('Verify your email with a code before continuing.')
+    error.statusCode = 403
+    error.code = 'EMAIL_NOT_VERIFIED'
+    error.expose = true
+    throw error
+  }
+}
+
 export function requireAuth(context, roles = []) {
   if (!context?.user) {
     const error = new Error('Authentication required.')

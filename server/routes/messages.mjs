@@ -1,5 +1,5 @@
 import { db } from '../lib/prisma.mjs'
-import { requireAuth } from '../lib/auth-context.mjs'
+import { requireAuth, requireVerifiedEmail } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isRateLimited } from '../lib/rateLimit.mjs'
 import { redactContactInfo } from '../lib/contact-redaction.mjs'
@@ -233,6 +233,7 @@ export async function handleMessages(req, res, url, context) {
   if (listingSendMatch) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context)
+    requireVerifiedEmail(context)
 
     const { listing, isOwner } = await loadListingForThread(listingSendMatch[1], context)
     const body = await readJson(req)
@@ -346,6 +347,7 @@ export async function handleMessages(req, res, url, context) {
   if (sendMatch) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context)
+    requireVerifiedEmail(context)
 
     const booking = await loadBookingForThread(sendMatch[1], context)
     const body = await readJson(req)

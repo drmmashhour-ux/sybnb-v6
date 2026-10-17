@@ -124,6 +124,10 @@ export async function sendEmail({ to, subject, text, html, purpose, idempotencyK
     })
     if (!res.ok) {
       // Never include the request headers/body (they carry the key/OTP) in the error.
+      // Log only the provider's own status + error name/message (no secrets) so ops can diagnose.
+      let detail = ''
+      try { const j = await res.json(); detail = `${j?.name || ''}: ${j?.message || ''}`.slice(0, 300) } catch { /* ignore */ }
+      console.error(JSON.stringify({ event: 'email_provider_rejected', provider: 'resend', providerStatus: res.status, detail }))
       const error = new Error('Email provider rejected the message.')
       error.statusCode = 502
       error.code = 'EMAIL_SEND_FAILED'

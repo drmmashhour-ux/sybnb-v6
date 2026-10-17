@@ -142,6 +142,9 @@ function readStoredUploadedFiles() {
 export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const isAr = lang === 'ar'
   const role = useMemo(() => pickSellerRole(window.localStorage.getItem(ROLE_STORAGE_KEY)), [])
+  const isCarsDraft = useMemo(() => {
+    try { return JSON.parse(window.sessionStorage.getItem('sybnb_v6_sell_wizard_draft') || '{}')?.division === 'CARS' } catch { return false }
+  }, [])
   const isAdvertisingFlow = flow === 'advertising'
   const isPlatformSaleFlow = flow === 'platform-sale'
   const requiresPlanPayment = !isAdvertisingFlow && !isPlatformSaleFlow
@@ -537,6 +540,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               ? pick(lang, 'أنشئ الحساب، أكّد رمز البريد الإلكتروني، أضف مستندات الحساب، ثم أكّد الدفع قبل إرسال الطلب للإدارة.', 'Create the account, verify the email code, add account documents, then confirm payment before admin review.', 'Créez le compte, vérifiez le code reçu par courriel, ajoutez les documents du compte, puis confirmez le paiement avant la vérification par l’administration.')
               : isPlatformSaleFlow
                 ? pick(lang, 'أنشئ الحساب، أكّد رمز البريد، ارفع إثبات الملكية أو التفويض، ثم ترسل الإدارة كود المتابعة وتستلم SYBNB إدارة البيع.', 'Create the account, verify the email code, upload ownership or authorization, then admin confirms the follow-up code and SYBNB manages the sale.', 'Créez le compte, vérifiez le code reçu par courriel, téléversez la preuve de propriété ou le mandat ; l’administration confirme ensuite le code de suivi et SYBNB gère la vente.')
+                : isCarsDraft ? pick(lang, 'بعد إنشاء الحساب، اختر طريقة الدفع، أكّد الدفع، ثم أضف ملفات السيارة وإثبات الملكية قبل المراجعة.', 'After account creation, choose a payment method, confirm payment, then add car and ownership files before review.', 'Après la création du compte, choisissez un mode de paiement, confirmez le paiement, puis ajoutez les fichiers du véhicule et la preuve de propriété avant la vérification.')
                 : pick(lang, 'بعد إنشاء الحساب، اختر طريقة الدفع، أكّد الدفع، ثم أضف ملفات العقار والتفويض قبل المراجعة.', 'After account creation, choose a payment method, confirm payment, then add property and authorization files before review.', 'Après la création du compte, choisissez un mode de paiement, confirmez le paiement, puis ajoutez les fichiers du bien et du mandat avant la vérification.')}
           </p>
           <div className="seller-account-mode-switch" role="tablist" aria-label={pick(lang, 'طريقة الدخول', 'Account access mode', 'Mode d’accès au compte')}>
@@ -584,8 +588,8 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
           ) : (
             <div className="seller-selected-role" style={{ '--accent': role.accent } as CSSVars}>
               <span>{pick(lang, 'الدور المختار', 'Selected role', 'Rôle choisi')}</span>
-              <strong>{role.label[lang]}</strong>
-              <small>{role.description[lang]}</small>
+              <strong>{isCarsDraft && role.id === 'owner' ? pick(lang, 'مالك السيارة', 'Car owner', 'Propriétaire du véhicule') : role.label[lang]}</strong>
+              <small>{isCarsDraft && role.id === 'owner' ? pick(lang, 'أملك السيارة وأريد بيعها أو عرضها في مزاد مع مستندات الملكية.', 'I own the car and want to sell it or list it for auction, with ownership documents.', 'Je suis propriétaire du véhicule et je souhaite le vendre ou le mettre aux enchères, avec les documents de propriété.') : role.description[lang]}</small>
             </div>
           )}
 

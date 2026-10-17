@@ -1402,6 +1402,23 @@ export type PlatformListingReview = {
   guest?: { id: string; displayName: string }
 }
 
+export type ListingReportReason = 'SCAM_OR_FAKE' | 'WRONG_INFO' | 'UNAVAILABLE_AT_CHECKIN' | 'INAPPROPRIATE' | 'OTHER'
+
+// "Report this listing": needs a signed-in account (the server refuses anonymous and own-listing reports).
+export async function reportListing(listingId: string, input: { reason: ListingReportReason; note?: string }) {
+  const session = getStoredGuestSession()
+  if (!session) {
+    const error = new Error('Sign in to report a listing.')
+    ;(error as Error & { code?: string }).code = 'AUTH_REQUIRED'
+    throw error
+  }
+  return apiRequest<{ ok: true; report: { id: string; status: string } }>(`/api/listings/${listingId}/report`, {
+    method: 'POST',
+    token: session.token,
+    body: input,
+  })
+}
+
 export async function submitPrototypeReview(input: { bookingId: string; rating: number; comment?: string }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; review: PlatformListingReview }>('/api/reviews', {

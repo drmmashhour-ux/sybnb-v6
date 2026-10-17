@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
+import { ReportListingButton } from './ReportListingButton'
 import {
   createPrototypeBooking,
   fetchBookingQuote,
@@ -1139,6 +1140,8 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             {customerReady ? <Info label={t.accountReady} value="✓" dir={isAr ? 'rtl' : 'ltr'} /> : null}
             {booking ? <Info label={t.requestStatus} value={statusText(booking.status, lang)} dir={isAr ? 'rtl' : 'ltr'} /> : null}
           </section>
+
+          {listing.status === 'APPROVED' && <ReportListingButton listingId={listing.id} lang={lang} />}
 
           {/* Compact sticky bar: price + the one primary action only (no agreement text), so it never
               covers a large part of the listing. */}

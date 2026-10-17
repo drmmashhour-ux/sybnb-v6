@@ -903,6 +903,24 @@ model ListingReview {
   @@map("listing_reviews")
 }
 
+// Listing reports (migration 069). Loose refs by design (no relations), like Incident.
+model ListingReport {
+  id             String    @id @default(uuid())
+  listingId      String    @map("listing_id")
+  reporterId     String    @map("reporter_id")
+  reason         String
+  note           String?
+  status         String    @default("OPEN")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  resolvedAt     DateTime? @map("resolved_at")
+  resolvedById   String?   @map("resolved_by_id")
+  resolutionNote String?   @map("resolution_note")
+
+  @@index([status, createdAt])
+  @@index([listingId])
+  @@map("listing_reports")
+}
+
 model MessageThread {
   id        String   @id @default(uuid())
   bookingId String?  @unique @map("booking_id")

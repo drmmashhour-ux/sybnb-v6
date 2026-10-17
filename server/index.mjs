@@ -38,6 +38,7 @@ import { handleLegal } from './routes/legal.mjs'
 import { handlePaymentIntents } from './routes/payment-intents.mjs'
 import { handlePayments } from './routes/payments.mjs'
 import { handleReviews } from './routes/reviews.mjs'
+import { handleListingReports } from './routes/listing-reports.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
 import { handleFood } from './routes/food.mjs'
 import { handleWallet } from './routes/wallet.mjs'
@@ -290,6 +291,7 @@ async function dispatch(req, res, url, context) {
     handleAgents,
     handleOpenHouses,
     handleMarket,
+    handleListingReports,
     handleListings,
     handleBookings,
     handlePayments,

@@ -5,6 +5,7 @@ import { navigate } from '../../app/routes'
 import {
   becomeHost,
   createHostAccountSession,
+  createSellerAccountSession,
   currentAccountIsHost,
   fetchHostVerification,
   getStoredGuestSession,
@@ -12,6 +13,7 @@ import {
   signInGuestAccount,
 } from '../../shared/api/platformApi'
 import { HostVerificationCard } from '../host/HostVerificationCard'
+import { ForgotPasswordPanel } from './ForgotPasswordPanel'
 import { HOST_PROFILE_NEXT_KEY } from '../host/HostProfilePage'
 
 // Host entrance (/host/join) -- owner decision of 2026-10-08, modelled on Booking.com's partner
@@ -208,8 +210,10 @@ export function HostJoinPage({ lang }: Props) {
 }
 
 // Host sign-up / sign-in, no emailed code: name, email typed twice, phone, password typed twice.
-function HostAccountForm({ lang, onSignedIn }: { lang: Lang; onSignedIn: () => void }) {
+// kind 'SELLER' is the restaurant / store owner version (Eats merchant page): same fields, a seller account.
+export function HostAccountForm({ lang, onSignedIn, kind = 'HOST' }: { lang: Lang; onSignedIn: () => void; kind?: 'HOST' | 'SELLER' }) {
   const [mode, setMode] = useState<'signup' | 'signin'>('signup')
+  const [forgot, setForgot] = useState(false)
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
@@ -243,7 +247,9 @@ function HostAccountForm({ lang, onSignedIn }: { lang: Lang; onSignedIn: () => v
     setBusy(true)
     setError('')
     try {
-      if (signup) await createHostAccountSession({ firstName: firstName.trim(), lastName: lastName.trim(), email, phone, password })
+      if (signup && kind === 'SELLER') {
+        await createSellerAccountSession({ displayName: `${firstName.trim()} ${lastName.trim()}`.trim(), email: email.trim().toLowerCase(), password, phone: phone.trim(), sellerRole: 'restaurant', planCode: 'eats' })
+      } else if (signup) await createHostAccountSession({ firstName: firstName.trim(), lastName: lastName.trim(), email, phone, password })
       else await signInGuestAccount(email, password)
       onSignedIn()
     } catch (err) {
@@ -268,10 +274,18 @@ function HostAccountForm({ lang, onSignedIn }: { lang: Lang; onSignedIn: () => v
   )
   const pwType = showPassword ? 'text' : 'password'
 
+  if (forgot) {
+    return (
+      <div style={styles.box}>
+        <ForgotPasswordPanel lang={lang} initialEmail={email} onClose={() => setForgot(false)} />
+      </div>
+    )
+  }
+
   return (
     <form style={styles.box} onSubmit={(event) => void submit(event)} noValidate>
       <h2 style={styles.boxTitle}>
-        {signup ? pick(lang, 'حساب المضيف', 'Host account', 'Compte hôte') : pick(lang, 'تسجيل الدخول', 'Sign in', 'Se connecter')}
+        {signup ? (kind === 'SELLER' ? pick(lang, 'حساب المتجر', 'Store account', 'Compte commerçant') : pick(lang, 'حساب المضيف', 'Host account', 'Compte hôte')) : pick(lang, 'تسجيل الدخول', 'Sign in', 'Se connecter')}
       </h2>
       {signup && (
         <>
@@ -287,6 +301,11 @@ function HostAccountForm({ lang, onSignedIn }: { lang: Lang; onSignedIn: () => v
       <button type="button" style={styles.link} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)}>
         {showPassword ? pick(lang, 'إخفاء كلمة المرور', 'Hide password', 'Masquer le mot de passe') : pick(lang, 'إظهار كلمة المرور', 'Show password', 'Afficher le mot de passe')}
       </button>
+      {!signup && (
+        <button type="button" style={styles.link} onClick={() => setForgot(true)}>
+          {pick(lang, 'نسيت كلمة المرور؟', 'Forgot password?', 'Mot de passe oublié ?')}
+        </button>
+      )}
       {error && <strong role="alert" style={styles.error}>{error}</strong>}
       <button type="submit" style={{ ...styles.primary, opacity: busy ? 0.7 : 1 }} disabled={busy}>
         {busy ? '…' : signup ? pick(lang, 'إنشاء الحساب والبدء', 'Create account and start', 'Créer le compte et commencer') : pick(lang, 'تسجيل الدخول', 'Sign in', 'Se connecter')}

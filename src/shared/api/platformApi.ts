@@ -613,6 +613,10 @@ export async function createSellerAccountSession(input: {
     planCode: input.planCode,
   }
   authStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(storedSession))
+  // One account: a seller is also a guest (GUEST + SELLER), so the same session signs them in everywhere.
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
   return storedSession
 }
 

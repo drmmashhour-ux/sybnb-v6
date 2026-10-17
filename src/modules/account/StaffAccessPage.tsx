@@ -1,3 +1,4 @@
+import { ForgotPasswordPanel } from './ForgotPasswordPanel'
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
@@ -93,6 +94,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [forgotOpen, setForgotOpen] = useState(false)
   const [phone, setPhone] = useState('')
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState('')
@@ -241,6 +243,16 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               {showPassword ? pick(lang, 'إخفاء كلمة المرور', 'Hide password', 'Masquer le mot de passe') : pick(lang, 'إظهار كلمة المرور', 'Show password', 'Afficher le mot de passe')}
             </button>
           </label>
+          {!isAdmin && (
+            <button
+              type="button"
+              onClick={() => setForgotOpen((value) => !value)}
+              style={{ alignSelf: 'flex-start', background: 'none', border: 0, padding: '2px 0', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit', fontSize: 13 }}
+            >
+              {pick(lang, 'نسيت كلمة المرور؟', 'Forgot password?', 'Mot de passe oublié ?')}
+            </button>
+          )}
+          {!isAdmin && forgotOpen && <ForgotPasswordPanel lang={lang} initialEmail={email} onClose={() => setForgotOpen(false)} />}
           {!isAdmin && (
             <label style={styles.label}>
               {pick(lang, 'رقم الهاتف (اختياري)', 'Phone number (optional)', 'Numéro de téléphone (facultatif)')}

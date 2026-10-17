@@ -177,9 +177,9 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
             passwordHash,
             displayName: body.displayName || body.email || 'SYBNB User',
             title: ALLOWED_SIGNUP_TITLES.has(body.title) ? body.title : undefined,
-            // A HOST is a guest account with hosting turned on (same as POST /api/me/become-host), so a
-            // code-free host sign-up keeps GUEST too -- otherwise the host could never book or ride.
-            roles: { create: role === 'HOST' ? [{ role: 'GUEST' }, { role: 'HOST' }] : { role } },
+            // A HOST/SELLER is a guest account with partner access turned on (same as POST /api/me/become-host),
+            // so a code-free partner sign-up keeps GUEST too -- otherwise they could never book, ride or buy.
+            roles: { create: role === 'HOST' || role === 'SELLER' ? [{ role: 'GUEST' }, { role }] : { role } },
             wallets: { create: { currency: defaultCurrency() } },
           },
           include: { roles: true },

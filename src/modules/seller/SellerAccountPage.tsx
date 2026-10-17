@@ -1,3 +1,4 @@
+import { ForgotPasswordPanel } from '../account/ForgotPasswordPanel'
 import { useEffect, useMemo, useState } from 'react'
 import { phonePlaceholder } from '../../shared/country/presentation'
 import { pick, type Lang } from '../../engines/language/languageEngine'
@@ -154,6 +155,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [repeatPassword, setRepeatPassword] = useState('')
   const [repeatEmail, setRepeatEmail] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [forgotOpen, setForgotOpen] = useState(false)
   const [accountDocumentCount, setAccountDocumentCount] = useState(() => readStoredUploadedFiles().length)
   const [accountUploadedFiles, setAccountUploadedFiles] = useState<string[]>(() => readStoredUploadedFiles())
   const [accountFileReviewed, setAccountFileReviewed] = useState(false)
@@ -691,6 +693,18 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
               >
                 {showPassword ? pick(lang, 'إخفاء كلمة المرور', 'Hide password', 'Masquer le mot de passe') : pick(lang, 'إظهار كلمة المرور', 'Show password', 'Afficher le mot de passe')}
               </button>
+              {accountMode === 'signin' && (
+                <button
+                  type="button"
+                  onClick={() => setForgotOpen((value) => !value)}
+                  style={{ alignSelf: 'flex-start', background: 'none', border: 0, padding: '2px 0', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit', fontSize: 13 }}
+                >
+                  {pick(lang, 'نسيت كلمة المرور؟', 'Forgot password?', 'Mot de passe oublié ?')}
+                </button>
+              )}
+              {accountMode === 'signin' && forgotOpen && (
+                <ForgotPasswordPanel lang={lang} initialEmail={email} onClose={() => setForgotOpen(false)} />
+              )}
               {accountMode === 'signup' && (
                 <label>
                   <span>{pick(lang, 'تأكيد كلمة المرور', 'Repeat password', 'Confirmer le mot de passe')}</span>

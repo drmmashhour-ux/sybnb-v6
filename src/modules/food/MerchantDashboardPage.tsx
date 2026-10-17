@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { pick } from '../../engines/language/languageEngine'
+import { HostAccountForm } from '../account/HostJoinPage'
 import {
   addFoodMenuItem,
   fetchFoodMenu,
@@ -153,6 +154,7 @@ export function MerchantDashboardPage({ lang }: Props) {
   const [chatOpen, setChatOpen] = useState('')
   const [chatDraft, setChatDraft] = useState<Record<string, string>>({})
   const [chatLog, setChatLog] = useState<Record<string, Array<{ id: string; senderRole: string; body: string }>>>({})
+  const [, setSessionTick] = useState(0)
   const hasSession = Boolean(getStoredGuestSession())
 
   function openStudio(item: FoodMenuItem) {
@@ -374,7 +376,7 @@ export function MerchantDashboardPage({ lang }: Props) {
       <main style={styles.page}>
         <h1 style={styles.h1}>{t.title}</h1>
         <p style={styles.muted}>{t.signIn}</p>
-        <a href="#/account/open" style={styles.primaryLink}>{pick(lang, 'تسجيل الدخول', 'Sign in', 'Connexion')}</a>
+        <HostAccountForm lang={lang} kind="SELLER" onSignedIn={() => setSessionTick((n) => n + 1)} />
       </main>
     )
   }

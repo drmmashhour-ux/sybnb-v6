@@ -19,7 +19,7 @@ function safeMeta(meta) {
   return meta
 }
 
-export async function logRideEvent(client, { rideId, type, actorId = null, actorRole = null, lat = null, lng = null, meta = {} } = {}) {
+export async function logRideEvent(client, { rideId, type, actorId = null, actorRole = null, lat = null, lng = null, meta = {}, createdAt = null } = {}) {
   try {
     if (!client || !rideId || !type) return null
     return await client.rideEvent.create({
@@ -31,6 +31,8 @@ export async function logRideEvent(client, { rideId, type, actorId = null, actor
         lat: typeof lat === 'number' && Number.isFinite(lat) ? lat : null,
         lng: typeof lng === 'number' && Number.isFinite(lng) ? lng : null,
         meta: safeMeta(meta),
+        // Only set for fixes buffered offline and uploaded later: they keep the time they were recorded.
+        ...(createdAt instanceof Date && !Number.isNaN(createdAt.getTime()) ? { createdAt } : {}),
       },
     })
   } catch (error) {

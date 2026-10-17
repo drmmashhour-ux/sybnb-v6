@@ -17,6 +17,7 @@ import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 // below for the full reasoning on each.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { logRideEventSafe } from '../lib/ride-events.mjs'
+import { normalizePoints, thinPoints, LIVE_POSITION_MAX_AGE_MS } from '../lib/location-batch.mjs'
 
 // SEC-002R: the transitions this route may write that are IRREVERSIBLE and financially load-bearing,
 // and therefore re-authorized at the commit boundary. Both are terminal states. See the ride status
@@ -53,6 +54,43 @@ const RIDER_STATUS_PUSH_COPY = {
 }
 
 export async function handleDriver(req, res, url, context) {
+  // Offline-first telemetry: the phone buffers GPS fixes during a signal blackout and uploads them
+  // here when the connection returns. The newest FRESH fix moves the live pin; fixes recorded while a
+  // trip was in progress are appended to its black-box trail with their original timestamps.
+  if (url.pathname === '/api/driver/location/batch') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['DRIVER'])
+    const body = await readJson(req)
+    const points = normalizePoints(body.points)
+    if (!points.length) return json(res, 200, { ok: true, accepted: 0, trail: 0 })
+
+    const newest = points[points.length - 1]
+    if (Date.now() - newest.at <= LIVE_POSITION_MAX_AGE_MS) await updateDriverLocation(context.user.id, newest.lat, newest.lng)
+
+    let trail = 0
+    const activeRide = await db().rideRequest.findFirst({
+      where: { driverId: context.user.id, status: 'IN_PROGRESS' },
+      select: { id: true },
+    })
+    if (activeRide) {
+      const started = await db().rideEvent.findFirst({
+        where: { rideId: activeRide.id, type: 'IN_PROGRESS' },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      })
+      const since = started ? started.createdAt.getTime() : Date.now()
+      const kept = thinPoints(points.filter((p) => p.at >= since), LOCATION_PING_MIN_INTERVAL_MS, 60)
+      for (const p of kept) {
+        await logRideEventSafe(db(), {
+          rideId: activeRide.id, type: 'LOCATION_PING', actorId: context.user.id, actorRole: 'DRIVER',
+          lat: p.lat, lng: p.lng, meta: { buffered: true }, createdAt: new Date(p.at),
+        })
+        trail += 1
+      }
+    }
+    return json(res, 200, { ok: true, accepted: points.length, trail })
+  }
+
   // SR Ride vs. Uber gap-closure (P0 #1): the driver client reports its own GPS position here
   // while sharing is on; never gated to a specific ride (a real driver app reports continuously,
   // same as the location column itself belongs to the driver, not to any one ride).

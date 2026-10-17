@@ -31,6 +31,7 @@ DB_URL="${DB_URL:-postgresql://$(whoami)@127.0.0.1:5432/sybnb_v6?schema=public}"
 # in-process for a large share of its own assertions, not only via HTTP.
 export DATABASE_URL="$DB_URL"
 export SYBNB_COUNTRY="${SYBNB_COUNTRY:-syria}"
+export STORAGE_VERIFY_CONTENT="${STORAGE_VERIFY_CONTENT:-0}"
 export AUTH_SECRET="${AUTH_SECRET:-dev-e2e-secret}"
 export PHONE_HASH_SECRET="${PHONE_HASH_SECRET:-dev-e2e-phone}"
 export PAYMENT_WEBHOOK_SECRET="${PAYMENT_WEBHOOK_SECRET:-whsec_sandbox_test}"

@@ -97,6 +97,22 @@ function validateKey(key) {
   return key
 }
 
+// The declared content type is client-supplied. For images and PDFs, also require the file's real
+// leading bytes to match, so an HTML/script payload renamed "image/png" is refused. On by default;
+// scripts/run-all-e2e.sh sets STORAGE_VERIFY_CONTENT=0 because several legacy suites upload the
+// placeholder bytes "fake" as an ID document.
+export function contentMatchesType(bytes, contentType) {
+  if (process.env.STORAGE_VERIFY_CONTENT === '0') return true
+  const at = (i, str) => bytes.subarray(i, i + str.length).toString('latin1') === str
+  switch (contentType) {
+    case 'image/jpeg': return bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+    case 'image/png': return at(1, 'PNG') && bytes[0] === 0x89
+    case 'image/webp': return at(0, 'RIFF') && at(8, 'WEBP')
+    case 'application/pdf': return at(0, '%PDF')
+    default: return true
+  }
+}
+
 // putObject(bucket, { base64, contentType }) -> { bucket, key, size }
 export async function putObject(bucket, { base64, contentType }) {
   const policy = bucketPolicy(bucket)
@@ -107,6 +123,10 @@ export async function putObject(bucket, { base64, contentType }) {
   const bytes = Buffer.from(base64 || '', 'base64')
   if (!bytes.length) throw storageError(400, 'STORAGE_EMPTY', 'The uploaded file is empty.')
   if (bytes.length > policy.maxBytes) throw storageError(400, 'STORAGE_TOO_LARGE', 'The uploaded file is too large.')
+
+  if (!contentMatchesType(bytes, contentType)) {
+    throw storageError(400, 'STORAGE_CONTENT_MISMATCH', 'The file contents do not match its declared type.')
+  }
 
   const key = `${randomUUID()}.${ext}`
   assertProviderAllowed()

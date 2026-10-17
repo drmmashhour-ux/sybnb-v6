@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isRateLimited } from '../lib/rateLimit.mjs'
+import { redactContactInfo } from '../lib/contact-redaction.mjs'
 import { notifyUserMulti } from '../lib/notifications.mjs'
 import { isBookingViewable } from './bookings.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
@@ -169,23 +170,8 @@ async function ensureRideThread(rideId) {
   })
 }
 
-// Message moderation (2026-10-11). Keep deals on-platform and curb abuse: redact contact details
-// (email / URL / phone-shaped numbers) from message bodies, and rate-limit sends per user. The
-// redactor is conservative — it targets emails, links, international (+/00) numbers, separator-
-// grouped numbers, and Syrian 09xxxxxxxx mobiles, but deliberately leaves bare long numbers (e.g. a
-// SYP price like 35000000) alone so negotiation isn't mangled.
-const CONTACT_HIDDEN = '[contact hidden]'
-function redactContactInfo(text) {
-  if (!text) return text
-  let out = text
-  out = out.replace(/\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b/gi, CONTACT_HIDDEN) // emails
-  out = out.replace(/\b(?:https?:\/\/|www\.)[^\s]+/gi, CONTACT_HIDDEN)      // urls
-  out = out.replace(/(?:wa\.me|t\.me|telegram\.me)\/[^\s]*/gi, CONTACT_HIDDEN) // messaging links
-  out = out.replace(/(?:\+|00)\d[\d\s().-]{6,}\d/g, CONTACT_HIDDEN)          // intl phone
-  out = out.replace(/\b0?9\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b/g, CONTACT_HIDDEN) // Syrian mobile 09xxxxxxxx
-  out = out.replace(/\b\d{2,4}[\s.-]\d{3,4}[\s.-]\d{3,4}\b/g, CONTACT_HIDDEN) // separator-grouped phone
-  return out
-}
+// Message moderation: contact details are redacted from message bodies by server/lib/contact-redaction.mjs
+// (unit-tested), and sends are rate-limited per user.
 async function assertMessageRateOk(userId) {
   // 20 messages / minute / user across all threads.
   const limited = await isRateLimited(`msg-send:${userId}`, 60_000, 20).catch(() => false)

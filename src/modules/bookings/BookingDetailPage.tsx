@@ -25,6 +25,7 @@ import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappI
 import { guestFeeSummary } from './guestFeeSummary'
 import { CHECKOUT_NOTE_KEY_PREFIX, STRIPE_PENDING_KEY_PREFIX, takeSessionFlag } from './checkoutDraft'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
+import { CheckinQrCard } from './CheckinQrCard'
 
 type Props = {
   bookingId: string
@@ -693,6 +694,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
                 {t.contactHost}
               </button>
             )}
+            {approvedPayment && booking.status === 'CONFIRMED' && <CheckinQrCard bookingId={booking.id} lang={lang} />}
             {['CONFIRMED', 'COMPLETED'].includes(booking.status) && (
               <button style={styles.dangerButton} onClick={() => (window.location.hash = `/booking/dispute/${booking.id}`)}>
                 {t.refund}

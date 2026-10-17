@@ -236,6 +236,35 @@ export function MerchantDashboardPage({ lang }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasSession])
 
+  // Live orders: a restaurant should not have to tap Refresh to see a new order. Poll every 15 s while
+  // the page is visible, refresh the moment the tab is shown again or the network returns, and tell the
+  // kitchen plainly when the connection is down so they do not assume "no new orders".
+  const [ordersStale, setOrdersStale] = useState(false)
+  const selectedId = selected?.id
+  useEffect(() => {
+    if (!hasSession || !selectedId) return undefined
+    let stopped = false
+    async function poll() {
+      if (document.hidden) return
+      try {
+        const rows = await fetchMerchantFoodOrders(selectedId as string)
+        if (!stopped) { setOrders(rows); setOrdersStale(false) }
+      } catch {
+        if (!stopped) setOrdersStale(true)
+      }
+    }
+    const timer = window.setInterval(() => void poll(), 15000)
+    const onWake = () => { if (!document.hidden) void poll() }
+    document.addEventListener('visibilitychange', onWake)
+    window.addEventListener('online', onWake)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onWake)
+      window.removeEventListener('online', onWake)
+    }
+  }, [hasSession, selectedId])
+
   async function submitRegister() {
     setBusy(true)
     setError('')
@@ -416,6 +445,11 @@ export function MerchantDashboardPage({ lang }: Props) {
               <p style={styles.muted}>Busy mode is ON — new instant orders are refused; customers are offered scheduling or other restaurants.</p>
             ) : null}
             <button type="button" style={styles.secondaryBtn} onClick={() => void selectMerchant(selected)}>{t.refresh}</button>
+            {ordersStale ? (
+              <p style={{ ...styles.muted, color: '#b42318', fontWeight: 700 }}>
+                {pick(lang, '⚠️ الاتصال ضعيف — قد توجد طلبات جديدة لا تظهر. نعيد المحاولة تلقائياً.', '⚠️ Connection problem — new orders may not be showing. Retrying automatically.', '⚠️ Problème de connexion — de nouvelles commandes peuvent ne pas s’afficher. Nouvelle tentative automatique.')}
+              </p>
+            ) : null}
             {orders.length === 0 ? (
               <p style={styles.muted}>{t.noOrders}</p>
             ) : (

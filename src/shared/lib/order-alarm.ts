@@ -25,7 +25,7 @@ export function createOrderAlarm() {
         const gain = ctx.createGain()
         osc.type = 'square'
         osc.frequency.value = i % 2 === 0 ? 880 : 1175
-        gain.gain.value = 0.25
+        gain.gain.value = 0.9
         osc.connect(gain)
         gain.connect(ctx.destination)
         const t0 = ctx.currentTime + i * 0.22

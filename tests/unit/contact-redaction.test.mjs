@@ -24,6 +24,12 @@ test('spelled-out numbers are caught (EN, FR, AR, spaced digits)', () => {
   assert.ok(hidden('0 9 4 4 1 2 3 4 5 6'))
   assert.ok(hidden('0.9.4.4.1.2.3.4.5.6'))
 })
+test('grouped words, two-digit groups and separated app names are caught', () => {
+  assert.ok(hidden('text me: nine four four, one two three, four five six'))
+  assert.ok(hidden('my number is 09 44 12 34 56'))
+  assert.ok(hidden('whats-app me'))
+  assert.ok(hidden('add me on whats_app'))
+})
 test('obfuscated emails, app names and handles are caught', () => {
   assert.ok(hidden('sara at gmail dot com'))
   assert.ok(hidden('sara (at) gmail (dot) com'))
@@ -41,6 +47,8 @@ test('normal negotiation text is untouched', () => {
     'سعر الليلة ٣٥٠٠٠ ليرة',
     'Is the apartment on the 3rd floor? Two bedrooms and one bathroom?',
     'I will arrive at five, thanks',
+    'Price 350 000 000 SYP or 1 200 000 000 total',
+    'Dates 12 10 2026 to 15 10 2026, 3 nights',
   ]) {
     assert.equal(redactContactInfo(text), text, text)
   }

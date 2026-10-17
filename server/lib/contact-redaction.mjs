@@ -28,7 +28,30 @@ const DIGIT_WORDS = [
   'صفر', 'واحد', 'اثنين', 'اثنان', 'ثنين', 'ثلاثة', 'ثلاث', 'أربعة', 'اربعة', 'اربع', 'خمسة', 'خمس', 'ستة', 'ست', 'سبعة', 'سبع', 'ثمانية', 'ثمان', 'تسعة', 'تسع',
 ].join('|')
 // A run of 7+ single digits or digit words separated by spaces/dots/dashes ("zero nine four ...", "0 9 4 ...").
-const SPELLED_NUMBER = new RegExp(`(?<![\\p{L}\\d])(?:(?:\\d|${DIGIT_WORDS})(?![\\p{L}\\d])[\\s.\\-_]+){6,}(?:\\d|${DIGIT_WORDS})(?![\\p{L}\\d])`, 'giu')
+const SPELLED_NUMBER = new RegExp(`(?<![\\p{L}\\d])(?:(?:\\d|${DIGIT_WORDS})(?![\\p{L}\\d])[\\s.,\\-_]+){6,}(?:\\d|${DIGIT_WORDS})(?![\\p{L}\\d])`, 'giu')
+
+// 9-15 digits in 2-4 digit groups ("09 44 12 34 56"). Thousands-grouped prices ("350 000 000": every
+// group after the first is exactly 3 digits) are NOT phone numbers and are left alone.
+const GROUPED_DIGITS = {
+  re: /(?<!\d)\d{1,4}(?:[\s.-]\d{1,4}){3,}(?!\d)/g,
+  test: (match) => {
+    const groups = match.split(/[\s.-]/)
+    const digits = groups.join('').length
+    if (digits < 9 || digits > 15) return false
+    return !groups.slice(1).every((g) => g.length === 3)
+  },
+}
+
+// Separator-grouped phone ("944 123 456"). A thousands-grouped price ("35 000 000": 1-3 digits, then
+// groups of exactly 3) is not a phone number; Syrian 09... and +/00 numbers have their own rules above.
+const SEPARATOR_GROUPED_PHONE = {
+  re: /\b\d{2,4}[\s.-]\d{3,4}[\s.-]\d{3,4}\b/g,
+  test: (match) => {
+    const groups = match.split(/[\s.-]/)
+    const thousands = groups[0].length <= 3 && groups.slice(1).every((g) => g.length === 3)
+    return !thousands
+  },
+}
 
 const RULES = [
   /\b[\w.+-]+@[\w-]+\.[a-z]{2,}\b/gi, // emails
@@ -37,9 +60,10 @@ const RULES = [
   /(?:wa\.me|t\.me|telegram\.me)\/[^\s]*/gi, // messaging links
   /(?:\+|00)\d[\d\s().-]{6,}\d/g, // international phone
   /\b0?9\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b/g, // Syrian mobile 09xxxxxxxx
-  /\b\d{2,4}[\s.-]\d{3,4}[\s.-]\d{3,4}\b/g, // separator-grouped phone
+  SEPARATOR_GROUPED_PHONE,
   SPELLED_NUMBER,
-  /(?:whats\s*app|watsapp|واتس\s*اب|واتساب|واتس|telegram|تلغرام|تيليغرام|تيليجرام|viber|فايبر|signal\s+app)/giu, // off-platform apps
+  GROUPED_DIGITS,
+  /(?:whats[\s._-]*app|watsapp|واتس\s*اب|واتساب|واتس|telegram|تلغرام|تيليغرام|تيليجرام|viber|فايبر|signal\s+app)/giu, // off-platform apps
   /(?<![\w@])@[a-z0-9_.]{3,}/gi, // @handles
 ]
 
@@ -48,9 +72,12 @@ export function redactContactInfo(text) {
   const normalized = normalizeDigits(text)
   const ranges = []
   for (const rule of RULES) {
-    rule.lastIndex = 0
-    for (const match of normalized.matchAll(rule)) {
+    const re = rule instanceof RegExp ? rule : rule.re
+    const test = rule instanceof RegExp ? null : rule.test
+    re.lastIndex = 0
+    for (const match of normalized.matchAll(re)) {
       if (match[0].length === 0) continue
+      if (test && !test(match[0])) continue
       ranges.push([match.index, match.index + match[0].length])
     }
   }

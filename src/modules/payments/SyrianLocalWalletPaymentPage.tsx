@@ -5,6 +5,7 @@ import {
   bookingPaymentStatusFromManualReview,
   createSyrianLocalWalletQrPayload,
   createSyrianLocalWalletSubmission,
+  createWalletIdempotencyKey,
   SYRIAN_LOCAL_WALLET_QR_ASSET,
   SYRIAN_LOCAL_WALLET_QR_NUMBER,
   syrianLocalWalletInstructions,
@@ -233,17 +234,26 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
   // captured the file's NAME, so admin had nothing real to review before releasing money.
   const [uploadedProofUrls, setUploadedProofUrls] = useState<string[]>([])
   const [proofUploadError, setProofUploadError] = useState('')
-  const [submission, setSubmission] = useState<SyrianLocalWalletSubmission>(() =>
-    createSyrianLocalWalletSubmission({
-      bookingId,
-      userId: 'USR-LOCAL-WALLET-001',
-      amount: Math.max(Number(amountMinor || 10), 1),
-      transactionReference: defaultTransactionReference,
-      senderName: '',
-      senderPhone: '',
-      proofUrl: undefined,
-    }),
-  )
+  // Initial placeholder only (status/reference/booking are shown before submit). It must NOT go
+  // through createSyrianLocalWalletSubmission: that validates the sender name/phone, and these start
+  // blank on purpose, so validating here threw and crashed the whole page on load. The real, validated
+  // submission is created when the guest presses submit.
+  const [submission, setSubmission] = useState<SyrianLocalWalletSubmission>(() => ({
+    bookingId,
+    userId: 'USR-LOCAL-WALLET-001',
+    paymentMethod: 'SYRIAN_LOCAL_WALLET',
+    amount: Math.max(Number(amountMinor || 10), 1),
+    currency: 'SYP',
+    transactionReference: defaultTransactionReference,
+    senderName: '',
+    senderPhone: '',
+    proofUrl: undefined,
+    status: 'PENDING_REVIEW',
+    createdAt: new Date().toISOString(),
+    idempotencyKey: createWalletIdempotencyKey(bookingId, defaultTransactionReference),
+    verificationHash: '',
+    riskFlags: [],
+  }))
   const [paymentProof, setPaymentProof] = useState<PlatformPaymentProof | null>(null)
   const [apiState, setApiState] = useState<'idle' | 'saving' | 'error'>('idle')
   const [apiError, setApiError] = useState('')

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { GRID_SPECS, gridSpecLabel } from '../../shared/listing/gridSpec'
+import { solarDetails } from '../../shared/listing/solarSpec'
 import type { CSSProperties } from 'react'
 import { pick, text, type Lang } from '../../engines/language/languageEngine'
 import {
@@ -143,6 +144,11 @@ export function listingSpecRows(division: string, metadata: Record<string, unkno
         const value = firstValue(vf[spec.key], md[spec.key])
         add(spec.key, `${spec.icon} ${pick(lang, ...spec.title)}`, value ? gridSpecLabel(spec, value, lang) : '')
       }
+      const solar = solarDetails(vf)
+      add('solarDetails', `☀️ ${pick(lang, 'تفاصيل الطاقة الشمسية', 'Solar details', 'Détails solaires')}`, [
+        solar.batteryKwh ? `${numberText(String(solar.batteryKwh), lang)} ${pick(lang, 'كيلوواط ساعة', 'kWh battery', 'kWh batterie')}` : '',
+        solar.inverterKw ? `${numberText(String(solar.inverterKw), lang)} ${pick(lang, 'كيلوواط محوّل', 'kW inverter', 'kW onduleur')}` : '',
+      ].filter(Boolean).join(' · '))
     }
     if (division === 'NEW_CONSTRUCTION') {
       add('phase', pick(lang, 'مرحلة المشروع', 'Project phase', 'Phase du projet'), firstValue(md.projectPhase))

@@ -371,6 +371,10 @@ export const amenityFilterGroup: VisualFilterGroup = {
     { id: 'tv', label: { ar: 'تلفزيون ذكي', en: 'Smart TV' }, art: 'amenity-tv' },
     { id: 'garden', label: { ar: 'حديقة', en: 'Garden' }, art: 'amenity-garden' },
     { id: 'elevator', label: { ar: 'مصعد', en: 'Elevator' }, art: 'amenity-elevator' },
+    // Added 2026-10-17 from real guest feedback (reuse existing pictures until dedicated ones exist).
+    { id: 'hotWater', label: { ar: 'ماء ساخن', en: 'Hot water' }, art: 'amenity-heating' },
+    { id: 'power24h', label: { ar: 'كهرباء ٢٤/٢٤', en: '24/7 electricity' }, art: 'amenity-generator' },
+    { id: 'dailyCleaning', label: { ar: 'تنظيف يومي', en: 'Daily cleaning' }, art: 'amenity-bathroom' },
   ],
 }
 

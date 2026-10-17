@@ -9,7 +9,8 @@ import { runDispatchSweep } from '../lib/ride-dispatch.mjs'
 import { VEHICLE_CATEGORY_VALUES, isCategoryAllowedForYear, VEHICLE_MAX_AGE_YEARS } from '../lib/vehicle-category.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
-import { settlePrepaidRide, createDriverPayoutRequest, driverPayoutBalances } from '../lib/finance-ledger.mjs'
+import { settlePrepaidRide, createDriverPayoutRequest, driverPayoutBalances, refundPrepaidRide } from '../lib/finance-ledger.mjs'
+import { isNearPickup, waitState, noShowFeeMinor, rideWaitMs } from '../lib/ride-wait.mjs'
 import { maybeAutoChargeRideCard } from '../lib/ride-auto-charge.mjs'
 import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 // SEC-002R rounds 3 and 4: the two TERMINAL transitions this route can write are Class A -- COMPLETED
@@ -700,6 +701,92 @@ export async function handleDriver(req, res, url, context) {
       void maybeAutoChargeRideCard({ rideId: ride.id }).catch(() => {})
     }
 
+    return json(res, 200, { ok: true, ride })
+  }
+
+  // Pickup waiting + no-show (owner decision 2026-10-17). "I've arrived" starts the rider's wait
+  // window and notifies them; "no-show" (only once the wait has ended, rider not boarded) cancels the
+  // ride and charges the no-show fee (default 100% of the fare = no refund) to the rider.
+  const arrivedMatch = url.pathname.match(/^\/api\/driver\/rides\/([^/]+)\/arrived$/)
+  const noShowMatch = url.pathname.match(/^\/api\/driver\/rides\/([^/]+)\/no-show$/)
+  if (arrivedMatch || noShowMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['DRIVER'])
+    const rideId = (arrivedMatch || noShowMatch)[1]
+    const existing = await db().rideRequest.findFirst({ where: { id: rideId, driverId: context.user.id } })
+    const fail = (statusCode, code, message) => {
+      const error = new Error(message)
+      error.statusCode = statusCode
+      error.code = code
+      error.expose = true
+      throw error
+    }
+    if (!existing) fail(404, 'DRIVER_RIDE_NOT_FOUND', 'Ride not found for this driver account.')
+    if (!['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(existing.status)) {
+      fail(400, 'RIDE_NOT_AT_PICKUP_STAGE', 'This action is only available before the trip starts.')
+    }
+    const meta = existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}
+    const coords = await getRideCoords(existing.id)
+    const location = await getDriverLocation(context.user.id).catch(() => null)
+    // Fair to both sides: the driver must really be at the pickup point (fresh GPS), so an "arrived"
+    // tap cannot start a fee clock from somewhere else. Skipped only if the ride has no pickup coords.
+    if (coords.pickup && !isNearPickup(location, coords.pickup)) {
+      fail(409, 'DRIVER_NOT_AT_PICKUP', 'You need to be at the pickup point (with GPS on) to do this.')
+    }
+
+    if (arrivedMatch) {
+      if (meta.arrivedAt) return json(res, 200, { ok: true, ride: existing, wait: waitState(meta) })
+      const arrivedAt = new Date().toISOString()
+      const updated = await db().rideRequest.updateMany({
+        where: { id: existing.id, status: existing.status, driverId: context.user.id },
+        data: { status: 'DRIVER_ARRIVING', metadata: { ...meta, arrivedAt } },
+      })
+      if (updated.count !== 1) fail(409, 'DRIVER_RIDE_STATUS_CONFLICT', 'Ride status changed before this update could apply. Reload and try again.')
+      const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
+      void logRideEventSafe(db(), {
+        rideId: ride.id, type: 'ARRIVING', actorId: context.user.id, actorRole: 'DRIVER',
+        lat: location?.lat ?? null, lng: location?.lng ?? null, meta: { arrivedAtPickup: true },
+      })
+      const minutes = Math.round(rideWaitMs() / 60000)
+      void sendPushNotification(ride.riderId, {
+        title: 'Your driver has arrived',
+        body: `Please come out now. Your driver will wait ${minutes} minutes.`,
+        url: '/#/ride',
+      })
+      return json(res, 200, { ok: true, ride, wait: waitState(ride.metadata) })
+    }
+
+    // No-show
+    const wait = waitState(meta)
+    if (!wait) fail(400, 'ARRIVAL_NOT_MARKED', 'Tap "I\'ve arrived" first.')
+    if (meta.pickupVerifiedAt) fail(400, 'RIDER_ALREADY_BOARDED', 'The rider is already verified, so this cannot be a no-show.')
+    if (!wait.waitExpired) fail(400, 'WAIT_NOT_OVER', `Please wait until the ${Math.round(rideWaitMs() / 60000)} minutes are over (${wait.secondsLeft}s left).`)
+    const feeMinor = noShowFeeMinor(existing.fareMinor)
+    const result = await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, { action: 'SR_RIDE_NO_SHOW', requiredRoles: ['DRIVER'] })
+      const r = await tx.rideRequest.updateMany({
+        where: { id: existing.id, status: existing.status, driverId: context.user.id },
+        data: { status: 'CANCELLED', cancellationFeeMinor: feeMinor, metadata: { ...meta, noShow: true, noShowAt: new Date().toISOString() } },
+      })
+      if (r.count === 1 && meta.prepaid) {
+        await refundPrepaidRide(tx, { ride: { ...existing, cancellationFeeMinor: feeMinor } })
+      }
+      return r
+    })
+    if (result.count !== 1) fail(409, 'DRIVER_RIDE_STATUS_CONFLICT', 'Ride status changed before this update could apply. Reload and try again.')
+    const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
+    await db().adminAuditLog.create({
+      data: { actorUserId: context.user.id, action: 'DRIVER_RIDER_NO_SHOW', entityType: 'ride_requests', entityId: ride.id, before: existing, after: ride },
+    })
+    void logRideEventSafe(db(), {
+      rideId: ride.id, type: 'CANCELLED', actorId: context.user.id, actorRole: 'DRIVER',
+      lat: location?.lat ?? null, lng: location?.lng ?? null, meta: { noShow: true, feeMinor },
+    })
+    void sendPushNotification(ride.riderId, {
+      title: 'Ride cancelled: driver waited',
+      body: 'The driver waited and left because you did not arrive. A no-show fee applies.',
+      url: '/#/ride',
+    })
     return json(res, 200, { ok: true, ride })
   }
 

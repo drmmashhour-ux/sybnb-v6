@@ -9,6 +9,7 @@ import { resolveTrafficDistance } from '../lib/traffic-distance.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { getDriverLocation, getRideCoords, etaMinutesBetween } from '../lib/live-map.mjs'
+import { waitState, noShowFeeMinor } from '../lib/ride-wait.mjs'
 import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
 import { defaultCurrency } from '../lib/country.mjs'
 import { activateScheduledRides, MIN_SCHEDULE_LEAD_MS } from '../lib/ride-schedule.mjs'
@@ -794,6 +795,8 @@ export async function handleSrRides(req, res, url, context) {
         }
       : { ...ride, pickupCoords: rideCoords.pickup, dropoffCoords: rideCoords.dropoff, etaToPickupMinutes, matchTimedOut: Boolean(matchTimedOut) }
     ridePayload.metadata = safeRideMetadata
+    // Pickup wait countdown for both apps (null until the driver taps "I've arrived").
+    ridePayload.wait = waitState(ride.metadata)
     return json(res, 200, { ok: true, ride: ridePayload })
   }
 
@@ -835,6 +838,11 @@ export async function handleSrRides(req, res, url, context) {
     let cancellationFeeMinor = driverAlreadyCommitted && existing.fareMinor
       ? Math.round((existing.fareMinor * RIDE_CANCELLATION_FEE_PERCENT) / 100)
       : null
+    // Driver already waiting at the pickup point (2026-10-17): no grace window applies, and the fee is
+    // the no-show fee (default 100% = no refund), the same as if the rider never came out.
+    if (waitState(existing.metadata) && existing.fareMinor) {
+      cancellationFeeMinor = noShowFeeMinor(existing.fareMinor)
+    }
     // Lyft-parity consent exit (2026-10-11): a rider who cancels specifically because the matched
     // driver may record audio is NOT charged a cancellation fee, even past the grace window. Only
     // honoured when the driver genuinely has a recording preference enabled, so it can't be abused

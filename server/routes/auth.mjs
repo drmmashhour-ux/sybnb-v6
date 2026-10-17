@@ -5,6 +5,7 @@ import { issueUserSession, listActiveSessions, revokeSession, revokeUserAccess, 
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { channelEnabled, defaultCurrency } from '../lib/country.mjs'
 import { isRateLimited, clientIp } from '../lib/rateLimit.mjs'
+import { loginPausedFor } from '../lib/login-pause.mjs'
 import { ADMIN_LOGIN_OTP_PURPOSE, ADMIN_LOGIN_OTP_WINDOW_MS, requiresAdminLoginCode } from '../lib/admin-login.mjs'
 
 // DRIVER is intentionally NOT self-registerable: an unvetted self-registered driver could claim
@@ -262,6 +263,9 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     if (await rateLimited(req, 'login')) return tooManyRequests(res)
     const body = await readJson(req)
+    if (loginPausedFor(body.email)) {
+      return json(res, 503, { ok: false, error: { code: 'LOGIN_PAUSED', message: 'Sign-in is temporarily paused for maintenance. Please try again later.' } })
+    }
     const where = body.email
       ? { email: String(body.email).trim().toLowerCase() }
       : body.phone

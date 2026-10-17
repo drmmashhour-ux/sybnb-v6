@@ -9,6 +9,9 @@ type RideMapProps = {
   dropoff?: MapPoint | null
   stops?: MapPoint[]
   driverLocation?: MapPoint | null
+  // Where the driver is heading (pickup before the trip, drop-off during it): a dashed line is
+  // drawn from the live driver pin to this point so the rider can follow the approach.
+  target?: MapPoint | null
   height?: number
 }
 
@@ -46,10 +49,11 @@ function stopIcon(n: number): L.DivIcon {
 // (no marker is ever placed for a point that wasn't actually provided).
 const FALLBACK_CENTER: MapPoint = { lat: 33.5138, lng: 36.2765 }
 
-export function RideMap({ pickup, dropoff, stops, driverLocation, height = 220 }: RideMapProps) {
+export function RideMap({ pickup, dropoff, stops, driverLocation, target, height = 220 }: RideMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const markersRef = useRef<{ pickup?: L.Marker; dropoff?: L.Marker; driver?: L.Marker; stops: L.Marker[] }>({ stops: [] })
+  const lineRef = useRef<L.Polyline | null>(null)
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
@@ -70,6 +74,7 @@ export function RideMap({ pickup, dropoff, stops, driverLocation, height = 220 }
       // caught live: only the driver marker (whose lat/lng genuinely changes between polls, forcing
       // the create branch) ever showed up; pickup/dropoff (constant lat/lng) never did.
       markersRef.current = { stops: [] }
+      lineRef.current = null
     }
     // Intentionally mount once -- pan/zoom is driven by the marker-sync effect below, not by prop
     // churn on every 4-5s ride/location poll (which would otherwise reset the rider's own pan/zoom).
@@ -102,6 +107,18 @@ export function RideMap({ pickup, dropoff, stops, driverLocation, height = 220 }
     upsertMarker('dropoff', dropoff, dropoffIcon)
     upsertMarker('driver', driverLocation, driverIcon)
 
+    // Approach line: live driver pin -> where the driver is heading.
+    if (lineRef.current) {
+      map.removeLayer(lineRef.current)
+      lineRef.current = null
+    }
+    if (driverLocation && target) {
+      lineRef.current = L.polyline(
+        [[driverLocation.lat, driverLocation.lng], [target.lat, target.lng]],
+        { color: '#19d7ff', weight: 4, opacity: 0.85, dashArray: '8 8' },
+      ).addTo(map)
+    }
+
     // Stops are fixed once a ride is created (never updated afterward), so a plain clear-and-
     // recreate is simpler than upsert-in-place and causes no visible churn in practice.
     markersRef.current.stops.forEach((marker) => map!.removeLayer(marker))
@@ -116,7 +133,7 @@ export function RideMap({ pickup, dropoff, stops, driverLocation, height = 220 }
       map.setView(boundsPoints[0], 14)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, driverLocation?.lat, driverLocation?.lng, JSON.stringify(stops)])
+  }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, driverLocation?.lat, driverLocation?.lng, target?.lat, target?.lng, JSON.stringify(stops)])
 
   return <div ref={containerRef} style={{ height, borderRadius: 8, overflow: 'hidden' }} />
 }

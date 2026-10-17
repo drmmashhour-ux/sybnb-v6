@@ -45,6 +45,7 @@ const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRE
 import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { RideMap } from '../../shared/maps/RideMap'
+import { RiderArrivalBanner } from './RiderArrivalBanner'
 import { RiderSignInGate } from '../../shared/auth/RiderSignInGate'
 import { getStoredGuestSession } from '../../shared/api/platformApi'
 import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
@@ -1055,7 +1056,7 @@ export function SrRidePage({ lang }: Props) {
   // the real fee (if any) is computed and stored server-side at the moment of cancellation. Keep
   // this rate in sync with RIDE_CANCELLATION_FEE_PERCENT in server/routes/sr-rides.mjs.
   const driverAlreadyCommitted = Boolean(ride && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status))
-  const estimatedCancellationFeeMinor = driverAlreadyCommitted && ride?.fareMinor ? Math.round((ride.fareMinor * 15) / 100) : 0
+  const estimatedCancellationFeeMinor = driverAlreadyCommitted && ride?.fareMinor ? Math.round((ride.fareMinor * (ride.wait ? 100 : 15)) / 100) : 0
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -1439,6 +1440,7 @@ export function SrRidePage({ lang }: Props) {
               dropoff={ride.dropoffCoords}
               stops={(ride.stops || []).filter((stop) => stop.lat != null && stop.lng != null).map((stop) => ({ lat: stop.lat as number, lng: stop.lng as number }))}
               driverLocation={ride.driver?.location}
+              target={ride.status === 'IN_PROGRESS' ? ride.dropoffCoords : ride.pickupCoords}
             />
           )}
           {ride?.driver ? (
@@ -1503,6 +1505,7 @@ export function SrRidePage({ lang }: Props) {
           {ride?.status === 'DRIVER_ASSIGNED' && (
             <div style={styles.message}>{t.driverAssigned}{typeof ride.etaToPickupMinutes === 'number' ? ` · ${t.etaPrefix}${ride.etaToPickupMinutes}${t.etaSuffix}` : ''}</div>
           )}
+          {ride && <RiderArrivalBanner ride={ride} lang={lang} />}
           {ride?.status === 'DRIVER_ARRIVING' && (
             <div style={styles.message}>{t.driverArriving}{typeof ride.etaToPickupMinutes === 'number' ? ` · ${t.etaPrefix}${ride.etaToPickupMinutes}${t.etaSuffix}` : ''}</div>
           )}

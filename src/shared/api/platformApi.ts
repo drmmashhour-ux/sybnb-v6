@@ -4179,6 +4179,11 @@ export type FoodMerchant = {
   lng?: number | null
   acceptingOrders?: boolean
   defaultPrepMinutes?: number | null
+  // Opening hours, minimum order and average rating (the server computes openNow).
+  openingHours?: { tz: string; days: number[]; open: string; close: string } | null
+  openNow?: boolean
+  minOrderMinor?: number | null
+  rating?: { average: number | null; count: number }
   // Menu Studio: cover photo. photoUrl is null unless APPROVED (or the owner is looking).
   photoUrl?: string | null
   photoStatus?: FoodPhotoStatus | null
@@ -4227,6 +4232,7 @@ export type FoodOrderItemRow = {
 
 export type FoodOrder = {
   id: string
+  ratingStars?: number | null
   merchantId: string
   customerId: string
   courierId?: string | null
@@ -4481,11 +4487,18 @@ export async function updateFoodOrderStatusAsMerchant(
 // Busy mode, store position and usual prep time — the merchant's own switches.
 export async function updateFoodMerchantSettings(
   merchantId: string,
-  input: Partial<{ acceptingOrders: boolean; lat: number; lng: number; defaultPrepMinutes: number | null }>,
+  input: Partial<{ acceptingOrders: boolean; lat: number; lng: number; defaultPrepMinutes: number | null; openingHours: { days: number[]; open: string; close: string } | null; minOrderMinor: number | null }>,
 ) {
   const session = await ensurePrototypeGuestSession()
   const r = await apiRequest<{ ok: true; merchant: FoodMerchant }>(`/api/food/merchants/${merchantId}/settings`, { method: 'PATCH', token: session.token, body: input })
   return r.merchant
+}
+
+// The customer rates a delivered order (1..5 stars, once).
+export async function rateFoodOrder(orderId: string, stars: number, comment?: string) {
+  const session = await ensurePrototypeGuestSession()
+  const r = await apiRequest<{ ok: true; ratingStars: number }>(`/api/food/orders/${orderId}/rating`, { method: 'POST', token: session.token, body: { stars, comment } })
+  return r.ratingStars
 }
 
 // The restaurant moves the promise; the customer gets their cancel right back.

@@ -1,3 +1,4 @@
+import { MerchantHoursEditor } from './MerchantHoursEditor'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { optimizePhoto } from '../../shared/lib/image-compress'
 import { createOrderAlarm, shouldRing, pendingOrderCount } from '../../shared/lib/order-alarm'
@@ -456,6 +457,12 @@ export function MerchantDashboardPage({ lang }: Props) {
               </button>
               {selected.lat != null ? <span style={styles.mutedSmall}>pin set</span> : null}
             </div>
+            <MerchantHoursEditor
+              key={selected.id}
+              merchant={selected}
+              lang={lang}
+              onSaved={(m) => setMerchants((prev) => (prev ? prev.map((x) => (x.id === m.id ? m : x)) : prev))}
+            />
             {selected.acceptingOrders === false ? (
               <p style={styles.muted}>Busy mode is ON — new instant orders are refused; customers are offered scheduling or other restaurants.</p>
             ) : null}

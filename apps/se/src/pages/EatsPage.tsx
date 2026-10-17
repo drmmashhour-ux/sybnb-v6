@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
+import { EatsRatingBox } from './EatsRatingBox'
 import {
   cancelFoodOrder,
   fetchFoodMenu,
@@ -384,6 +385,7 @@ export function EatsPage({ lang }: Props) {
           <p style={{ ...styles.statusBig, color: terminal && order.status !== 'DELIVERED' ? '#b91c1c' : '#166534' }}>
             {statusLabel}
           </p>
+          {order.status === 'DELIVERED' ? <EatsRatingBox order={order} lang={lang} /> : null}
           {order.scheduledFor ? (
             <p style={styles.muted}>{t.scheduledForL}: <strong dir="ltr">{new Date(order.scheduledFor).toLocaleString(isAr ? 'ar-SY' : undefined)}</strong></p>
           ) : null}
@@ -502,6 +504,23 @@ export function EatsPage({ lang }: Props) {
         <section style={styles.card}>
           <h1 style={styles.h1} dir="auto">{isAr && merchant.nameAr ? merchant.nameAr : merchant.name}</h1>
           <p style={styles.muted} dir="auto">{merchant.address} · {merchant.city}</p>
+          {merchant.rating && merchant.rating.count > 0 ? (
+            <p style={styles.mutedSmall}>★ {merchant.rating.average} ({merchant.rating.count})</p>
+          ) : null}
+          {merchant.minOrderMinor ? (
+            <p style={styles.mutedSmall}>
+              {pick(lang, 'الحد الأدنى للطلب', 'Minimum order', 'Commande minimum')}: <strong dir="ltr">{merchant.minOrderMinor}</strong>
+            </p>
+          ) : null}
+          {merchant.openNow === false ? (
+            <div style={styles.busyBanner} role="alert">
+              <strong>🕒 {pick(lang, 'مغلق الآن', 'Closed right now', 'Fermé actuellement')}</strong>
+              {merchant.openingHours ? (
+                <span style={styles.mutedSmall} dir="ltr">{merchant.openingHours.open} – {merchant.openingHours.close}</span>
+              ) : null}
+              <span style={styles.mutedSmall}>{pick(lang, 'يمكنك جدولة طلبك لوقت لاحق أو اختيار مطعم آخر.', 'You can schedule your order for later or choose another restaurant.', 'Vous pouvez planifier votre commande ou choisir un autre restaurant.')}</span>
+            </div>
+          ) : null}
           {merchant.acceptingOrders === false ? (
             <div style={styles.busyBanner} role="alert">
               <strong>⏸ {t.busyBadge}</strong>
@@ -607,7 +626,7 @@ export function EatsPage({ lang }: Props) {
               <button
                 type="button"
                 style={styles.primaryBtn}
-                disabled={busy || (merchant.acceptingOrders === false && !(scheduleOpen && scheduledFor)) || (scheduleOpen && !scheduledFor)}
+                disabled={busy || ((merchant.acceptingOrders === false || merchant.openNow === false) && !(scheduleOpen && scheduledFor)) || (scheduleOpen && !scheduledFor)}
                 onClick={() => void submitOrder()}
               >
                 {busy ? t.placing : t.placeOrder}
@@ -652,6 +671,8 @@ export function EatsPage({ lang }: Props) {
               <span dir="auto" style={{ display: 'block', fontWeight: 800, fontSize: 16 }}>
                 {isAr && m.nameAr ? m.nameAr : m.name}
                 {m.acceptingOrders === false ? <span style={styles.busyTag}> {t.busyBadge}</span> : null}
+                {m.openNow === false ? <span style={styles.busyTag}> {pick(lang, 'مغلق', 'Closed', 'Fermé')}</span> : null}
+                {m.rating && m.rating.count > 0 ? <span style={styles.mutedSmall}> ★ {m.rating.average}</span> : null}
               </span>
               <span dir="auto" style={styles.mutedSmall}>{m.address} · {m.city}</span>
             </span>

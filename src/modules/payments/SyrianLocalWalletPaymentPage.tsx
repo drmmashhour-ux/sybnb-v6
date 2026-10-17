@@ -77,6 +77,7 @@ const copy = {
     savePayment: 'حفظ معلومات الدفع',
     printPayment: 'طباعة معلومات الدفع',
     apiError: 'تعذر الاتصال بواجهة الدفع',
+    paymentsClosed: 'الدفع عبر المنصة غير متاح بعد. حجزك محفوظ — سنخبرك فور فتح الدفع.',
     saving: 'جار الحفظ',
     adminConfirmedTitle: 'تم تأكيد الدفع والحجز',
     adminConfirmedBody: 'أكدت الإدارة استلام المال ومطابقة إثبات الدفع. أصبح الحجز مؤكداً ويمكن للعميل متابعة رحلته من حسابه.',
@@ -130,6 +131,7 @@ const copy = {
     savePayment: 'Save Payment Info',
     printPayment: 'Print Payment Info',
     apiError: 'Payment API request failed',
+    paymentsClosed: 'Payments are not open yet. Your booking is saved — we will tell you as soon as payment opens.',
     saving: 'Saving',
     adminConfirmedTitle: 'Payment and booking confirmed',
     adminConfirmedBody: 'Admin confirmed the money was received and the proof matches. The reservation is now confirmed and the guest can continue the trip from the account.',
@@ -183,6 +185,7 @@ const copy = {
     savePayment: 'Enregistrer les infos de paiement',
     printPayment: 'Imprimer les infos de paiement',
     apiError: 'La requête de paiement a échoué',
+    paymentsClosed: 'Le paiement n’est pas encore ouvert. Votre réservation est enregistrée — nous vous préviendrons dès son ouverture.',
     saving: 'Enregistrement',
     adminConfirmedTitle: 'Paiement et réservation confirmés',
     adminConfirmedBody: 'L’administration a confirmé la réception des fonds et la conformité de la preuve. La réservation est maintenant confirmée et le voyageur peut suivre son voyage depuis son compte.',
@@ -381,7 +384,12 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
       setApiState('idle')
     } catch (error) {
       setApiState('error')
-      setApiError(error instanceof Error ? error.message : t.apiError)
+      const code = (error as { code?: string } | null)?.code
+      setApiError(
+        code === 'PAYMENT_POLICY_DENIED' || code === 'PAYMENTS_DISABLED'
+          ? t.paymentsClosed
+          : error instanceof Error ? error.message : t.apiError,
+      )
     }
   }
 

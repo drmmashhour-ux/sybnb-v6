@@ -153,6 +153,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
   const [repeatEmail, setRepeatEmail] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [accountDocumentCount, setAccountDocumentCount] = useState(() => readStoredUploadedFiles().length)
   const [accountUploadedFiles, setAccountUploadedFiles] = useState<string[]>(() => readStoredUploadedFiles())
   const [accountFileReviewed, setAccountFileReviewed] = useState(false)
@@ -678,10 +679,18 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                   autoComplete={accountMode === 'signup' ? 'new-password' : 'current-password'}
                   onChange={(event) => setPassword(event.target.value)}
                   placeholder={accountMode === 'signup' ? (pick(lang, 'إنشاء كلمة مرور', 'Create password', 'Créer un mot de passe')) : pick(lang, 'كلمة مرور الحساب', 'Account password', 'Mot de passe du compte')}
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
                 />
               </label>
+              <button
+                type="button"
+                aria-pressed={showPassword}
+                onClick={() => setShowPassword((value) => !value)}
+                style={{ alignSelf: 'flex-start', background: 'none', border: 0, padding: '2px 0', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit', fontSize: 13 }}
+              >
+                {showPassword ? pick(lang, 'إخفاء كلمة المرور', 'Hide password', 'Masquer le mot de passe') : pick(lang, 'إظهار كلمة المرور', 'Show password', 'Afficher le mot de passe')}
+              </button>
               {accountMode === 'signup' && (
                 <label>
                   <span>{pick(lang, 'تأكيد كلمة المرور', 'Repeat password', 'Confirmer le mot de passe')}</span>
@@ -689,7 +698,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                     autoComplete="new-password"
                     onChange={(event) => setRepeatPassword(event.target.value)}
                     placeholder={pick(lang, 'أعد كتابة كلمة المرور', 'Repeat password', 'Confirmer le mot de passe')}
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     value={repeatPassword}
                   />
                 </label>

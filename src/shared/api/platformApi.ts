@@ -656,6 +656,33 @@ export async function createGuestAccountSession(input: {
   return session
 }
 
+// Host sign-up with NO emailed code (owner decision 2026-10-16): email + phone + password. The server
+// creates a GUEST+HOST account. If the email already has an account we sign it in with the password
+// and switch hosting on. Stored exactly like the other guest sign-in paths.
+export async function createHostAccountSession(input: {
+  firstName: string
+  lastName: string
+  email: string
+  phone: string
+  password: string
+}) {
+  const email = input.email.trim().toLowerCase()
+  const displayName = [input.firstName, input.lastName].filter(Boolean).join(' ').trim() || email
+  let session: PlatformAuthSession
+  try {
+    session = await register({ email, password: input.password, displayName, role: 'HOST', phone: input.phone.trim() })
+  } catch (error) {
+    if (!isAccountExistsError(error)) throw error
+    session = await login(email, input.password)
+  }
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(GUEST_SESSION_TOKEN_KEY, session.token)
+  mirrorHostAccess(session)
+  window.dispatchEvent(new Event('sybnb-session-changed'))
+  if (!(session.user?.roles || []).includes('HOST')) return becomeHost()
+  return session
+}
+
 // Sign an EXISTING account in with email + password only (no OTP — the server's /api/auth/login
 // never required one). Stores the session exactly like createGuestAccountSession does.
 export async function signInGuestAccount(email: string, password: string) {

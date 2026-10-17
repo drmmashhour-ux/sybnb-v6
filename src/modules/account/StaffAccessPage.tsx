@@ -92,6 +92,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
   // first-time host missing it and having their OTP sent to a mailbox they don't control. Start blank.
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [phone, setPhone] = useState('')
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState('')
@@ -228,9 +229,17 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               style={styles.input}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               dir="ltr"
             />
+            <button
+              type="button"
+              aria-pressed={showPassword}
+              onClick={() => setShowPassword((value) => !value)}
+              style={{ alignSelf: 'flex-start', background: 'none', border: 0, padding: '2px 0', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', font: 'inherit', fontSize: 13 }}
+            >
+              {showPassword ? pick(lang, 'إخفاء كلمة المرور', 'Hide password', 'Masquer le mot de passe') : pick(lang, 'إظهار كلمة المرور', 'Show password', 'Afficher le mot de passe')}
+            </button>
           </label>
           {!isAdmin && (
             <label style={styles.label}>

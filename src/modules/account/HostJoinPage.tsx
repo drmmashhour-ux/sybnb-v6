@@ -1,15 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import {
   becomeHost,
+  createHostAccountSession,
   currentAccountIsHost,
   fetchHostVerification,
   getStoredGuestSession,
   getStoredStaffSession,
+  signInGuestAccount,
 } from '../../shared/api/platformApi'
-import { GuestAccountPage } from './GuestAccountPage'
 import { HostVerificationCard } from '../host/HostVerificationCard'
 import { HOST_PROFILE_NEXT_KEY } from '../host/HostProfilePage'
 
@@ -160,15 +161,7 @@ export function HostJoinPage({ lang }: Props) {
 
         <section className="host-join-panel" style={styles.panel}>
           {view === 'signedOut' && (
-            <GuestAccountPage
-              lang={lang}
-              flow="generic"
-              returnPath="/host/join"
-              embedded
-              embeddedTitle={pick(lang, 'حساب المضيف', 'Host account', 'Compte hôte')}
-              initialMode="signup"
-              onSignedIn={onSignedIn}
-            />
+            <HostAccountForm lang={lang} onSignedIn={onSignedIn} />
           )}
 
           {view === 'notHost' && (
@@ -212,6 +205,109 @@ export function HostJoinPage({ lang }: Props) {
       </div>
     </main>
   )
+}
+
+// Host sign-up / sign-in, no emailed code: name, email typed twice, phone, password typed twice.
+function HostAccountForm({ lang, onSignedIn }: { lang: Lang; onSignedIn: () => void }) {
+  const [mode, setMode] = useState<'signup' | 'signin'>('signup')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
+  const [repeatEmail, setRepeatEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [password, setPassword] = useState('')
+  const [repeatPassword, setRepeatPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const signup = mode === 'signup'
+
+  function validate() {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) return pick(lang, 'أدخل بريداً إلكترونياً صحيحاً.', 'Enter a valid email.', 'Saisissez un courriel valide.')
+    if (password.length < 8) return pick(lang, 'كلمة المرور 8 أحرف على الأقل.', 'Password needs at least 8 characters.', 'Le mot de passe doit avoir au moins 8 caractères.')
+    if (!signup) return ''
+    if (!firstName.trim() || !lastName.trim()) return pick(lang, 'أدخل الاسم الأول واسم العائلة.', 'Enter first and last name.', 'Saisissez le prénom et le nom.')
+    if (email.trim().toLowerCase() !== repeatEmail.trim().toLowerCase()) return pick(lang, 'البريد وتأكيده غير متطابقين.', 'Email and repeated email do not match.', 'Le courriel et sa confirmation ne correspondent pas.')
+    if (phone.replace(/\D/g, '').length < 7) return pick(lang, 'أدخل رقم هاتف صحيحاً.', 'Enter a valid phone number.', 'Saisissez un numéro de téléphone valide.')
+    if (password !== repeatPassword) return pick(lang, 'كلمة المرور وتأكيدها غير متطابقين.', 'Password and repeated password do not match.', 'Le mot de passe et sa confirmation ne correspondent pas.')
+    return ''
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    const problem = validate()
+    if (problem) {
+      setError(problem)
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      if (signup) await createHostAccountSession({ firstName: firstName.trim(), lastName: lastName.trim(), email, phone, password })
+      else await signInGuestAccount(email, password)
+      onSignedIn()
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : pick(lang, 'تعذّر المتابعة. حاول مرة أخرى.', 'Could not continue. Please try again.', 'Impossible de continuer. Veuillez réessayer.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const field = (label: string, value: string, set: (v: string) => void, extra: { type?: string; auto?: string; ltr?: boolean } = {}) => (
+    <label style={formStyles.label}>
+      {label}
+      <input
+        style={formStyles.input}
+        value={value}
+        onChange={(event) => set(event.target.value)}
+        type={extra.type || 'text'}
+        autoComplete={extra.auto}
+        dir={extra.ltr ? 'ltr' : undefined}
+      />
+    </label>
+  )
+  const pwType = showPassword ? 'text' : 'password'
+
+  return (
+    <form style={styles.box} onSubmit={(event) => void submit(event)} noValidate>
+      <h2 style={styles.boxTitle}>
+        {signup ? pick(lang, 'حساب المضيف', 'Host account', 'Compte hôte') : pick(lang, 'تسجيل الدخول', 'Sign in', 'Se connecter')}
+      </h2>
+      {signup && (
+        <>
+          {field(pick(lang, 'الاسم الأول', 'First name', 'Prénom'), firstName, setFirstName, { auto: 'given-name' })}
+          {field(pick(lang, 'اسم العائلة', 'Last name', 'Nom de famille'), lastName, setLastName, { auto: 'family-name' })}
+        </>
+      )}
+      {field(pick(lang, 'البريد الإلكتروني', 'Email', 'Courriel'), email, setEmail, { type: 'email', auto: 'email', ltr: true })}
+      {signup && field(pick(lang, 'تأكيد البريد الإلكتروني', 'Repeat email', 'Confirmer le courriel'), repeatEmail, setRepeatEmail, { type: 'email', auto: 'off', ltr: true })}
+      {signup && field(pick(lang, 'رقم الهاتف', 'Phone number', 'Numéro de téléphone'), phone, setPhone, { type: 'tel', auto: 'tel', ltr: true })}
+      {field(pick(lang, 'كلمة المرور', 'Password', 'Mot de passe'), password, setPassword, { type: pwType, auto: signup ? 'new-password' : 'current-password', ltr: true })}
+      {signup && field(pick(lang, 'تأكيد كلمة المرور', 'Repeat password', 'Confirmer le mot de passe'), repeatPassword, setRepeatPassword, { type: pwType, auto: 'new-password', ltr: true })}
+      <button type="button" style={styles.link} aria-pressed={showPassword} onClick={() => setShowPassword((value) => !value)}>
+        {showPassword ? pick(lang, 'إخفاء كلمة المرور', 'Hide password', 'Masquer le mot de passe') : pick(lang, 'إظهار كلمة المرور', 'Show password', 'Afficher le mot de passe')}
+      </button>
+      {error && <strong role="alert" style={styles.error}>{error}</strong>}
+      <button type="submit" style={{ ...styles.primary, opacity: busy ? 0.7 : 1 }} disabled={busy}>
+        {busy ? '…' : signup ? pick(lang, 'إنشاء الحساب والبدء', 'Create account and start', 'Créer le compte et commencer') : pick(lang, 'تسجيل الدخول', 'Sign in', 'Se connecter')}
+      </button>
+      <button
+        type="button"
+        style={styles.link}
+        onClick={() => {
+          setMode(signup ? 'signin' : 'signup')
+          setError('')
+        }}
+      >
+        {signup ? pick(lang, 'لديك حساب؟ سجّل الدخول', 'Already have an account? Sign in', 'Déjà un compte ? Connectez-vous') : pick(lang, 'مضيف جديد؟ أنشئ حساباً', 'New host? Create an account', 'Nouvel hôte ? Créez un compte')}
+      </button>
+    </form>
+  )
+}
+
+const formStyles: Record<string, CSSProperties> = {
+  label: { display: 'grid', gap: 6, fontWeight: 800, fontSize: 14 },
+  input: { minHeight: 48, borderRadius: 10, border: '1px solid #30384d', background: '#151a28', color: '#fff', padding: '0 12px', fontSize: 16 },
 }
 
 const styles: Record<string, CSSProperties> = {

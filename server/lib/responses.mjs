@@ -66,7 +66,23 @@ export async function readJson(req) {
   }
 }
 
+// The database refuses two overlapping CONFIRMED bookings (migration 070). If that ever fires
+// (e.g. a code path that bypasses the app-level lock), the guest should see "dates unavailable"
+// (409), not a generic 500.
+export function translateDbError(error) {
+  if (!error || error.statusCode) return error
+  const text = `${error.message || ''} ${error.meta?.message || ''} ${error.meta?.code || ''}`
+  if (text.includes('bookings_no_overlapping_confirmed') || error.meta?.code === '23P01') {
+    error.statusCode = 409
+    error.code = 'BOOKING_DATES_UNAVAILABLE'
+    error.expose = true
+    error.message = 'These dates are no longer available for this listing.'
+  }
+  return error
+}
+
 export function handleRouteError(res, error) {
+  translateDbError(error)
   if (!error.statusCode || error.statusCode >= 500) {
     // Redacted summary only — never dump the raw error object (may carry sensitive context).
     log.error('api_error', errorSummary(error))

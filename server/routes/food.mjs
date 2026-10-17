@@ -20,6 +20,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { defaultCurrency } from '../lib/country.mjs'
+import { notifyAdmin } from '../lib/notifications.mjs'
 import { saveFoodPhoto, deleteFoodPhoto, signFoodPhotoUrl } from '../lib/food-photo-storage.mjs'
 import { checkPhotoStandards } from '../lib/photo-standards.mjs'
 import { getDriverLocation, etaMinutesBetween } from '../lib/live-map.mjs'
@@ -138,6 +139,8 @@ function menuItemView(item, { owner = false, now = new Date() } = {}) {
   return { ...base, promoPriceMinor: item.promoPriceMinor, promoStartsAt: item.promoStartsAt }
 }
 
+const MAX_MERCHANTS_PER_OWNER = 5
+
 export async function handleFood(req, res, url, context) {
   if (!url.pathname.startsWith('/api/food/')) return false
 
@@ -150,6 +153,15 @@ export async function handleFood(req, res, url, context) {
       const city = trimmed(body.city, 60)
       const address = trimmed(body.address, 160)
       if (!name || !city || !address) throw httpError(400, 'MERCHANT_FIELDS_REQUIRED', 'name, city and address are required.')
+      // Anti-spam (2026-10-17): one account can own only a handful of stores, and the same store
+      // (name + city) cannot be registered twice -- otherwise a bot could flood the review queue.
+      const owned = await db().merchant.findMany({ where: { ownerId: context.user.id }, select: { name: true, city: true } })
+      if (owned.length >= MAX_MERCHANTS_PER_OWNER) {
+        throw httpError(409, 'MERCHANT_LIMIT_REACHED', `One account can register up to ${MAX_MERCHANTS_PER_OWNER} stores. Contact support for more.`)
+      }
+      if (owned.some((m) => m.name.toLowerCase() === name.toLowerCase() && m.city.toLowerCase() === city.toLowerCase())) {
+        throw httpError(409, 'MERCHANT_ALREADY_REGISTERED', 'You already registered a store with this name in this city.')
+      }
       const merchant = await db().merchant.create({
         data: {
           ownerId: context.user.id,
@@ -164,6 +176,7 @@ export async function handleFood(req, res, url, context) {
           status: 'PENDING_REVIEW',
         },
       })
+      notifyAdmin('admin_merchant_pending', { merchantId: merchant.id, name: merchant.name, city: merchant.city }, `admin_merchant_pending:${merchant.id}`)
       return json(res, 201, { ok: true, merchant: publicMerchant(merchant) })
     }
     if (req.method === 'GET') {

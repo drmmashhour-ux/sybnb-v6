@@ -225,6 +225,11 @@ const TEMPLATES = {
     en: (d) => ({ subject: 'SYBNB admin: ride dispute opened', body: `The ${String(d.openedBy || '').toLowerCase()} opened a dispute on ride ${d.rideId}. Review it in the rides console.` }),
     fr: (d) => ({ subject: 'SYBNB admin : litige sur une course', body: `Le ${String(d.openedBy || '').toLowerCase() === 'driver' ? 'chauffeur' : 'passager'} a ouvert un litige sur la course ${d.rideId}. À examiner dans la console des courses.` }),
   },
+  admin_merchant_pending: {
+    ar: (d) => ({ subject: 'SYBNB Eats: مطعم جديد بانتظار المراجعة', body: `سجّل متجر «${d.name}» في ${d.city} ويحتاج موافقتك قبل أن يستقبل طلبات. افتح لوحة المطاعم للمراجعة.` }),
+    en: (d) => ({ subject: 'SYBNB Eats admin: new restaurant awaiting review', body: `Store “${d.name}” in ${d.city} registered and needs your approval before it can take orders. Open the restaurants console to review.` }),
+    fr: (d) => ({ subject: 'SYBNB Eats admin : nouveau restaurant à valider', body: `Le commerce « ${d.name} » à ${d.city} s’est inscrit et attend votre validation avant de recevoir des commandes. Ouvrez la console des restaurants.` }),
+  },
   admin_ride_fee_contested: {
     ar: (d) => ({ subject: 'SYBNB: اعتراض على رسوم إلغاء', body: `اعترض الراكب على رسوم الإلغاء (${d.feeMinor} ${d.currency || ''}) في الرحلة ${d.rideId}. راجع الطلب في لوحة الرحلات واتخذ قرار الإلغاء أو التأييد.` }),
     en: (d) => ({ subject: 'SYBNB admin: cancellation fee contested', body: `The rider contested the cancellation fee (${d.feeMinor} ${d.currency || ''}) on ride ${d.rideId}. Review it in the rides console and waive or uphold it.` }),

@@ -37,12 +37,12 @@ check('email code verifies', verified === true, `verified=${verified}`)
 const session = await api.createSellerAccountSession({ displayName: 'Host Journey', email, password: 'StrongPass123', sellerRole: 'owner', planCode: 'plus' })
 check('SELLER account created + session token (email-only)', Boolean(session && session.token), 'no token')
 
-console.log('\n=== NO BYPASS: seller signup without a verified email OTP must fail ===')
-let blocked = false
+console.log('\n=== NO CODE: seller signup needs only email + phone + password (owner decision 2026-10-16) ===')
+let noCodeSession = null
 try {
-  await api.createSellerAccountSession({ displayName: 'No Otp', email: `nootp-seller-${base}@sybnb.local`, password: 'StrongPass123', sellerRole: 'owner', planCode: 'plus' })
-} catch { blocked = true }
-check('unverified email cannot open a seller account (OTP-gated)', blocked === true, 'account created without OTP')
+  noCodeSession = await api.createSellerAccountSession({ displayName: 'No Code', email: `nocode-seller-${base}@sybnb.local`, phone: '+963944000111', password: 'StrongPass123', sellerRole: 'owner', planCode: 'plus' })
+} catch (e) { noCodeSession = null }
+check('seller account opens without an emailed code', Boolean(noCodeSession && noCodeSession.token), 'seller signup still blocked')
 
 console.log(`\n==== SELLER SIGNUP JOURNEY E2E: ${pass} passed, ${fail} failed ====`)
 process.exit(fail ? 1 : 0)

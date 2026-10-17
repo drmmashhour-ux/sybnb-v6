@@ -113,7 +113,13 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
     // (email-only countries like Syria never do). Under an email-only country an account MUST have a
     // verified email — a phone-only signup is refused (fail-closed, no unverified account).
     const smsEnabled = channelEnabled('sms')
-    const otpIdentifierHash = body.email ? hashEmail(body.email) : (smsEnabled && phoneHash ? phoneHash : undefined)
+    // Owner decision 2026-10-16: SELLER and HOST sign-ups (restaurants, car/project sellers, property
+    // renters, hosts) need NO emailed code -- just email + phone + password. Their accounts still go
+    // through admin document review and plan approval before anything is listed. GUEST sign-ups keep
+    // the code requirement.
+    const OTP_FREE_SIGNUP_ROLES = new Set(['SELLER', 'HOST'])
+    const otpRequired = !OTP_FREE_SIGNUP_ROLES.has(role)
+    const otpIdentifierHash = otpRequired ? (body.email ? hashEmail(body.email) : (smsEnabled && phoneHash ? phoneHash : undefined)) : undefined
     if (!body.email && !smsEnabled) {
       const error = new Error('An email is required to create an account.')
       error.statusCode = 400

@@ -4,11 +4,9 @@ import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo } from '../../shared/brand'
 import {
-  confirmOtp,
   createSellerAccountSession,
   fetchSellerOverview,
   getStoredSellerSession,
-  requestOtp,
   signOutAllLocalSessions,
   submitSellerPlanProof,
   uploadPaymentProofFile,
@@ -154,9 +152,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [repeatPassword, setRepeatPassword] = useState('')
-  const [mobileCodeSent, setMobileCodeSent] = useState(false)
-  const [mobileCode, setMobileCode] = useState('')
-  const [mobileCodeConfirmed, setMobileCodeConfirmed] = useState(false)
+  const [repeatEmail, setRepeatEmail] = useState('')
   const [accountDocumentCount, setAccountDocumentCount] = useState(() => readStoredUploadedFiles().length)
   const [accountUploadedFiles, setAccountUploadedFiles] = useState<string[]>(() => readStoredUploadedFiles())
   const [accountFileReviewed, setAccountFileReviewed] = useState(false)
@@ -212,12 +208,17 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
         )
   // EMAIL is the verification identity (email-only Syria config). Phone is optional contact.
   const emailValid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
+  const emailsMatch = email.trim().toLowerCase() === repeatEmail.trim().toLowerCase()
+  const phoneValid = phone.replace(/\D/g, '').length >= 7
+  // Sign-up needs only: name, email (typed twice), phone, password (typed twice). No emailed code.
   const accountIdentityReady =
     accountMode === 'signup'
       ? Boolean(
           firstName.trim() &&
             lastName.trim() &&
             emailValid &&
+            emailsMatch &&
+            phoneValid &&
             password.length >= 8 &&
             password === repeatPassword,
         )
@@ -225,19 +226,11 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   // Every flow now requires a real, backend-approved plan/review proof before it counts as
   // ready — advertising and platform-sale used to skip this via client-only "admin lane" flags.
   const accountReadyForNext =
-    accountIdentityReady && mobileCodeConfirmed && accountFileConfirmed && accountSentToAdmin && paymentConfirmed
+    accountIdentityReady && accountFileConfirmed && accountSentToAdmin && paymentConfirmed
   const flowSteps = [
     {
       label: accountMode === 'signup' ? (pick(lang, 'إنشاء الحساب', 'Create account', 'Créer le compte')) : pick(lang, 'تسجيل الدخول', 'Sign in', 'Se connecter'),
       done: accountIdentityReady,
-    },
-    {
-      label: pick(lang, 'إرسال الرمز', 'Send code', 'Envoyer le code'),
-      done: mobileCodeSent,
-    },
-    {
-      label: pick(lang, 'تأكيد الرمز', 'Confirm code', 'Confirmer le code'),
-      done: mobileCodeConfirmed,
     },
     {
       label: pick(lang, 'رفع مستندات الحساب', 'Upload account documents', 'Téléverser les documents du compte'),
@@ -396,7 +389,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
   // platform-sale flows previously never created a real account or submitted a real review
   // request at all, relying entirely on client-only state that anyone could fake.
   useEffect(() => {
-    if (!accountIdentityReady || !mobileCodeConfirmed) return
+    if (!accountIdentityReady) return
     if (getStoredSellerSession()) {
       void refreshSellerPlanStatus()
       return
@@ -409,7 +402,7 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
       sellerRole: role.id,
       planCode: isPlatformSaleFlow ? 'platform-sale' : isAdvertisingFlow ? 'advertising' : plan.id,
     }).then(() => refreshSellerPlanStatus())
-  }, [accountIdentityReady, mobileCodeConfirmed])
+  }, [accountIdentityReady])
 
   const submitAccount = async () => {
     const trimmedFirstName = firstName.trim()
@@ -426,17 +419,21 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
       return
     }
 
-    if (accountMode === 'signup' && password !== repeatPassword) {
+    if (accountMode === 'signup' && !emailsMatch) {
       setSubmitState('error')
-      setSubmitError(pick(lang, 'كلمة المرور وتأكيد كلمة المرور غير متطابقين.', 'Password and repeated password do not match.', 'Le mot de passe et sa confirmation ne correspondent pas.'))
+      setSubmitError(pick(lang, 'البريد الإلكتروني وتأكيده غير متطابقين.', 'Email and repeated email do not match.', 'Le courriel et sa confirmation ne correspondent pas.'))
       return
     }
 
-    if (!mobileCodeSent || !mobileCodeConfirmed) {
+    if (accountMode === 'signup' && !phoneValid) {
       setSubmitState('error')
-      setSubmitError(
-        pick(lang, 'أرسل رمز التحقق إلى بريدك الإلكتروني ثم أكّده قبل المتابعة.', 'Send the verification code to your email, then confirm it before continuing.', 'Envoyez le code de vérification à votre adresse courriel, puis confirmez-le avant de continuer.'),
-      )
+      setSubmitError(pick(lang, 'أدخل رقم هاتف صحيحاً.', 'Enter a valid phone number.', 'Saisissez un numéro de téléphone valide.'))
+      return
+    }
+
+    if (accountMode === 'signup' && password !== repeatPassword) {
+      setSubmitState('error')
+      setSubmitError(pick(lang, 'كلمة المرور وتأكيد كلمة المرور غير متطابقين.', 'Password and repeated password do not match.', 'Le mot de passe et sa confirmation ne correspondent pas.'))
       return
     }
 
@@ -646,16 +643,27 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                 value={email}
               />
             </label>
+            {accountMode === 'signup' && (
+              <label>
+                <span>{pick(lang, 'تأكيد البريد الإلكتروني', 'Repeat email', 'Confirmer le courriel')}</span>
+                <input
+                  autoComplete="off"
+                  dir="ltr"
+                  onChange={(event) => setRepeatEmail(event.target.value)}
+                  onPaste={(event) => event.preventDefault()}
+                  placeholder="seller@example.com"
+                  type="email"
+                  value={repeatEmail}
+                />
+              </label>
+            )}
             <label>
-              <span>{pick(lang, 'رقم الهاتف (اختياري)', 'Phone number (optional)', 'Numéro de téléphone (facultatif)')}</span>
+              <span>{pick(lang, 'رقم الهاتف', 'Phone number', 'Numéro de téléphone')}</span>
               <input
                 autoComplete="tel"
                 dir="ltr"
                 onChange={(event) => {
                   setPhone(event.target.value)
-                  setMobileCodeSent(false)
-                  setMobileCode('')
-                  setMobileCodeConfirmed(false)
                   setAccountSentToAdmin(false)
                 }}
                 placeholder={phonePlaceholder()}
@@ -686,74 +694,6 @@ export function SellerAccountPage({ flow = 'listing', lang }: Props) {
                   />
                 </label>
               )}
-            </div>
-            <div className="seller-verification-box">
-              <div>
-                <strong>{pick(lang, 'توثيق البريد الإلكتروني', 'Email verification', 'Vérification du courriel')}</strong>
-                <span>
-                  {mobileCodeSent
-                    ? pick(lang, `تم إرسال رمز التحقق إلى بريدك الإلكتروني ${email.trim()}. أدخل الرمز المستلم.`, `Verification code sent to your email ${email.trim()}. Enter the received code.`, `Code de vérification envoyé à votre adresse ${email.trim()}. Saisissez le code reçu.`)
-                    : pick(lang, 'أرسل رمز تحقق إلى بريدك الإلكتروني قبل إنشاء الحساب.', 'Send a verification code to your email before creating the account.', 'Envoyez un code de vérification à votre adresse courriel avant de créer le compte.')}
-                </span>
-              </div>
-              <button
-                type="button"
-                disabled={!emailValid}
-                onClick={async () => {
-                  try {
-                    await requestOtp({ email: email.trim(), purpose: 'seller-login' })
-                    setMobileCodeSent(true)
-                    setMobileCode('')
-                    setMobileCodeConfirmed(false)
-                    setAccountSentToAdmin(false)
-                    setSubmitState('idle')
-                    setSubmitError('')
-                  } catch (err) {
-                    setSubmitState('error')
-                    setSubmitError(err instanceof Error ? err.message : pick(lang, 'تعذر إرسال الرمز.', 'Could not send code.', 'Impossible d’envoyer le code.'))
-                  }
-                }}
-              >
-                {mobileCodeSent ? (pick(lang, 'إعادة إرسال الرمز', 'Resend code', 'Renvoyer le code')) : pick(lang, 'إرسال الرمز إلى البريد', 'Email me the code', 'M’envoyer le code par courriel')}
-              </button>
-              <label>
-                <small>{pick(lang, 'رمز التحقق', 'Verification code', 'Code de vérification')}</small>
-                <input
-                  dir="ltr"
-                  inputMode="numeric"
-                  onChange={(event) => {
-                    setMobileCode(event.target.value)
-                    setMobileCodeConfirmed(false)
-                    setAccountSentToAdmin(false)
-                  }}
-                  placeholder="123456"
-                  value={mobileCode}
-                />
-              </label>
-              <button
-                type="button"
-                disabled={!mobileCodeSent || mobileCode.trim().length !== 6}
-                onClick={async () => {
-                  try {
-                    const ok = await confirmOtp({ email: email.trim(), purpose: 'seller-login', code: mobileCode.trim() })
-                    if (!ok) {
-                      setSubmitState('error')
-                      setSubmitError(pick(lang, 'الرمز غير صحيح.', 'The code is not correct.', 'Le code est incorrect.'))
-                      return
-                    }
-                  } catch (err) {
-                    setSubmitState('error')
-                    setSubmitError(err instanceof Error ? err.message : pick(lang, 'الرمز غير صحيح.', 'The code is not correct.', 'Le code est incorrect.'))
-                    return
-                  }
-                  setSubmitState('idle')
-                  setSubmitError('')
-                  setMobileCodeConfirmed(true)
-                  setAccountSentToAdmin(false)
-                }}
-              >
-                {mobileCodeConfirmed ? (pick(lang, 'تم تأكيد الرمز', 'Code confirmed', 'Code confirmé')) : pick(lang, 'تأكيد الرمز', 'Confirm code', 'Confirmer le code')}
-              </button>
             </div>
             <div className={`seller-account-file-box ${accountFileConfirmed ? 'confirmed' : ''}`}>
               <div>

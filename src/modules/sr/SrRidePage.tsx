@@ -46,6 +46,7 @@ import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { RideMap } from '../../shared/maps/RideMap'
 import { RiderArrivalBanner } from './RiderArrivalBanner'
+import { LateCancelNotice } from './LateCancelNotice'
 import { RideFeeContest } from './RideFeeContest'
 import { RiderSignInGate } from '../../shared/auth/RiderSignInGate'
 import { getStoredGuestSession } from '../../shared/api/platformApi'
@@ -1506,6 +1507,7 @@ export function SrRidePage({ lang }: Props) {
           {ride?.status === 'DRIVER_ASSIGNED' && (
             <div style={styles.message}>{t.driverAssigned}{typeof ride.etaToPickupMinutes === 'number' ? ` · ${t.etaPrefix}${ride.etaToPickupMinutes}${t.etaSuffix}` : ''}</div>
           )}
+          <LateCancelNotice role="RIDER" lang={lang} />
           {ride && <RiderArrivalBanner ride={ride} lang={lang} />}
           {ride?.status === 'DRIVER_ARRIVING' && (
             <div style={styles.message}>{t.driverArriving}{typeof ride.etaToPickupMinutes === 'number' ? ` · ${t.etaPrefix}${ride.etaToPickupMinutes}${t.etaSuffix}` : ''}</div>

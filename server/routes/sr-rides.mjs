@@ -10,7 +10,7 @@ import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { getDriverLocation, getRideCoords, etaMinutesBetween } from '../lib/live-map.mjs'
 import { waitState, noShowFeeMinor, withMinCancellationFee } from '../lib/ride-wait.mjs'
-import { countOffences, isOffenceBlocked, riderOffenceFeeMinor, restrictedError } from '../lib/ride-offences.mjs'
+import { countOffences, isOffenceBlocked, riderOffenceFeeMinor, restrictedError, offenceFeeMinor, offenceBlockThreshold, offenceWindowMs } from '../lib/ride-offences.mjs'
 import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
 import { defaultCurrency } from '../lib/country.mjs'
 import { activateScheduledRides, MIN_SCHEDULE_LEAD_MS } from '../lib/ride-schedule.mjs'
@@ -360,6 +360,23 @@ function generatePickupCode() {
 }
 
 export async function handleSrRides(req, res, url, context) {
+  // Late-cancel strike status for the signed-in rider or driver (shown as a warning in the apps).
+  if (url.pathname === '/api/sr/strikes') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    const role = url.searchParams.get('role') === 'DRIVER' ? 'DRIVER' : 'RIDER'
+    requireAuth(context, [role === 'DRIVER' ? 'DRIVER' : 'GUEST'])
+    const count = await countOffences(db(), { userId: context.user.id, role })
+    return json(res, 200, {
+      ok: true,
+      role,
+      count,
+      blockAt: offenceBlockThreshold(),
+      windowDays: Math.round(offenceWindowMs() / 86_400_000),
+      blocked: isOffenceBlocked(count),
+      nextFeeMinor: offenceFeeMinor(count + 1),
+    })
+  }
+
   if (url.pathname === '/api/sr/quote') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])

@@ -1,4 +1,5 @@
 import { PickupWaitPanel } from './PickupWaitPanel'
+import { LateCancelNotice } from '../sr/LateCancelNotice'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import type { CSSProperties } from 'react'
@@ -789,6 +790,7 @@ export function DriverDashboardPage({ lang }: Props) {
       <section style={styles.hero}>
         <p style={styles.eyebrow}>SR / SYBNB</p>
         <h1 style={styles.title}>{t.title}</h1>
+        <LateCancelNotice role="DRIVER" lang={lang} />
         <p style={styles.body}>{t.subtitle}</p>
         {pushStatus !== 'enabled' && (
           <button

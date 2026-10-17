@@ -2692,6 +2692,14 @@ export async function markRiderNoShow(rideId: string) {
   return response.ride
 }
 
+export type LateCancelStrikes = { role: 'RIDER' | 'DRIVER'; count: number; blockAt: number; windowDays: number; blocked: boolean; nextFeeMinor: number }
+
+// Late-cancel strikes for the signed-in rider or driver.
+export async function getLateCancelStrikes(role: 'RIDER' | 'DRIVER') {
+  const session = role === 'DRIVER' ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
+  return apiRequest<LateCancelStrikes & { ok: true }>(`/api/sr/strikes?role=${role}`, { token: session.token })
+}
+
 // Rider contests a cancellation / no-show fee (admin then waives or upholds it).
 export async function contestRideFee(rideId: string, reason: string) {
   const session = await ensurePrototypeGuestSession()

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ProjectUnitsPanel } from './ProjectUnitsPanel'
 import { PriceFreshnessTag } from '../../shared/listing/PriceFreshnessTag'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
@@ -859,6 +860,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
             <ListingSpecs division={listing.division} metadata={listing.metadata} lang={lang} />
             <NearbyTags metadata={listing.metadata} lang={lang} />
+            {listing.division === 'NEW_CONSTRUCTION' && !listing.metadata?.parentListingId ? <ProjectUnitsPanel projectId={listing.id} lang={lang} /> : null}
             {(listing.division === 'BUY' || listing.division === 'NEW_CONSTRUCTION') && (
               <AffordabilityCalculator priceMinor={listing.priceMinor} currency={listing.currency} lang={lang} />
             )}

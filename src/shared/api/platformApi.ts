@@ -4489,3 +4489,25 @@ export async function confirmListingPrice(listingId: string, mode: HostDashboard
   )
   return response.listing
 }
+
+export type ProjectUnitInput = { label: string; priceMinor: number; floor?: number; view?: string; bedrooms?: number; sizeSqm?: number }
+export type ProjectUnit = {
+  id: string; titleAr: string | null; titleEn: string | null; priceMinor: number; currency: string
+  label: string | null; floor: number | null; view: string | null; bedrooms: number | null; sizeSqm: number | null
+}
+
+// Developer: create many unit listings from one new-construction project (units await SYBNB review).
+export async function createProjectUnits(projectId: string, units: ProjectUnitInput[], mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  return apiRequest<{ ok: true; created: number }>(`/api/host/listings/${projectId}/units`, {
+    method: 'POST',
+    token: session.token,
+    body: { units },
+  })
+}
+
+// Public: the approved units of a project.
+export async function fetchProjectUnits(projectId: string) {
+  const response = await apiRequest<{ ok: true; units: ProjectUnit[] }>(`/api/listings/${projectId}/units`)
+  return response.units
+}

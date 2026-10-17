@@ -41,6 +41,7 @@ import { handleReviews } from './routes/reviews.mjs'
 import { handleListingReports } from './routes/listing-reports.mjs'
 import { handleSplitStay } from './routes/split-stay.mjs'
 import { handlePriceConfirm } from './routes/price-confirm.mjs'
+import { handleProjectUnits } from './routes/project-units.mjs'
 import { handleSrRides } from './routes/sr-rides.mjs'
 import { handleFood } from './routes/food.mjs'
 import { handleWallet } from './routes/wallet.mjs'
@@ -296,6 +297,7 @@ async function dispatch(req, res, url, context) {
     handleListingReports,
     handleSplitStay,
     handlePriceConfirm,
+    handleProjectUnits,
     handleListings,
     handleBookings,
     handlePayments,

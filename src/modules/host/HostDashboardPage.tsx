@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { ProjectUnitsBuilder } from '../seller/ProjectUnitsBuilder'
 import { priceFreshness } from '../../shared/listing/priceFreshness'
 import { PriceFreshnessTag } from '../../shared/listing/PriceFreshnessTag'
 import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
@@ -852,6 +853,14 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                 >
                   {pick(lang, 'تأكيد السعر الحالي', 'Re-verify price', 'Reconfirmer le prix')}
                 </button>
+              )}
+              {listing.division === 'NEW_CONSTRUCTION' && !listing.metadata?.parentListingId && ['PENDING_REVIEW', 'APPROVED'].includes(listing.status) && (
+                <ProjectUnitsBuilder
+                  projectId={listing.id}
+                  lang={lang}
+                  mode={mode}
+                  onCreated={() => void fetchPrototypeHostOverview(mode).then(setOverview).catch(() => undefined)}
+                />
               )}
               {listing.expiresAt && (
                 <Info

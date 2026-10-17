@@ -210,6 +210,7 @@ run "payment-refund-execute" refund-execution-wallet-credit.e2e.mjs
 run "booking-money-flow" booking-money-flow.e2e.mjs
 run "concurrent-booking" concurrent-booking.e2e.mjs
 run "split-stay" split-stay.e2e.mjs
+run "booking-no-overlap-db" booking-no-overlap-db.e2e.mjs
 run "price-confirm" price-confirm.e2e.mjs
 run "project-units" project-units.e2e.mjs
 run "auction-anti-snipe" auction-anti-snipe.e2e.mjs

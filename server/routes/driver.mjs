@@ -490,7 +490,7 @@ export async function handleDriver(req, res, url, context) {
     const annotatedRides = rides.map((ride) => {
       const payable = ride.status === 'COMPLETED' || (ride.status === 'CANCELLED' && ride.cancellationFeeMinor)
       const paymentStatus = paidRideIds.has(ride.id) ? 'PAID' : (payable ? 'AWAITING_PAYMENT' : 'NONE')
-      return { ...ride, metadata: stripPickupCode(ride.metadata), paymentStatus, expectedNetMinor: expectedNetForRide(ride) }
+      return { ...ride, metadata: stripPickupCode(ride.metadata), paymentStatus, expectedNetMinor: expectedNetForRide(ride), wait: waitState(ride.metadata) }
     })
     const billedMinor = rides.filter((ride) => ride.status === 'COMPLETED').reduce((sum, ride) => sum + (ride.fareMinor || 0), 0)
     // Net earnings still awaiting payment (rides done but not yet paid by rider + approved).

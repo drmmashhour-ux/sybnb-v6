@@ -136,6 +136,8 @@ export type PlatformRideRequest = {
   // Dispatch/ETA fields (2026-10-09), present on the single-ride GET and driver pending list.
   etaToPickupMinutes?: number | null
   matchTimedOut?: boolean
+  // Pickup wait (set once the driver taps "I've arrived"); null before that.
+  wait?: { arrivedAt: string; waitEndsAt: string; waitExpired: boolean; secondsLeft: number } | null
   pickupDistanceKm?: number | null
   // Full auto-dispatch (2026-10-10): the live outstanding offer, surfaced on the driver pending list.
   offeredDriverId?: string | null
@@ -2667,6 +2669,26 @@ export async function updatePrototypeDriverRideStatus(
       body: { status },
     },
   )
+  return response.ride
+}
+
+// Pickup wait (2026-10-17): the driver taps "I've arrived" (rider is notified, wait starts), and after
+// the wait may mark the rider a no-show (ride cancelled, no-show fee charged to the rider).
+export async function markDriverArrived(rideId: string) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>(`/api/driver/rides/${rideId}/arrived`, {
+    method: 'PATCH',
+    token: session.token,
+  })
+  return response.ride
+}
+
+export async function markRiderNoShow(rideId: string) {
+  const session = await ensurePrototypeDriverSession()
+  const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>(`/api/driver/rides/${rideId}/no-show`, {
+    method: 'PATCH',
+    token: session.token,
+  })
   return response.ride
 }
 

@@ -1,3 +1,4 @@
+import { PickupWaitPanel } from './PickupWaitPanel'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import type { CSSProperties } from 'react'
@@ -1212,7 +1213,10 @@ function RideCard({
         <Info key={index} label={`${labels.stopLabel} ${index + 1}`} value={stop.address} />
       ))}
       {['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status) && (
-        <PickupVerifyPanel ride={ride} lang={lang} onRefresh={onRefresh} />
+        <>
+          <PickupWaitPanel ride={ride} lang={lang} onRefresh={onRefresh} />
+          <PickupVerifyPanel ride={ride} lang={lang} onRefresh={onRefresh} />
+        </>
       )}
       {ride.status !== 'COMPLETED' && ride.status !== 'CANCELLED' && (
         <NavigateButton ride={ride} label={labels.navigate} />

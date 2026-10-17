@@ -12,6 +12,8 @@ type ApiUser = {
   email: string | null
   displayName: string
   roles: string[]
+  // True for a guest who started checkout without an emailed code and has not verified yet.
+  emailUnverified?: boolean
 }
 
 type AuthResponse = {
@@ -704,15 +706,32 @@ export async function signInGuestAccount(email: string, password: string) {
 
 // Passenger / guest sign-in with a verified email code (POST /api/auth/guest-session). No password
 // and no sign-up form. Stores the session exactly like the other guest sign-in paths.
-export async function signInRiderWithEmailCode(email: string): Promise<PlatformAuthSession> {
+// skipCode: checkout path. Works only for an email with no account yet (the account is flagged
+// unverified); an existing email answers GUEST_SESSION_CODE_REQUIRED and needs the emailed code.
+export async function signInRiderWithEmailCode(email: string, options: { skipCode?: boolean } = {}): Promise<PlatformAuthSession> {
   const response = await apiRequest<AuthResponse>('/api/auth/guest-session', {
     method: 'POST',
-    body: { email: email.trim().toLowerCase() },
+    body: { email: email.trim().toLowerCase(), ...(options.skipCode ? { skipCode: true } : {}) },
   })
   authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(response))
   authStorage.setItem(GUEST_SESSION_TOKEN_KEY, response.token)
   window.dispatchEvent(new Event('sybnb-session-changed'))
   return response
+}
+
+export function isGuestEmailUnverified(): boolean {
+  return getStoredGuestSession()?.user?.emailUnverified === true
+}
+
+// Clears the unverified flag after the guest proves their email: caller first runs
+// requestOtp + confirmOtp with purpose 'guest-login' for the same address.
+export async function verifyGuestEmail(): Promise<void> {
+  const session = getStoredGuestSession()
+  if (!session) throw new Error('Sign in first.')
+  await apiRequest<{ ok: true }>('/api/auth/verify-email', { method: 'POST', token: session.token, body: {} })
+  const next = { ...session, user: { ...session.user, emailUnverified: false } }
+  authStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(next))
+  window.dispatchEvent(new Event('sybnb-session-changed'))
 }
 
 function readFileAsBase64(file: File): Promise<string> {

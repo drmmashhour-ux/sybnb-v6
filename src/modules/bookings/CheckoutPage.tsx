@@ -404,7 +404,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
 
             {!signedIn && !blocked && (
               <section className="checkout-account" aria-label={t('signInTitle')}>
-                <RiderSignInGate lang={lang} onSignedIn={() => setSignedIn(true)} />
+                <RiderSignInGate lang={lang} codeFree onSignedIn={() => setSignedIn(true)} />
               </section>
             )}
 

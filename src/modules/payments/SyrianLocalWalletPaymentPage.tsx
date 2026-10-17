@@ -23,6 +23,7 @@ import {
 import { moneyText, statusText } from '../../shared/i18n/display'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { PaymentCapsule } from './PaymentCapsule'
+import { VerifyEmailBox } from '../../shared/auth/VerifyEmailBox'
 import { PaymentProofUpload, paymentProofReference } from './PaymentProofUpload'
 
 type Props = {
@@ -538,6 +539,7 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
 
       <section className="wallet-grid">
         <article className="wallet-card">
+          <VerifyEmailBox lang={lang} />
           <h2>{t.formTitle}</h2>
           <label>
             <span>{t.transactionReference}</span>

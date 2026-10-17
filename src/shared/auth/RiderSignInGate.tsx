@@ -3,7 +3,9 @@ import { confirmOtp, requestOtp, signInRiderWithEmailCode } from '../api/platfor
 
 // Passenger / guest entry point: a verified email code is the only step. No password, no sign-up
 // form. Hosts, sellers, car sellers, construction companies and drivers keep their account sign-in.
-type Props = { lang: string; onSignedIn: () => void }
+// codeFree: checkout mode. A brand-new email continues with no code (verified later, before payment
+// proof); an email that already has an account is sent a code and must enter it.
+type Props = { lang: string; onSignedIn: () => void; codeFree?: boolean }
 
 const COPY = {
   ar: {
@@ -14,6 +16,9 @@ const COPY = {
     code: 'الرمز المكوّن من 6 أرقام',
     verify: 'تأكيد ومتابعة',
     error: 'تعذر إكمال التحقق. حاول مرة أخرى.',
+    cont: 'متابعة',
+    freeHint: 'لا تحتاج إلى حساب أو كلمة مرور. أدخل بريدك للمتابعة، وسنطلب تأكيده قبل رفع إثبات الدفع.',
+    existing: 'هذا البريد لديه حساب. أرسلنا إليك رمزاً، أدخله للمتابعة.',
   },
   en: {
     title: 'Verify your email to request a ride or book',
@@ -23,6 +28,9 @@ const COPY = {
     code: '6-digit code',
     verify: 'Verify and continue',
     error: 'Could not complete verification. Please try again.',
+    cont: 'Continue',
+    freeHint: 'No account or password needed. Enter your email to continue; we will ask you to confirm it before you upload payment proof.',
+    existing: 'This email already has an account. We sent you a code; enter it to continue.',
   },
   fr: {
     title: 'Vérifiez votre e-mail pour demander une course ou réserver',
@@ -32,6 +40,9 @@ const COPY = {
     code: 'Code à 6 chiffres',
     verify: 'Vérifier et continuer',
     error: 'La vérification a échoué. Réessayez.',
+    cont: 'Continuer',
+    freeHint: "Aucun compte ni mot de passe requis. Entrez votre e-mail pour continuer ; nous vous demanderons de le confirmer avant d'envoyer la preuve de paiement.",
+    existing: 'Cet e-mail a déjà un compte. Nous vous avons envoyé un code ; saisissez-le pour continuer.',
   },
 }
 
@@ -39,13 +50,37 @@ function copyFor(lang: string) {
   return lang === 'ar' ? COPY.ar : lang === 'fr' ? COPY.fr : COPY.en
 }
 
-export function RiderSignInGate({ lang, onSignedIn }: Props) {
+export function RiderSignInGate({ lang, onSignedIn, codeFree = false }: Props) {
   const t = copyFor(lang)
   const [email, setEmail] = useState('')
   const [step, setStep] = useState<'email' | 'code'>('email')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  async function continueWithoutCode() {
+    setBusy(true)
+    setError('')
+    try {
+      await signInRiderWithEmailCode(email, { skipCode: true })
+      onSignedIn()
+    } catch (caught) {
+      if ((caught as { code?: string })?.code === 'GUEST_SESSION_CODE_REQUIRED') {
+        try {
+          await requestOtp({ email: email.trim(), purpose: 'guest-login' })
+          setNotice(t.existing)
+          setStep('code')
+        } catch (sendError) {
+          setError(sendError instanceof Error ? sendError.message : t.error)
+        }
+      } else {
+        setError(caught instanceof Error ? caught.message : t.error)
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function sendCode() {
     setBusy(true)
@@ -82,15 +117,16 @@ export function RiderSignInGate({ lang, onSignedIn }: Props) {
   return (
     <div style={box}>
       <strong style={{ display: 'block', marginBottom: 6 }}>{t.title}</strong>
-      <p style={{ margin: '0 0 10px', opacity: 0.8 }}>{t.hint}</p>
+      <p style={{ margin: '0 0 10px', opacity: 0.8 }}>{codeFree ? t.freeHint : t.hint}</p>
+      {notice ? <p style={{ margin: '0 0 10px', color: '#7dd3fc' }}>{notice}</p> : null}
       {step === 'email' ? (
         <>
           <label style={{ display: 'block' }}>
             {t.email}
             <input style={input} type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
           </label>
-          <button style={button} disabled={busy || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())} onClick={() => void sendCode()}>
-            {t.send}
+          <button style={button} disabled={busy || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())} onClick={() => void (codeFree ? continueWithoutCode() : sendCode())}>
+            {codeFree ? t.cont : t.send}
           </button>
         </>
       ) : (

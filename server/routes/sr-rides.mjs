@@ -20,6 +20,7 @@ import {
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { rideCategoryToVehicle, isKnownRideCategory } from '../lib/vehicle-category.mjs'
+import { isRateLimited } from '../lib/rateLimit.mjs'
 import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
 import { recordWalletEntry, refundPrepaidRide } from '../lib/finance-ledger.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
@@ -1081,6 +1082,15 @@ export async function handleSrRides(req, res, url, context) {
       const error = new Error('Pickup can only be verified before the trip starts.')
       error.statusCode = 409
       error.code = 'PICKUP_NOT_VERIFIABLE'
+      error.expose = true
+      throw error
+    }
+    // The code is only 4 digits, so cap guesses per ride (a dishonest driver must not be able to try all
+    // 10,000 and "start" a trip without the rider). Counts every attempt, right or wrong.
+    if (await isRateLimited(`sr-pickup-verify:${ride.id}`, 10 * 60_000, 8)) {
+      const error = new Error('Too many pickup-code attempts for this ride. Wait a few minutes, or ask the rider to contact support.')
+      error.statusCode = 429
+      error.code = 'PICKUP_TOO_MANY_ATTEMPTS'
       error.expose = true
       throw error
     }

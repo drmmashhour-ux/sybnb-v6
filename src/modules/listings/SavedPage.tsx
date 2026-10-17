@@ -54,7 +54,7 @@ export function SavedPage({ lang }: Props) {
 
   async function load() {
     try {
-      const [f, s] = await Promise.all([fetchFavourites().catch(() => []), fetchSavedSearches().catch(() => [])])
+      const [f, s] = await Promise.all([fetchFavourites().catch(() => []), signedIn ? fetchSavedSearches().catch(() => []) : Promise.resolve([])])
       setFavourites(f)
       setSearches(s)
     } finally {
@@ -63,8 +63,7 @@ export function SavedPage({ lang }: Props) {
   }
 
   useEffect(() => {
-    if (signedIn) void load()
-    else setLoading(false)
+    void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -81,16 +80,6 @@ export function SavedPage({ lang }: Props) {
   async function toggleNotify(s: PlatformSavedSearch) {
     setSearches((cur) => cur.map((x) => (x.id === s.id ? { ...x, notifyOnNew: !x.notifyOnNew } : x)))
     try { await updateSavedSearch(s.id, { notifyOnNew: !s.notifyOnNew }) } catch { void load() }
-  }
-
-  if (!signedIn) {
-    return (
-      <main style={styles.wrap} dir={isAr ? 'rtl' : 'ltr'}>
-        <h1 style={styles.h1}>{pick(lang, 'المحفوظات', 'Saved', 'Sauvegardés')}</h1>
-        <p style={styles.muted}>{pick(lang, 'سجّل الدخول لحفظ الإعلانات وعمليات البحث وتلقّي تنبيهات الإعلانات الجديدة.', 'Sign in to save listings and searches and get new-listing alerts.', 'Connectez-vous pour sauvegarder des annonces et des recherches.')}</p>
-        <button type="button" style={styles.primary} onClick={() => (window.location.hash = '/account')}>{pick(lang, 'تسجيل الدخول', 'Sign in', 'Se connecter')}</button>
-      </main>
-    )
   }
 
   return (
@@ -123,6 +112,7 @@ export function SavedPage({ lang }: Props) {
         )}
       </section>
 
+      {signedIn ? (
       <section style={{ marginTop: 28 }}>
         <h2 style={styles.h2}>{pick(lang, 'عمليات البحث المحفوظة', 'Saved searches', 'Recherches sauvegardées')} {searches.length ? `(${searches.length})` : ''}</h2>
         {loading ? <p style={styles.muted}>…</p> : searches.length === 0 ? (
@@ -148,6 +138,7 @@ export function SavedPage({ lang }: Props) {
           </div>
         )}
       </section>
+      ) : null}
     </main>
   )
 }

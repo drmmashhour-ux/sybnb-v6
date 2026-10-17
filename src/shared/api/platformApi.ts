@@ -528,6 +528,7 @@ export const STAFF_SESSION_KEY = 'sybnb.v6.staffSession'
 export const STAFF_SESSION_TOKEN_KEY = 'sybnb-v6-staff-token'
 
 export { authStorage } from './authStorage'
+import { addLocalFavourite, clearLocalFavourites, readLocalFavourites, removeLocalFavourite } from './localFavourites'
 import { readQueue, enqueueFix, clearQueue } from '../lib/gps-queue'
 import { optimizePhoto } from '../lib/image-compress'
 import { authStorage } from './authStorage'
@@ -3834,16 +3835,39 @@ export type PlatformSavedSearch = {
 }
 
 export async function fetchFavourites(): Promise<PlatformFavourite[]> {
-  const session = await ensurePrototypeGuestSession()
+  const session = getStoredGuestSession()
+  if (!session) {
+    // Not signed in: show the choices saved on this device (no account needed).
+    const ids = readLocalFavourites()
+    const rows = await Promise.all(ids.map(async (listingId) => {
+      try {
+        const res = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${encodeURIComponent(listingId)}`)
+        return { id: `local-${listingId}`, listingId, createdAt: '', listing: res.listing } as PlatformFavourite
+      } catch {
+        return null
+      }
+    }))
+    return rows.filter((r): r is PlatformFavourite => r !== null)
+  }
+  await mergeLocalFavouritesInto(session.token)
   const res = await apiRequest<{ ok: true; favourites: PlatformFavourite[] }>('/api/favourites', { token: session.token })
   return res.favourites
 }
 
-// Lightweight: just the set of favourited listing ids (for rendering hearts). Returns [] when signed out.
+// A visitor who saved listings before signing in keeps them: push them to the account once.
+async function mergeLocalFavouritesInto(token: string) {
+  const ids = readLocalFavourites()
+  if (!ids.length) return
+  await Promise.all(ids.map((listingId) => apiRequest<{ ok: true }>('/api/favourites', { method: 'POST', token, body: { listingId } }).catch(() => null)))
+  clearLocalFavourites()
+}
+
+// Lightweight: just the set of favourited listing ids (for rendering hearts).
 export async function fetchFavouriteIds(): Promise<string[]> {
   const session = getStoredGuestSession()
-  if (!session) return []
+  if (!session) return readLocalFavourites()
   try {
+    await mergeLocalFavouritesInto(session.token)
     const res = await apiRequest<{ ok: true; favourites: PlatformFavourite[] }>('/api/favourites', { token: session.token })
     return res.favourites.map((f) => f.listingId)
   } catch {
@@ -3852,12 +3876,14 @@ export async function fetchFavouriteIds(): Promise<string[]> {
 }
 
 export async function addFavourite(listingId: string): Promise<void> {
-  const session = await ensurePrototypeGuestSession()
+  const session = getStoredGuestSession()
+  if (!session) { addLocalFavourite(listingId); return }
   await apiRequest<{ ok: true }>('/api/favourites', { method: 'POST', token: session.token, body: { listingId } })
 }
 
 export async function removeFavourite(listingId: string): Promise<void> {
-  const session = await ensurePrototypeGuestSession()
+  const session = getStoredGuestSession()
+  if (!session) { removeLocalFavourite(listingId); return }
   await apiRequest<{ ok: true }>(`/api/favourites/${encodeURIComponent(listingId)}`, { method: 'DELETE', token: session.token })
 }
 

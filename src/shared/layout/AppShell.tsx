@@ -296,6 +296,7 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
       ]
     : [
         { key: 'login', label: pick(lang, 'تسجيل الدخول أو إنشاء حساب', 'Log in or sign up', 'Connexion ou inscription'), onSelect: () => go('/account/open'), strong: true },
+        { key: 'saved', label: pick(lang, 'المحفوظات', 'Saved', 'Sauvegardés'), onSelect: () => go('/saved') },
         { key: 'sep1', separator: true },
         { key: 'agents', label: pick(lang, 'الوسطاء الموثّقون', 'Verified agents', 'Agents vérifiés'), onSelect: () => go('/agents') },
         { key: 'guides', label: pick(lang, 'أدلة إرشادية', 'Guides', 'Guides'), onSelect: () => go('/guides') },

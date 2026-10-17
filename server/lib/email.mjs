@@ -162,6 +162,10 @@ export async function sendEmail({ to, subject, text, html, purpose, idempotencyK
     const res = await sesRequest(cfg, body)
     if (!res.ok) {
       // Never include the request body (it carries the OTP) or credentials in the error.
+      // Log only SES's own error type + message so ops can diagnose (no secrets, no OTP).
+      let detail = ''
+      try { const j = await res.json(); detail = `${res.headers.get('x-amzn-errortype') || j?.__type || ''}: ${j?.message || j?.Message || ''}`.slice(0, 300) } catch { /* ignore */ }
+      console.error(JSON.stringify({ event: 'email_provider_rejected', provider: 'ses', providerStatus: res.status, detail }))
       const error = new Error('Email provider rejected the message.')
       error.statusCode = 502
       error.code = 'EMAIL_SEND_FAILED'

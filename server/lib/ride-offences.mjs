@@ -45,20 +45,21 @@ export function isOffenceBlocked(count, env = process.env) {
   return count >= offenceBlockThreshold(env)
 }
 
-// Un-voided offences by this user in the role window.
+// Un-voided offences by this user in the role window. The voided check is done in code: a SQL
+// "NOT (json path = true)" is NULL (so excluded) for rides that have no `voided` field at all.
 export async function countOffences(client, { userId, role }, now = Date.now(), env = process.env) {
   const since = new Date(now - offenceWindowMs(env))
-  const where = {
-    updatedAt: { gte: since },
-    AND: [
-      { metadata: { path: ['lateCancel', 'by'], equals: role } },
-      { NOT: { metadata: { path: ['lateCancel', 'voided'], equals: true } } },
-    ],
-    ...(role === 'RIDER' ? { riderId: userId } : { driverId: userId }),
-  }
-  return client.rideRequest.count({ where })
+  const rows = await client.rideRequest.findMany({
+    where: {
+      updatedAt: { gte: since },
+      metadata: { path: ['lateCancel', 'by'], equals: role },
+      ...(role === 'RIDER' ? { riderId: userId } : { driverId: userId }),
+    },
+    select: { metadata: true },
+    take: 200,
+  })
+  return rows.filter((r) => r.metadata?.lateCancel?.voided !== true).length
 }
-
 export function restrictedError(role) {
   const error = new Error(
     role === 'RIDER'

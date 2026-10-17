@@ -25,9 +25,10 @@ test('rider fee: ladder is a floor, percent fee can be higher, never above fare'
   assert.equal(riderOffenceFeeMinor({ currency: 'SYP', baseFeeMinor: 700, fareMinor: 9000, offenceNumber: 1 }, {}), 700)
 })
 
-test('countOffences filters by role, window and voided strikes', async () => {
+test('countOffences filters by role and window and skips voided strikes', async () => {
   let seen
-  const client = { rideRequest: { count: async (q) => { seen = q; return 2 } } }
+  const rows = [{ metadata: { lateCancel: { by: 'RIDER' } } }, { metadata: { lateCancel: { by: 'RIDER', voided: true } } }, { metadata: { lateCancel: { by: 'RIDER', voided: false } } }]
+  const client = { rideRequest: { findMany: async (q) => { seen = q; return rows } } }
   const n = await countOffences(client, { userId: 'u1', role: 'RIDER' }, Date.parse('2026-10-17T00:00:00Z'), {})
   assert.equal(n, 2)
   assert.equal(seen.where.riderId, 'u1')

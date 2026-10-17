@@ -19,7 +19,7 @@ import {
   validateActivePromoCode,
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
-import { rideCategoryToVehicle } from '../lib/vehicle-category.mjs'
+import { rideCategoryToVehicle, isKnownRideCategory } from '../lib/vehicle-category.mjs'
 import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
 import { recordWalletEntry, refundPrepaidRide } from '../lib/finance-ledger.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
@@ -365,6 +365,13 @@ export async function handleSrRides(req, res, url, context) {
       .map((stop) => String(stop || '').trim())
       .filter(Boolean)
       .slice(0, 3)
+    if (body.category && !isKnownRideCategory(String(body.category))) {
+      const error = new Error('Unknown ride category. Choose SR Bike, SR Economy, SR Comfort, SR SUV, SR Van or SR VIP.')
+      error.statusCode = 400
+      error.code = 'RIDE_CATEGORY_INVALID'
+      error.expose = true
+      throw error
+    }
     const quote = await computeSrQuoteWithTraffic({
       pickup: body.pickup,
       dropoff: body.dropoff,
@@ -386,6 +393,13 @@ export async function handleSrRides(req, res, url, context) {
     requireAuth(context, ['GUEST'])
     const body = await readJson(req)
     const category = String(body.category || 'SR Economy')
+    if (!isKnownRideCategory(category)) {
+      const error = new Error('Unknown ride category. Choose SR Bike, SR Economy, SR Comfort, SR SUV, SR Van or SR VIP.')
+      error.statusCode = 400
+      error.code = 'RIDE_CATEGORY_INVALID'
+      error.expose = true
+      throw error
+    }
     const pickup = String(body.pickup || '')
     const dropoff = String(body.dropoff || '')
     // SR Ride vs. Uber gap-closure (P2 #14): up to 3 intermediate stops, matching Uber's own

@@ -15,6 +15,12 @@ export const RIDE_CATEGORY_TO_VEHICLE = {
 export const VEHICLE_CATEGORY_VALUES = ['BIKE', 'ECONOMY', 'COMFORT', 'SUV', 'VAN', 'VIP']
 
 // Map a ride category string to its VehicleCategory enum value, or null if unknown/missing.
+// True only for the exact ride-category names the app sends ('SR Bike', 'SR Economy', ...). An unknown
+// name used to be accepted and priced at the default tier, creating a ride NO driver could ever claim.
+export function isKnownRideCategory(cat) {
+  return typeof cat === 'string' && Object.prototype.hasOwnProperty.call(RIDE_CATEGORY_TO_VEHICLE, cat)
+}
+
 export function rideCategoryToVehicle(cat) {
   if (!cat || typeof cat !== 'string') return null
   return RIDE_CATEGORY_TO_VEHICLE[cat] || null

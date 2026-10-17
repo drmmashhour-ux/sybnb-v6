@@ -1,3 +1,4 @@
+import { assertListingPrice, assertListingText, clampPlaceText } from '../lib/listing-input.mjs'
 import { gridFilterCondition } from '../lib/grid-filter.mjs'
 import { db } from '../lib/prisma.mjs'
 import { dateBlockingBookingWhere } from '../lib/booking-policy.mjs'
@@ -492,13 +493,8 @@ export async function handleListings(req, res, url, context) {
         error.expose = true
         throw error
       }
-      if (!Number.isFinite(priceMinor) || priceMinor <= 0) {
-        const error = new Error('Listing price must be greater than zero.')
-        error.statusCode = 400
-        error.code = 'LISTING_PRICE_INVALID'
-        error.expose = true
-        throw error
-      }
+      assertListingPrice(priceMinor)
+      assertListingText(body)
       // Persist a Location relation so the listing is discoverable by the city browse filter and
       // renders with a real location. The wizard sends a governorate slug (damascus/aleppo/…); map
       // it to the English city name that browse filters match (location.city). Without this, host-
@@ -506,7 +502,7 @@ export async function handleListings(req, res, url, context) {
       let locationId
       const govSource = body.governorate || body.metadata?.governorate || ''
       const areaSource = body.area || body.metadata?.area
-      const cityName = resolveListingCityName(govSource)
+      const cityName = clampPlaceText(resolveListingCityName(govSource))
       if (cityName) {
         const latRaw = Number(body.lat ?? body.metadata?.lat)
         const lngRaw = Number(body.lng ?? body.metadata?.lng)
@@ -515,7 +511,7 @@ export async function handleListings(req, res, url, context) {
             country: 'SY',
             governorate: cityName,
             city: cityName,
-            area: areaSource ? String(areaSource) : undefined,
+            area: clampPlaceText(areaSource),
             lat: Number.isFinite(latRaw) && latRaw !== 0 ? latRaw : undefined,
             lng: Number.isFinite(lngRaw) && lngRaw !== 0 ? lngRaw : undefined,
           },

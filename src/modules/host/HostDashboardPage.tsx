@@ -16,6 +16,7 @@ import {
   updatePrototypeHostInstantBook,
   confirmListingPrice,
   updatePrototypeHostListingStatus,
+  setHostListingSold,
   type HostDashboardMode,
   type PlatformHostEarnings,
   type PlatformHostOverview,
@@ -566,6 +567,22 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     }
   }
 
+  async function toggleSold(listingId: string, sold: boolean) {
+    setStatus('saving')
+    setActiveListingId(listingId)
+    setMessage('')
+    try {
+      await setHostListingSold(listingId, sold, mode)
+      setOverview(await fetchPrototypeHostOverview(mode))
+      setStatus('ready')
+    } catch (error) {
+      setStatus('error')
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setActiveListingId('')
+    }
+  }
+
   async function deleteListing(listingId: string) {
     if (!window.confirm(pick(lang, 'حذف هذا الإعلان نهائياً؟ لا يمكن التراجع.', 'Permanently delete this listing? This cannot be undone.', 'Supprimer définitivement cette annonce ? Cette action est irréversible.'))) return
     setStatus('saving')
@@ -888,6 +905,17 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                     onClick={() => void updateListing(listing.id, 'PAUSED')}
                   >
                     {activeListingId === listing.id ? t.saving : t.pause}
+                  </button>
+                )}
+                {listing.division !== 'STAYS' && listing.status === 'APPROVED' && (
+                  <button
+                    disabled={activeListingId === listing.id}
+                    style={listing.metadata?.sold === true ? styles.primaryButton : styles.secondaryButton}
+                    onClick={() => void toggleSold(listing.id, listing.metadata?.sold !== true)}
+                  >
+                    {listing.metadata?.sold === true
+                      ? pick(lang, 'إعادة للبيع', 'Back on sale', 'Remettre en vente')
+                      : pick(lang, 'تم البيع', 'Mark as sold', 'Marquer comme vendu')}
                   </button>
                 )}
                 <button

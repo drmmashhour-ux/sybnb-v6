@@ -351,7 +351,7 @@ export async function handleListings(req, res, url, context) {
 
         let hitPageSize = false
         for (const listing of batch) {
-          if (listing.metadata?.advertising !== true) listings.push(listing)
+          if (listing.metadata?.advertising !== true && listing.metadata?.sold !== true) listings.push(listing)
           scanCursor = { value: listing[sortConfig.field], id: listing.id }
           if (listings.length >= PAGE_SIZE) {
             hitPageSize = true
@@ -567,6 +567,41 @@ export async function handleListings(req, res, url, context) {
     }
 
     return methodNotAllowed(res, ['GET', 'POST'])
+  }
+
+  // Mark as sold / back on sale (2026-10-17). For items that are sold once (cars, marketplace, property
+  // for sale): the ad stays reachable by its link with a "Sold" badge (so saved/shared links do not
+  // 404) but disappears from browse. Not for stays, which are rented repeatedly.
+  const soldMatch = url.pathname.match(/^\/api\/listings\/([^/]+)\/sold$/)
+  if (soldMatch) {
+    if (req.method !== 'PATCH') return methodNotAllowed(res, ['PATCH'])
+    requireAuth(context, ['SELLER', 'HOST'])
+    const body = await readJson(req)
+    const existing = await db().listing.findFirst({ where: { id: soldMatch[1], ownerId: context.user.id } })
+    const fail = (statusCode, code, message) => {
+      const error = new Error(message)
+      error.statusCode = statusCode
+      error.code = code
+      error.expose = true
+      throw error
+    }
+    if (!existing) fail(404, 'LISTING_NOT_FOUND', 'Listing not found for this account.')
+    if (existing.division === 'STAYS') fail(400, 'LISTING_NOT_SELLABLE', 'Stays cannot be marked as sold. Pause the listing instead.')
+    if (existing.status !== 'APPROVED') fail(409, 'LISTING_NOT_LIVE', 'Only a live listing can be marked as sold.')
+    const sold = body.sold !== false
+    const metadata = { ...(existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}) }
+    if (sold) {
+      metadata.sold = true
+      metadata.soldAt = new Date().toISOString()
+    } else {
+      delete metadata.sold
+      delete metadata.soldAt
+    }
+    const listing = await db().listing.update({ where: { id: existing.id }, data: { metadata } })
+    await db().adminAuditLog.create({
+      data: { actorUserId: context.user.id, action: sold ? 'LISTING_MARKED_SOLD' : 'LISTING_UNMARKED_SOLD', entityType: 'listings', entityId: listing.id, before: existing, after: listing },
+    })
+    return json(res, 200, { ok: true, listing })
   }
 
   const detailMatch = url.pathname.match(/^\/api\/listings\/([^/]+)$/)

@@ -1520,7 +1520,7 @@ export type PlatformHostInquiryThread = {
   guestId: string | null
   updatedAt: string
   listing: { id: string; titleAr: string; titleEn: string | null; division: string; priceMinor: number; currency: string } | null
-  guest: { id: string; displayName: string; email: string | null } | null
+  guest: { id: string; displayName: string } | null
   messages: PlatformMessage[]
 }
 
@@ -3169,6 +3169,17 @@ export async function updatePrototypeHostListingStatus(
       body: { status },
     },
   )
+  return response.listing
+}
+
+// Mark a for-sale listing (cars, marketplace, property) as sold, or put it back on sale.
+export async function setHostListingSold(listingId: string, sold: boolean, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}/sold`, {
+    method: 'PATCH',
+    token: session.token,
+    body: { sold },
+  })
   return response.listing
 }
 

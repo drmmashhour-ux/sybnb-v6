@@ -857,6 +857,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
               <div style={styles.demoBadge} role="note">{isDemoListing ? t.demoNotice : t.notBookableNotice}</div>
             )}
 
+            {listing.metadata?.sold === true && (
+              <div style={styles.demoBadge} role="status">{pick(lang, 'تم بيع هذا الإعلان', 'This item has been sold', 'Cet article a été vendu')}</div>
+            )}
             <p style={styles.body}>{listingDescriptionText(listing, lang)}</p>
             <ListingSpecs division={listing.division} metadata={listing.metadata} lang={lang} />
             <NearbyTags metadata={listing.metadata} lang={lang} />

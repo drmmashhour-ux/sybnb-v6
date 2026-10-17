@@ -3,6 +3,7 @@ import { findDivisionByRoute } from '../engines/navigation/divisions'
 import type { Lang } from '../engines/language/languageEngine'
 import { getInitialLanguage, persistLanguage, text } from '../engines/language/languageEngine'
 import { AppShell } from '../shared/layout/AppShell'
+import { VendorModeSwitcher } from '../shared/layout/VendorModeSwitcher'
 import { NotFoundPage } from '../modules/common/NotFoundPage'
 import { isSellerRoute } from '../modules/seller/sellerRoutes'
 import { isTrustProtectionRoute } from '../modules/trust/trustRoutes'
@@ -241,11 +242,14 @@ export function App() {
           path === '/host/cars' ||
           path === '/host/new-construction' ||
           path === '/host/marketplace' ? (
-          <HostDashboardPage
-            lang={lang}
-            mode={path === '/host/stays' || path === '/host' ? 'host' : 'seller'}
-            focus={hostFocusFromPath(path)}
-          />
+          <>
+            <VendorModeSwitcher lang={lang} path={path} />
+            <HostDashboardPage
+              lang={lang}
+              mode={path === '/host/stays' || path === '/host' ? 'host' : 'seller'}
+              focus={hostFocusFromPath(path)}
+            />
+          </>
         ) : path === '/host/earnings' ? (
           <HostEarningsPage lang={lang} />
         ) : path === '/host/payouts' ? (
@@ -253,9 +257,9 @@ export function App() {
         ) : path === '/host/inquiries' ? (
           <HostInquiriesPage lang={lang} />
         ) : path === '/driver' ? (
-          <DriverDashboardPage lang={lang} />
+          <><VendorModeSwitcher lang={lang} path={path} /><DriverDashboardPage lang={lang} /></>
         ) : path === '/merchant' ? (
-          <MerchantDashboardPage lang={lang} />
+          <><VendorModeSwitcher lang={lang} path={path} /><MerchantDashboardPage lang={lang} /></>
         ) : path === '/immocontact' ? (
           <ImmocontactPage lang={lang} />
         ) : path === '/admin/sr/promo-codes' ? (

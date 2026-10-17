@@ -318,7 +318,8 @@ export async function handleMessages(req, res, url, context) {
       where: { listing: { ownerId: context.user.id } },
       include: {
         listing: { select: { id: true, titleAr: true, titleEn: true, division: true, priceMinor: true, currency: true } },
-        guest: { select: { id: true, displayName: true, email: true } },
+        // Email deliberately not exposed: contact stays inside the platform (owner decision 2026-10-17).
+        guest: { select: { id: true, displayName: true } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 },
       },
       orderBy: { updatedAt: 'desc' },

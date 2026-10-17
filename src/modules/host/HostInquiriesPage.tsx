@@ -140,7 +140,7 @@ export function HostInquiriesPage({ lang, mode = 'host' }: Props) {
               <>
                 <div style={styles.conversationHeader}>
                   <strong>{activeThread.listing ? listingTitleText(activeThread.listing, lang) : '-'}</strong>
-                  <span>{activeThread.guest?.displayName} · {activeThread.guest?.email}</span>
+                  <span>{activeThread.guest?.displayName}</span>
                 </div>
                 <div style={styles.messages}>
                   {activeThread.messages.length === 0 && <p style={styles.body}>{t.noMessages}</p>}

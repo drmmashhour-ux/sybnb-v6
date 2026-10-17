@@ -218,6 +218,28 @@ const TEMPLATES = {
     en: (d) => ({ subject: `SYBNB: your auction sold`, body: `Your auction for ${d.carName} closed with a winning bid.` }),
     fr: (d) => ({ subject: `SYBNB : votre enchère est vendue`, body: `Votre enchère pour ${d.carName} s'est terminée avec une offre gagnante.` }),
   },
+  // Admin alerts that were being sent with no template (2026-10-17): renderNotification threw
+  // "Unknown notification kind", so these emails never went out.
+  admin_ride_disputed: {
+    ar: (d) => ({ subject: 'SYBNB: نزاع جديد على رحلة', body: `فتح ${d.openedBy === 'DRIVER' ? 'السائق' : 'الراكب'} نزاعاً على الرحلة ${d.rideId}. راجعه من لوحة الرحلات.` }),
+    en: (d) => ({ subject: 'SYBNB admin: ride dispute opened', body: `The ${String(d.openedBy || '').toLowerCase()} opened a dispute on ride ${d.rideId}. Review it in the rides console.` }),
+    fr: (d) => ({ subject: 'SYBNB admin : litige sur une course', body: `Le ${String(d.openedBy || '').toLowerCase() === 'driver' ? 'chauffeur' : 'passager'} a ouvert un litige sur la course ${d.rideId}. À examiner dans la console des courses.` }),
+  },
+  car_auction_settled: {
+    ar: (d) => ({ subject: 'SYBNB: أُغلق مزاد سيارة بنجاح', body: `المزاد ${d.auctionId} (الإعلان ${d.listingId}) أُغلق بمزايدة فائزة قيمتها ${d.winningBidMinor}. ${d.depositCharged ? 'تم تحصيل العربون.' : 'لم يُحصَّل العربون بعد — راجعه.'}` }),
+    en: (d) => ({ subject: 'SYBNB admin: car auction settled', body: `Auction ${d.auctionId} (listing ${d.listingId}) closed with a winning bid of ${d.winningBidMinor}. ${d.depositCharged ? 'Deposit charged.' : 'Deposit NOT charged yet — please review.'}` }),
+    fr: (d) => ({ subject: 'SYBNB admin : enchère auto conclue', body: `L'enchère ${d.auctionId} (annonce ${d.listingId}) s'est terminée avec une offre gagnante de ${d.winningBidMinor}. ${d.depositCharged ? 'Acompte prélevé.' : 'Acompte NON prélevé — à vérifier.'}` }),
+  },
+  car_auction_closed_no_sale: {
+    ar: (d) => ({ subject: 'SYBNB: أُغلق مزاد سيارة دون بيع', body: `المزاد ${d.auctionId} (الإعلان ${d.listingId}) أُغلق دون بيع${d.reserveMet === false ? ' (لم يبلغ السعر الأدنى)' : ''}.` }),
+    en: (d) => ({ subject: 'SYBNB admin: car auction closed without a sale', body: `Auction ${d.auctionId} (listing ${d.listingId}) closed without a sale${d.reserveMet === false ? ' (reserve not met)' : ''}.` }),
+    fr: (d) => ({ subject: 'SYBNB admin : enchère auto clôturée sans vente', body: `L'enchère ${d.auctionId} (annonce ${d.listingId}) s'est clôturée sans vente${d.reserveMet === false ? ' (prix de réserve non atteint)' : ''}.` }),
+  },
+  listing_visit_requested: {
+    ar: (d) => ({ subject: 'SYBNB: طلب زيارة جديد', body: `طلب مستخدم زيارة للإعلان ${d.listingId} (الطلب ${d.visitId}).` }),
+    en: (d) => ({ subject: 'SYBNB admin: new visit request', body: `A user requested a visit for listing ${d.listingId} (request ${d.visitId}).` }),
+    fr: (d) => ({ subject: 'SYBNB admin : nouvelle demande de visite', body: `Un utilisateur a demandé une visite pour l'annonce ${d.listingId} (demande ${d.visitId}).` }),
+  },
   auction_outbid: {
     ar: () => ({ subject: `SYBNB: تمت المزايدة فوقك`, body: `قدّم أحدهم مزايدة أعلى. زايد مجدداً للبقاء في الصدارة.` }),
     en: () => ({ subject: `SYBNB: you were outbid`, body: `Someone placed a higher bid. Bid again to stay in front.` }),

@@ -10,6 +10,7 @@ import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 import { listingPriceText } from './listingPriceText'
 import { SearchStateCard } from './SearchStates'
 import { SplitStayPanel } from './SplitStayPanel'
+import { GridSpecFilters } from './GridSpecFilters'
 import { restoredSearchValue, UnifiedSearchBar } from './UnifiedSearchBar'
 import type { SearchDivision, UnifiedSearchValue } from './UnifiedSearchBar'
 
@@ -221,6 +222,10 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
+  // Power / water / internet filters for stays (listing.metadata.visualFilters.*). A ref mirrors the
+  // state so runLiveSearch (called right after a change) always reads the newest selection.
+  const [gridFilters, setGridFilters] = useState<Record<string, string>>({})
+  const gridRef = useRef<Record<string, string>>({})
   const [lastQuery, setLastQuery] = useState<{ division: string; filters?: Parameters<typeof fetchApprovedListings>[1] } | null>(null)
   // Keyword filtering is client-side over the loaded results (the listings API has no keyword
   // parameter): titles (AR/EN) and description, case-insensitive, Arabic-normalized.
@@ -299,7 +304,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
     setActiveKeyword(value && value.division !== 'stays' ? value.keyword : '')
 
     try {
-      const filters = value
+      const filters = !value && Object.keys(gridRef.current).length
+        ? { attributes: { ...gridRef.current } }
+        : value
         ? {
             attributes: {
               carBrand: value.carBrand,
@@ -312,6 +319,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
               amenities: value.amenities,
               views: value.views,
               access: value.access,
+              ...(value.division === 'stays' ? gridRef.current : {}),
             },
             priceMin: Number(value.minPrice) || undefined,
             priceMax: Number(value.maxPrice) || undefined,
@@ -488,6 +496,17 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             onRetry={() => void runLiveSearch(lastSearch || undefined)}
           />
         )}
+        {(lastSearch?.division || effectiveInitialDivision) === 'stays' ? (
+          <GridSpecFilters
+            lang={lang}
+            value={gridFilters}
+            onChange={(next) => {
+              gridRef.current = next
+              setGridFilters(next)
+              void runLiveSearch(lastSearch || undefined)
+            }}
+          />
+        ) : null}
         {lastSearch && lastSearch.division === 'stays' && lastSearch.locationTouched && lastSearch.governorate && lastSearch.checkIn && lastSearch.checkOut ? (
           <SplitStayPanel lang={lang} city={governorateCityName(lastSearch.governorate) || ""} checkIn={lastSearch.checkIn} checkOut={lastSearch.checkOut} />
         ) : null}

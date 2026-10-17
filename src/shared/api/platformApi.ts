@@ -1330,7 +1330,7 @@ export async function fetchApprovedListings(
   const params = new URLSearchParams({ division })
   // Single-select scalar attributes only (Cars: carBrand/…; Buy/Rentals: propertyType). Skip
   // 'any', empty, and multi-select array values — only scalar constraints reach the server.
-  const ATTRIBUTE_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType', 'marketCategory']
+  const ATTRIBUTE_KEYS = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType', 'marketCategory', 'powerSource', 'waterSystem', 'connectivity']
   if (filters?.attributes) {
     for (const key of ATTRIBUTE_KEYS) {
       const value = filters.attributes[key]

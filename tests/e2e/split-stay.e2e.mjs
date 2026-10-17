@@ -24,8 +24,8 @@ async function main() {
   const host = await db().user.create({ data: { email: `split-host-${RUN}@example.test`, displayName: `Split host ${RUN}`, locale: 'en', hostVerifiedAt: new Date(), roles: { create: [{ role: 'HOST' }, { role: 'GUEST' }] } } })
   await createSessionToken({ id: host.id, roles: [{ role: 'HOST' }] })
   const loc = await db().location.create({ data: { governorate: 'Test', city: CITY } })
-  const mk = (title, price) => db().listing.create({ data: { ownerId: host.id, division: 'STAYS', titleAr: title, titleEn: title, status: 'APPROVED', priceMinor: price, currency: 'SYP', metadata: {}, locationId: loc.id } })
-  const A = await mk(`A ${RUN}`, 100_000)
+  const mk = (title, price, metadata = {}) => db().listing.create({ data: { ownerId: host.id, division: 'STAYS', titleAr: title, titleEn: title, status: 'APPROVED', priceMinor: price, currency: 'SYP', metadata, locationId: loc.id } })
+  const A = await mk(`A ${RUN}`, 100_000, { visualFilters: { powerSource: 'solar', waterSystem: 'tank' } })
   const B = await mk(`B ${RUN}`, 120_000)
   // Trip: nights day(50)..day(58) = 8 nights. A is booked from night 5 on; B is booked for the first 3 nights.
   await db().booking.create({ data: { listingId: A.id, guestId: host.id, status: 'CONFIRMED', checkIn: day(55), checkOut: day(58), amountMinor: 1, currency: 'SYP' } })
@@ -43,6 +43,15 @@ async function main() {
   const shortQs = `city=${encodeURIComponent(CITY)}&checkIn=${iso(60)}&checkOut=${iso(62)}`
   const free = await get(shortQs)
   check('free dates: both stays are single matches, no split needed', free.j.singles?.length === 2 && free.j.pairs?.length === 0, free.j)
+
+  // Power / water / internet search filters (grid-spec).
+  const ids = async (q) => ((await (await fetch(`${API}/api/listings?division=STAYS&city=${encodeURIComponent(CITY)}&${q}`)).json()).listings || []).map((x) => x.id)
+  const solar = await ids('powerSource=solar')
+  check('powerSource=solar returns only the solar stay', solar.includes(A.id) && !solar.includes(B.id), solar)
+  const grid = await ids('powerSource=grid')
+  check('powerSource=grid excludes it', !grid.includes(A.id), grid)
+  const both = await ids('powerSource=solar&waterSystem=tank')
+  check('combined power + water filter matches', both.includes(A.id), both)
 
   check('missing city -> 400', (await get(`checkIn=${iso(50)}&checkOut=${iso(52)}`)).status === 400, 'no 400')
   check('bad dates -> 400', (await get(`city=x&checkIn=${iso(52)}&checkOut=${iso(50)}`)).status === 400, 'no 400')

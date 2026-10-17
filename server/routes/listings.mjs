@@ -209,7 +209,7 @@ export async function handleListings(req, res, url, context) {
       // browse uses carBrand/carBody/carFuel/carTransmission/condition — so this is one generic
       // filter, not a per-division search system. 'any'/empty means "no constraint".
       // Single-select attribute filters (Cars: carBrand/…; Buy/Rentals: propertyType).
-      const attributeKeys = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType', 'marketCategory']
+      const attributeKeys = ['carBrand', 'carBody', 'carFuel', 'carTransmission', 'condition', 'propertyType', 'marketCategory', 'powerSource', 'waterSystem', 'connectivity']
       const attributeConditions = []
       for (const key of attributeKeys) {
         const value = url.searchParams.get(key)

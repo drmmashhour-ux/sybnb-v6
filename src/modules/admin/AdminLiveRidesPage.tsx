@@ -5,6 +5,7 @@ import {
   fetchAdminSrRides,
   resolveAdminRideDispute,
   reverseAdminRidePayment,
+  resolveAdminRideFeeContest,
   type PlatformAdminSrRide,
 } from '../../shared/api/platformApi'
 import { moneyText } from '../../shared/i18n/display'
@@ -39,6 +40,11 @@ const copy = {
     confirmFare: 'تأكيد الأجرة',
     reverseRefund: 'عكس وإرجاع',
     reversePayment: 'عكس الدفعة',
+    feeContests: 'اعتراضات الرسوم',
+    waiveFee: 'إلغاء الرسوم وإرجاع المال',
+    upholdFee: 'تأييد الرسوم',
+    contestReason: 'سبب الراكب',
+    noShowTag: 'عدم حضور',
     confirmReverse: 'سيؤدي هذا إلى عكس أموال الرحلة. متابعة؟',
     done: 'تم',
   },
@@ -64,6 +70,11 @@ const copy = {
     confirmFare: 'Confirm fare',
     reverseRefund: 'Reverse & refund',
     reversePayment: 'Reverse payment',
+    feeContests: 'Fee contests',
+    waiveFee: 'Waive fee & refund',
+    upholdFee: 'Uphold fee',
+    contestReason: 'Rider’s reason',
+    noShowTag: 'No-show',
     confirmReverse: 'This reverses the ride’s money. Continue?',
     done: 'Done',
   },
@@ -89,12 +100,17 @@ const copy = {
     confirmFare: 'Confirmer le tarif',
     reverseRefund: 'Annuler & rembourser',
     reversePayment: 'Annuler le paiement',
+    feeContests: 'Contestations de frais',
+    waiveFee: 'Annuler les frais et rembourser',
+    upholdFee: 'Maintenir les frais',
+    contestReason: 'Motif du passager',
+    noShowTag: 'Absence',
     confirmReverse: 'Ceci annule l’argent de la course. Continuer ?',
     done: 'Terminé',
   },
 }
 
-type Filter = 'ACTIVE' | 'DISPUTED' | 'COMPLETED'
+type Filter = 'ACTIVE' | 'DISPUTED' | 'COMPLETED' | 'FEE_CONTEST'
 
 function fmt(ts: string | null | undefined) {
   if (!ts) return ''
@@ -158,6 +174,21 @@ export function AdminLiveRidesPage({ lang }: Props) {
     }
   }
 
+  async function resolveFee(rideId: string, resolution: 'WAIVE' | 'UPHOLD') {
+    if (resolution === 'WAIVE' && !window.confirm(t.confirmReverse)) return
+    setBusyId(rideId)
+    setMessage('')
+    try {
+      await resolveAdminRideFeeContest(rideId, { resolution, reason: reason.trim() || undefined })
+      setReason('')
+      await load(filter)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : t.error)
+    } finally {
+      setBusyId('')
+    }
+  }
+
   async function reversePayment(rideId: string) {
     if (!window.confirm(t.confirmReverse)) return
     setBusyId(rideId)
@@ -176,6 +207,7 @@ export function AdminLiveRidesPage({ lang }: Props) {
   const filters: Array<{ key: Filter; label: string }> = [
     { key: 'ACTIVE', label: t.filterActive },
     { key: 'DISPUTED', label: t.filterDisputed },
+    { key: 'FEE_CONTEST', label: t.feeContests },
     { key: 'COMPLETED', label: t.filterCompleted },
   ]
 
@@ -210,7 +242,7 @@ export function AdminLiveRidesPage({ lang }: Props) {
       {status === 'ready' && rides.length === 0 && <p>{t.empty}</p>}
       {message && status !== 'error' && <p style={styles.error}>{message}</p>}
 
-      {rides.some((r) => r.status === 'DISPUTED' || r.status === 'COMPLETED') && (
+      {rides.some((r) => r.status === 'DISPUTED' || r.status === 'COMPLETED' || r.feeContest?.status === 'OPEN') && (
         <input
           style={styles.input}
           value={reason}
@@ -245,6 +277,20 @@ export function AdminLiveRidesPage({ lang }: Props) {
             )}
             <span dir="ltr" style={styles.dim}>{t.requested}: {fmt(ride.requestedAt)}</span>
 
+            {ride.noShow && <span style={styles.tag}>{t.noShowTag}</span>}
+            {ride.feeContest?.status === 'OPEN' && (
+              <>
+                <span style={styles.dim}>{t.contestReason}: {ride.feeContest.reason}</span>
+                <div style={styles.actions}>
+                  <button style={styles.dangerButton} disabled={busyId === ride.id} onClick={() => void resolveFee(ride.id, 'WAIVE')}>
+                    {t.waiveFee}
+                  </button>
+                  <button style={styles.primaryButton} disabled={busyId === ride.id} onClick={() => void resolveFee(ride.id, 'UPHOLD')}>
+                    {t.upholdFee}
+                  </button>
+                </div>
+              </>
+            )}
             {ride.status === 'DISPUTED' && (
               <div style={styles.actions}>
                 <button style={styles.primaryButton} disabled={busyId === ride.id} onClick={() => void confirmDispute(ride.id)}>

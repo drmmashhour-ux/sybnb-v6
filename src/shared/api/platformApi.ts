@@ -2692,6 +2692,17 @@ export async function markRiderNoShow(rideId: string) {
   return response.ride
 }
 
+// Rider contests a cancellation / no-show fee (admin then waives or upholds it).
+export async function contestRideFee(rideId: string, reason: string) {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>(`/api/sr/rides/${rideId}/contest-fee`, {
+    method: 'PATCH',
+    token: session.token,
+    body: { reason },
+  })
+  return response.ride
+}
+
 // Safety Phase 2 (2026-10-10): the assigned driver submits the rider's 4-digit pickup PIN. On a
 // match the server stamps metadata.pickupVerifiedAt, which unlocks the IN_PROGRESS (start trip)
 // transition. A mismatch is a 403 PICKUP_CODE_MISMATCH surfaced to the driver.
@@ -2895,6 +2906,8 @@ export type PlatformAdminSrRide = {
   updatedAt: string
   matchConfirmed?: boolean
   matchConfirmedAt?: string | null
+  feeContest?: { status: string; reason: string; openedAt: string } | null
+  noShow?: boolean
 }
 
 export async function fetchAdminSrRides(status?: string) {
@@ -2913,6 +2926,15 @@ export async function resolveAdminRideDispute(rideId: string, input: { resolutio
     ),
   )
   return response
+}
+
+export async function resolveAdminRideFeeContest(rideId: string, input: { resolution: 'WAIVE' | 'UPHOLD'; reason?: string }) {
+  return runAdminRequest((token) =>
+    apiRequest<{ ok: true; resolution: string; waiver: unknown }>(
+      `/api/admin/sr/rides/${encodeURIComponent(rideId)}/resolve-fee-contest`,
+      { method: 'PATCH', token, body: { resolution: input.resolution, reason: input.reason } },
+    ),
+  )
 }
 
 export async function reverseAdminRidePayment(rideId: string, input: { reason?: string } = {}) {

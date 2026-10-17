@@ -46,6 +46,7 @@ import { moneyText, statusText } from '../../shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { RideMap } from '../../shared/maps/RideMap'
 import { RiderArrivalBanner } from './RiderArrivalBanner'
+import { RideFeeContest } from './RideFeeContest'
 import { RiderSignInGate } from '../../shared/auth/RiderSignInGate'
 import { getStoredGuestSession } from '../../shared/api/platformApi'
 import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
@@ -1685,6 +1686,7 @@ export function SrRidePage({ lang }: Props) {
             </button>
           )}
 
+          {ride && <RideFeeContest ride={ride} lang={lang} />}
           {canCancel && estimatedCancellationFeeMinor > 0 && (
             <p style={styles.addressWarning}>
               {t.cancellationFeeWarning.replace('{amount}', moneyText(estimatedCancellationFeeMinor, ride?.currency || 'USD', lang))}

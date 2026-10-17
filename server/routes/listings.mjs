@@ -1,6 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { dateBlockingBookingWhere } from '../lib/booking-policy.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
+import { publicDisplayName } from '../lib/public-name.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { expireOldListings, listingExpiryDate, PLAN_DURATION_DAYS } from '../lib/listing-lifecycle.mjs'
@@ -126,7 +127,7 @@ function toPublicListing(l) {
     location: l.location
       ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area, lat: l.location.lat ?? null, lng: l.location.lng ?? null }
       : null,
-    owner: l.owner ? { id: l.owner.id, displayName: l.owner.displayName } : undefined,
+    owner: l.owner ? { id: l.owner.id, displayName: publicDisplayName(l.owner.displayName) } : undefined,
   }
 }
 
@@ -673,7 +674,8 @@ export async function handleListings(req, res, url, context) {
     })
     const count = reviews.length
     const average = count ? Math.round((reviews.reduce((sum, review) => sum + review.rating, 0) / count) * 10) / 10 : null
-    return json(res, 200, { ok: true, reviews, average, count })
+    const publicReviews = reviews.map((review) => ({ ...review, guest: review.guest ? { ...review.guest, displayName: publicDisplayName(review.guest.displayName) } : review.guest }))
+    return json(res, 200, { ok: true, reviews: publicReviews, average, count })
   }
 
   // Comparable / similar listings (migration 064). Centris "similar properties nearby": same

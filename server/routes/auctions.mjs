@@ -504,7 +504,7 @@ export async function handleAuctions(req, res, url, context) {
 function maskName(name) {
   if (!name || typeof name !== 'string') return 'Bidder'
   const trimmed = name.trim()
-  if (!trimmed) return 'Bidder'
+  if (!trimmed || trimmed.includes('@')) return 'Bidder' // email-shaped names must never appear
   const parts = trimmed.split(/\s+/)
   const first = parts[0]
   const initial = parts.length > 1 ? parts[parts.length - 1][0] : ''

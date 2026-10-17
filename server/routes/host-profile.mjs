@@ -2,6 +2,7 @@ import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { deleteHostPhoto, saveHostPhoto, signHostPhotoUrl } from '../lib/host-photo-storage.mjs'
+import { publicDisplayName } from '../lib/public-name.mjs'
 
 // Airbnb-style host profile (SYBNB's own): photo, "About me", languages, city -- filled in right
 // after a customer turns on hosting, and shown to guests on the host's listings.
@@ -125,7 +126,8 @@ export async function handleHostProfile(req, res, url, context) {
       error.expose = true
       throw error
     }
-    return json(res, 200, { ok: true, profile: shape(user.hostProfile, user) })
+    const publicUser = { ...user, displayName: publicDisplayName(user.displayName) }
+    return json(res, 200, { ok: true, profile: shape(user.hostProfile, publicUser) })
   }
 
   return false

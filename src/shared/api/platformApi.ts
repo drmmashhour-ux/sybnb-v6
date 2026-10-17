@@ -526,6 +526,7 @@ export const STAFF_SESSION_KEY = 'sybnb.v6.staffSession'
 export const STAFF_SESSION_TOKEN_KEY = 'sybnb-v6-staff-token'
 
 export { authStorage } from './authStorage'
+import { readQueue, enqueueFix, clearQueue } from '../lib/gps-queue'
 import { optimizePhoto } from '../lib/image-compress'
 import { authStorage } from './authStorage'
 export type HostDashboardMode = 'host' | 'seller'
@@ -2534,13 +2535,38 @@ export async function saveDriverVehicle(vehicle: { vehicleMake: string; vehicleM
   return response.driverProfile
 }
 
-export async function reportPrototypeDriverLocation(lat: number, lng: number) {
-  const session = await ensurePrototypeDriverSession()
-  await apiRequest<{ ok: true }>('/api/driver/location', {
-    method: 'PATCH',
-    token: session.token,
-    body: { lat, lng },
+let gpsFlushing = false
+async function flushGpsQueue(token: string) {
+  if (gpsFlushing || typeof localStorage === 'undefined') return
+  const points = readQueue(localStorage)
+  if (!points.length) return
+  gpsFlushing = true
+  try {
+    await apiRequest<{ ok: true }>('/api/driver/location/batch', { method: 'POST', token, body: { points } })
+    clearQueue(localStorage)
+  } catch { /* still offline: keep buffer */ } finally { gpsFlushing = false }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    void ensurePrototypeDriverSession().then((s) => flushGpsQueue(s.token)).catch(() => {})
   })
+}
+
+export async function reportPrototypeDriverLocation(lat: number, lng: number) {
+  const at = new Date().toISOString()
+  try {
+    const session = await ensurePrototypeDriverSession()
+    await apiRequest<{ ok: true }>('/api/driver/location', {
+      method: 'PATCH',
+      token: session.token,
+      body: { lat, lng },
+    })
+    await flushGpsQueue(session.token)
+  } catch (error) {
+    if (typeof localStorage !== 'undefined') enqueueFix(localStorage, { lat, lng, at })
+    throw error
+  }
 }
 
 // #192 (2026-10-10): driver earnings withdrawal client. GET reports the withdrawable/pending balance

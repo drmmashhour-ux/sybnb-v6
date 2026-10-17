@@ -89,6 +89,7 @@ const copy = {
     dispute: 'الإبلاغ عن مشكلة',
     saving: 'جار الحفظ',
     openListing: 'فتح الإعلان',
+    contactHost: 'تواصل مع المضيف',
     noPayment: 'لا يوجد إثبات دفع بعد.',
     saveBooking: 'حفظ الحجز',
     printBooking: 'طباعة الحجز',
@@ -149,6 +150,7 @@ const copy = {
     dispute: 'Report issue',
     saving: 'Saving',
     openListing: 'Open listing',
+    contactHost: 'Contact host',
     noPayment: 'No payment proof yet.',
     saveBooking: 'Save booking',
     printBooking: 'Print booking',
@@ -209,6 +211,7 @@ const copy = {
     dispute: 'Signaler un problème',
     saving: 'Enregistrement',
     openListing: 'Ouvrir l’annonce',
+    contactHost: 'Contacter l’hôte',
     noPayment: 'Aucune preuve de paiement pour le moment.',
     saveBooking: 'Enregistrer la réservation',
     printBooking: 'Imprimer la réservation',
@@ -684,6 +687,11 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
                   {hasIdDocument ? t.pay : t.idGateTitle}
                 </button>
               )
+            )}
+            {approvedPayment && ['CONFIRMED', 'COMPLETED'].includes(booking.status) && (
+              <button style={styles.primaryButton} onClick={() => (window.location.hash = '/immocontact')}>
+                {t.contactHost}
+              </button>
             )}
             {['CONFIRMED', 'COMPLETED'].includes(booking.status) && (
               <button style={styles.dangerButton} onClick={() => (window.location.hash = `/booking/dispute/${booking.id}`)}>

@@ -1114,11 +1114,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
             )}
 
             <div style={styles.actions}>
-              {isStays && (
-                <button type="button" style={styles.secondaryButton} onClick={openContactTunnel}>
-                  {pick(lang, 'تواصل مع المضيف', 'Contact host', 'Contacter l’hôte')}
-                </button>
-              )}
+              {/* Stays: no "Contact host" before booking -- messaging with the host opens on the booking once it is paid and confirmed. */}
               {!inquirySent && !booking && (
                 <button type="button" disabled={status === 'saving'} style={styles.primaryButton} onClick={() => void requestListing()}>
                   {primaryLabel}

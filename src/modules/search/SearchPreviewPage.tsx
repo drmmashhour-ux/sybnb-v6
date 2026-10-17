@@ -215,6 +215,7 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   const [effectiveInitialDivision, setEffectiveInitialDivision] = useState<SearchDivision>(() => readInitialSearchDivision(initialDivision))
   const [state, setState] = useState<'loading' | 'empty' | 'error'>('empty')
   const [lastSearch, setLastSearch] = useState<UnifiedSearchValue | null>(null)
+  const [auctionsOnly, setAuctionsOnly] = useState(false)
   const [listings, setListings] = useState<PlatformListing[]>([])
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -268,10 +269,12 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
   const isDirectDivisionEntry = isStaysEntry || initialDivision !== 'stays'
   const divisionCopy = t.divisionCopy[effectiveInitialDivision]
   const isSampleMode = listings.some(isSampleListing)
-  const visibleListings = useMemo(
-    () => (activeKeyword.trim() ? listings.filter((listing) => listingMatchesKeyword(listing, activeKeyword)) : listings),
-    [listings, activeKeyword],
-  )
+  const visibleListings = useMemo(() => {
+    const byKeyword = activeKeyword.trim() ? listings.filter((listing) => listingMatchesKeyword(listing, activeKeyword)) : listings
+    // Cars page "Auction cars" toggle: only listings flagged as auctions (metadata.auction.isAuction).
+    if (!auctionsOnly || effectiveInitialDivision !== 'cars') return byKeyword
+    return byKeyword.filter((listing) => (listing.metadata as { auction?: { isAuction?: boolean } } | null)?.auction?.isAuction)
+  }, [listings, activeKeyword, auctionsOnly, effectiveInitialDivision])
   // A count is only meaningful once the guest has searched or filtered; before that the list is
   // just a sample of the newest listings, so no number is shown.
   const hasSearched = lastSearch !== null
@@ -401,6 +404,23 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             >
               {pick(lang, 'هل لديك مكان؟ أدرج مكانك واستضِف', 'Have a place? List your place & host', 'Vous avez un logement ? Publiez-le et devenez hôte')}
             </button>
+          )}
+          {effectiveInitialDivision === 'cars' && (
+            <div className="cars-hero-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
+              <button type="button" className="stays-host-cta" onClick={() => (window.location.hash = '/sell')}>
+                {pick(lang, 'بع سيارتك', 'Sell your car', 'Vendez votre voiture')}
+              </button>
+              <button
+                type="button"
+                className="stays-host-cta"
+                aria-pressed={auctionsOnly}
+                onClick={() => setAuctionsOnly((value) => !value)}
+              >
+                {auctionsOnly
+                  ? pick(lang, 'عرض كل السيارات', 'Show all cars', 'Afficher toutes les voitures')
+                  : pick(lang, 'سيارات المزاد', 'Auction cars', 'Voitures aux enchères')}
+              </button>
+            </div>
           )}
         </div>
         <div className="search-hero-photo" aria-hidden="true">

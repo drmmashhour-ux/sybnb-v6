@@ -77,6 +77,13 @@ export function translateDbError(error) {
     error.code = 'BOOKING_DATES_UNAVAILABLE'
     error.expose = true
     error.message = 'These dates are no longer available for this listing.'
+  } else if (error.code === 'P2023' && /uuid/i.test(text)) {
+    // A malformed id in the URL or body (not a UUID) is the caller's mistake, not a server fault:
+    // answer 400 instead of a raw 500.
+    error.statusCode = 400
+    error.code = 'INVALID_ID'
+    error.expose = true
+    error.message = 'An id in the request is not valid.'
   }
   return error
 }

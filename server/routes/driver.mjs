@@ -17,6 +17,7 @@ import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 // below for the full reasoning on each.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { logRideEventSafe } from '../lib/ride-events.mjs'
+import { payoutBlockReason } from '../lib/payout-guard.mjs'
 import { normalizePoints, thinPoints, LIVE_POSITION_MAX_AGE_MS } from '../lib/location-batch.mjs'
 
 // SEC-002R: the transitions this route may write that are IRREVERSIBLE and financially load-bearing,
@@ -187,6 +188,18 @@ export async function handleDriver(req, res, url, context) {
         throw error
       }
       const requestCurrency = String(body.currency || currency).toUpperCase().slice(0, 8)
+      const mine = await db().payoutRequest.findMany({
+        where: { hostId: context.user.id, createdAt: { gte: new Date(Date.now() - 48 * 3600 * 1000) } },
+        select: { status: true, createdAt: true, method: true },
+      })
+      const blocked = payoutBlockReason(mine.filter((r) => r.method && r.method.kind === 'driver'))
+      if (blocked) {
+        const error = new Error(blocked.message)
+        error.statusCode = 409
+        error.code = blocked.code
+        error.expose = true
+        throw error
+      }
       // Free-form payout destination the operator pays to, shallow-copied + length-capped so a client
       // cannot smuggle a huge or deeply-nested payload into the stored method JSON.
       const methodInput = (body.method && typeof body.method === 'object' && !Array.isArray(body.method)) ? body.method : {}

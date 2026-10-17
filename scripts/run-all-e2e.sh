@@ -209,6 +209,7 @@ run "payment-refund-execute" refund-execution-wallet-credit.e2e.mjs
 # retained split, unpaid expiry, host withdrawals). Self-contained: seeds its own users/listings.
 run "booking-money-flow" booking-money-flow.e2e.mjs
 run "concurrent-booking" concurrent-booking.e2e.mjs
+run "split-stay" split-stay.e2e.mjs
 # Host verification + admin login code (owner decisions of 2026-10-08). Self-contained.
 run "host-verification" host-verification.e2e.mjs
 # Onboarding order (owner decision 2026-10-09): AI pre-check never decides; approving an unverified

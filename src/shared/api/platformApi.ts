@@ -4451,3 +4451,30 @@ export async function sendFoodOrderMessageAsCourier(orderId: string, body: strin
   const r = await apiRequest<{ ok: true; message: FoodOrderMessage }>(`/api/food/orders/${orderId}/messages`, { method: 'POST', token: session.token, body: { body } })
   return r.message
 }
+
+export type SplitStayLeg = {
+  id: string
+  titleAr: string | null
+  titleEn: string | null
+  priceMinor: number
+  currency: string
+  city: string | null
+  area: string | null
+  checkIn: string
+  checkOut: string
+  nights: number
+}
+export type SplitStaySuggestion = { first: SplitStayLeg; second: SplitStayLeg; estimateMinor: number; estimateNote: string }
+export type SplitStayResult = {
+  checkIn: string
+  checkOut: string
+  nights: number
+  singles: Array<Omit<SplitStayLeg, 'checkIn' | 'checkOut' | 'nights'>>
+  pairs: SplitStaySuggestion[]
+}
+
+// Read-only: pairs of stays in one city that together cover a date range no single stay can.
+export async function fetchSplitStay(city: string, checkIn: string, checkOut: string) {
+  const query = new URLSearchParams({ city, checkIn, checkOut })
+  return apiRequest<{ ok: true } & SplitStayResult>(`/api/split-stay?${query.toString()}`)
+}

@@ -9,6 +9,7 @@ import { listingDescriptionText, statusText } from '../../shared/i18n/display'
 import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 import { listingPriceText } from './listingPriceText'
 import { SearchStateCard } from './SearchStates'
+import { SplitStayPanel } from './SplitStayPanel'
 import { restoredSearchValue, UnifiedSearchBar } from './UnifiedSearchBar'
 import type { SearchDivision, UnifiedSearchValue } from './UnifiedSearchBar'
 
@@ -487,6 +488,9 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
             onRetry={() => void runLiveSearch(lastSearch || undefined)}
           />
         )}
+        {lastSearch && lastSearch.division === 'stays' && lastSearch.locationTouched && lastSearch.governorate && lastSearch.checkIn && lastSearch.checkOut ? (
+          <SplitStayPanel lang={lang} city={governorateCityName(lastSearch.governorate) || ""} checkIn={lastSearch.checkIn} checkOut={lastSearch.checkOut} />
+        ) : null}
         {hasSearched && lastQuery ? (
           <MarketInsightsPanel
             division={lastQuery.division}

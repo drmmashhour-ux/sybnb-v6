@@ -407,7 +407,18 @@ export function SearchPreviewPage({ lang, initialDivision = 'stays', entry = 'ge
           )}
           {effectiveInitialDivision === 'cars' && (
             <div className="cars-hero-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
-              <button type="button" className="stays-host-cta" onClick={() => (window.location.hash = '/sell')}>
+              <button type="button" className="stays-host-cta" onClick={() => {
+                // Start the seller flow on the Cars division: the listing wizard reads this draft, so the
+                // seller lands on car fields (fixed price or auction), not the property form.
+                try {
+                  window.sessionStorage.setItem('sybnb_v6_sell_wizard_draft', JSON.stringify({ division: 'CARS' }))
+                  window.localStorage.setItem('sybnb_v6_sell_flow', 'listing')
+                  if (!window.localStorage.getItem('sybnb_v6_selected_seller_role')) window.localStorage.setItem('sybnb_v6_selected_seller_role', 'owner')
+                } catch {
+                  /* storage blocked: the wizard still lets the seller pick Cars */
+                }
+                window.location.hash = '/sell/account'
+              }}>
                 {pick(lang, 'بع سيارتك', 'Sell your car', 'Vendez votre voiture')}
               </button>
               <button

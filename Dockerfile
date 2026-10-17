@@ -2,7 +2,7 @@
 # Builds the raw Node HTTP API only (the Vite SPA deploys separately to Vercel). No secrets are baked
 # in; all secrets are injected at RUN time via the host's secret store. Migrations run as a SEPARATE
 # deploy step (see RENDER_DEPLOY.md), not in this image.
-FROM node:22-slim AS build
+FROM node:24-slim AS build
 WORKDIR /app
 # openssl/ca-certificates: required by the Prisma query engine on Debian slim.
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -13,7 +13,7 @@ RUN npx prisma generate
 COPY server ./server
 COPY countries ./countries
 
-FROM node:22-slim AS runtime
+FROM node:24-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*

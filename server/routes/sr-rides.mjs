@@ -10,6 +10,7 @@ import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { getDriverLocation, getRideCoords, etaMinutesBetween } from '../lib/live-map.mjs'
 import { waitState, noShowFeeMinor, withMinCancellationFee } from '../lib/ride-wait.mjs'
+import { countOffences, isOffenceBlocked, riderOffenceFeeMinor, restrictedError } from '../lib/ride-offences.mjs'
 import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
 import { defaultCurrency } from '../lib/country.mjs'
 import { activateScheduledRides, MIN_SCHEDULE_LEAD_MS } from '../lib/ride-schedule.mjs'
@@ -124,6 +125,9 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
     error.expose = true
     throw error
   }
+
+  // Late-cancel control: a driver with repeated late cancellations is blocked from accepting rides.
+  if (isOffenceBlocked(await countOffences(db(), { userId: context.user.id, role: 'DRIVER' }))) throw restrictedError('DRIVER')
 
   // Pilot-safety gate: a driver may only pick up a passenger once (1) their identity is verified
   // via the same ID-review pipeline as hosts/guests, and (2) they have registered a vehicle, so
@@ -393,6 +397,7 @@ export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/sr/rides') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
+    if (isOffenceBlocked(await countOffences(db(), { userId: context.user.id, role: 'RIDER' }))) throw restrictedError('RIDER')
     const body = await readJson(req)
     const category = String(body.category || 'SR Economy')
     if (!isKnownRideCategory(category)) {
@@ -842,8 +847,16 @@ export async function handleSrRides(req, res, url, context) {
       : null
     // Driver already waiting at the pickup point (2026-10-17): no grace window applies, and the fee is
     // the no-show fee (default 100% = no refund), the same as if the rider never came out.
+    let lateCancel = null
     if (waitState(existing.metadata) && existing.fareMinor) {
-      cancellationFeeMinor = noShowFeeMinor(existing.fareMinor)
+      const offenceNumber = (await countOffences(db(), { userId: existing.riderId, role: 'RIDER' })) + 1
+      cancellationFeeMinor = riderOffenceFeeMinor({
+        baseFeeMinor: noShowFeeMinor(existing.fareMinor),
+        fareMinor: existing.fareMinor,
+        currency: existing.currency,
+        offenceNumber,
+      })
+      lateCancel = { by: 'RIDER', at: new Date().toISOString(), offenceNumber, feeMinor: cancellationFeeMinor }
     }
     // Lyft-parity consent exit (2026-10-11): a rider who cancels specifically because the matched
     // driver may record audio is NOT charged a cancellation fee, even past the grace window. Only
@@ -877,7 +890,11 @@ export async function handleSrRides(req, res, url, context) {
       // landing at the same moment cannot be silently overwritten by this cancel.
       const result = await tx.rideRequest.updateMany({
         where: { id: existing.id, status: existing.status, riderId: context.user.id },
-        data: { status: 'CANCELLED', cancellationFeeMinor },
+        data: {
+          status: 'CANCELLED',
+          cancellationFeeMinor,
+          ...(lateCancel ? { metadata: { ...(existing.metadata || {}), lateCancel } } : {}),
+        },
       })
       // Prepaid ride: refund the rider their prepayment (minus any cancellation fee, which goes to
       // the committed driver) atomically with the cancellation. Idempotent by ride id.

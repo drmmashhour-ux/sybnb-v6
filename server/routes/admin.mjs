@@ -1358,6 +1358,8 @@ export async function handleAdmin(req, res, url, context) {
       if (resolution === 'WAIVE') waiver = await waiveRideCancellationFee(tx, { ride: existing, reason })
       const metadata = {
         ...meta,
+        // A waived fee also cancels the strike it counted as, so the rider is not blocked for it.
+        ...(resolution === 'WAIVE' && meta.lateCancel ? { lateCancel: { ...meta.lateCancel, voided: true } } : {}),
         feeContest: {
           ...meta.feeContest,
           status: resolution === 'WAIVE' ? 'WAIVED' : 'UPHELD',

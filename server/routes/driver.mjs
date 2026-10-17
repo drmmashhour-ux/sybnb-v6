@@ -7,6 +7,8 @@ import { updateDriverLocation, getDriverLocation, getRideCoords, haversineKm, et
 import { activateScheduledRides } from '../lib/ride-schedule.mjs'
 import { runDispatchSweep } from '../lib/ride-dispatch.mjs'
 import { VEHICLE_CATEGORY_VALUES, isCategoryAllowedForYear, VEHICLE_MAX_AGE_YEARS } from '../lib/vehicle-category.mjs'
+import { countOffences, offenceFeeMinor, riderOffenceFeeMinor } from '../lib/ride-offences.mjs'
+import { recordWalletEntry } from '../lib/finance-ledger.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
 import { settlePrepaidRide, createDriverPayoutRequest, driverPayoutBalances, refundPrepaidRide } from '../lib/finance-ledger.mjs'
@@ -612,13 +614,43 @@ export async function handleDriver(req, res, url, context) {
     // irreversible in any financial sense. Noted in docs/security/sec-002r-mutation-inventory.md as
     // Class B rather than silently widened.
     const guardedWhere = { id: existing.id, status: existing.status, driverId: context.user.id }
+    // Late-cancel control: a driver who cancels after the grace window (or after arriving) is charged
+    // the ladder penalty ($1, then $5; blocked at the 3rd) -- debited from their wallet, which may go
+    // negative like the cash-commission debt. Free before then, and for in-progress trips (safety).
+    let driverLateCancel = null
+    if (nextStatus === 'CANCELLED' && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(existing.status)) {
+      const graceMs = (Number(process.env.RIDE_CANCEL_GRACE_SECONDS) > 0 ? Number(process.env.RIDE_CANCEL_GRACE_SECONDS) : 120) * 1000
+      const withinGrace = existing.status === 'DRIVER_ASSIGNED' && existing.updatedAt && Date.now() - new Date(existing.updatedAt).getTime() < graceMs
+      if (!withinGrace && (!existing.currency || existing.currency === 'USD')) {
+        const offenceNumber = (await countOffences(db(), { userId: context.user.id, role: 'DRIVER' })) + 1
+        driverLateCancel = { by: 'DRIVER', at: new Date().toISOString(), offenceNumber, penaltyMinor: offenceFeeMinor(offenceNumber) }
+      }
+    }
     const updateResult = COMMIT_PROTECTED_DRIVER_STATUSES.has(nextStatus)
       ? await db().$transaction(async (tx) => {
           await reauthorizeAtCommit(tx, context, {
             action: `SR_RIDE_${nextStatus}`,
             requiredRoles: ['DRIVER'],
           })
-          const r = await tx.rideRequest.updateMany({ where: guardedWhere, data: { status: nextStatus } })
+          const r = await tx.rideRequest.updateMany({
+            where: guardedWhere,
+            data: driverLateCancel
+              ? { status: nextStatus, metadata: { ...(existing.metadata || {}), lateCancel: driverLateCancel } }
+              : { status: nextStatus },
+          })
+          if (r.count === 1 && driverLateCancel) {
+            await recordWalletEntry(tx, {
+              userId: context.user.id,
+              type: 'DEBIT',
+              amountMinor: driverLateCancel.penaltyMinor,
+              currency: existing.currency || 'USD',
+              referenceType: 'RIDE_DRIVER_LATE_CANCEL',
+              referenceId: existing.id,
+              keyParts: ['ride-driver-late-cancel', existing.id],
+              note: 'Late cancellation penalty',
+              allowNegative: true,
+            })
+          }
           // Prepaid ride (2026-10-09): completing it settles the fare INSTANTLY from the rider's
           // prepayment — driver gets the net (fare minus commission), platform the commission — with no post-ride proof or admin step.
           // Idempotent (keyed by ride id) and marked settled so a re-run never double-pays.
@@ -761,12 +793,19 @@ export async function handleDriver(req, res, url, context) {
     if (!wait) fail(400, 'ARRIVAL_NOT_MARKED', 'Tap "I\'ve arrived" first.')
     if (meta.pickupVerifiedAt) fail(400, 'RIDER_ALREADY_BOARDED', 'The rider is already verified, so this cannot be a no-show.')
     if (!wait.waitExpired) fail(400, 'WAIT_NOT_OVER', `Please wait until the ${Math.round(rideWaitMs() / 60000)} minutes are over (${wait.secondsLeft}s left).`)
-    const feeMinor = noShowFeeMinor(existing.fareMinor)
+    const offenceNumber = (await countOffences(db(), { userId: existing.riderId, role: 'RIDER' })) + 1
+    const feeMinor = riderOffenceFeeMinor({
+      baseFeeMinor: noShowFeeMinor(existing.fareMinor),
+      fareMinor: existing.fareMinor,
+      currency: existing.currency,
+      offenceNumber,
+    })
+    const lateCancel = { by: 'RIDER', at: new Date().toISOString(), offenceNumber, feeMinor, noShow: true }
     const result = await db().$transaction(async (tx) => {
       await reauthorizeAtCommit(tx, context, { action: 'SR_RIDE_NO_SHOW', requiredRoles: ['DRIVER'] })
       const r = await tx.rideRequest.updateMany({
         where: { id: existing.id, status: existing.status, driverId: context.user.id },
-        data: { status: 'CANCELLED', cancellationFeeMinor: feeMinor, metadata: { ...meta, noShow: true, noShowAt: new Date().toISOString() } },
+        data: { status: 'CANCELLED', cancellationFeeMinor: feeMinor, metadata: { ...meta, noShow: true, noShowAt: new Date().toISOString(), lateCancel } },
       })
       if (r.count === 1 && meta.prepaid) {
         await refundPrepaidRide(tx, { ride: { ...existing, cancellationFeeMinor: feeMinor } })

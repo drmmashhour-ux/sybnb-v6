@@ -16,6 +16,7 @@ import { approvePaymentProof, firstAdminId } from './finance-ledger.mjs'
 import { withTx } from './tx-scope.mjs'
 import { log } from './logger.mjs'
 
+const chargeCurrencyForHold = () => (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
 export async function maybeAutoChargeRideCard({ rideId }) {
@@ -32,6 +33,46 @@ export async function maybeAutoChargeRideCard({ rideId }) {
   if (ride.metadata?.prepaid) return { attempted: false, reason: 'prepaid' }
   const amountMinor = Math.round(ride.fareMinor || 0)
   if (amountMinor <= 0) return { attempted: false, reason: 'no_fare' }
+
+  // Hold-and-capture (Rezekme Payment Standard): capture the authorised hold for the actual fare.
+  const holdId = ride.metadata?.cardHoldIntentId
+  if (holdId) {
+    let intent
+    try {
+      const held = await stripe.paymentIntents.retrieve(holdId)
+      const heldCents = held.amount
+      const wantCents = Math.max(50, amountMinor * 100)
+      intent = await stripe.paymentIntents.capture(holdId, { amount_to_capture: Math.min(heldCents, wantCents) }, { idempotencyKey: `sr-ride-capture-${ride.id}` })
+      // Fare grew past the hold (e.g. route change): charge the difference off-session on the same card.
+      if (wantCents > heldCents) {
+        const rider = await db().user.findUnique({ where: { id: ride.riderId }, select: { stripeCustomerId: true, defaultCardPmId: true } })
+        if (rider?.stripeCustomerId && rider?.defaultCardPmId) {
+          await stripe.paymentIntents.create(
+            { amount: wantCents - heldCents, currency: chargeCurrencyForHold(), customer: rider.stripeCustomerId, payment_method: rider.defaultCardPmId, off_session: true, confirm: true, metadata: { rideId: ride.id, kind: 'sr_ride_fare_diff' } },
+            { idempotencyKey: `sr-ride-diff-${ride.id}` },
+          ).catch((err) => log.warn('sr_ride_diff_charge_failed', { rideId: ride.id, code: err?.code }))
+        }
+      }
+    } catch (err) {
+      log.error('sr_ride_capture_failed', { rideId: ride.id, holdId, code: err?.code, message: err?.message })
+      return { attempted: true, charged: false, code: err?.code || 'capture_failed' }
+    }
+    if (intent.status !== 'succeeded') return { attempted: true, charged: false, status: intent.status }
+    try {
+      await withTx(async (tx) => {
+        const dup = await tx.paymentProof.findFirst({ where: { provider: 'stripe', providerRef: intent.id } })
+        if (dup) return
+        const created = await tx.paymentProof.create({
+          data: { rideId: ride.id, userId: ride.riderId, provider: 'stripe', status: 'PENDING_ADMIN_REVIEW', amountMinor, currency: ride.currency || 'USD', providerRef: intent.id, proofAssetUrl: `stripe://payment_intents/${intent.id}` },
+        })
+        await approvePaymentProof(tx, { proofId: created.id, actorUserId: await firstAdminId(tx), note: 'Auto-approved: SR ride card hold captured at completion.' })
+      })
+    } catch (err) {
+      log.error('sr_ride_capture_settle_failed', { rideId: ride.id, intentId: intent.id, message: err?.message })
+      return { attempted: true, charged: true, settled: false }
+    }
+    return { attempted: true, charged: true, settled: true, captured: true }
+  }
 
   // Already paid (cash/wallet/card) or a prior attempt settled -- never double-charge.
   const existing = await db().paymentProof.findFirst({

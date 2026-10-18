@@ -25,6 +25,7 @@ import { rideCategoryToVehicle, isKnownRideCategory } from '../lib/vehicle-categ
 import { isRateLimited } from '../lib/rateLimit.mjs'
 import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
 import { recordWalletEntry, refundPrepaidRide } from '../lib/finance-ledger.mjs'
+import { cardHoldAvailable, riderHasSavedCard, placeCardHold, releaseCardHold, replaceCardHold } from '../lib/ride-card-hold.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
 // file -- promo-code creation, promo-code activation toggling, and business-account onboarding --
 // were bare db().x.create/update calls with no transaction and no commit-boundary re-authorization.
@@ -108,11 +109,16 @@ async function switchOpenRideCategory(existing, category) {
   const bonusMinor = Number(meta.fareFactors?.bonusMinor) || 0
   const { noDriverNotifiedAt: _drop, ...restMeta } = meta
   const newFare = quote.fareMinor + bonusMinor
+  let holdMeta = {}
+  if (meta.cardHoldIntentId) {
+    const hold = await replaceCardHold({ riderId: existing.riderId, rideId: existing.id, oldIntentId: meta.cardHoldIntentId, newAmountMinor: newFare })
+    holdMeta = { cardHoldIntentId: hold.intentId, cardHoldAmountMinor: hold.amountMinor }
+  }
   const updated = await db().rideRequest.updateMany({
     where: { id: existing.id, driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
     data: {
       fareMinor: newFare,
-      metadata: { ...restMeta, category, categoryChangedFrom: meta.category ?? null, requestedAtCategoryChange: new Date().toISOString() },
+      metadata: { ...restMeta, ...holdMeta, category, categoryChangedFrom: meta.category ?? null, requestedAtCategoryChange: new Date().toISOString() },
       offeredDriverId: null,
       offerExpiresAt: null,
       offerSeq: 0,
@@ -647,7 +653,8 @@ export async function handleSrRides(req, res, url, context) {
       const rideCurrency = quote.currency || body.currency || defaultCurrency()
       const wallet = await db().wallet.findUnique({ where: { userId_currency: { userId: context.user.id, currency: rideCurrency } }, select: { cachedBalanceMinor: true } })
       const balanceMinor = Math.max(0, wallet?.cachedBalanceMinor || 0)
-      if (balanceMinor < finalFareMinor) {
+      const cardCovers = !shareable && cardHoldAvailable() && (await riderHasSavedCard(context.user.id))
+      if (balanceMinor < finalFareMinor && !cardCovers) {
         const error = new Error('Add funds to your wallet to request this ride.')
         error.statusCode = 402
         error.code = 'RIDE_PREPAY_REQUIRED'
@@ -735,6 +742,19 @@ export async function handleSrRides(req, res, url, context) {
       } catch (err) {
         if (err?.code !== 'WALLET_INSUFFICIENT_FUNDS' && err?.code !== 'WALLET_ENTRY_RACE_LOST') throw err
         // insufficient balance -> leave the ride unprepaid; it uses the post-ride proof path.
+      }
+    }
+    // Card hold (Uber model): not covered by the wallet -> authorise the fare on the saved card NOW,
+    // before any driver is offered. A decline cancels the ride and returns 402 (nothing dispatched).
+    if (process.env.SR_REQUIRE_PREPAY === '1' && !shareable && finalFareMinor > 0 && !ride.metadata?.prepaid) {
+      try {
+        const hold = await placeCardHold({ riderId: context.user.id, rideId: ride.id, amountMinor: finalFareMinor })
+        const holdMeta = { ...ride.metadata, cardHoldIntentId: hold.intentId, cardHoldAmountMinor: hold.amountMinor }
+        await db().rideRequest.update({ where: { id: ride.id }, data: { metadata: holdMeta } })
+        ride = { ...ride, metadata: holdMeta }
+      } catch (err) {
+        await db().rideRequest.updateMany({ where: { id: ride.id, status: ride.status }, data: { status: 'CANCELLED', metadata: { ...ride.metadata, cancelledReason: 'payment_failed' } } })
+        throw err
       }
     }
     const [createdStops, createdCoords] = await Promise.all([
@@ -981,11 +1001,16 @@ export async function handleSrRides(req, res, url, context) {
     const current = Number(meta.fareFactors?.bonusMinor) || 0
     const delta = wanted - current
     if (delta <= 0) throw fail(400, 'RIDE_BONUS_INVALID', 'Choose a bonus higher than the current one.')
+    let bonusHold = {}
+    if (meta.cardHoldIntentId) {
+      const hold = await replaceCardHold({ riderId: existing.riderId, rideId: existing.id, oldIntentId: meta.cardHoldIntentId, newAmountMinor: (existing.fareMinor ?? 0) + delta })
+      bonusHold = { cardHoldIntentId: hold.intentId, cardHoldAmountMinor: hold.amountMinor }
+    }
     const updated = await db().rideRequest.updateMany({
       where: { id: existing.id, driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
       data: {
         fareMinor: (existing.fareMinor ?? 0) + delta,
-        metadata: { ...meta, fareFactors: { ...(meta.fareFactors || {}), bonusMinor: wanted } },
+        metadata: { ...meta, ...bonusHold, fareFactors: { ...(meta.fareFactors || {}), bonusMinor: wanted } },
         offeredDriverId: null,
         offerExpiresAt: null,
         offerSeq: 0,
@@ -1121,6 +1146,7 @@ export async function handleSrRides(req, res, url, context) {
       throw error
     }
 
+    if (existing.metadata?.cardHoldIntentId) await releaseCardHold(existing.metadata.cardHoldIntentId)
     const ride = await db().rideRequest.findUnique({ where: { id: existing.id } })
 
     await db().adminAuditLog.create({

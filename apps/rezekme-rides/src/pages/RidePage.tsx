@@ -523,6 +523,9 @@ export function RidePage({ lang }: Props) {
   const [quote, setQuote] = useState<PlatformSrQuote | null>(null)
   // Which category the current `quote` was fetched for (the quote is refetched ~400 ms after a change).
   const [quoteCategory, setQuoteCategory] = useState<string | null>(null)
+  // Real server quotes for EVERY car category on the current trip (so the list shows true prices,
+  // not the local estimate): { 'SR Economy': quote, ... }. Cleared whenever the trip inputs change.
+  const [quotesByCategory, setQuotesByCategory] = useState<Record<string, PlatformSrQuote>>({})
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
     srRideRoute: 'cityRide',
@@ -688,6 +691,25 @@ export function RidePage({ lang }: Props) {
     }, 400)
     return () => window.clearTimeout(timer)
   }, [pickup, dropoff, category, lowDataMode, pickupCoords, dropoffCoords, ride, trimmedStops, trimmedStopCoords, riderCount, bagCount, scheduleForLater])
+
+  useEffect(() => {
+    if (ride) return
+    setQuotesByCategory({})
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      categories.forEach((item) => {
+        fetchSrQuoteWithCoords({ pickup, dropoff, category: item, lowDataMode, pickupCoords, dropoffCoords, stops: trimmedStops, stopCoords: trimmedStopCoords, riderCount, bagCount, scheduled: scheduleForLater })
+          .then((result) => {
+            if (!cancelled) setQuotesByCategory((current) => ({ ...current, [item]: result }))
+          })
+          .catch(() => {})
+      })
+    }, 500)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [pickup, dropoff, lowDataMode, pickupCoords, dropoffCoords, ride, trimmedStops, trimmedStopCoords, riderCount, bagCount, scheduleForLater])
 
   useEffect(() => {
     fetchSavedPlaces().then(setSavedPlaces).catch(() => setSavedPlaces([]))
@@ -1313,7 +1335,7 @@ export function RidePage({ lang }: Props) {
           quote.scheduled ? (isAr ? `حجز مسبق +${Math.round(((quote.scheduleMultiplier ?? 1) - 1) * 100)}%` : `scheduled +${Math.round(((quote.scheduleMultiplier ?? 1) - 1) * 100)}%`) : null,
           (quote.fuelSurchargePercent ?? 0) > 0 ? (isAr ? `وقود +${quote.fuelSurchargePercent}%` : `fuel +${quote.fuelSurchargePercent}%`) : null,
           (quote.demandMultiplier ?? 1) > 1 ? (isAr ? `طلب ×${quote.demandMultiplier}` : `demand ×${quote.demandMultiplier}`) : null,
-          quote.airportTrip ? (isAr ? `مطار $${quote.airportSurcharge}` : `airport $${quote.airportSurcharge}`) : null,
+          quote.airportTrip ? (isAr ? 'رحلة مطار' : 'airport trip') : null,
           (quote.stopsFee ?? 0) > 0 ? (isAr ? `محطات $${quote.stopsFee}` : `stops $${quote.stopsFee}`) : null,
           (quote.bagsFee ?? 0) > 0 ? (isAr ? `حقائب $${quote.bagsFee}` : `bags $${quote.bagsFee}`) : null,
           (quote.ridersFee ?? 0) > 0 ? (isAr ? `ركاب $${quote.ridersFee}` : `riders $${quote.ridersFee}`) : null,
@@ -1445,7 +1467,9 @@ export function RidePage({ lang }: Props) {
               // selected class once it matches the current selection; otherwise a labelled estimate
               // from the local fare model (never presented as a quote).
               const realQuote = confirmedLocations && selected && quote !== null && quoteCategory === item
-              const price = realQuote ? quote.fareMinor : srFallbackFareMinor(item, lowDataMode)
+              const serverQuote = confirmedLocations ? quotesByCategory[item] : undefined
+              const hasRealPrice = Boolean(realQuote || serverQuote)
+              const price = realQuote ? quote.fareMinor : serverQuote ? serverQuote.fareMinor : srFallbackFareMinor(item, lowDataMode)
               const description = vehicleDescription(item, lang)
               return (
                 <button
@@ -1474,9 +1498,9 @@ export function RidePage({ lang }: Props) {
                   </span>
                   <span style={styles.vehiclePriceCol}>
                     <strong style={styles.vehiclePrice} dir={isAr ? 'rtl' : 'ltr'}>
-                      {!confirmedLocations ? '—' : `${realQuote ? '' : '~'}${moneyText(price, quote?.currency || 'USD', lang)}`}
+                      {!confirmedLocations ? '—' : `${hasRealPrice ? '' : '~'}${moneyText(price, quote?.currency || 'USD', lang)}`}
                     </strong>
-                    {confirmedLocations && !realQuote && <span style={styles.estimateTag}>{ui.estimate}</span>}
+                    {confirmedLocations && !hasRealPrice && <span style={styles.estimateTag}>{ui.estimate}</span>}
                   </span>
                 </button>
               )

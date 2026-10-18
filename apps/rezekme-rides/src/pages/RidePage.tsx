@@ -1524,6 +1524,18 @@ export function RidePage({ lang }: Props) {
         <section aria-label={ui.chooseRide}>
           <h2 style={styles.sectionTitle}>{ui.chooseRide}</h2>
           {!confirmedLocations && <div style={styles.hint}>{ui.enterBoth}</div>}
+          {Object.keys(availability).length > 0 && (() => {
+            const total = Object.values(availability).reduce((sum, row) => sum + (row.drivers || 0), 0)
+            const etas = Object.values(availability).filter((row) => row.drivers > 0 && typeof row.etaMinutes === 'number').map((row) => row.etaMinutes as number)
+            const best = etas.length ? Math.min(...etas) : null
+            return (
+              <div style={{ ...styles.hint, fontWeight: 700 }}>
+                {total > 0
+                  ? pick(lang, `${total} سائق بالقرب منك${best !== null ? ` · أقرب سيارة ${best} د` : ''}`, `${total} driver${total === 1 ? '' : 's'} near you${best !== null ? ` · nearest ${best} min` : ''}`, `${total} chauffeur${total === 1 ? '' : 's'} près de vous${best !== null ? ` · le plus proche ${best} min` : ''}`)
+                  : pick(lang, 'لا يوجد سائقون قريبون الآن', 'No drivers nearby right now', 'Aucun chauffeur à proximité pour le moment')}
+              </div>
+            )
+          })()}
           <div role="radiogroup" aria-label={ui.chooseRide} style={styles.vehicleList}>
             {categories.map((item) => {
               const selected = item === category

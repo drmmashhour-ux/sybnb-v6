@@ -2,6 +2,7 @@
 // Public, read-only. An "agent" is a SellerProfile with a professional sellerType whose documents
 // are APPROVED (verified). Contact details are never exposed here — buyers reach them through a
 // listing's existing contact flow.
+import { publicListingMedia } from '../lib/listing-media-url.mjs'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
@@ -24,7 +25,7 @@ function toPublicListing(l) {
     priceMinor: l.priceMinor,
     currency: l.currency,
     metadata,
-    media: l.media,
+    media: publicListingMedia(l.media),
     location: l.location
       ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area, lat: l.location.lat ?? null, lng: l.location.lng ?? null }
       : null,

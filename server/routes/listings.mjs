@@ -1,4 +1,5 @@
 import { assertListingPrice, assertListingText, clampPlaceText } from '../lib/listing-input.mjs'
+import { publicListingMedia } from '../lib/listing-media-url.mjs'
 import { gridFilterCondition } from '../lib/grid-filter.mjs'
 import { db } from '../lib/prisma.mjs'
 import { dateBlockingBookingWhere } from '../lib/booking-policy.mjs'
@@ -125,7 +126,7 @@ function toPublicListing(l) {
     createdAt: l.createdAt,
     updatedAt: l.updatedAt,
     metadata,
-    media: l.media,
+    media: publicListingMedia(l.media),
     location: l.location
       ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area, lat: l.location.lat ?? null, lng: l.location.lng ?? null }
       : null,
@@ -159,7 +160,7 @@ export async function handleListings(req, res, url, context) {
         titleAr: l.titleAr,
         titleEn: l.titleEn,
         plan: l.metadata?.adPlan === 'premium' ? 'premium' : 'plus',
-        media: l.media.map((m) => ({ url: m.url, kind: m.kind })),
+        media: publicListingMedia(l.media.map((m) => ({ url: m.url, kind: m.kind }))),
       }))
     return json(res, 200, { ok: true, ads })
   }

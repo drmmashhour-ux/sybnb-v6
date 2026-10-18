@@ -1,6 +1,7 @@
 // Open houses (migration 064, 2026-10-11). Centris-parity: a seller publishes a viewing window on a
 // property; buyers see upcoming open houses on the listing and in a browse feed. Distinct from the
 // 1:1 VisitRequest (schedule-a-visit) — an open house is a group/public viewing slot.
+import { publicListingMedia } from '../lib/listing-media-url.mjs'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
@@ -22,7 +23,7 @@ function toPublicOpenHouse(o) {
           division: o.listing.division,
           priceMinor: o.listing.priceMinor,
           currency: o.listing.currency,
-          media: o.listing.media,
+          media: publicListingMedia(o.listing.media),
           location: o.listing.location
             ? { city: o.listing.location.city, area: o.listing.location.area, governorate: o.listing.location.governorate }
             : null,

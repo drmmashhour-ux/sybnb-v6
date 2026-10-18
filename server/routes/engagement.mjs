@@ -1,6 +1,7 @@
 // Centris-parity Phase 1 (2026-10-10): favourites (saved listings) + saved searches.
 // All endpoints are user-scoped and require a session. Saved searches additionally power the
 // new-listing alert sweep (server/lib/saved-search-alerts.mjs).
+import { publicListingMedia } from '../lib/listing-media-url.mjs'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, readJson } from '../lib/responses.mjs'
@@ -36,7 +37,7 @@ function toPublicListing(l) {
     createdAt: l.createdAt,
     updatedAt: l.updatedAt,
     metadata,
-    media: l.media,
+    media: publicListingMedia(l.media),
     location: l.location
       ? { country: l.location.country, governorate: l.location.governorate, city: l.location.city, area: l.location.area }
       : null,

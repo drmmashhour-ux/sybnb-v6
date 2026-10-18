@@ -3495,7 +3495,25 @@ async function apiRequest<T>(
     throw error
   }
 
-  return payload as T
+  return absolutizeMediaUrls(payload) as T
+}
+
+// Signed storage URLs from the API are server-relative ('/api/storage/...'); resolve the ones inside
+// any `media` array against the API origin so <img> works when the page is served elsewhere.
+function absolutizeMediaUrls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(absolutizeMediaUrls)
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      if (key === 'media' && Array.isArray(item)) {
+        out[key] = item.map((entry) => entry && typeof entry === 'object' && typeof (entry as { url?: unknown }).url === 'string' && (entry as { url: string }).url.startsWith('/api/storage/')
+          ? { ...(entry as object), url: resolveApiUrl((entry as { url: string }).url) }
+          : absolutizeMediaUrls(entry))
+      } else out[key] = absolutizeMediaUrls(item)
+    }
+    return out
+  }
+  return value
 }
 
 function isApiErrorBody(payload: unknown): payload is ApiErrorBody {

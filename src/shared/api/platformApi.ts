@@ -3235,6 +3235,16 @@ export async function updatePrototypeHostListingStatus(
   return response.listing
 }
 
+// Host removes their own listing for good: its photos are deleted from storage. Refused by the server
+// (409 HOST_LISTING_HAS_ACTIVE_BOOKINGS) while any booking on it is still live.
+export async function removeHostListing(listingId: string, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  return apiRequest<{ ok: true; listing: { id: string; status: string }; photosDeleted: number }>(
+    `/api/host/listings/${listingId}`,
+    { method: 'DELETE', token: session.token },
+  )
+}
+
 // Mark a for-sale listing (cars, marketplace, property) as sold, or put it back on sale.
 export async function setHostListingSold(listingId: string, sold: boolean, mode: HostDashboardMode = 'host') {
   const session = await getHostDashboardSession(mode)

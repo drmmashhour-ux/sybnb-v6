@@ -33,6 +33,7 @@ enum ListingStatus {
   REJECTED
   PAUSED
   EXPIRED
+  REMOVED
 
   @@map("listing_status")
 }

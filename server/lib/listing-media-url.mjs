@@ -1,4 +1,5 @@
-import { signObjectUrl } from './storage.mjs'
+import { signObjectUrl, deleteObject } from './storage.mjs'
+import { db } from './prisma.mjs'
 
 // Listing photos are stored as private references ('payment-proof://<key>' from the seller wizard
 // upload, or 'listing-media://<key>'). A browser cannot open those, so every PUBLIC listing response
@@ -24,4 +25,16 @@ export function publicListingMedia(media) {
   return media
     .map((item) => ({ ...item, url: publicMediaUrl(item?.url) }))
     .filter((item) => item.url)
+}
+
+// Host removed the listing: delete every photo from storage, then the media rows. A storage failure
+// on one object never blocks the removal (the row is deleted regardless); returns how many rows went.
+export async function deleteListingPhotos(listingId) {
+  const rows = await db().listingMedia.findMany({ where: { listingId }, select: { id: true, url: true } })
+  for (const row of rows) {
+    const match = PRIVATE_REF.exec(row.url || '')
+    if (match) await deleteObject(match[1], match[2]).catch(() => {})
+  }
+  await db().listingMedia.deleteMany({ where: { listingId } })
+  return rows.length
 }

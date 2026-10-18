@@ -41,6 +41,7 @@ export const API_ENDPOINTS = [
   ['GET', '/api/host/payouts', 'user', 'Read withdrawable balance, pending requests, and payout request history.'],
   ['POST', '/api/host/payouts', 'user', 'Request a withdrawal of released earnings (no money moves until an admin marks it paid).'],
   ['PATCH', '/api/host/listings/:id/status', 'user', 'Pause or resume a host-owned listing.'],
+  ['DELETE', '/api/host/listings/:id', 'user', 'Remove a host-owned listing and delete its photos (refused while it has active bookings).'],
   ['GET', '/api/driver/rides', 'user', 'Read assigned SR rides for the signed-in driver.'],
   ['GET', '/api/driver/rides/pending', 'user', 'Read unclaimed SR ride requests available to self-accept.'],
   ['PATCH', '/api/driver/rides/:id/status', 'user', 'Move an assigned SR ride through arriving, in-progress, completed, or cancelled.'],

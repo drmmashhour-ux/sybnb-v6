@@ -17,6 +17,7 @@ import { isRateLimited } from '../lib/rateLimit.mjs'
 import { completeExpiredBookings } from '../lib/booking-lifecycle.mjs'
 import { expireOldListings } from '../lib/listing-lifecycle.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
+import { deleteListingPhotos } from '../lib/listing-media-url.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 // SEC-002R round 2. The fresh mutation sweep classified the host's own confirm/cancel decision as
 // Class A for the same reason the guest's cancellation is: cancelling marks real payment proofs
@@ -105,7 +106,7 @@ export async function handleHost(req, res, url, context) {
     await expireOldListings({ ownerId: context.user.id })
 
     const listings = await db().listing.findMany({
-      where: { ownerId: context.user.id },
+      where: { ownerId: context.user.id, status: { not: 'REMOVED' } },
       include: {
         bookings: {
           where: {
@@ -219,20 +220,20 @@ export async function handleHost(req, res, url, context) {
     const canConfirm = status === 'CONFIRMED' && existing.status === 'REQUESTED'
     const canCancel = status === 'CANCELLED' && ['REQUESTED', 'CONFIRMED'].includes(existing.status)
 
-    if (!canConfirm && !canCancel) {
-      const error = new Error('This booking cannot be changed by the host at its current status.')
-      error.statusCode = 400
-      error.code = 'HOST_REQUEST_NOT_DECIDABLE'
+    // An expiry sweep can already have marked an ended stay COMPLETED. Return the same
+    // ended-stay denial in that case before the generic undecidable-status guard.
+    if (status === 'CANCELLED' && ['REQUESTED', 'CONFIRMED', 'COMPLETED'].includes(existing.status) && hasStayEnded(existing, { policy: bookingPolicySettings() })) {
+      const error = new Error('This stay has already ended and can no longer be cancelled.')
+      error.statusCode = 409
+      error.code = 'BOOKING_STAY_ENDED'
       error.expose = true
       throw error
     }
 
-    // Review fix: once the check-out date has begun (country time) the stay is used -- a host
-    // "cancel" would refund a finished stay in full. Refuse like the guest cancel route does.
-    if (canCancel && hasStayEnded(existing, { policy: bookingPolicySettings() })) {
-      const error = new Error('This stay has already ended and can no longer be cancelled.')
-      error.statusCode = 409
-      error.code = 'BOOKING_STAY_ENDED'
+    if (!canConfirm && !canCancel) {
+      const error = new Error('This booking cannot be changed by the host at its current status.')
+      error.statusCode = 400
+      error.code = 'HOST_REQUEST_NOT_DECIDABLE'
       error.expose = true
       throw error
     }
@@ -779,6 +780,45 @@ export async function handleHost(req, res, url, context) {
     }
 
     return methodNotAllowed(res, ['PATCH', 'DELETE'])
+  }
+
+  const removeMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)$/)
+  if (removeMatch) {
+    if (req.method !== 'DELETE') return methodNotAllowed(res, ['DELETE'])
+    requireAuth(context, ['HOST', 'SELLER'])
+    const existing = await db().listing.findFirst({ where: { id: removeMatch[1], ownerId: context.user.id } })
+    if (!existing || existing.status === 'REMOVED') {
+      const error = new Error('Listing not found for this host account.')
+      error.statusCode = 404
+      error.code = 'HOST_LISTING_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    // A listing with a live booking (waiting on the host, awaiting payment, confirmed, or disputed)
+    // cannot be removed -- the guest's stay and the money flow depend on it.
+    const activeBookings = await db().booking.count({
+      where: { listingId: existing.id, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED'] } },
+    })
+    if (activeBookings > 0) {
+      const error = new Error('This listing has active bookings. Finish or cancel them before removing it.')
+      error.statusCode = 409
+      error.code = 'HOST_LISTING_HAS_ACTIVE_BOOKINGS'
+      error.expose = true
+      throw error
+    }
+    const photoCount = await deleteListingPhotos(existing.id)
+    const listing = await db().listing.update({ where: { id: existing.id }, data: { status: 'REMOVED', instantBookEnabled: false } })
+    await db().adminAuditLog.create({
+      data: {
+        actorUserId: context.user.id,
+        action: 'HOST_LISTING_REMOVED',
+        entityType: 'listings',
+        entityId: listing.id,
+        before: { status: existing.status },
+        after: { status: listing.status, photosDeleted: photoCount },
+      },
+    })
+    return json(res, 200, { ok: true, listing: { id: listing.id, status: listing.status }, photosDeleted: photoCount })
   }
 
   const listingMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/status$/)

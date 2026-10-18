@@ -519,6 +519,19 @@ export function RidePage({ lang }: Props) {
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>()
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | undefined>()
   const [ride, setRide] = useState<PlatformRideRequest | null>(null)
+  // Pre-fill the last trip's pickup, destination and car type (entered by the rider before, so they count as confirmed).
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('rezekme.lastTrip') || 'null') as { pickup?: string; dropoff?: string; category?: string } | null
+      if (!saved) return
+      if (saved.pickup && saved.pickup !== PICKUP_DEFAULT_TEXT) { setPickup(saved.pickup); setPickupSource('saved') }
+      if (saved.dropoff && saved.dropoff !== DROPOFF_DEFAULT_TEXT) { setDropoff(saved.dropoff); setDropoffSource('saved') }
+      if (saved.category && categories.includes(saved.category as (typeof categories)[number])) setCategory(saved.category as (typeof categories)[number])
+    } catch {
+      /* storage unavailable */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   // Keep the open trip across reloads: remember its id on this device and re-load it on mount.
   useEffect(() => {
     try {
@@ -1033,6 +1046,11 @@ export function RidePage({ lang }: Props) {
       setDropTarget(null)
       setRequestedPins({ pickup: bookingPickupPin, dropoff: bookingDropoffPin, stops: bookingStopPins })
       setRecents(storeRecent({ text: dropoff.trim(), lat: dropoffCoords?.lat, lng: dropoffCoords?.lng }))
+      try {
+        window.localStorage.setItem('rezekme.lastTrip', JSON.stringify({ pickup: pickup.trim(), dropoff: dropoff.trim(), category }))
+      } catch {
+        /* storage blocked */
+      }
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)

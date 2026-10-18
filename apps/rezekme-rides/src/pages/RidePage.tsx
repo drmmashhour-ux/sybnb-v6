@@ -42,7 +42,7 @@ const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 
 const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 import { moneyText, statusText } from '@platform/shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '@platform/shared/filters/VisualFilterPanel'
-import { changeSrRideCategory, createSrRideWithCoords, fetchSrQuoteWithCoords, type Coords, type StopCoords } from '../api'
+import { addSrRideBonus, changeSrRideCategory, createSrRideWithCoords, fetchSrAvailability, fetchSrQuoteWithCoords, type CategoryAvailability, type Coords, type StopCoords } from '../api'
 import { MapHero } from '../maps/MapHero'
 import { SeatIcon, VehicleArt, type VehicleKind } from './VehicleArt'
 import { PlaceInput } from '../maps/PlaceInput'
@@ -525,6 +525,9 @@ export function RidePage({ lang }: Props) {
   const [quoteCategory, setQuoteCategory] = useState<string | null>(null)
   // Real server quotes for EVERY car category on the current trip (so the list shows true prices,
   // not the local estimate): { 'SR Economy': quote, ... }. Cleared whenever the trip inputs change.
+  const [autoSwitch, setAutoSwitch] = useState(false)
+  const [availability, setAvailability] = useState<Record<string, CategoryAvailability>>({})
+  const [hideNoDriverUntil, setHideNoDriverUntil] = useState(0)
   const [quotesByCategory, setQuotesByCategory] = useState<Record<string, PlatformSrQuote>>({})
   const [rideFilters, setRideFilters] = useState<VisualFilterSelection>({
     srRideCategory: 'economy',
@@ -691,6 +694,26 @@ export function RidePage({ lang }: Props) {
     }, 400)
     return () => window.clearTimeout(timer)
   }, [pickup, dropoff, category, lowDataMode, pickupCoords, dropoffCoords, ride, trimmedStops, trimmedStopCoords, riderCount, bagCount, scheduleForLater])
+
+  // Live availability near the pickup (per category driver count + ETA), refreshed every 20s.
+  const availabilityPoint = quote?.pickupCoords ?? pickupCoords
+  useEffect(() => {
+    if (ride || !availabilityPoint) return
+    let cancelled = false
+    const load = () => {
+      fetchSrAvailability(availabilityPoint)
+        .then((rows) => {
+          if (!cancelled) setAvailability(Object.fromEntries(rows.map((row) => [row.category, row])))
+        })
+        .catch(() => {})
+    }
+    load()
+    const timer = window.setInterval(load, 20000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [availabilityPoint?.lat, availabilityPoint?.lng, ride])
 
   useEffect(() => {
     if (ride) return
@@ -979,6 +1002,7 @@ export function RidePage({ lang }: Props) {
         promoCode: promoCode.trim() || undefined,
         billToBusinessAccount: businessAccountName ? billToBusinessAccount : undefined,
         shareable,
+        autoSwitch,
       })
       setRide(nextRide)
       setStatus('idle')
@@ -1469,6 +1493,16 @@ export function RidePage({ lang }: Props) {
               const realQuote = confirmedLocations && selected && quote !== null && quoteCategory === item
               const serverQuote = confirmedLocations ? quotesByCategory[item] : undefined
               const hasRealPrice = Boolean(realQuote || serverQuote)
+              const avail = availability[item]
+              const anyDriverNearby = Object.values(availability).some((row) => row.drivers > 0)
+              const noDriversHere = confirmedLocations && Boolean(avail) && anyDriverNearby && avail.drivers === 0
+              const availText = !confirmedLocations || !avail
+                ? null
+                : avail.drivers > 0
+                  ? pick(lang, `أقرب سائق خلال ${avail.etaMinutes ?? '?'} د`, `Driver about ${avail.etaMinutes ?? '?'} min away`, `Chauffeur à environ ${avail.etaMinutes ?? '?'} min`)
+                  : anyDriverNearby
+                    ? pick(lang, 'لا يوجد سائق قريب', 'No drivers nearby', 'Aucun chauffeur à proximité')
+                    : null
               const price = realQuote ? quote.fareMinor : serverQuote ? serverQuote.fareMinor : srFallbackFareMinor(item, lowDataMode)
               const description = vehicleDescription(item, lang)
               return (
@@ -1477,7 +1511,8 @@ export function RidePage({ lang }: Props) {
                   type="button"
                   role="radio"
                   aria-checked={selected}
-                  style={selected ? { ...styles.vehicleRow, ...styles.vehicleRowActive } : styles.vehicleRow}
+                  disabled={noDriversHere}
+                  style={{ ...(selected ? { ...styles.vehicleRow, ...styles.vehicleRowActive } : styles.vehicleRow), ...(noDriversHere ? { opacity: 0.45, cursor: 'not-allowed' } : {}) }}
                   onClick={() => pickCategory(item)}
                 >
                   <span style={styles.vehicleArt}>
@@ -1492,6 +1527,7 @@ export function RidePage({ lang }: Props) {
                       </span>
                     </span>
                     <span style={styles.vehicleDesc}>{description}</span>
+                    {availText ? <span style={{ ...styles.vehicleMeta, fontWeight: 700, color: noDriversHere ? '#b3261e' : '#1b6e3c' }}>{availText}</span> : null}
                     {confirmedLocations && quote?.estimatedMinutes ? (
                       <span style={styles.vehicleMeta} dir="ltr">{`${quote.estimatedMinutes} ${ui.minShort} ${ui.trip}`}</span>
                     ) : null}
@@ -1600,6 +1636,10 @@ export function RidePage({ lang }: Props) {
               <label style={styles.checkRow}>
                 <input type="checkbox" checked={shareable} onChange={(event) => setShareable(event.target.checked)} />
                 {t.shareable}
+              </label>
+              <label style={styles.checkRow}>
+                <input type="checkbox" checked={autoSwitch} onChange={(event) => setAutoSwitch(event.target.checked)} />
+                {pick(lang, 'إذا لم يتوفر سائق في فئتي، انقلني تلقائياً إلى أرخص فئة متاحة', 'If no driver in my category, switch me automatically to the cheapest available one', 'Si aucun chauffeur dans ma catégorie, passer automatiquement à la moins chère disponible')}
               </label>
               <label style={styles.checkRow}>
                 <input checked={lowDataMode} type="checkbox" onChange={(event) => setLowDataMode(event.target.checked)} />
@@ -1729,7 +1769,10 @@ export function RidePage({ lang }: Props) {
           <div style={styles.hint}>{ride.matchTimedOut ? t.stillLooking : t.waitingForDriver}</div>
         )}
         {['REQUESTED', 'MATCHING'].includes(ride.status) && !ride.matchTimedOut && <div style={styles.progressTrack}><div style={styles.progressBar} /></div>}
-        {['REQUESTED', 'MATCHING'].includes(ride.status) && ride.matchTimedOut && (() => {
+        {['REQUESTED', 'MATCHING'].includes(ride.status) && (ride as unknown as { autoSwitchedTo?: string }).autoSwitchedTo && (
+          <div style={styles.hint}><strong>{pick(lang, `لم يتوفر سائق، تم نقلك تلقائياً إلى ${String((ride as unknown as { autoSwitchedTo?: string }).autoSwitchedTo).replace('SR ', '')}.`, `No driver was free, so we moved you to ${String((ride as unknown as { autoSwitchedTo?: string }).autoSwitchedTo).replace('SR ', '')}.`, `Aucun chauffeur libre : nous vous avons passé en ${String((ride as unknown as { autoSwitchedTo?: string }).autoSwitchedTo).replace('SR ', '')}.`)}</strong></div>
+        )}
+        {['REQUESTED', 'MATCHING'].includes(ride.status) && ride.matchTimedOut && Date.now() > hideNoDriverUntil && (() => {
           const noDriver = (ride as unknown as { noDriver?: { category: string; alternatives: Array<{ category: string; drivers: number; fareMinor: number | null }> } }).noDriver
           const own = String(ride.metadata?.category || '').replace('SR ', '')
           return (
@@ -1756,6 +1799,36 @@ export function RidePage({ lang }: Props) {
                   </div>
                 </>
               ) : null}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                <button type="button" style={{ padding: '8px 12px', borderRadius: 999, border: '1px solid #999', background: '#fff', cursor: 'pointer' }} onClick={() => setHideNoDriverUntil(Date.now() + 120000)}>
+                  {pick(lang, 'تابع الانتظار', 'Keep waiting', 'Continuer à attendre')}
+                </button>
+                {!ride.metadata?.prepaid && (
+                  <button
+                    type="button"
+                    style={{ padding: '8px 12px', borderRadius: 999, border: '1px solid #999', background: '#fff', cursor: 'pointer' }}
+                    onClick={() => {
+                      const current = Number((ride.metadata as { fareFactors?: { bonusMinor?: number } } | undefined)?.fareFactors?.bonusMinor) || 0
+                      void addSrRideBonus(ride.id, current + 5)
+                        .then(async () => setRide(await fetchPrototypeSrRide(ride.id)))
+                        .catch((error: unknown) => window.alert(error instanceof Error ? error.message : String(error)))
+                    }}
+                  >
+                    {pick(lang, 'أضف مكافأة 5$ للسائق', 'Add a $5 driver bonus', 'Ajouter 5 $ de bonus')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  style={{ padding: '8px 12px', borderRadius: 999, border: '1px solid #999', background: '#fff', cursor: 'pointer' }}
+                  onClick={() => {
+                    void cancelPrototypeSrRide(ride.id)
+                      .then(() => setRide(null))
+                      .catch((error: unknown) => window.alert(error instanceof Error ? error.message : String(error)))
+                  }}
+                >
+                  {pick(lang, 'غيّر نقطة الانطلاق أو الموعد', 'Change pickup or schedule', 'Changer le départ ou planifier')}
+                </button>
+              </div>
             </div>
           )
         })()}

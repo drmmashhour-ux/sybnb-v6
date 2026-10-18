@@ -80,6 +80,7 @@ export async function createSrRideWithCoords(input: {
   riderCount?: number
   bagCount?: number
   bonusMinor?: number
+  autoSwitch?: boolean
 }): Promise<PlatformRideRequest> {
   const response = await post<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
     pickup: input.pickup,
@@ -106,6 +107,8 @@ export async function createSrRideWithCoords(input: {
       // Recorded as the rider's stated preference, not an enforced match (same as the platform client).
       requestedRouteType: input.routeType,
       requestedFeatures: input.features,
+      // Opt-in: if no driver in the chosen category after the timeout, move to the cheapest category that has one.
+      ...(input.autoSwitch ? { autoSwitch: true } : {}),
     },
   })
   return response.ride
@@ -114,4 +117,21 @@ export async function createSrRideWithCoords(input: {
 // Switch an unclaimed ride to another car category (after "no driver in your category").
 export async function changeSrRideCategory(rideId: string, category: string): Promise<{ category: string; fareMinor: number; currency: string }> {
   return post<{ ok: true; category: string; fareMinor: number; currency: string }>(`/api/sr/rides/${rideId}/change-category`, { category })
+}
+
+// Raise the driver bonus on a still-unclaimed ride (total bonus, whole USD) to get picked up faster.
+export async function addSrRideBonus(rideId: string, bonusMinor: number): Promise<{ bonusMinor: number; fareMinor: number }> {
+  return post<{ ok: true; bonusMinor: number; fareMinor: number }>(`/api/sr/rides/${rideId}/bonus`, { bonusMinor })
+}
+
+export type CategoryAvailability = { category: string; drivers: number; etaMinutes: number | null }
+
+// Live availability near the pickup: per category driver count + rough ETA.
+export async function fetchSrAvailability(point: Coords): Promise<CategoryAvailability[]> {
+  const token = getStoredGuestSession()?.token
+  if (!token) return []
+  const response = await fetch(`${API_BASE_URL}/api/sr/availability?lat=${point.lat}&lng=${point.lng}`, { headers: { authorization: `Bearer ${token}` } })
+  if (!response.ok) return []
+  const payload = (await response.json()) as { availability?: CategoryAvailability[] }
+  return payload.availability ?? []
 }

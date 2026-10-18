@@ -79,3 +79,42 @@ export async function notifyRiderNoDriverOnce(ride, alternatives) {
   }, `ride-no-driver:${ride.id}`)
   return true
 }
+
+// Availability at a pickup point (before any ride exists): per category the number of eligible online
+// drivers within the radius and a rough ETA in minutes (straight-line distance at city speed + a
+// 2-minute dispatch buffer). Same gates as above.
+export async function categoryAvailabilityAt(point) {
+  const inspectionRequired = !['false', '0'].includes(String(process.env.SR_REQUIRE_VEHICLE_INSPECTION ?? '').trim().toLowerCase())
+  const inspectionSql = inspectionRequired
+    ? Prisma.sql`AND dp.inspection_status = 'PASSED' AND (dp.inspection_expires_at IS NULL OR dp.inspection_expires_at > now())`
+    : Prisma.empty
+  const geo = Prisma.sql`ST_SetSRID(ST_MakePoint(${point.lng}, ${point.lat}), 4326)::geography`
+  const rows = await db().$queryRaw(Prisma.sql`
+    SELECT dp.vehicle_category::text AS "vehicle", COUNT(*)::int AS "drivers",
+           MIN(dp.last_location_geo::geography <-> ${geo}) AS "nearestM"
+    FROM driver_profiles dp
+    JOIN users u ON u.id = dp.user_id
+    WHERE dp.last_location_geo IS NOT NULL
+      AND u.id_document_status = 'APPROVED'
+      AND dp.vehicle_plate IS NOT NULL
+      AND dp.vehicle_status = 'APPROVED'
+      AND dp.vehicle_category IS NOT NULL
+      AND (dp.registration_expires_at IS NULL OR dp.registration_expires_at > now())
+      ${inspectionSql}
+      AND dp.last_location_updated_at >= now() - (interval '1 second' * ${ONLINE_WINDOW_SECONDS})
+      AND (dp.last_location_geo::geography <-> ${geo}) <= ${RADIUS_M}
+      AND NOT EXISTS (
+        SELECT 1 FROM ride_requests ar
+        WHERE ar.driver_id = dp.user_id AND ar.status IN ('DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS')
+      )
+    GROUP BY dp.vehicle_category
+  `)
+  const byCategory = {}
+  for (const row of rows) {
+    const category = VEHICLE_TO_RIDE_CATEGORY[row.vehicle]
+    if (!category) continue
+    const nearestM = row.nearestM == null ? null : Number(row.nearestM)
+    byCategory[category] = { drivers: Number(row.drivers), etaMinutes: nearestM == null ? null : Math.max(2, Math.round((nearestM / 1000 / 28) * 60) + 2) }
+  }
+  return Object.values(VEHICLE_TO_RIDE_CATEGORY).map((category) => ({ category, drivers: byCategory[category]?.drivers ?? 0, etaMinutes: byCategory[category]?.etaMinutes ?? null }))
+}

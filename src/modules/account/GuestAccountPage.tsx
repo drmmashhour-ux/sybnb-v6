@@ -184,8 +184,22 @@ const copy = {
   },
 }
 
+// Brand shown in the sign-in / create-account copy. Rezekme builds set VITE_BRAND_NAME via Vite `define`;
+// every other build keeps SYBNB.
+const BRAND = ((import.meta.env.VITE_BRAND_NAME as string | undefined) || 'SYBNB').trim() || 'SYBNB'
+function withBrand<T extends Record<string, unknown>>(obj: T): T {
+  if (BRAND === 'SYBNB') return obj
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === 'string') out[k] = v.replace(/SYBNB/g, BRAND)
+    else if (typeof v === 'function') out[k] = (...a: unknown[]) => { const r = (v as (...x: unknown[]) => unknown)(...a); return typeof r === 'string' ? r.replace(/SYBNB/g, BRAND) : r }
+    else out[k] = v
+  }
+  return out as T
+}
+
 export function GuestAccountPage({ lang, listingId, returnPath: explicitReturnPath, embedded = false, onSignedIn, embeddedTitle, initialMode = 'login' }: Props) {
-  const t = copy[lang]
+  const t = withBrand(copy[lang])
   const isAr = lang === 'ar'
   const [step, setStep] = useState<Step>('email')
   // Two explicit doors (owner decision): first-time users create an account, returning users log in.

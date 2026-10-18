@@ -10,6 +10,7 @@ export default defineConfig({
   envDir: resolve(__dirname, '../..'),
   publicDir: resolve(__dirname, '../../public'),
   plugins: [react()],
+  define: { 'import.meta.env.VITE_BRAND_NAME': JSON.stringify('Rezekme') },
   resolve: { alias: { '@platform': resolve(__dirname, '../../src') } },
   server: { host: '127.0.0.1', port: 5191 },
   build: { outDir: resolve(__dirname, '../../dist-apps/rezekme-rides'), emptyOutDir: true },

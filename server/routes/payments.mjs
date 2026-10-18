@@ -197,7 +197,6 @@ export async function handlePayments(req, res, url, context) {
   if (url.pathname === '/api/payments/stripe/create-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
-    requireVerifiedEmail(context)
     requireStripe()
 
     const body = await readJson(req)

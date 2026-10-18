@@ -16,7 +16,7 @@ import { cancellationRuleText, freeCancellationLabel } from '@platform/shared/bo
 import { stayGuestAgreement } from '@platform/shared/booking/guestAgreement'
 import { divisionText, moneyText } from '@platform/shared/i18n/display'
 import { listingDisplayTitle } from '@platform/shared/listing/displayTitle'
-import { GuestAccountPage } from '@platform/modules/account/GuestAccountPage'
+import { RiderSignInGate } from '@platform/shared/auth/RiderSignInGate'
 import { DateRangePicker, formatDateForLang, isValidDate, nightsBetween, type DateRange } from './DateRangePicker'
 import { guestFeeSummary } from '@platform/modules/bookings/guestFeeSummary'
 import { CHECKOUT_DRAFT_KEY, CHECKOUT_NOTE_KEY_PREFIX, STRIPE_PENDING_KEY_PREFIX, loadCheckoutDraft, saveCheckoutDraft } from '@platform/modules/bookings/checkoutDraft'
@@ -402,12 +402,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
 
             {!signedIn && !blocked && (
               <section className="checkout-account" aria-label={t('signInTitle')}>
-                <GuestAccountPage
-                  lang={lang}
-                  embedded
-                  embeddedTitle={t('signInTitle')}
-                  onSignedIn={() => setSignedIn(true)}
-                />
+                <RiderSignInGate lang={lang} codeFree onSignedIn={() => setSignedIn(true)} />
               </section>
             )}
 

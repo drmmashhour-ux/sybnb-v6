@@ -1111,7 +1111,7 @@ export function SrRidePage({ lang }: Props) {
         </section>
       )}
 
-      {!hasRiderSession ? <RiderSignInGate lang={lang} onSignedIn={() => setHasRiderSession(true)} /> : null}
+      {!hasRiderSession ? <RiderSignInGate lang={lang} codeFree onSignedIn={() => setHasRiderSession(true)} /> : null}
       <section style={styles.grid}>
         <article style={styles.card}>
           <strong style={{ display: "block", marginBottom: 6 }}>{t.location}</strong>

@@ -51,7 +51,8 @@ export function App() {
   const isBusinessRoute = path === '/business/account'
   const isTripsRoute = path === '/trips'
   const isAccountRoute = /^\/account\/open(?:\/[^/]+)?$/.test(path)
-  const needsGate = (isRideRoute || isBusinessRoute || isTripsRoute) && !hasGuestSession
+  // The ride form itself asks for the email (no code for a new email); only trips/business need a session.
+  const needsGate = (isBusinessRoute || isTripsRoute) && !hasGuestSession
 
   if (needsGate) {
     try {

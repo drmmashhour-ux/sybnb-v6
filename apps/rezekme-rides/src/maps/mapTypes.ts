@@ -105,11 +105,20 @@ export function hasMoved(a: LatLng, b: LatLng): boolean {
 }
 
 /** Top-down car outline (nose pointing up, centred on 0,0), drawn for this app. Used by both maps. */
-export const CAR_PATH = 'M -4 -10 C -4 -11.5 4 -11.5 4 -10 L 5 -4 L 5 8 C 5 10 -5 10 -5 8 L -5 -4 Z'
+export const CAR_PATH = 'M -3.7 -10.2 C -3.7 -11.8 3.7 -11.8 3.7 -10.2 L 4.5 -6 L 4.5 7.2 C 4.5 10.4 -4.5 10.4 -4.5 7.2 L -4.5 -6 Z'
 
 /** Same car as an HTML snippet for Leaflet divIcons, rotated to `heading` degrees. */
 export function carHtml(heading: number): string {
-  return `<div style="width:30px;height:30px;transform:rotate(${Math.round(heading)}deg);transition:transform .4s linear"><svg viewBox="-9 -12 18 24" width="30" height="30"><path d="${CAR_PATH}" fill="#000" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/><path d="M -3.2 -5.5 L 3.2 -5.5 L 3.6 -2 L -3.6 -2 Z" fill="#cfd8e0"/><path d="M -3.4 4.5 L 3.4 4.5 L 3.4 6.8 L -3.4 6.8 Z" fill="#cfd8e0"/></svg></div>`
+  // Top-down car (not a navigation arrow): body, four wheels, side mirrors, windscreen, rear glass, headlights.
+  return `<div style="width:44px;height:44px;transform:rotate(${Math.round(heading)}deg);transition:transform .4s linear;filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))"><svg viewBox="-10 -13 20 26" width="44" height="44">
+<rect x="-5.9" y="-7.4" width="2" height="4.2" rx=".8" fill="#000"/><rect x="3.9" y="-7.4" width="2" height="4.2" rx=".8" fill="#000"/>
+<rect x="-5.9" y="3.2" width="2" height="4.2" rx=".8" fill="#000"/><rect x="3.9" y="3.2" width="2" height="4.2" rx=".8" fill="#000"/>
+<rect x="-5.6" y="-4.4" width="1.8" height="1.6" rx=".6" fill="#111"/><rect x="3.8" y="-4.4" width="1.8" height="1.6" rx=".6" fill="#111"/>
+<path d="M -3.7 -10.2 C -3.7 -11.8 3.7 -11.8 3.7 -10.2 L 4.5 -6 L 4.5 7.2 C 4.5 10.4 -4.5 10.4 -4.5 7.2 L -4.5 -6 Z" fill="#1c1c1e" stroke="#fff" stroke-width="1" stroke-linejoin="round"/>
+<path d="M -3.2 -5.6 L 3.2 -5.6 L 3.8 -2 L -3.8 -2 Z" fill="#a9c7e4"/><path d="M -3.3 3.6 L 3.3 3.6 L 3.1 6.2 L -3.1 6.2 Z" fill="#a9c7e4"/>
+<rect x="-3.2" y="-1.6" width="6.4" height="4.8" rx="1" fill="#2c2c2e"/>
+<circle cx="-2.7" cy="-10.1" r=".8" fill="#ffe27a"/><circle cx="2.7" cy="-10.1" r=".8" fill="#ffe27a"/>
+</svg></div>`
 }
 
 /** Coerce server-provided coordinates (numbers or numeric strings) to a clean point, or null. */

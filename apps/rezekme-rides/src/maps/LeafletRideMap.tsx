@@ -21,7 +21,7 @@ const dot = (bg: string, size: number, round = true, text = '') =>
     iconAnchor: [size / 2, size / 2],
   })
 
-const carIcon = (heading: number) => L.divIcon({ className: '', html: carHtml(heading), iconSize: [30, 30], iconAnchor: [15, 15] })
+const carIcon = (heading: number) => L.divIcon({ className: '', html: carHtml(heading), iconSize: [44, 44], iconAnchor: [22, 22] })
 
 export function LeafletRideMap(props: RideMapProps) {
   const { pickup, dropoff, stops, driver, userLocation, dropTarget, onPick, command, phase } = props

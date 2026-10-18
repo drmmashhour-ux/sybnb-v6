@@ -5,6 +5,8 @@
 //   'sandbox' (default) — does NOT send anything. Returns a synthetic id. Never logs the email body
 //                         (which may contain an OTP). Used for local/dev/staging + governed tests.
 //   'ses'               — Amazon SES v2 via SigV4 (AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, EMAIL_FROM).
+//   'brevo'             — POSTs to https://api.brevo.com/v3/smtp/email. Requires BREVO_API_KEY and
+//                         EMAIL_FROM ("Name <addr@domain>" or a bare address).
 //   'resend'            — POSTs to https://api.resend.com/emails. Requires RESEND_API_KEY and
 //                         EMAIL_FROM; throws EMAIL_PROVIDER_NOT_CONFIGURED if missing (prepared but
 //                         inert until real credentials are supplied — a reserved owner action).
@@ -23,12 +25,22 @@ function normalizeAddress(address) {
   return String(address || '').trim().toLowerCase()
 }
 
+// "SYBNB <no-reply@x.app>" or "no-reply@x.app" -> { name?, email }
+export function parseFromAddress(from) {
+  const m = String(from || '').match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/)
+  if (m) return m[1].trim() ? { name: m[1].trim(), email: m[2].trim() } : { email: m[2].trim() }
+  return { email: String(from || '').trim() }
+}
+
 export function emailProviderStatus() {
   const provider = providerName()
   if (provider === 'sandbox') return { provider, configured: true, live: false }
   if (provider === 'resend') {
     // Report configuration WITHOUT exposing the key (boolean only).
     return { provider, configured: Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM), live: true }
+  }
+  if (provider === 'brevo') {
+    return { provider, configured: Boolean(process.env.BREVO_API_KEY && process.env.EMAIL_FROM), live: true }
   }
   if (provider === 'ses') {
     // Boolean only: never expose key material.
@@ -137,6 +149,42 @@ export async function sendEmail({ to, subject, text, html, purpose, idempotencyK
     let data = {}
     try { data = await res.json() } catch { /* provider may return empty body */ }
     return { provider: 'resend', messageId: data.id || `resend-${Date.now()}`, delivered: true }
+  }
+
+  if (provider === 'brevo') {
+    const apiKey = process.env.BREVO_API_KEY
+    const from = process.env.EMAIL_FROM
+    if (!apiKey || !from) {
+      const error = new Error('Email provider is not configured for live delivery.')
+      error.statusCode = 503
+      error.code = 'EMAIL_PROVIDER_NOT_CONFIGURED'
+      error.expose = true
+      throw error
+    }
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json', 'api-key': apiKey },
+      body: JSON.stringify({
+        sender: parseFromAddress(from),
+        to: recipients.map((email) => ({ email })),
+        subject,
+        textContent: text,
+        ...(html ? { htmlContent: html } : {}),
+      }),
+    })
+    if (!res.ok) {
+      let detail = ''
+      try { const j = await res.json(); detail = `${j?.code || ''}: ${j?.message || ''}`.slice(0, 300) } catch { /* ignore */ }
+      console.error(JSON.stringify({ event: 'email_provider_rejected', provider: 'brevo', providerStatus: res.status, detail }))
+      const error = new Error('Email provider rejected the message.')
+      error.statusCode = 502
+      error.code = 'EMAIL_SEND_FAILED'
+      error.expose = true
+      throw error
+    }
+    let data = {}
+    try { data = await res.json() } catch { /* empty body */ }
+    return { provider: 'brevo', messageId: data.messageId || `brevo-${Date.now()}`, delivered: true }
   }
 
   if (provider === 'ses') {

@@ -154,7 +154,7 @@ const copy = {
     paymentRejected: 'تعذر قبول إثبات الدفع السابق. يرجى إرسال رقم مرجع صحيح.',
     cancellationFeeLabel: 'رسوم الإلغاء',
     payFeeTitle: 'تأكيد دفع رسوم الإلغاء',
-    payFeeCopy: 'كان السائق قد بدأ التوجه إليك بالفعل. ادفع رسوم الإلغاء له مباشرة (نقداً أو تحويل)، ثم أدخل رقم مرجع العملية هنا ليتحقق منها فريق Rezekme.',
+    payFeeCopy: 'تطبق رسوم إلغاء. حوّل المبلغ إلى حساب منصة Rezekme — سيحصل السائق على حصته بعد مراجعة المشرف. أدخل رقم مرجع التحويل أدناه.',
     cancellationFeeWarning: 'قد يترتب على الإلغاء الآن رسوم إلغاء تقريبية قدرها {amount} لأن السائق بدأ التوجه إليك بالفعل.',
     chatTitle: 'راسل السائق',
     chatEmpty: 'لا توجد رسائل بعد.',
@@ -265,7 +265,7 @@ const copy = {
     receiptFare: 'Amount charged',
     receiptDistance: 'Distance',
     payTitle: 'Confirm payment',
-    payCopy: "Pay the fare directly to the driver (cash or transfer), then enter the transaction reference here so Rezekme can verify it.",
+    payCopy: "Transfer the fare to the Rezekme platform account (see QR below or contact support), then enter the transfer reference here.",
     payReferencePlaceholder: 'Transaction reference',
     payCashButton: 'I paid the driver in cash',
     payCardButton: 'Pay by card',
@@ -280,7 +280,7 @@ const copy = {
     paymentRejected: 'The previous payment proof could not be accepted. Please submit a valid reference.',
     cancellationFeeLabel: 'Cancellation fee',
     payFeeTitle: 'Confirm cancellation fee payment',
-    payFeeCopy: 'Your driver had already started heading your way. Pay the cancellation fee directly to them (cash or transfer), then enter the transaction reference here so Rezekme can verify it.',
+    payFeeCopy: 'A cancellation fee applies. Transfer the amount to the Rezekme platform account — the driver will receive their share after admin verification. Enter the transfer reference below.',
     cancellationFeeWarning: 'Cancelling now may incur an estimated cancellation fee of {amount} because your driver has already started heading your way.',
     chatTitle: 'Message your driver',
     chatEmpty: 'No messages yet.',
@@ -1315,11 +1315,7 @@ export function RidePage({ lang }: Props) {
         <button disabled={!payProviderRef.trim() || payStatus === 'saving'} style={styles.bigButtonInline} onClick={() => void submitPayment()}>
           {payStatus === 'saving' ? t.paySubmitting : t.paySubmit}
         </button>
-        <div style={styles.orDivider}>{t.payOr}</div>
-        <span style={styles.hint}>{t.payCashHint}</span>
-        <button disabled={payStatus === 'saving'} style={styles.smallButton} onClick={() => void submitCashPayment()}>
-          {payStatus === 'saving' ? t.paySubmitting : t.payCashButton}
-        </button>
+
         {stripeConfigured && (
           <>
             <div style={styles.orDivider}>{t.payOr}</div>
@@ -2231,7 +2227,7 @@ export function RidePage({ lang }: Props) {
           </>
         )}
 
-        {ride.status === 'CANCELLED' && typeof ride.cancellationFeeMinor === 'number' && ride.cancellationFeeMinor > 0 && (
+        {ride.status === 'CANCELLED' && typeof ride.cancellationFeeMinor === 'number' && ride.cancellationFeeMinor > 0 && ride.driverId && (
           <>
             <div style={styles.infoRow}>
               <span>{t.cancellationFeeLabel}</span>

@@ -1774,11 +1774,8 @@ export function RidePage({ lang }: Props) {
                 ) : (
                   <>
                     <span style={styles.hint}>
-                      {pick(lang, 'أضف بطاقة: تُحجز الأجرة عند الطلب وتُخصم بعد الرحلة. لا دفع نقدي.', 'Add a card: the fare is held when you request and charged after the trip. No cash.', 'Ajoutez une carte : le tarif est réservé à la demande et débité après la course. Pas d’espèces.')}
+                      {pick(lang, 'تُدفع الأجرة من محفظة Rezekme عند التأكيد، قبل البحث عن سائق. لا دفع نقدي.', 'The fare is paid from your Rezekme wallet when you confirm, before we look for a driver. No cash.', 'Le tarif est payé depuis votre portefeuille Rezekme à la confirmation, avant la recherche d’un chauffeur. Pas d’espèces.')}
                     </span>
-                    <button type="button" style={styles.smallButton} disabled={cardSetupStatus === 'redirecting' || cardSetupStatus === 'confirming'} onClick={() => void startAddCard()}>
-                      {cardSetupStatus === 'redirecting' || cardSetupStatus === 'confirming' ? t.addingCard : t.addCard}
-                    </button>
                   </>
                 )}
               </div>
@@ -1959,6 +1956,11 @@ export function RidePage({ lang }: Props) {
           </div>
         </div>
         <div style={styles.infoRow}><span>{t.rideId}</span><strong dir="ltr">{ride.id.slice(0, 8).toUpperCase()}</strong></div>
+        {Boolean(ride.metadata?.prepaid || ride.metadata?.cardHoldIntentId) && !['CANCELLED'].includes(ride.status) && (
+          <div style={{ ...styles.notice, background: '#e8f5e9', color: '#1b5e20', borderColor: '#a5d6a7' }}>
+            ✓ {pick(lang, `تم الدفع ${moneyText(ride.fareMinor ?? 0, ride.currency, lang)} قبل البحث عن سائق — يحتفظ به Rezekme حتى نهاية الرحلة`, `Paid ${moneyText(ride.fareMinor ?? 0, ride.currency, lang)} before we look for a driver — held by Rezekme until the trip ends`, `${moneyText(ride.fareMinor ?? 0, ride.currency, lang)} payé avant la recherche d’un chauffeur — conservé par Rezekme jusqu’à la fin de la course`)}
+          </div>
+        )}
         <div style={styles.infoRow}><span>{t.fare}</span><strong dir={isAr ? 'rtl' : 'ltr'}>{moneyText(ride.fareMinor ?? fareMinor, ride.currency, lang)}</strong></div>
         {ride.accessibilityRequired && <div style={styles.badge}>♿ {t.accessibilityRequired}</div>}
         {ride.businessAccountId && <div style={styles.badge}>{t.billedToBusiness}</div>}

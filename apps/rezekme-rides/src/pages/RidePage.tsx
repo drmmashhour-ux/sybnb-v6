@@ -1736,6 +1736,23 @@ export function RidePage({ lang }: Props) {
 
         <div style={styles.stickyBar}>
           <div style={styles.stickyInner}>
+            {stripeConfigured && (
+              <div style={styles.subCard}>
+                <strong>{pick(lang, 'الدفع', 'Payment', 'Paiement')}</strong>
+                {savedCard ? (
+                  <span dir="ltr">{`✓ ${savedCard.brand ? savedCard.brand.toUpperCase() : 'CARD'} · ${t.cardEndingIn} ${savedCard.last4 || '----'}`}</span>
+                ) : (
+                  <>
+                    <span style={styles.hint}>
+                      {pick(lang, 'أضف بطاقة: تُحجز الأجرة عند الطلب وتُخصم بعد الرحلة. لا دفع نقدي.', 'Add a card: the fare is held when you request and charged after the trip. No cash.', 'Ajoutez une carte : le tarif est réservé à la demande et débité après la course. Pas d’espèces.')}
+                    </span>
+                    <button type="button" style={styles.smallButton} disabled={cardSetupStatus === 'redirecting' || cardSetupStatus === 'confirming'} onClick={() => void startAddCard()}>
+                      {cardSetupStatus === 'redirecting' || cardSetupStatus === 'confirming' ? t.addingCard : t.addCard}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             <button disabled={requestDisabled} style={requestDisabled ? { ...styles.bigButton, ...styles.bigButtonDisabled } : styles.bigButton} onClick={() => void requestRide()}>
               <span>{requestLabel}</span>
               {confirmedLocations && status !== 'saving' && (

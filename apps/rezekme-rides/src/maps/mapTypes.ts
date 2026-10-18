@@ -28,7 +28,9 @@ export interface RideMapProps {
 }
 
 /** Neutral initial view when nothing is known yet: no country is baked in. */
-const WORLD_VIEW: LatLng = { lat: 20, lng: 0 }
+// Rezekme opens on Syria (Damascus-centred); a rider's GPS fix is used only when it is inside Syria.
+const WORLD_VIEW: LatLng = { lat: 34.8, lng: 38.5 }
+const inSyria = (p: LatLng) => p.lat > 32 && p.lat < 37.5 && p.lng > 35.5 && p.lng < 42.5
 
 const LAST_POS_KEY = 'sr.lastKnownPosition'
 
@@ -52,14 +54,14 @@ export function initialView(): { center: LatLng; zoom: number } {
     const stored = window.localStorage.getItem(LAST_POS_KEY)
     if (stored) {
       const point = JSON.parse(stored) as LatLng
-      if (Number.isFinite(point.lat) && Number.isFinite(point.lng)) return { center: point, zoom: 13 }
+      if (Number.isFinite(point.lat) && Number.isFinite(point.lng) && inSyria(point)) return { center: point, zoom: 13 }
     }
   } catch {
     /* ignore */
   }
   const configured = parsePoint(import.meta.env.VITE_MAPS_DEFAULT_CENTER as string | undefined)
-  if (configured) return { center: configured, zoom: 11 }
-  return { center: WORLD_VIEW, zoom: 2 }
+  if (configured && inSyria(configured)) return { center: configured, zoom: 11 }
+  return { center: WORLD_VIEW, zoom: 7 }
 }
 
 /**

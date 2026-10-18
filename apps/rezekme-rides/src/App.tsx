@@ -13,6 +13,7 @@ const LegalDocumentPage = lazy(() =>
 )
 const RidePage = lazy(() => import('./pages/RidePage').then((m) => ({ default: m.RidePage })))
 const SharedRidePage = lazy(() => import('./pages/SharedRidePage').then((m) => ({ default: m.SharedRidePage })))
+const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })))
 const TripsPage = lazy(() => import('./pages/TripsPage').then((m) => ({ default: m.TripsPage })))
 const BusinessAccountPage = lazy(() =>
   import('./pages/BusinessAccountPage').then((m) => ({ default: m.BusinessAccountPage })),
@@ -52,9 +53,10 @@ export function App() {
   const isRideRoute = path === '/' || path === '/ride'
   const isBusinessRoute = path === '/business/account'
   const isTripsRoute = path === '/trips'
+  const isProfileRoute = path === '/profile'
   const isAccountRoute = /^\/account\/open(?:\/[^/]+)?$/.test(path)
   // The ride form itself asks for the email (no code for a new email); only trips/business need a session.
-  const needsGate = (isBusinessRoute || isTripsRoute) && !hasGuestSession
+  const needsGate = (isBusinessRoute || isTripsRoute || isProfileRoute) && !hasGuestSession
 
   if (needsGate) {
     try {
@@ -129,6 +131,8 @@ export function App() {
   } else if (sharedRideMatch) {
     const query = new URLSearchParams(sharedRideMatch[2] || '')
     content = <SharedRidePage lang={lang} rideId={sharedRideMatch[1]} exp={query.get('exp') || ''} sig={query.get('sig') || ''} />
+  } else if (isProfileRoute) {
+    content = <ProfilePage lang={lang} onSignOut={() => void handleSignOut()} />
   } else if (isTripsRoute) {
     content = <TripsPage lang={lang} />
   } else if (isBusinessRoute) {
@@ -165,6 +169,7 @@ export function App() {
             {hasGuestSession ? (
               <>
                 <a href="#/trips" style={styles.barLink}>{pick(lang, 'رحلاتي', 'Trips', 'Courses')}</a>
+                <a href="#/profile" style={styles.barLink}>{pick(lang, 'حسابي', 'Profile', 'Profil')}</a>
                 <a href="#/business/account" style={styles.barLink}>{pick(lang, 'الأعمال', 'Business', 'Entreprise')}</a>
                 <button type="button" style={styles.barButton} onClick={() => void handleSignOut()}>
                   {pick(lang, 'خروج', 'Sign out', 'Quitter')}

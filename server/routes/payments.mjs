@@ -741,9 +741,24 @@ export async function handlePayments(req, res, url, context) {
         where: { id: context.user.id },
         select: { defaultCardPmId: true, defaultCardBrand: true, defaultCardLast4: true },
       })
+      let expiry = {}
+      if (user?.defaultCardPmId && stripe) {
+        try {
+          const pm = await stripe.paymentMethods.retrieve(user.defaultCardPmId)
+          const m = pm?.card?.exp_month
+          const y = pm?.card?.exp_year
+          if (m && y) {
+            const now = new Date()
+            const monthsLeft = (y - now.getUTCFullYear()) * 12 + (m - (now.getUTCMonth() + 1))
+            expiry = { expMonth: m, expYear: y, expired: monthsLeft < 0, expiringSoon: monthsLeft >= 0 && monthsLeft <= 1 }
+          }
+        } catch {
+          // Stripe unreachable: show the card without expiry details.
+        }
+      }
       return json(res, 200, {
         ok: true,
-        card: user?.defaultCardPmId ? { brand: user.defaultCardBrand, last4: user.defaultCardLast4 } : null,
+        card: user?.defaultCardPmId ? { brand: user.defaultCardBrand, last4: user.defaultCardLast4, ...expiry } : null,
       })
     }
     if (req.method === 'DELETE') {

@@ -1703,7 +1703,7 @@ export async function createStripeCheckoutSession(bookingId: string) {
   return response
 }
 
-export type SavedCard = { brand: string | null; last4: string | null }
+export type SavedCard = { brand: string | null; last4: string | null; expMonth?: number; expYear?: number; expired?: boolean; expiringSoon?: boolean }
 
 export async function fetchSavedCard(): Promise<SavedCard | null> {
   const session = await ensurePrototypeGuestSession()

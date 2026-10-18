@@ -519,6 +519,29 @@ export function RidePage({ lang }: Props) {
   const [accuracyMeters, setAccuracyMeters] = useState<number | undefined>()
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | undefined>()
   const [ride, setRide] = useState<PlatformRideRequest | null>(null)
+  // Keep the open trip across reloads: remember its id on this device and re-load it on mount.
+  useEffect(() => {
+    try {
+      const id = window.localStorage.getItem('rezekme.activeRideId')
+      if (!id) return
+      fetchPrototypeSrRide(id)
+        .then((r) => {
+          if (r && !['COMPLETED', 'CANCELLED'].includes(r.status)) setRide(r)
+          else window.localStorage.removeItem('rezekme.activeRideId')
+        })
+        .catch(() => {})
+    } catch {
+      /* storage unavailable */
+    }
+  }, [])
+  useEffect(() => {
+    try {
+      if (ride && !['COMPLETED', 'CANCELLED'].includes(ride.status)) window.localStorage.setItem('rezekme.activeRideId', ride.id)
+      else if (ride) window.localStorage.removeItem('rezekme.activeRideId')
+    } catch {
+      /* storage unavailable */
+    }
+  }, [ride])
   const [driverPhotoUrl, setDriverPhotoUrl] = useState<string | null>(null)
   const [quote, setQuote] = useState<PlatformSrQuote | null>(null)
   // Which category the current `quote` was fetched for (the quote is refetched ~400 ms after a change).

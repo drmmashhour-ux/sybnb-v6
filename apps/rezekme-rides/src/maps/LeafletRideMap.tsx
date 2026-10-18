@@ -121,9 +121,30 @@ export function LeafletRideMap(props: RideMapProps) {
       layers.line = undefined
     }
     if (path.length >= 2) layers.line = L.polyline(path.map((p) => [p.lat, p.lng] as [number, number]), { color: '#000', weight: 4, opacity: 0.9 }).addTo(map)
+    // Replace the straight line with the real road route (OSRM, OpenStreetMap roads). The straight
+    // line stays as the instant fallback if the router is slow or unreachable.
+    let cancelled = false
+    if (path.length >= 2) {
+      const coords = path.map((p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';')
+      const controller = new AbortController()
+      const timer = window.setTimeout(() => controller.abort(), 8000)
+      fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`, { signal: controller.signal })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data: { routes?: Array<{ geometry?: { coordinates?: Array<[number, number]> } }> } | null) => {
+          const road = data?.routes?.[0]?.geometry?.coordinates
+          if (cancelled || !road || road.length < 2 || !mapRef.current) return
+          if (layersRef.current.line) mapRef.current.removeLayer(layersRef.current.line)
+          layersRef.current.line = L.polyline(road.map(([lng, lat]) => [lat, lng] as [number, number]), { color: '#000', weight: 4, opacity: 0.9 }).addTo(mapRef.current)
+        })
+        .catch(() => {})
+        .finally(() => window.clearTimeout(timer))
+    }
 
     map.invalidateSize({ animate: false })
     if (!interactedRef.current) fit()
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, stopsKey, hasDriver])
 

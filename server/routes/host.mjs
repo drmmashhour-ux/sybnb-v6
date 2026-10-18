@@ -220,20 +220,20 @@ export async function handleHost(req, res, url, context) {
     const canConfirm = status === 'CONFIRMED' && existing.status === 'REQUESTED'
     const canCancel = status === 'CANCELLED' && ['REQUESTED', 'CONFIRMED'].includes(existing.status)
 
-    // An expiry sweep can already have marked an ended stay COMPLETED. Return the same
-    // ended-stay denial in that case before the generic undecidable-status guard.
-    if (status === 'CANCELLED' && ['REQUESTED', 'CONFIRMED', 'COMPLETED'].includes(existing.status) && hasStayEnded(existing, { policy: bookingPolicySettings() })) {
-      const error = new Error('This stay has already ended and can no longer be cancelled.')
-      error.statusCode = 409
-      error.code = 'BOOKING_STAY_ENDED'
-      error.expose = true
-      throw error
-    }
-
     if (!canConfirm && !canCancel) {
       const error = new Error('This booking cannot be changed by the host at its current status.')
       error.statusCode = 400
       error.code = 'HOST_REQUEST_NOT_DECIDABLE'
+      error.expose = true
+      throw error
+    }
+
+    // Review fix: once the check-out date has begun (country time) the stay is used -- a host
+    // "cancel" would refund a finished stay in full. Refuse like the guest cancel route does.
+    if (canCancel && hasStayEnded(existing, { policy: bookingPolicySettings() })) {
+      const error = new Error('This stay has already ended and can no longer be cancelled.')
+      error.statusCode = 409
+      error.code = 'BOOKING_STAY_ENDED'
       error.expose = true
       throw error
     }
@@ -756,69 +756,51 @@ export async function handleHost(req, res, url, context) {
         error.expose = true
         throw error
       }
-      // Booking has no onDelete cascade/restrict override on its listing relation (Prisma defaults to
-      // DB-level RESTRICT), so ANY booking history — not just active statuses — would make the delete
-      // below fail with an opaque 500 from the FK constraint. Check for any booking at all and give a
-      // clean, actionable error; this also preserves booking/financial history, which should never be
-      // silently destroyed by deleting the listing it references.
-      const anyBooking = await db().booking.findFirst({
-        where: { listingId: existing.id },
+      if (existing.status === 'REMOVED') {
+        const error = new Error('Listing not found for this host account.')
+        error.statusCode = 404
+        error.code = 'HOST_LISTING_NOT_FOUND'
+        error.expose = true
+        throw error
+      }
+      // A live booking (waiting on the host, awaiting payment, confirmed or disputed) blocks removal:
+      // the guest's stay and the money flow depend on the listing.
+      const activeBooking = await db().booking.findFirst({
+        where: { listingId: existing.id, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED'] } },
         select: { id: true },
       })
-      if (anyBooking) {
-        const error = new Error('This listing has booking history and cannot be deleted; pause it instead.')
+      if (activeBooking) {
+        const error = new Error('This listing has active bookings; finish or cancel them before removing it.')
         error.statusCode = 409
         error.code = 'HOST_LISTING_HAS_BOOKINGS'
         error.expose = true
         throw error
       }
-      await db().listing.delete({ where: { id: existing.id } })
+      // The photos live in object storage and are only ever deleted here, when the host removes the
+      // listing. Booking has no onDelete cascade (DB-level RESTRICT), so a listing with finished-booking
+      // history is kept as a REMOVED row (hidden everywhere) to preserve booking/financial history;
+      // a listing with no bookings at all is deleted outright.
+      const photosDeleted = await deleteListingPhotos(existing.id)
+      const anyBooking = await db().booking.findFirst({ where: { listingId: existing.id }, select: { id: true } })
+      if (anyBooking) {
+        await db().listing.update({ where: { id: existing.id }, data: { status: 'REMOVED', instantBookEnabled: false } })
+      } else {
+        await db().listing.delete({ where: { id: existing.id } })
+      }
       await db().adminAuditLog.create({
-        data: { actorUserId: context.user.id, action: 'HOST_LISTING_DELETE', entityType: 'listings', entityId: existing.id, before: existing, after: null },
+        data: {
+          actorUserId: context.user.id,
+          action: 'HOST_LISTING_DELETE',
+          entityType: 'listings',
+          entityId: existing.id,
+          before: existing,
+          after: { removed: Boolean(anyBooking), photosDeleted },
+        },
       })
-      return json(res, 200, { ok: true, deleted: existing.id })
+      return json(res, 200, { ok: true, deleted: existing.id, photosDeleted })
     }
 
     return methodNotAllowed(res, ['PATCH', 'DELETE'])
-  }
-
-  const removeMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)$/)
-  if (removeMatch) {
-    if (req.method !== 'DELETE') return methodNotAllowed(res, ['DELETE'])
-    requireAuth(context, ['HOST', 'SELLER'])
-    const existing = await db().listing.findFirst({ where: { id: removeMatch[1], ownerId: context.user.id } })
-    if (!existing || existing.status === 'REMOVED') {
-      const error = new Error('Listing not found for this host account.')
-      error.statusCode = 404
-      error.code = 'HOST_LISTING_NOT_FOUND'
-      error.expose = true
-      throw error
-    }
-    // A listing with a live booking (waiting on the host, awaiting payment, confirmed, or disputed)
-    // cannot be removed -- the guest's stay and the money flow depend on it.
-    const activeBookings = await db().booking.count({
-      where: { listingId: existing.id, status: { in: ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED', 'DISPUTED'] } },
-    })
-    if (activeBookings > 0) {
-      const error = new Error('This listing has active bookings. Finish or cancel them before removing it.')
-      error.statusCode = 409
-      error.code = 'HOST_LISTING_HAS_ACTIVE_BOOKINGS'
-      error.expose = true
-      throw error
-    }
-    const photoCount = await deleteListingPhotos(existing.id)
-    const listing = await db().listing.update({ where: { id: existing.id }, data: { status: 'REMOVED', instantBookEnabled: false } })
-    await db().adminAuditLog.create({
-      data: {
-        actorUserId: context.user.id,
-        action: 'HOST_LISTING_REMOVED',
-        entityType: 'listings',
-        entityId: listing.id,
-        before: { status: existing.status },
-        after: { status: listing.status, photosDeleted: photoCount },
-      },
-    })
-    return json(res, 200, { ok: true, listing: { id: listing.id, status: listing.status }, photosDeleted: photoCount })
   }
 
   const listingMatch = url.pathname.match(/^\/api\/host\/listings\/([^/]+)\/status$/)

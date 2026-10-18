@@ -15,7 +15,6 @@ import {
   submitHostIdDocument,
   updatePrototypeHostInstantBook,
   confirmListingPrice,
-  removeHostListing,
   updatePrototypeHostListingStatus,
   setHostListingSold,
   type HostDashboardMode,
@@ -373,7 +372,6 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const [message, setMessage] = useState('')
   const [activeRequestId, setActiveRequestId] = useState('')
   const [activeListingId, setActiveListingId] = useState('')
-  const [confirmRemoveId, setConfirmRemoveId] = useState('')
   const [calendarListingId, setCalendarListingId] = useState('')
   const [acceptedRequestTerms, setAcceptedRequestTerms] = useState<Record<string, boolean>>({})
   const [hostDocumentFiles, setHostDocumentFiles] = useState<string[]>([])
@@ -564,27 +562,6 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
     } catch (error) {
       setStatus('error')
       setMessage(error instanceof Error ? error.message : t.error)
-    } finally {
-      setActiveListingId('')
-    }
-  }
-
-  async function removeListing(listingId: string) {
-    setStatus('saving')
-    setActiveListingId(listingId)
-    setMessage('')
-    try {
-      await removeHostListing(listingId, mode)
-      setConfirmRemoveId('')
-      setOverview(await fetchPrototypeHostOverview(mode))
-      setStatus('ready')
-    } catch (error) {
-      setConfirmRemoveId('')
-      setStatus('error')
-      const code = (error as { code?: string } | null)?.code
-      setMessage(code === 'HOST_LISTING_HAS_ACTIVE_BOOKINGS'
-        ? pick(lang, 'لا يمكن حذف الإعلان وفيه حجوزات نشطة. أنهِها أو ألغِها أولاً.', 'This listing has active bookings. Finish or cancel them before removing it.', 'Cette annonce a des réservations actives. Terminez-les ou annulez-les avant de la supprimer.')
-        : error instanceof Error ? error.message : t.error)
     } finally {
       setActiveListingId('')
     }
@@ -939,20 +916,6 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                     {listing.metadata?.sold === true
                       ? pick(lang, 'إعادة للبيع', 'Back on sale', 'Remettre en vente')
                       : pick(lang, 'تم البيع', 'Mark as sold', 'Marquer comme vendu')}
-                  </button>
-                )}
-                {confirmRemoveId === listing.id ? (
-                  <>
-                    <button disabled={activeListingId === listing.id} style={styles.dangerButton} onClick={() => void removeListing(listing.id)}>
-                      {pick(lang, 'تأكيد الحذف النهائي (تُحذف الصور)', 'Confirm permanent removal (photos deleted)', 'Confirmer la suppression (photos effacées)')}
-                    </button>
-                    <button style={styles.secondaryButton} onClick={() => setConfirmRemoveId('')}>
-                      {pick(lang, 'تراجع', 'Keep it', 'Annuler')}
-                    </button>
-                  </>
-                ) : (
-                  <button style={styles.secondaryButton} onClick={() => setConfirmRemoveId(listing.id)}>
-                    {pick(lang, 'حذف الإعلان', 'Remove listing', "Supprimer l'annonce")}
                   </button>
                 )}
                 <button

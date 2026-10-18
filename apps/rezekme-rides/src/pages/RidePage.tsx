@@ -1871,6 +1871,11 @@ export function RidePage({ lang }: Props) {
               onShamCashRefChange={setShamCashRef}
               onShamCashSubmit={() => {
                 if (!shamCashRef.trim()) return
+                if (entryMode === 'guest') {
+                  // Guest sham cash: just mark submitted; ref sent with ride creation
+                  setShamCashStatus('submitted')
+                  return
+                }
                 setShamCashStatus('saving')
                 submitPrototypeLocalWalletProof({ amountMinor: fareMinor, currency: 'USD', providerRef: shamCashRef.trim() })
                   .then(() => setShamCashStatus('submitted'))

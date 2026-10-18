@@ -622,7 +622,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
           <section style={styles.grid}>
             <Info label={t.status} value={statusText(booking.status, lang)} dir={isAr ? 'rtl' : 'ltr'} strong />
             <Info label={t.amount} value={moneyText(fees?.totalMinor ?? booking.amountMinor, booking.currency, lang)} dir={isAr ? 'rtl' : 'ltr'} strong />
-            <Info label={t.booking} value={booking.id} />
+            <Info label={t.booking} value={booking.id.slice(0, 8).toUpperCase()} />
             <Info label={t.listing} value={listingTitle} />
             <Info label={t.guest} value={booking.guest?.displayName || booking.guestId.slice(0, 8).toUpperCase()} />
             <Info label={t.host} value={booking.listing?.owner?.displayName || booking.listing?.ownerId?.slice(0, 8).toUpperCase() || '-'} />

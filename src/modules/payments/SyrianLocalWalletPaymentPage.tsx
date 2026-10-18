@@ -66,6 +66,7 @@ const copy = {
     seed: 'حالة المراجعة',
     security: 'حالة الدفع',
     validationPassed: 'تم التحقق من الحقول',
+    awaitingProof: 'بانتظار رفع إثبات الدفع',
     validationFailed: 'يوجد خطأ في بيانات الدفع',
     duplicateBlocked: 'منع التكرار',
     hash: 'رمز المراجعة',
@@ -120,6 +121,7 @@ const copy = {
     seed: 'Review status',
     security: 'Payment status',
     validationPassed: 'Fields validated',
+    awaitingProof: 'Waiting for payment proof',
     validationFailed: 'Payment data has an error',
     duplicateBlocked: 'Duplicate blocked',
     hash: 'Review hash',
@@ -174,6 +176,7 @@ const copy = {
     seed: 'Statut de la vérification',
     security: 'État du paiement',
     validationPassed: 'Champs validés',
+    awaitingProof: 'En attente de la preuve de paiement',
     validationFailed: 'Les données de paiement contiennent une erreur',
     duplicateBlocked: 'Doublon bloqué',
     hash: 'Code de vérification',
@@ -321,9 +324,10 @@ export function SyrianLocalWalletPaymentPage({ lang, bookingId = 'BK-2026-0042',
         ? t.hostRejected
         : t.hostUnderReview
   const isAdminApproved = paymentProof?.status === 'APPROVED' || submission.status === 'APPROVED'
-  const displayedBookingStatus = isAdminApproved ? t.reservationConfirmed : statusText(bookingPaymentStatus, lang)
-  const displayedHostStatus = isAdminApproved ? t.hostApproved : hostStatus
-  const displayedReviewStatus = isAdminApproved ? t.adminReviewApproved : statusLabel[lang][submission.status]
+  const awaitingProof = !isAdminApproved && !paymentProof
+  const displayedBookingStatus = isAdminApproved ? t.reservationConfirmed : awaitingProof ? t.awaitingProof : statusText(bookingPaymentStatus, lang)
+  const displayedHostStatus = isAdminApproved ? t.hostApproved : awaitingProof ? t.awaitingProof : hostStatus
+  const displayedReviewStatus = isAdminApproved ? t.adminReviewApproved : awaitingProof ? t.awaitingProof : statusLabel[lang][submission.status]
   const capsuleStatus =
     isAdminApproved
       ? 'confirmed'

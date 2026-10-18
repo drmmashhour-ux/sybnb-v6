@@ -32,6 +32,8 @@ import {
   type PlatformSrQuote,
   type RideInvoice,
   type SavedCard,
+  fetchRideWallet,
+  createGuestPreRideCheckout,
 } from '@platform/shared/api/platformApi'
 
 const ACTIVE_RIDE_STATUSES = ['DRAFT', 'REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
@@ -75,6 +77,7 @@ function storeRecent(entry: RecentDestination): RecentDestination[] {
 import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
 import { srFallbackFareMinor } from './srFareModel'
 import { RecordingControls } from './RecordingControls'
+import { PaymentPicker, type PayMethod } from './PaymentPicker'
 
 type Props = {
   lang: Lang
@@ -611,6 +614,15 @@ export function RidePage({ lang }: Props) {
   // Yallago gap-closure #3: optional driver bonus (whole USD, 0..20) to attract a driver faster.
   const [bonusMinor, setBonusMinor] = useState(0)
   const [moreOpen, setMoreOpen] = useState(false)
+  // Payment picker: guest vs client mode, wallet balance, selected method, Sham Cash fields
+  const [entryMode] = useState<'guest' | 'client'>(() => {
+    try { return (window.localStorage.getItem('rezekme.entryMode') as 'guest' | 'client') || 'guest' } catch { return 'guest' }
+  })
+  const [walletBalanceMinor, setWalletBalanceMinor] = useState<number | null>(null)
+  const [selectedPayMethod, setSelectedPayMethod] = useState<PayMethod>(null)
+  const [shamCashRef, setShamCashRef] = useState('')
+  const [shamCashStatus, setShamCashStatus] = useState<'idle' | 'saving' | 'submitted' | 'error'>('idle')
+  const [guestCheckoutStatus, setGuestCheckoutStatus] = useState<'idle' | 'redirecting'>('idle')
   // Coordinates attached to the dropoff / stops when they came from Places, a saved place or a map pin.
   // A hand-edit of the text clears them (and flips the source to 'manual'), exactly like pickupCoords.
   const [dropoffCoords, setDropoffCoords] = useState<Coords | undefined>()
@@ -694,10 +706,57 @@ export function RidePage({ lang }: Props) {
           setMessage(error instanceof Error ? error.message : t.error)
         })
     }
+    // Returned from guest pre-ride Stripe checkout -> auto-request the ride
+    const guestCheckoutSessionId = params.get('guest_checkout_session_id')
+    if (guestCheckoutSessionId) {
+      try {
+        const pendingRaw = window.localStorage.getItem('rezekme.guestPendingRide')
+        if (pendingRaw) {
+          const pending = JSON.parse(pendingRaw) as {
+            pickup: string; dropoff: string; category: string; pickupCoords?: { lat: number; lng: number }; dropoffCoords?: { lat: number; lng: number }
+          }
+          window.localStorage.removeItem('rezekme.guestPendingRide')
+          const clean = window.location.pathname + window.location.hash
+          window.history.replaceState(null, '', clean)
+          setStatus('saving')
+          createSrRideWithCoords({
+            pickup: pending.pickup,
+            dropoff: pending.dropoff,
+            category: pending.category as never,
+            currency: 'USD',
+            lowDataMode: false,
+            guestStripeSessionId: guestCheckoutSessionId,
+          } as never).then((nextRide) => {
+            if (cancelled) return
+            setRide(nextRide)
+            setStatus('idle')
+          }).catch((err) => {
+            if (cancelled) return
+            setStatus('error')
+            setMessage(err instanceof Error ? err.message : 'Payment error')
+          })
+        }
+      } catch { /* ignore parse errors */ }
+    }
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Fetch USD wallet balance for client riders (used by PaymentPicker)
+  useEffect(() => {
+    if (entryMode !== 'client') return
+    let cancelled = false
+    fetchRideWallet('USD')
+      .then((wallet) => {
+        if (!cancelled) setWalletBalanceMinor(wallet ? wallet.balanceMinor : 0)
+      })
+      .catch(() => {
+        if (!cancelled) setWalletBalanceMinor(0)
+      })
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Fetch (lazily minting) the Rezekme invoice once the ride is terminal, to show its number + link.
@@ -1009,6 +1068,29 @@ export function RidePage({ lang }: Props) {
             })) {
       setStatus('error')
       setMessage(t.locationNotConfirmed)
+      return
+    }
+
+    // Guest card: save pending ride to localStorage, redirect to Stripe
+    if (entryMode === 'guest' && selectedPayMethod === 'card') {
+      setGuestCheckoutStatus('redirecting')
+      try {
+        try {
+          window.localStorage.setItem('rezekme.guestPendingRide', JSON.stringify({
+            pickup: pickup.trim(),
+            dropoff: dropoff.trim(),
+            category,
+            pickupCoords,
+            dropoffCoords,
+          }))
+        } catch { /* storage blocked */ }
+        const { url } = await createGuestPreRideCheckout(fareMinor, 'USD')
+        window.location.href = url
+      } catch (err) {
+        setGuestCheckoutStatus('idle')
+        setStatus('error')
+        setMessage(err instanceof Error ? err.message : 'Checkout error')
+      }
       return
     }
 
@@ -1409,7 +1491,18 @@ export function RidePage({ lang }: Props) {
           .join(' · ')
       : ''
 
-  const requestDisabled = status === 'saving' || (scheduleForLater && !scheduledFor) || !confirmedLocations
+  const walletSufficient = walletBalanceMinor !== null && walletBalanceMinor >= fareMinor
+  const payMethodReady =
+    entryMode === 'guest'
+      ? selectedPayMethod === 'card'
+      : selectedPayMethod === 'wallet'
+        ? walletSufficient
+        : selectedPayMethod === 'card'
+          ? Boolean(savedCard)
+          : selectedPayMethod === 'shamcash'
+            ? shamCashStatus === 'submitted'
+            : false
+  const requestDisabled = status === 'saving' || guestCheckoutStatus === 'redirecting' || (scheduleForLater && !scheduledFor) || !confirmedLocations || !payMethodReady
   const requestLabel = status === 'saving' ? t.saving : scheduleForLater ? t.scheduleRide : `${ui.confirm} ${categoryLabel(category)}`
 
   // ---------------------------------------------------------------- booking view (no ride yet)
@@ -1766,20 +1859,26 @@ export function RidePage({ lang }: Props) {
 
         <div style={styles.stickyBar}>
           <div style={styles.stickyInner}>
-            {stripeConfigured && (
-              <div style={styles.subCard}>
-                <strong>{pick(lang, 'الدفع', 'Payment', 'Paiement')}</strong>
-                {savedCard ? (
-                  <span dir="ltr">{`✓ ${savedCard.brand ? savedCard.brand.toUpperCase() : 'CARD'} · ${t.cardEndingIn} ${savedCard.last4 || '----'}`}</span>
-                ) : (
-                  <>
-                    <span style={styles.hint}>
-                      {pick(lang, 'تُدفع الأجرة من محفظة Rezekme عند التأكيد، قبل البحث عن سائق. لا دفع نقدي.', 'The fare is paid from your Rezekme wallet when you confirm, before we look for a driver. No cash.', 'Le tarif est payé depuis votre portefeuille Rezekme à la confirmation, avant la recherche d’un chauffeur. Pas d’espèces.')}
-                    </span>
-                  </>
-                )}
-              </div>
-            )}
+            <PaymentPicker
+              mode={entryMode}
+              lang={lang}
+              walletBalanceMinor={walletBalanceMinor}
+              fareMinor={fareMinor}
+              currency="USD"
+              savedCard={savedCard}
+              value={selectedPayMethod}
+              onChange={setSelectedPayMethod}
+              shamCashRef={shamCashRef}
+              onShamCashRefChange={setShamCashRef}
+              onShamCashSubmit={() => {
+                if (!shamCashRef.trim()) return
+                setShamCashStatus('saving')
+                submitPrototypeLocalWalletProof(shamCashRef.trim())
+                  .then(() => setShamCashStatus('submitted'))
+                  .catch(() => setShamCashStatus('error'))
+              }}
+              shamCashStatus={shamCashStatus}
+            />
             <button disabled={requestDisabled} style={requestDisabled ? { ...styles.bigButton, ...styles.bigButtonDisabled } : styles.bigButton} onClick={() => void requestRide()}>
               <span>{requestLabel}</span>
               {confirmedLocations && status !== 'saving' && (

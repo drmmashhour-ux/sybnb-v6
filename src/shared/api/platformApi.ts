@@ -1758,6 +1758,32 @@ export type RideInvoice = {
   issuedAt: string
 }
 
+
+// Fetch the rider's wallet for a specific currency (used to check USD balance for rides).
+export async function fetchRideWallet(currency: string): Promise<PlatformWallet | null> {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; wallet: PlatformWallet | null }>(
+    `/api/wallet?currency=${encodeURIComponent(currency)}`,
+    { token: session.token },
+  )
+  return response.wallet
+}
+
+// Create a Stripe Checkout session for a guest to pay for a ride before it is created.
+// Returns the Stripe hosted URL to redirect to.
+export async function createGuestPreRideCheckout(fareMinor: number, currency: string): Promise<{ url: string; sessionId: string }> {
+  const session = await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true; url: string; sessionId: string }>(
+    '/api/payments/stripe/guest-checkout-session',
+    {
+      method: 'POST',
+      token: session.token,
+      body: { fareMinor, currency, origin: window.location.origin },
+    },
+  )
+  return { url: response.url, sessionId: response.sessionId }
+}
+
 export async function fetchRideInvoice(rideId: string): Promise<RideInvoice> {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; invoice: RideInvoice }>(

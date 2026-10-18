@@ -654,7 +654,29 @@ export async function handleSrRides(req, res, url, context) {
       const wallet = await db().wallet.findUnique({ where: { userId_currency: { userId: context.user.id, currency: rideCurrency } }, select: { cachedBalanceMinor: true } })
       const balanceMinor = Math.max(0, wallet?.cachedBalanceMinor || 0)
       const cardCovers = !shareable && cardHoldAvailable() && (await riderHasSavedCard(context.user.id))
-      if (balanceMinor < finalFareMinor && !cardCovers) {
+
+      // Guest one-time Stripe card payment: if a pre-ride guest checkout session was provided,
+      // verify it is paid and matches the fare, then mark the ride as prepaid and skip the gate.
+      const guestStripeSessionId = String(body.guestStripeSessionId || '')
+      let guestStripePrepaid = false
+      if (guestStripeSessionId && process.env.SR_GUEST_STRIPE_ENABLED === '1') {
+        const { default: Stripe } = await import('stripe')
+        const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY)
+        const session = await stripeClient.checkout.sessions.retrieve(guestStripeSessionId)
+        if (session.payment_status === 'paid' && session.metadata?.intentType === 'guest_preride') {
+          // Amount verification: session.amount_total is in cents; fareMinor is in dollars for USD.
+          const sessionFareMinor = Math.round((session.amount_total || 0) / 100)
+          if (sessionFareMinor >= finalFareMinor) {
+            rideData.metadata.prepaid = true
+            rideData.metadata.prepaidBy = 'stripe_guest'
+            rideData.metadata.prepaidAmountMinor = sessionFareMinor
+            rideData.metadata.guestStripeSessionId = session.id
+            guestStripePrepaid = true
+          }
+        }
+      }
+
+      if (!guestStripePrepaid && balanceMinor < finalFareMinor && !cardCovers) {
         const error = new Error('Add funds to your wallet to request this ride.')
         error.statusCode = 402
         error.code = 'RIDE_PREPAY_REQUIRED'
@@ -662,6 +684,9 @@ export async function handleSrRides(req, res, url, context) {
         error.details = { requiredMinor: finalFareMinor, balanceMinor, shortfallMinor: finalFareMinor - balanceMinor, currency: rideCurrency }
         throw error
       }
+
+      // Wallet debit only when NOT using guest Stripe (wallet path) and wallet covers the fare
+      // Note: the existing wallet debit block below handles the wallet case; we only set the flag here.
     }
 
     let ride

@@ -13,7 +13,8 @@ export async function handleWallet(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
     const wallet = await db().wallet.findUnique({
-      where: { userId_currency: { userId: context.user.id, currency: defaultCurrency() } },
+      // Allow ?currency=USD to fetch the rides wallet (default is SYP)
+      where: { userId_currency: { userId: context.user.id, currency: (url.searchParams.get('currency') || '').toUpperCase() || defaultCurrency() } },
       include: { entries: { orderBy: { createdAt: 'desc' }, take: 25 } },
     })
     if (!wallet) return json(res, 200, { ok: true, wallet: null })

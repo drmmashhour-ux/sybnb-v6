@@ -194,6 +194,56 @@ export async function handlePayments(req, res, url, context) {
     return json(res, 200, { ok: true, url: url_ })
   }
 
+  // Guest one-time card payment (pre-ride Stripe Checkout).
+  // The rider has not saved a card and is paying for a single ride.  We create a hosted
+  // Checkout session and store the estimated fare in metadata; sr-rides.mjs verifies this
+  // session on ride creation and marks the ride prepaid.  Enabled with SR_GUEST_STRIPE_ENABLED=1.
+  if (url.pathname === '/api/payments/stripe/guest-checkout-session') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+    requireStripe()
+    if (process.env.SR_GUEST_STRIPE_ENABLED !== '1') {
+      const error = new Error('Guest card payments are not enabled on this server.')
+      error.statusCode = 503
+      error.code = 'GUEST_STRIPE_DISABLED'
+      error.expose = true
+      throw error
+    }
+    const body = await readJson(req)
+    const origin = String(body.origin || '').replace(/\/$/, '')
+    const fareMinor = Math.round(Number(body.fareMinor || 0))
+    const currency = String(body.currency || 'USD').toUpperCase()
+    if (!origin || fareMinor <= 0) {
+      const error = new Error('origin and fareMinor are required.')
+      error.statusCode = 400
+      error.code = 'STRIPE_GUEST_INPUT_INVALID'
+      error.expose = true
+      throw error
+    }
+    const chargeCurrency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
+    // fareMinor for USD rides is in dollars (e.g. 24 = $24.00); Stripe needs cents.
+    const unitAmount = Math.max(50, currency === 'USD' && chargeCurrency === 'usd'
+      ? Math.round(fareMinor * 100)
+      : Math.round(fareMinor * 100))
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: { currency: chargeCurrency, unit_amount: unitAmount, product_data: { name: 'Rezekme ride' } },
+        quantity: 1,
+      }],
+      metadata: {
+        intentType: 'guest_preride',
+        guestId: context.user.id,
+        fareMinor: String(fareMinor),
+        currency,
+      },
+      success_url: `${origin}/?guest_checkout_session_id={CHECKOUT_SESSION_ID}#/ride`,
+      cancel_url: `${origin}/#/ride`,
+    })
+    return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
+  }
+
   if (url.pathname === '/api/payments/stripe/create-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])

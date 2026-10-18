@@ -45,6 +45,7 @@ export function App() {
     window.scrollTo(0, 0)
   }, [path])
 
+  const [entryMode, setEntryMode] = useState<'choose' | 'guest' | 'client'>('choose')
   const isAr = lang === 'ar'
   const hasGuestSession = Boolean(getStoredGuestSession())
   const sharedRideMatch = path.match(/^\/ride\/shared\/([^/?]+)(?:\?(.*))?$/)
@@ -83,9 +84,46 @@ export function App() {
     content = <GuestAccountPage lang={lang} flow="ride" returnPath={needsGate ? path : '/ride'} />
   } else if (isRideRoute && !hasGuestSession) {
     // Email only (no code for a new email); the session starts here and the ride page appears.
+    // Uber-style entry: continue as a one-time guest, or as a client with an account (code, stays signed in).
     content = (
       <div style={{ maxWidth: 480, margin: '48px auto', padding: '0 16px' }}>
-        <RiderSignInGate lang={lang} codeFree onSignedIn={() => setAuthVersion((version) => version + 1)} />
+        {entryMode === 'choose' && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <h1 style={{ fontSize: 24, margin: '0 0 4px' }}>{pick(lang, 'كيف تريد المتابعة؟', 'How would you like to continue?', 'Comment souhaitez-vous continuer ?')}</h1>
+            <button
+              type="button"
+              style={{ padding: '16px 18px', borderRadius: 14, border: '2px solid #111', background: '#111', color: '#fff', fontSize: 17, fontWeight: 700, textAlign: 'start', cursor: 'pointer' }}
+              onClick={() => { try { localStorage.setItem('rezekme.entryMode', 'client') } catch { /* ignore */ } setEntryMode('client') }}
+            >
+              {pick(lang, 'المتابعة كعميل', 'Continue as client', 'Continuer comme client')}
+              <div style={{ fontSize: 13, fontWeight: 400, opacity: 0.85, marginTop: 4 }}>
+                {pick(lang, 'أنشئ حساباً مرة واحدة: معلوماتك وبطاقتك محفوظة وتبقى مسجلاً على هاتفك حتى تخرج.', 'Create an account once: your info and card are saved and you stay signed in on this phone until you log out.', 'Créez un compte une fois : vos infos et votre carte sont enregistrées et vous restez connecté sur ce téléphone jusqu’à la déconnexion.')}
+              </div>
+            </button>
+            <button
+              type="button"
+              style={{ padding: '16px 18px', borderRadius: 14, border: '2px solid #111', background: '#fff', color: '#111', fontSize: 17, fontWeight: 700, textAlign: 'start', cursor: 'pointer' }}
+              onClick={() => { try { localStorage.setItem('rezekme.entryMode', 'guest') } catch { /* ignore */ } setEntryMode('guest') }}
+            >
+              {pick(lang, 'المتابعة كضيف', 'Continue as guest', 'Continuer comme invité')}
+              <div style={{ fontSize: 13, fontWeight: 400, opacity: 0.7, marginTop: 4 }}>
+                {pick(lang, 'لمرة واحدة، بدون حساب. الدفع بالبطاقة، لا نقد.', 'One time, no account. Pay by card, no cash.', 'Une seule fois, sans compte. Paiement par carte, pas d’espèces.')}
+              </div>
+            </button>
+          </div>
+        )}
+        {entryMode === 'guest' && (
+          <>
+            <button type="button" style={{ marginBottom: 12, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setEntryMode('choose')}>←</button>
+            <RiderSignInGate lang={lang} codeFree onSignedIn={() => setAuthVersion((version) => version + 1)} />
+          </>
+        )}
+        {entryMode === 'client' && (
+          <>
+            <button type="button" style={{ marginBottom: 12, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setEntryMode('choose')}>←</button>
+            <GuestAccountPage lang={lang} flow="ride" returnPath="/ride" />
+          </>
+        )}
       </div>
     )
   } else if (sharedRideMatch) {

@@ -73,31 +73,61 @@ export function PaymentPicker({
 }: Props) {
   const isAr = lang === 'ar'
 
-  // ---------- GUEST: card only ----------
+  // ---------- GUEST: card or Sham Cash ----------
   if (mode === 'guest') {
     return (
       <div style={s.wrap}>
         <span style={s.label}>{pick(lang, 'طريقة الدفع', 'Payment method', 'Paiement')}</span>
-        <div
-          role="button"
-          tabIndex={0}
-          style={s.guestCard}
-          onClick={() => onChange('card')}
-          onKeyDown={(e) => e.key === 'Enter' && onChange('card')}
-        >
-          <span style={s.guestCardIcon}>💳</span>
-          <div style={s.guestCardText}>
-            <div style={s.guestCardTitle}>
-              {pick(lang, 'الدفع ببطاقة ائتمان / دولية', 'Credit or international card', 'Carte bancaire / internationale')}
-            </div>
-            <div style={s.guestCardHint}>
+        <div style={s.tabs}>
+          <Tab label={pick(lang, 'بطاقة دولية', 'International card', 'Carte internationale')} active={value === 'card'} onClick={() => onChange('card')} />
+          <Tab label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
+        </div>
+
+        {/* ---- Guest card ---- */}
+        {value === 'card' && (
+          <div style={s.body}>
+            <div style={s.hint}>
               {pick(lang, 'ستُحوّل إلى Stripe لإتمام الدفع بأمان قبل البحث عن سائق.', "You'll be redirected to Stripe to pay securely before we look for a driver.", 'Vous serez redirigé vers Stripe avant la mise en relation avec un chauffeur.')}
             </div>
+            <span style={s.notice}>→ {pick(lang, 'اضغط "طلب الرحلة" للمتابعة إلى Stripe', 'Tap Request ride to continue to Stripe', 'Appuyez sur Demander le trajet pour continuer vers Stripe')}</span>
           </div>
-          <span style={{ color: '#2563eb' }}>→</span>
-        </div>
-        {value === 'card' && (
-          <span style={s.notice}>✓ {pick(lang, 'بطاقة محددة — اضغط "طلب الرحلة" للمتابعة', 'Card selected — tap Request ride to continue', 'Carte sélectionnée — appuyez sur Demander le trajet')}</span>
+        )}
+
+        {/* ---- Guest Sham Cash ---- */}
+        {value === 'shamcash' && (
+          <div style={s.body}>
+            {shamCashStatus === 'submitted' ? (
+              <span style={s.ok}>✓ {pick(lang, 'تم إرسال إثبات الدفع. اضغط "طلب الرحلة" — سيُوافق عليه المشرف ثم يبدأ البحث عن سائق.', 'Payment proof sent. Tap Request ride — an admin will verify and dispatch your driver.', 'Preuve envoyée. Appuyez sur Demander le trajet — un admin vérifiera et enverra le chauffeur.')}</span>
+            ) : (
+              <>
+                <div style={s.hint}>
+                  {pick(lang, 'حوّل المبلغ إلى حساب Rezekme أدناه ثم أدخل رقم المرجع.', 'Transfer the amount to the Rezekme account below and enter the reference number.', 'Transférez le montant au compte Rezekme ci-dessous et entrez la référence.')}
+                </div>
+                <img src={LOCAL_WALLET_QR} alt="Sham Cash QR" style={s.qr} />
+                <div style={{ marginBottom: 6, fontSize: 12, color: '#333' }}>
+                  {pick(lang, 'المبلغ المطلوب:', 'Amount due:', 'Montant dû:')} <strong>{moneyText(fareMinor, currency, lang)}</strong>
+                </div>
+                <input
+                  type="text"
+                  dir={isAr ? 'rtl' : 'ltr'}
+                  style={s.input}
+                  placeholder={pick(lang, 'رقم مرجع التحويل', 'Transfer reference number', 'Référence du transfert')}
+                  value={shamCashRef}
+                  onChange={(e) => onShamCashRefChange(e.target.value)}
+                />
+                <button
+                  type="button"
+                  style={shamCashStatus === 'saving' || !shamCashRef.trim() ? s.btnDisabled : s.btn}
+                  disabled={shamCashStatus === 'saving' || !shamCashRef.trim()}
+                  onClick={onShamCashSubmit}
+                >
+                  {shamCashStatus === 'saving'
+                    ? pick(lang, 'جارٍ الإرسال…', 'Sending…', 'Envoi…')
+                    : pick(lang, 'إرسال إثبات الدفع', 'Submit payment proof', 'Envoyer la preuve')}
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
     )

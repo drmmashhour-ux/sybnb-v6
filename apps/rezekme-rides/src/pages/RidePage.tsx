@@ -750,7 +750,7 @@ export function RidePage({ lang }: Props) {
     let cancelled = false
     fetchRideWallet('USD')
       .then((wallet) => {
-        if (!cancelled) setWalletBalanceMinor(wallet ? wallet.balanceMinor : 0)
+        if (!cancelled) setWalletBalanceMinor(wallet ? wallet.cachedBalanceMinor : 0)
       })
       .catch(() => {
         if (!cancelled) setWalletBalanceMinor(0)
@@ -1094,6 +1094,7 @@ export function RidePage({ lang }: Props) {
       return
     }
 
+
     setStatus('saving')
     setMessage('')
 
@@ -1121,7 +1122,9 @@ export function RidePage({ lang }: Props) {
         billToBusinessAccount: businessAccountName ? billToBusinessAccount : undefined,
         shareable,
         autoSwitch,
-      })
+        ...(entryMode === 'guest' && selectedPayMethod === 'shamcash' && shamCashRef.trim()
+          ? { guestShamCashRef: shamCashRef.trim() } : {}),
+      } as never)
       setRide(nextRide)
       setStatus('idle')
       setMessage(t.saved)
@@ -1494,7 +1497,7 @@ export function RidePage({ lang }: Props) {
   const walletSufficient = walletBalanceMinor !== null && walletBalanceMinor >= fareMinor
   const payMethodReady =
     entryMode === 'guest'
-      ? selectedPayMethod === 'card'
+      ? selectedPayMethod === 'card' || (selectedPayMethod === 'shamcash' && shamCashStatus === 'submitted')
       : selectedPayMethod === 'wallet'
         ? walletSufficient
         : selectedPayMethod === 'card'
@@ -1873,7 +1876,7 @@ export function RidePage({ lang }: Props) {
               onShamCashSubmit={() => {
                 if (!shamCashRef.trim()) return
                 setShamCashStatus('saving')
-                submitPrototypeLocalWalletProof(shamCashRef.trim())
+                submitPrototypeLocalWalletProof({ amountMinor: fareMinor, currency: 'USD', providerRef: shamCashRef.trim() })
                   .then(() => setShamCashStatus('submitted'))
                   .catch(() => setShamCashStatus('error'))
               }}

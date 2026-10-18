@@ -676,7 +676,13 @@ export async function handleSrRides(req, res, url, context) {
         }
       }
 
-      if (!guestStripePrepaid && balanceMinor < finalFareMinor && !cardCovers) {
+      // ---- guest Sham Cash: bypass prepay gate; admin verifies before dispatch ----
+      const guestShamCashRef = typeof body.guestShamCashRef === 'string' ? body.guestShamCashRef.trim() : null
+      if (guestShamCashRef) {
+        rideData.metadata = { ...rideData.metadata, guestShamCashRef, pendingShamCash: true, prepaid: false }
+      }
+
+      if (!guestStripePrepaid && !guestShamCashRef && balanceMinor < finalFareMinor && !cardCovers) {
         const error = new Error('Add funds to your wallet to request this ride.')
         error.statusCode = 402
         error.code = 'RIDE_PREPAY_REQUIRED'

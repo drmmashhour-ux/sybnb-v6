@@ -2,7 +2,18 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "baseUrl": ".",
-    "paths": { "@platform/*": ["../src/*"] }
+    "paths": {
+      "@platform/*": [
+        "../src/*"
+      ]
+    }
   },
-  "include": ["sr/src", "str/src", "se/src", "../src/vite-env.d.ts"]
+  "include": [
+    "sr/src",
+    "str/src",
+    "se/src",
+    "rezekme-rides/src",
+    "rezekme-stay/src",
+    "../src/vite-env.d.ts"
+  ]
 }

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>Rezekme</title>
+    <style>
+      :root { --ink:#14213d; --muted:#5b6475; --line:#e3e6ec; --accent:#1f6feb; --bg:#ffffff; --card:#f6f8fb; }
+      @media (prefers-color-scheme: dark) { :root { --ink:#eef1f7; --muted:#a3acbd; --line:#2a3242; --accent:#6ea8ff; --bg:#0f1420; --card:#171d2b; } }
+      * { box-sizing: border-box; }
+      body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+      main { max-width: 760px; margin: 0 auto; padding: 56px 16px 40px; }
+      h1 { font-size: 2rem; margin: 0 0 8px; letter-spacing: -0.01em; }
+      p.lead { color: var(--muted); margin: 0 0 32px; line-height: 1.5; }
+      .grid { display:grid; gap:16px; grid-template-columns: 1fr; }
+      @media (min-width: 640px) { .grid { grid-template-columns: 1fr 1fr; } }
+      a.card { display:block; padding:24px; border:1px solid var(--line); border-radius:16px; background:var(--card); color:inherit; text-decoration:none; }
+      a.card:hover, a.card:focus-visible { border-color: var(--accent); outline: none; }
+      a.card h2 { margin:0 0 6px; font-size:1.25rem; }
+      a.card p { margin:0; color:var(--muted); line-height:1.45; }
+      a.card span { display:inline-block; margin-top:14px; color:var(--accent); font-weight:600; }
+      footer { margin-top:40px; color:var(--muted); font-size:.85rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Rezekme</h1>
+      <p class="lead">Two apps, one team. Book a place to stay, or get a ride.</p>
+      <div class="grid">
+        <a class="card" href="https://stay.rezekme.com">
+          <h2>Stays</h2>
+          <p>Find and book short-term stays from local hosts, or list your own place.</p>
+          <span>Open Stays</span>
+        </a>
+        <a class="card" href="https://rides.rezekme.com">
+          <h2>Rides</h2>
+          <p>Request a ride with the price shown first, or drive and earn.</p>
+          <span>Open Rides</span>
+        </a>
+      </div>
+      <footer>rezekme.com</footer>
+    </main>
+  </body>
+</html>

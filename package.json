@@ -78,7 +78,14 @@
     "dev:str": "vite --config apps/str/vite.config.ts",
     "build:str": "tsc -p apps && vite build --config apps/str/vite.config.ts",
     "build:se": "tsc -p apps && vite build --config apps/se/vite.config.ts",
-    "build:apps": "npm run build:sr && npm run build:str && npm run build:se"
+    "build:apps": "npm run build:sr && npm run build:str && npm run build:se",
+    "dev:rezekme-rides": "vite --config apps/rezekme-rides/vite.config.ts",
+    "dev:rezekme-stay": "vite --config apps/rezekme-stay/vite.config.ts",
+    "dev:rezekme-landing": "vite --config apps/rezekme-landing/vite.config.ts",
+    "build:rezekme-rides": "tsc -p apps && vite build --config apps/rezekme-rides/vite.config.ts",
+    "build:rezekme-stay": "tsc -p apps && vite build --config apps/rezekme-stay/vite.config.ts",
+    "build:rezekme-landing": "vite build --config apps/rezekme-landing/vite.config.ts",
+    "build:rezekme": "npm run build:rezekme-rides && npm run build:rezekme-stay && npm run build:rezekme-landing"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",

@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState, type CSSProperties } from 'react'
 import { getCurrentPath, navigate } from '@platform/app/routes'
 import { getInitialLanguage, persistLanguage, pick, type Lang } from '@platform/engines/language/languageEngine'
 import { getStoredGuestSession, signOutGuest } from '@platform/shared/api/platformApi'
+import { RiderSignInGate } from '@platform/shared/auth/RiderSignInGate'
 
 // Heavy / rarely used pages load on demand so the first paint stays small on weak connections.
 const GuestAccountPage = lazy(() =>
@@ -80,6 +81,13 @@ export function App() {
   let content
   if (needsGate || isAccountRoute) {
     content = <GuestAccountPage lang={lang} flow="ride" returnPath={needsGate ? path : '/ride'} />
+  } else if (isRideRoute && !hasGuestSession) {
+    // Email only (no code for a new email); the session starts here and the ride page appears.
+    content = (
+      <div style={{ maxWidth: 480, margin: '48px auto', padding: '0 16px' }}>
+        <RiderSignInGate lang={lang} codeFree onSignedIn={() => setAuthVersion((version) => version + 1)} />
+      </div>
+    )
   } else if (sharedRideMatch) {
     const query = new URLSearchParams(sharedRideMatch[2] || '')
     content = <SharedRidePage lang={lang} rideId={sharedRideMatch[1]} exp={query.get('exp') || ''} sig={query.get('sig') || ''} />

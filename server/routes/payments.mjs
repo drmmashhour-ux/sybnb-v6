@@ -1013,6 +1013,13 @@ export async function handlePayments(req, res, url, context) {
     // already hold it as physical cash. The operator-approval step is the check that protects a driver
     // from a rider who falsely marks a ride cash-paid.
     const isCashRide = Boolean(ride) && String(body.method || body.paymentMethod || '').trim().toLowerCase() === 'cash'
+    if (isCashRide && process.env.SR_REQUIRE_PREPAY === '1') {
+      const error = new Error('Cash is not accepted. Pay through your Rezekme wallet (card or Sham Cash).')
+      error.statusCode = 400
+      error.code = 'CASH_NOT_ACCEPTED'
+      error.expose = true
+      throw error
+    }
     // Distinct provider strings for tips let the ledger detect and route them 100% to the driver.
     const walletProvider = isTip
       ? (isCashRide ? 'tip_cash' : 'tip_local_wallet')

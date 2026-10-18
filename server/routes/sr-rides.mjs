@@ -640,6 +640,23 @@ export async function handleSrRides(req, res, url, context) {
       },
     }
 
+    // Uber-style rule (owner decision 2026-10-18): no cash. A ride is only requested when its fare is
+    // already covered by the rider's wallet (funded by card / Sham Cash), so the platform always holds
+    // the money and pays the driver (85%) after taking its commission. Enabled with SR_REQUIRE_PREPAY=1 (after the wallet top-up UI ships).
+    if (process.env.SR_REQUIRE_PREPAY === '1' && finalFareMinor > 0) {
+      const rideCurrency = quote.currency || body.currency || defaultCurrency()
+      const wallet = await db().wallet.findUnique({ where: { userId_currency: { userId: context.user.id, currency: rideCurrency } }, select: { cachedBalanceMinor: true } })
+      const balanceMinor = Math.max(0, wallet?.cachedBalanceMinor || 0)
+      if (balanceMinor < finalFareMinor) {
+        const error = new Error('Add funds to your wallet to request this ride.')
+        error.statusCode = 402
+        error.code = 'RIDE_PREPAY_REQUIRED'
+        error.expose = true
+        error.details = { requiredMinor: finalFareMinor, balanceMinor, shortfallMinor: finalFareMinor - balanceMinor, currency: rideCurrency }
+        throw error
+      }
+    }
+
     let ride
     if (promo) {
       try {
@@ -696,7 +713,7 @@ export async function handleSrRides(req, res, url, context) {
     // path — a ride is never blocked by prepayment. The DEBIT moves the rider's OWN money into
     // platform custody (same pattern as funding a wallet gift), with recordWalletEntry's atomic
     // no-overdraw guard preventing double-spend.
-    if (!scheduledFor && !shareable && finalFareMinor > 0) {
+    if (!shareable && finalFareMinor > 0) {
       try {
         await db().$transaction(async (tx) => {
           await recordWalletEntry(tx, {

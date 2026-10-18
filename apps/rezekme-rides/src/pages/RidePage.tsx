@@ -1873,6 +1873,24 @@ export function RidePage({ lang }: Props) {
           )
         })()}
 
+        {['REQUESTED', 'MATCHING'].includes(ride.status) && !ride.driver && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
+            <button
+              type="button"
+              disabled={status === 'saving'}
+              style={{ flex: 1, minWidth: 140, padding: '12px 14px', borderRadius: 12, border: '1px solid #c0392b', background: '#fff', color: '#c0392b', fontWeight: 700, cursor: 'pointer' }}
+              onClick={() => {
+                setStatus('saving')
+                cancelPrototypeSrRide(ride.id)
+                  .then(() => { setStatus('idle'); setMessage(''); startNewRide() })
+                  .catch((error: unknown) => { setStatus('error'); setMessage(error instanceof Error ? error.message : t.error) })
+              }}
+            >
+              {pick(lang, 'إلغاء وتغيير رحلتي', 'Cancel and change my trip', 'Annuler et modifier ma course')}
+            </button>
+          </div>
+        )}
+
         {showPin && (
           <div style={styles.pinBox}>
             <span style={styles.pinLabel}>{ui.pinTitle}</span>

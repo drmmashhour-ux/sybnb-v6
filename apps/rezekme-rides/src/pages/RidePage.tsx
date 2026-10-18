@@ -42,7 +42,7 @@ const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 
 const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 import { moneyText, statusText } from '@platform/shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '@platform/shared/filters/VisualFilterPanel'
-import { createSrRideWithCoords, fetchSrQuoteWithCoords, type Coords, type StopCoords } from '../api'
+import { changeSrRideCategory, createSrRideWithCoords, fetchSrQuoteWithCoords, type Coords, type StopCoords } from '../api'
 import { MapHero } from '../maps/MapHero'
 import { SeatIcon, VehicleArt, type VehicleKind } from './VehicleArt'
 import { PlaceInput } from '../maps/PlaceInput'
@@ -1705,6 +1705,36 @@ export function RidePage({ lang }: Props) {
           <div style={styles.hint}>{ride.matchTimedOut ? t.stillLooking : t.waitingForDriver}</div>
         )}
         {['REQUESTED', 'MATCHING'].includes(ride.status) && !ride.matchTimedOut && <div style={styles.progressTrack}><div style={styles.progressBar} /></div>}
+        {['REQUESTED', 'MATCHING'].includes(ride.status) && ride.matchTimedOut && (() => {
+          const noDriver = (ride as unknown as { noDriver?: { category: string; alternatives: Array<{ category: string; drivers: number; fareMinor: number | null }> } }).noDriver
+          const own = String(ride.metadata?.category || '').replace('SR ', '')
+          return (
+            <div style={styles.hint}>
+              <strong>{pick(lang, `لا يوجد سائق متاح الآن في فئة ${own}.`, `No ${own} driver is free right now.`, `Aucun chauffeur ${own} n'est libre pour l'instant.`)}</strong>
+              {noDriver && noDriver.alternatives.length > 0 ? (
+                <>
+                  <div>{pick(lang, 'اختر فئة أخرى متاحة قربك:', 'Switch to a category available near you:', 'Passez à une catégorie disponible près de vous :')}</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                    {noDriver.alternatives.map((alt) => (
+                      <button
+                        key={alt.category}
+                        type="button"
+                        style={{ padding: '10px 14px', borderRadius: 999, border: '1px solid #000', background: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                        onClick={() => {
+                          void changeSrRideCategory(ride.id, alt.category)
+                            .then(async () => setRide(await fetchPrototypeSrRide(ride.id)))
+                            .catch((error: unknown) => window.alert(error instanceof Error ? error.message : String(error)))
+                        }}
+                      >
+                        {alt.category.replace('SR ', '')}{alt.fareMinor != null ? ` · $${alt.fareMinor}` : ''}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+          )
+        })()}
 
         {showPin && (
           <div style={styles.pinBox}>

@@ -110,3 +110,8 @@ export async function createSrRideWithCoords(input: {
   })
   return response.ride
 }
+
+// Switch an unclaimed ride to another car category (after "no driver in your category").
+export async function changeSrRideCategory(rideId: string, category: string): Promise<{ category: string; fareMinor: number; currency: string }> {
+  return post<{ ok: true; category: string; fareMinor: number; currency: string }>(`/api/sr/rides/${rideId}/change-category`, { category })
+}

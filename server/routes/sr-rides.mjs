@@ -36,6 +36,7 @@ import { REAUTH_FAILURE_CODES, reauthorizeAtCommit } from '../lib/commit-authori
 import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mjs'
 import { offerRideToNextDriver, runDispatchSweep } from '../lib/ride-dispatch.mjs'
 import { logRideEventSafe } from '../lib/ride-events.mjs'
+import { buildAlternatives, notifyRiderNoDriverOnce } from '../lib/ride-no-driver.mjs'
 import { analyzeRide } from '../lib/ai-ride-analyst.mjs'
 import { getOrCreateRideInvoice, renderInvoiceHtml } from '../lib/invoices.mjs'
 
@@ -817,9 +818,90 @@ export async function handleSrRides(req, res, url, context) {
         }
       : { ...ride, pickupCoords: rideCoords.pickup, dropoffCoords: rideCoords.dropoff, etaToPickupMinutes, matchTimedOut: Boolean(matchTimedOut) }
     ridePayload.metadata = safeRideMetadata
+    // No driver in the chosen category after the match timeout: list the OTHER categories that do
+    // have a driver nearby (priced for this same trip) and tell the rider once, so they can switch.
+    if (matchTimedOut && isRiderViewer) {
+      try {
+        const own = String((ride.metadata && ride.metadata.category) || '')
+        const quoteFor = (category) => computeSrQuoteWithTraffic({
+          pickup: ride.metadata?.pickup,
+          dropoff: ride.metadata?.dropoff,
+          category,
+          lowDataMode: true,
+          pickupCoordsOverride: rideCoords.pickup,
+          dropoffCoordsOverride: rideCoords.dropoff,
+          stops: (ride.stops || []).map((stop) => stop.address),
+          stopCoordsOverrides: (ride.stops || []).map((stop) => (stop.lat != null && stop.lng != null ? { lat: stop.lat, lng: stop.lng } : undefined)),
+          scheduled: false,
+        })
+        const alternatives = await buildAlternatives(ride.id, own, quoteFor)
+        ridePayload.noDriver = { category: own, alternatives }
+        await notifyRiderNoDriverOnce(ride, alternatives)
+      } catch {
+        // best-effort: a failure here never breaks the ride read
+      }
+    }
     // Pickup wait countdown for both apps (null until the driver taps "I've arrived").
     ridePayload.wait = waitState(ride.metadata)
     return json(res, 200, { ok: true, ride: ridePayload })
+  }
+
+  // Switch an unclaimed ride to another car category (after "no driver in your category").
+  // Only while the ride is still open, unclaimed, not prepaid from wallet and without a promo -- so no
+  // money has to be moved. The fare is re-quoted by the same engine, the offer round is reset.
+  const changeCategoryMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/change-category$/)
+  if (changeCategoryMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+    const body = await readJson(req)
+    const category = String(body.category || '')
+    const fail = (statusCode, code, message) => {
+      const error = new Error(message)
+      error.statusCode = statusCode
+      error.code = code
+      error.expose = true
+      return error
+    }
+    if (!isKnownRideCategory(category)) throw fail(400, 'RIDE_CATEGORY_INVALID', 'Unknown ride category.')
+    const existing = await db().rideRequest.findUnique({
+      where: { id: changeCategoryMatch[1] },
+      include: { stops: { select: { address: true, lat: true, lng: true }, orderBy: { sequence: 'asc' } } },
+    })
+    if (!existing || existing.riderId !== context.user.id) throw fail(404, 'RIDE_NOT_FOUND', 'Ride request not found.')
+    const meta = existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {}
+    if (existing.driverId || !['REQUESTED', 'MATCHING'].includes(existing.status)) throw fail(409, 'RIDE_NOT_OPEN', 'This ride can no longer change category.')
+    if (meta.prepaid || existing.promoCodeId) throw fail(409, 'RIDE_CATEGORY_LOCKED', 'This ride was prepaid or uses a promo. Cancel it and book again in the new category.')
+    if (meta.category === category) throw fail(400, 'RIDE_CATEGORY_SAME', 'The ride is already in this category.')
+    const coords = await getRideCoords(existing.id)
+    const quote = await computeSrQuoteWithTraffic({
+      pickup: meta.pickup,
+      dropoff: meta.dropoff,
+      category,
+      lowDataMode: true,
+      pickupCoordsOverride: coords.pickup,
+      dropoffCoordsOverride: coords.dropoff,
+      stops: existing.stops.map((stop) => stop.address),
+      stopCoordsOverrides: existing.stops.map((stop) => (stop.lat != null && stop.lng != null ? { lat: stop.lat, lng: stop.lng } : undefined)),
+      scheduled: false,
+    })
+    const bonusMinor = Number(meta.fareFactors?.bonusMinor) || 0
+    const { noDriverNotifiedAt: _drop, ...restMeta } = meta
+    const updated = await db().rideRequest.updateMany({
+      where: { id: existing.id, driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
+      data: {
+        fareMinor: quote.fareMinor + bonusMinor,
+        metadata: { ...restMeta, category, categoryChangedFrom: meta.category ?? null, requestedAtCategoryChange: new Date().toISOString() },
+        offeredDriverId: null,
+        offerExpiresAt: null,
+        offerSeq: 0,
+        declinedByIds: [],
+        requestedAt: new Date(),
+      },
+    })
+    if (updated.count !== 1) throw fail(409, 'RIDE_NOT_OPEN', 'This ride can no longer change category.')
+    void logRideEventSafe(db(), { rideId: existing.id, type: 'CREATED', actorId: context.user.id, actorRole: 'GUEST', meta: { categoryChange: { from: meta.category ?? null, to: category, fareMinor: quote.fareMinor + bonusMinor } } })
+    offerRideToNextDriver(existing.id).catch(() => {})
+    return json(res, 200, { ok: true, category, fareMinor: quote.fareMinor + bonusMinor, currency: quote.currency })
   }
 
   const cancelMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/cancel$/)

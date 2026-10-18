@@ -265,6 +265,11 @@ const TEMPLATES = {
     en: (d) => ({ subject: `SYBNB: new message`, body: `${d.senderName}: ${d.preview}` }),
     fr: (d) => ({ subject: `SYBNB : nouveau message`, body: `${d.senderName}: ${d.preview}` }),
   },
+  ride_no_driver: {
+    ar: (d) => ({ subject: `SYBNB: لا يوجد سائق متاح`, body: d.hasAlternatives ? `لا يوجد سائق متاح الآن في فئة ${d.category}. متاح قريباً منك: ${d.alternatives}. افتح التطبيق لتغيير الفئة.` : `لا يوجد سائق متاح الآن في فئة ${d.category}. سنواصل البحث، أو جرّب لاحقاً.` }),
+    en: (d) => ({ subject: `SYBNB: no driver available yet`, body: d.hasAlternatives ? `No ${d.category} driver is free right now. Available near you: ${d.alternatives}. Open the app to switch category.` : `No ${d.category} driver is free right now. We keep looking, or try again shortly.` }),
+    fr: (d) => ({ subject: `SYBNB : aucun chauffeur disponible`, body: d.hasAlternatives ? `Aucun chauffeur ${d.category} n'est libre pour l'instant. Disponible près de vous : ${d.alternatives}. Ouvrez l'app pour changer de catégorie.` : `Aucun chauffeur ${d.category} n'est libre pour l'instant. Nous continuons la recherche, ou réessayez bientôt.` }),
+  },
   ride_driver_assigned: {
     ar: (d) => ({ subject: `SYBNB: تم تعيين سائق`, body: `${d.driverName} في الطريق إلى نقطة انطلاقك.` }),
     en: (d) => ({ subject: `SYBNB: driver assigned`, body: `${d.driverName} is on the way to your pickup.` }),

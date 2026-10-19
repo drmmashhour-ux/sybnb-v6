@@ -2,9 +2,11 @@
 // central authorization service; unknown routes 404 inside the prefix.
 import { createRouter } from './router.mjs'
 import { registerCore } from './core.mjs'
+import { registerAccess } from './access.mjs'
 
 const router = createRouter()
 registerCore(router)
+registerAccess(router)
 
 export async function handleAdmin2(req, res, url, context) {
   return router.handle(req, res, url, context)

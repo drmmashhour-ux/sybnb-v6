@@ -543,10 +543,24 @@ export async function handleDriver(req, res, url, context) {
       if (ride.status === 'COMPLETED') return Math.round((ride.fareMinor || 0) * (1 - SR_RIDE_COMMISSION_RATE))
       return 0
     }
+    // Active rides carry pickup/dropoff coordinates so the trip screen can draw the map after a reload.
+    const activeCoords = new Map()
+    await Promise.all(
+      rides
+        .filter((ride) => ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(ride.status))
+        .map(async (ride) => {
+          try {
+            activeCoords.set(ride.id, await getRideCoords(ride.id))
+          } catch {
+            /* map falls back to no pins */
+          }
+        }),
+    )
     const annotatedRides = rides.map((ride) => {
       const payable = ride.status === 'COMPLETED' || (ride.status === 'CANCELLED' && ride.cancellationFeeMinor)
       const paymentStatus = paidRideIds.has(ride.id) ? 'PAID' : (payable ? 'AWAITING_PAYMENT' : 'NONE')
-      return { ...ride, metadata: stripPickupCode(ride.metadata), paymentStatus, expectedNetMinor: expectedNetForRide(ride), wait: waitState(ride.metadata) }
+      const rc = activeCoords.get(ride.id)
+      return { ...ride, ...(rc ? { pickupCoords: rc.pickup, dropoffCoords: rc.dropoff } : {}), metadata: stripPickupCode(ride.metadata), paymentStatus, expectedNetMinor: expectedNetForRide(ride), wait: waitState(ride.metadata) }
     })
     const billedMinor = rides.filter((ride) => ride.status === 'COMPLETED').reduce((sum, ride) => sum + (ride.fareMinor || 0), 0)
     // Net earnings still awaiting payment (rides done but not yet paid by rider + approved).

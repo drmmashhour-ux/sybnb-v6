@@ -108,7 +108,15 @@ async function s3Request(cfg, { method, objectPath, body, contentType }) {
 }
 
 export async function putObjectS3(cfg, objectPath, bytes, contentType) {
-  const { res } = await s3Request(cfg, { method: 'PUT', objectPath, body: bytes, contentType })
+  let res
+  try {
+    ;({ res } = await s3Request(cfg, { method: 'PUT', objectPath, body: bytes, contentType }))
+  } catch (cause) {
+    // Network or configuration failure before any HTTP status exists (bad endpoint, DNS, TLS).
+    // Only the error name and a short message are surfaced; credentials never appear in them.
+    const detail = `${cause?.name || 'Error'}: ${String(cause?.message || '').slice(0, 120)}`
+    throw storageUpstreamError('save', detail)
+  }
   if (!res.ok) throw storageUpstreamError('save', res.status)
 }
 

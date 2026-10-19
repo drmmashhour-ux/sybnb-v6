@@ -200,7 +200,7 @@ export async function handlePayments(req, res, url, context) {
   // session on ride creation and marks the ride prepaid.  Enabled with SR_GUEST_STRIPE_ENABLED=1.
   if (url.pathname === '/api/payments/stripe/guest-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
-    requireAuth(context, ['GUEST'])
+    requireAuth(context, ['GUEST', 'CLIENT'])
     requireStripe()
     if (process.env.SR_GUEST_STRIPE_ENABLED !== '1') {
       const error = new Error('Guest card payments are not enabled on this server.')
@@ -233,8 +233,8 @@ export async function handlePayments(req, res, url, context) {
         quantity: 1,
       }],
       metadata: {
-        intentType: 'guest_preride',
-        guestId: context.user.id,
+        intentType: context.roles.includes('CLIENT') ? 'client_preride' : 'guest_preride',
+        riderId: context.user.id,
         fareMinor: String(fareMinor),
         currency,
       },

@@ -663,12 +663,13 @@ export async function handleSrRides(req, res, url, context) {
         const { default: Stripe } = await import('stripe')
         const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY)
         const session = await stripeClient.checkout.sessions.retrieve(guestStripeSessionId)
-        if (session.payment_status === 'paid' && session.metadata?.intentType === 'guest_preride') {
+        const validIntentTypes = ['guest_preride', 'client_preride']
+        if (session.payment_status === 'paid' && validIntentTypes.includes(session.metadata?.intentType)) {
           // Amount verification: session.amount_total is in cents; fareMinor is in dollars for USD.
           const sessionFareMinor = Math.round((session.amount_total || 0) / 100)
           if (sessionFareMinor >= finalFareMinor) {
             rideData.metadata.prepaid = true
-            rideData.metadata.prepaidBy = 'stripe_guest'
+            rideData.metadata.prepaidBy = session.metadata?.intentType === 'client_preride' ? 'stripe_client' : 'stripe_guest'
             rideData.metadata.prepaidAmountMinor = sessionFareMinor
             rideData.metadata.guestStripeSessionId = session.id
             guestStripePrepaid = true

@@ -1071,8 +1071,8 @@ export function RidePage({ lang }: Props) {
       return
     }
 
-    // Guest card: save pending ride to localStorage, redirect to Stripe
-    if (entryMode === 'guest' && selectedPayMethod === 'card') {
+    // Guest or client card: save pending ride to localStorage, redirect to Stripe
+    if (selectedPayMethod === 'card' && (entryMode === 'guest' || entryMode === 'client')) {
       setGuestCheckoutStatus('redirecting')
       try {
         try {
@@ -1497,7 +1497,7 @@ export function RidePage({ lang }: Props) {
       : selectedPayMethod === 'wallet'
         ? walletSufficient
         : selectedPayMethod === 'card'
-          ? Boolean(savedCard)
+          ? true  // always ready: redirects to Stripe
           : selectedPayMethod === 'shamcash'
             ? shamCashStatus === 'submitted'
             : false

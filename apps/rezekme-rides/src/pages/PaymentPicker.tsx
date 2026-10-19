@@ -2,7 +2,6 @@ import type { CSSProperties } from 'react'
 import type { Lang } from '@platform/engines/language/languageEngine'
 import { pick } from '@platform/engines/language/languageEngine'
 import { moneyText } from '@platform/shared/i18n/display'
-import type { SavedCard } from '@platform/shared/api/platformApi'
 
 export type PayMethod = 'wallet' | 'card' | 'shamcash' | 'msh' | null
 
@@ -12,7 +11,6 @@ type Props = {
   walletBalanceMinor: number | null  // null = loading
   fareMinor: number
   currency: string
-  savedCard: SavedCard | null
   value: PayMethod
   onChange: (m: PayMethod) => void
   shamCashRef: string
@@ -68,7 +66,7 @@ function Tab({ label, active, onClick }: { label: string; active: boolean; onCli
 }
 
 export function PaymentPicker({
-  mode, lang, walletBalanceMinor, fareMinor, currency, savedCard, value, onChange,
+  mode, lang, walletBalanceMinor, fareMinor, currency, value, onChange,
   shamCashRef, onShamCashRefChange, onShamCashSubmit, shamCashStatus,
 }: Props) {
   const isAr = lang === 'ar'
@@ -79,7 +77,7 @@ export function PaymentPicker({
       <div style={s.wrap}>
         <span style={s.label}>{pick(lang, 'طريقة الدفع', 'Payment method', 'Paiement')}</span>
         <div style={s.tabs}>
-          <Tab label={pick(lang, 'بطاقة دولية', 'International card', 'Carte internationale')} active={value === 'card'} onClick={() => onChange('card')} />
+          <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />
           <Tab label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
         </div>
 
@@ -141,7 +139,7 @@ export function PaymentPicker({
       <span style={s.label}>{pick(lang, 'طريقة الدفع', 'Payment method', 'Paiement')}</span>
       <div style={s.tabs}>
         <Tab label={pick(lang, 'المحفظة', 'Wallet', 'Portefeuille')} active={value === 'wallet'} onClick={() => onChange('wallet')} />
-        <Tab label={pick(lang, 'بطاقة', 'Card', 'Carte')} active={value === 'card'} onClick={() => onChange('card')} />
+        <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />
         <Tab label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
         <Tab label="MSH" active={value === 'msh'} onClick={() => onChange('msh')} />
       </div>
@@ -160,17 +158,13 @@ export function PaymentPicker({
         </div>
       )}
 
-      {/* ---- Card ---- */}
+      {/* ---- Card (Stripe 3D redirect) ---- */}
       {value === 'card' && (
         <div style={s.body}>
-          {savedCard ? (
-            <span style={s.ok}>
-              ✓ {savedCard.brand ? savedCard.brand.toUpperCase() : 'CARD'} · {pick(lang, 'تنتهي بـ', 'ending', 'finissant par')} {savedCard.last4}
-              {savedCard.expired && <span style={s.warn}> · {pick(lang, 'منتهية الصلاحية', 'Expired', 'Expirée')}</span>}
-            </span>
-          ) : (
-            <span style={s.hint}>{pick(lang, 'لا توجد بطاقة محفوظة — أضف بطاقة من ملفك الشخصي ثم عد هنا.', 'No card saved — add one in your profile then return here.', 'Aucune carte — ajoutez-en une dans votre profil.')}</span>
-          )}
+          <div style={s.hint}>
+            {pick(lang, 'ستُحوّل إلى Stripe لإتمام الدفع بأمان (3D Secure) قبل البحث عن سائق.', "You'll be redirected to Stripe to pay securely (3D Secure) before we look for a driver.", 'Vous serez redirigé vers Stripe pour un paiement sécurisé (3D Secure) avant la mise en relation.')}
+          </div>
+          <span style={s.notice}>→ {pick(lang, 'اضغط "طلب الرحلة" للمتابعة إلى Stripe', 'Tap Request ride to continue to Stripe', 'Appuyez sur Demander le trajet pour continuer vers Stripe')}</span>
         </div>
       )}
 

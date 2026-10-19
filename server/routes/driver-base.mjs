@@ -16,6 +16,34 @@ const REQUIRED = ['LICENCE', 'CRIMINAL_RECORD', 'REGISTRATION', 'INSURANCE', 'ME
   'CAR_PHOTO_FRONT', 'CAR_PHOTO_BACK', 'CAR_PHOTO_LEFT', 'CAR_PHOTO_RIGHT', 'CAR_PHOTO_INSIDE', 'CAR_PHOTO_BOOT']
 const CAR_ONLY = new Set(['CAR_PHOTO_INSIDE', 'CAR_PHOTO_BOOT'])
 const CLEAN_DAYS = { OUTSIDE: 1, INSIDE: 7 }
+// Uber and Lyft both take a driver off the road the moment a licence, insurance or registration
+// expires, so these three must carry an expiry date we can enforce. The criminal-record certificate
+// must be recent (Uber accepts 90 days), so its date is also required.
+const NEEDS_EXPIRY = new Set(['LICENCE', 'INSURANCE', 'REGISTRATION', 'CRIMINAL_RECORD', 'MECHANIC_REPORT'])
+const EXPIRING_SOON_DAYS = 30
+
+// Everything that stops a driver going on duty: a required document missing, still in review,
+// rejected or expired. Used by the key-code step and shown on the dashboard checklist.
+async function dutyBlockers(userId, profile) {
+  const docs = await db().driverDocument.findMany({ where: { userId }, select: { kind: true, status: true, expiresAt: true } })
+  const have = new Map(docs.map((d) => [d.kind, d]))
+  const isCar = profile?.vehicleCategory && profile.vehicleCategory !== 'BIKE'
+  const now = Date.now()
+  const blockers = []
+  const expiringSoon = []
+  for (const kind of REQUIRED.filter((k) => isCar || !CAR_ONLY.has(k))) {
+    const d = have.get(kind)
+    if (!d) { blockers.push({ kind, reason: 'MISSING' }); continue }
+    if (d.status === 'REJECTED') { blockers.push({ kind, reason: 'REJECTED' }); continue }
+    if (d.status !== 'APPROVED') { blockers.push({ kind, reason: 'IN_REVIEW' }); continue }
+    if (d.expiresAt) {
+      const left = new Date(d.expiresAt).getTime() - now
+      if (left <= 0) blockers.push({ kind, reason: 'EXPIRED' })
+      else if (left <= EXPIRING_SOON_DAYS * 86_400_000) expiringSoon.push({ kind, days: Math.ceil(left / 86_400_000) })
+    }
+  }
+  return { blockers, expiringSoon }
+}
 
 function fail(status, code, message) {
   const error = new Error(message)
@@ -52,10 +80,8 @@ export async function handleDriverBase(req, res, url, context) {
       careState(userId),
       getDriverRatingSummary(userId),
     ])
-    const isCar = profile?.vehicleCategory && profile.vehicleCategory !== 'BIKE'
-    const needed = REQUIRED.filter((k) => isCar || !CAR_ONLY.has(k))
-    const have = new Map(docs.map((d) => [d.kind, d]))
-    const missing = needed.filter((k) => !have.has(k) || have.get(k).status === 'REJECTED')
+    const { blockers, expiringSoon } = await dutyBlockers(userId, profile)
+    const missing = blockers.filter((b) => b.reason === 'MISSING' || b.reason === 'REJECTED').map((b) => b.kind)
     return json(res, 200, {
       ok: true,
       vehicleStatus: profile?.vehicleStatus || null,
@@ -67,6 +93,8 @@ export async function handleDriverBase(req, res, url, context) {
       } : null,
       documents: docs,
       missingDocuments: missing,
+      dutyBlockers: blockers,
+      expiringSoon,
       carCare: care,
       rating,
     })
@@ -88,6 +116,10 @@ export async function handleDriverBase(req, res, url, context) {
       const d = new Date(body.expiresAt)
       if (Number.isNaN(d.getTime())) throw fail(400, 'DRIVER_DOC_DATE_INVALID', 'expiresAt must be a valid date.')
       expiresAt = d
+    }
+    if (NEEDS_EXPIRY.has(kind)) {
+      if (!expiresAt) throw fail(400, 'DRIVER_DOC_EXPIRY_REQUIRED', 'Enter the date this document expires.')
+      if (expiresAt.getTime() <= Date.now()) throw fail(400, 'DRIVER_DOC_EXPIRED', 'This document has already expired. Upload a valid one.')
     }
     const userId = context.user.id
     const prev = await db().driverDocument.findUnique({ where: { userId_kind: { userId, kind } } })
@@ -119,13 +151,21 @@ export async function handleDriverBase(req, res, url, context) {
     requireAuth(context, ['DRIVER'])
     const body = await readJson(req)
     const code = String(body.code || '').replace(/\D/g, '')
-    const profile = await db().driverProfile.findUnique({ where: { userId: context.user.id }, select: { keyCodeHash: true, vehicleStatus: true } })
+    const profile = await db().driverProfile.findUnique({ where: { userId: context.user.id }, select: { keyCodeHash: true, vehicleStatus: true, vehicleCategory: true } })
     if (!profile?.keyCodeHash) throw fail(403, 'KEY_CODE_NOT_ISSUED', 'No key code has been issued to you yet.')
     if (profile.vehicleStatus !== 'APPROVED') throw fail(403, 'DRIVER_NOT_APPROVED', 'Your application is still in review.')
     const given = Buffer.from(hashKey(code))
     const want = Buffer.from(profile.keyCodeHash)
     if (code.length !== 6 || given.length !== want.length || !crypto.timingSafeEqual(given, want)) {
       throw fail(403, 'KEY_CODE_WRONG', 'That key code is not correct.')
+    }
+    // Same rule as Lyft: an expired or unapproved licence, insurance or registration keeps the
+    // driver off the road until it is fixed.
+    const { blockers } = await dutyBlockers(context.user.id, profile)
+    if (blockers.length) {
+      const error = fail(403, 'DRIVER_DOCUMENTS_BLOCK_DUTY', 'Some documents need your attention before you can start work.')
+      error.details = blockers
+      throw error
     }
     await db().driverProfile.update({ where: { userId: context.user.id }, data: { onDutyAt: new Date() } })
     return json(res, 200, { ok: true })

@@ -216,7 +216,7 @@ function Home({ lang, name, onSignOut }: { lang: Lang; name: string; onSignOut: 
   const active = overview?.rides.find((r) => LIVE.includes(r.status)) ?? null
   const driver = overview?.driver
   const idApproved = idStatus === 'APPROVED'
-  const vehicleOk = Boolean(driver?.vehiclePlate) && driver?.vehicleStatus !== 'REJECTED'
+  const vehicleOk = Boolean(driver?.vehiclePlate) && driver?.vehicleStatus === 'APPROVED'
   const inspectionOk = !driver?.inspectionRequired || driver?.inspectionStatus === 'PASSED'
   const ready = idApproved && vehicleOk && inspectionOk
 
@@ -339,6 +339,7 @@ function Onboarding({ lang, idStatus, driver, idApproved, vehicleOk, inspectionO
     vehicleCategory: (driver.vehicleCategory || 'ECONOMY') as 'BIKE' | 'ECONOMY' | 'COMFORT' | 'SUV' | 'VAN',
   })
   const idPending = idStatus === 'PENDING_REVIEW' || idStatus === 'PENDING'
+  const vehicleSaved = Boolean(driver.vehiclePlate)
 
   async function uploadId(file: File | undefined) {
     if (!file) return
@@ -391,8 +392,8 @@ function Onboarding({ lang, idStatus, driver, idApproved, vehicleOk, inspectionO
         )}
       </Step>
 
-      <Step ok={vehicleOk} title={t('2. المركبة', '2. Vehicle', '2. Véhicule')} hint={vehicleOk ? `${driver.vehicleMake || ''} ${driver.vehicleModel || ''} · ${driver.vehiclePlate || ''}` : t('أدخل بيانات مركبتك', 'Enter your vehicle details', 'Saisissez votre véhicule')}>
-        {!vehicleOk && (
+      <Step ok={vehicleOk} title={t('2. المركبة', '2. Vehicle', '2. Véhicule')} hint={vehicleOk ? `${driver.vehicleMake || ''} ${driver.vehicleModel || ''} · ${driver.vehiclePlate || ''}` : vehicleSaved ? (driver.vehicleStatus === 'REJECTED' ? t('مرفوضة، عدّل البيانات', 'Rejected, update the details', 'Refusé, modifiez les informations') : t('قيد المراجعة من فريقنا', 'Under review by our team', 'En cours de vérification')) : t('أدخل بيانات مركبتك', 'Enter your vehicle details', 'Saisissez votre véhicule')}>
+        {!vehicleOk && (!vehicleSaved || driver.vehicleStatus === 'REJECTED') && (
           <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
             <input style={S.input} placeholder={t('الصنع', 'Make', 'Marque')} value={form.vehicleMake} onChange={set('vehicleMake')} />
             <input style={S.input} placeholder={t('الطراز', 'Model', 'Modèle')} value={form.vehicleModel} onChange={set('vehicleModel')} />
@@ -616,7 +617,7 @@ function Earnings({ lang, overview, rate, currency }: { lang: Lang; overview: Pl
         <strong>{t('أرباحك', 'Your earnings', 'Vos gains')}</strong>
         <strong style={{ fontSize: 22 }}>{money(overview.totals.earningsMinor, currency)}</strong>
       </div>
-      <div style={S.muted}>{overview.totals.completed} {t('رحلة مكتملة', 'completed trips', 'courses terminées')} · {Math.round((1 - rate) * 100)}% {t('لك من كل أجرة', 'of every fare is yours', 'de chaque course pour vous')}</div>
+      <div style={S.muted}>{t('رحلات مكتملة', overview.totals.completed === 1 ? 'completed trip' : 'completed trips', 'courses terminées')}: {overview.totals.completed} · {Math.round((1 - rate) * 100)}% {t('لك من كل أجرة', 'of every fare is yours', 'de chaque course pour vous')}</div>
       {recent.map((r) => (
         <div key={r.id} style={{ ...S.row, borderTop: '1px solid #eee', paddingTop: 8, marginTop: 8, fontSize: 14 }}>
           <span dir="ltr">{String(r.metadata.dropoff || '-')}</span>

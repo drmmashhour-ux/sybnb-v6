@@ -242,7 +242,7 @@ export async function handleDriver(req, res, url, context) {
     if (req.method === 'GET') {
       const profile = await db().driverProfile.findUnique({
         where: { userId: context.user.id },
-        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true },
+        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true, largeBagCapacity: true, handBagCapacity: true, seatCount: true, smokingAllowed: true, tyreType: true, tyresFittedOn: true },
       })
       return json(res, 200, { ok: true, driverProfile: profile || null })
     }
@@ -330,12 +330,58 @@ export async function handleDriver(req, res, url, context) {
           throw error
         }
       }
+      // Car facts shown to riders: bag capacity (large = 23 kg), seats, smoking policy, tyre type.
+      const intField = (v, max, code) => {
+        if (v === undefined || v === null || v === '') return undefined
+        const n = Number(v)
+        if (!Number.isInteger(n) || n < 0 || n > max) {
+          const error = new Error(`${code} must be a whole number between 0 and ${max}.`)
+          error.statusCode = 400
+          error.code = 'VEHICLE_CAPACITY_INVALID'
+          error.expose = true
+          throw error
+        }
+        return n
+      }
+      const largeBagCapacity = intField(body.largeBagCapacity, 12, 'largeBagCapacity')
+      const handBagCapacity = intField(body.handBagCapacity, 20, 'handBagCapacity')
+      const seatCount = intField(body.seatCount, 16, 'seatCount')
+      const smokingAllowed = body.smokingAllowed === undefined ? undefined : body.smokingAllowed === true
+      let tyreType
+      if (body.tyreType !== undefined && body.tyreType !== null && body.tyreType !== '') {
+        tyreType = String(body.tyreType)
+        if (!['WINTER', 'ALL_SEASON'].includes(tyreType)) {
+          const error = new Error('tyreType must be WINTER or ALL_SEASON.')
+          error.statusCode = 400
+          error.code = 'TYRE_TYPE_INVALID'
+          error.expose = true
+          throw error
+        }
+      }
+      let tyresFittedOn
+      if (body.tyresFittedOn) {
+        const d = new Date(body.tyresFittedOn)
+        if (Number.isNaN(d.getTime())) {
+          const error = new Error('tyresFittedOn must be a valid date.')
+          error.statusCode = 400
+          error.code = 'TYRE_DATE_INVALID'
+          error.expose = true
+          throw error
+        }
+        tyresFittedOn = d
+      }
       // Persist the new fields alongside the category; a field absent from the body is left untouched.
       const extraVehicleFields = {
         ...(vehicleCategory !== undefined ? { vehicleCategory } : {}),
         ...(vehicleYear !== undefined ? { vehicleYear } : {}),
         ...(vehicleColor !== undefined ? { vehicleColor: vehicleColor || null } : {}),
         ...(registrationExpiresAt !== undefined ? { registrationExpiresAt } : {}),
+        ...(largeBagCapacity !== undefined ? { largeBagCapacity } : {}),
+        ...(handBagCapacity !== undefined ? { handBagCapacity } : {}),
+        ...(seatCount !== undefined ? { seatCount } : {}),
+        ...(smokingAllowed !== undefined ? { smokingAllowed } : {}),
+        ...(tyreType !== undefined ? { tyreType } : {}),
+        ...(tyresFittedOn !== undefined ? { tyresFittedOn } : {}),
       }
       // Registering or changing the vehicle sends it (back) to PENDING_REVIEW: a self-declared
       // vehicle must be reviewed before the driver can accept rides, and any later change re-opens
@@ -344,7 +390,7 @@ export async function handleDriver(req, res, url, context) {
         where: { userId: context.user.id },
         create: { userId: context.user.id, vehicleMake, vehicleModel, vehiclePlate, vehicleStatus: 'PENDING_REVIEW', ...extraVehicleFields },
         update: { vehicleMake, vehicleModel, vehiclePlate, vehicleStatus: 'PENDING_REVIEW', ...extraVehicleFields },
-        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true },
+        select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true, largeBagCapacity: true, handBagCapacity: true, seatCount: true, smokingAllowed: true, tyreType: true, tyresFittedOn: true },
       })
       return json(res, 200, { ok: true, driverProfile: profile })
     }
@@ -469,7 +515,7 @@ export async function handleDriver(req, res, url, context) {
     const ratingSummary = await getDriverRatingSummary(context.user.id)
     const driverProfile = await db().driverProfile.findUnique({
       where: { userId: context.user.id },
-      select: { accessibilityCapable: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true },
+      select: { accessibilityCapable: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, vehicleYear: true, vehicleColor: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true, largeBagCapacity: true, handBagCapacity: true, seatCount: true, smokingAllowed: true, tyreType: true, tyresFittedOn: true },
     })
     // Honest earnings: COLLECTED money — the driver's actual ride-fare wallet credits (already net
     // of the SYBNB commission) — not merely the BILLED fares of completed rides, which overstated

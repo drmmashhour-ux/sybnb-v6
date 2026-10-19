@@ -16,6 +16,7 @@ import { handleWebhooks } from './routes/webhooks.mjs'
 import { handleSesWebhooks } from './routes/ses-webhooks.mjs'
 import { handleBookings } from './routes/bookings.mjs'
 import { handleDriver } from './routes/driver.mjs'
+import { handleDriverBase } from './routes/driver-base.mjs'
 import { handleHost } from './routes/host.mjs'
 import { handleListings } from './routes/listings.mjs'
 import { handleAuctions, closeDueAuctions } from './routes/auctions.mjs'
@@ -307,6 +308,7 @@ async function dispatch(req, res, url, context) {
     handleHostVerification,
     handleHost,
     handleDriver,
+    handleDriverBase,
     handleAdmin,
     handleRideRecordings,
     handleSrRides,

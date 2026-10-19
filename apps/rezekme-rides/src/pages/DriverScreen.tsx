@@ -120,10 +120,18 @@ function SignIn({ lang, onDone }: { lang: Lang; onDone: () => void }) {
     } catch (e) {
       // The server refuses an account that also holds an admin role until an admin-login code is used;
       // the client falls back to a register() call whose own error hides that reason, so offer it.
-      setNeedsAdmin(true)
-      setSent(false)
+      // Admin accounts need the admin-login code. Request it right away and switch the form to it.
+      setAdminMode(true)
+      setPurpose('admin-login')
       setCode('')
-      setMsg((e as { message?: string }).message || t('تعذر تسجيل الدخول. تحقق من كلمة المرور.', 'Could not sign in. Check your password.', 'Connexion impossible. Vérifiez votre mot de passe.'))
+      try {
+        await requestOtp({ email: email.trim(), purpose: 'admin-login' })
+        setSent(true)
+        setMsg(t('هذا الحساب إداري أيضاً. أرسلنا رمز إدارة جديداً إلى بريدك: أدخله هنا واضغط دخول.', 'This account is also an admin account. We emailed a NEW admin code: enter it here and press Sign in.', 'Ce compte est aussi administrateur. Un NOUVEAU code admin a été envoyé : saisissez-le ici puis appuyez sur Connexion.'))
+      } catch (err2) {
+        setSent(false)
+        setMsg((e as { message?: string }).message || (err2 as { message?: string }).message || t('تعذر تسجيل الدخول', 'Could not sign in', 'Connexion impossible'))
+      }
     } finally {
       setBusy(false)
     }

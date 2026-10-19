@@ -524,6 +524,9 @@ model UserSession {
   revokedReason String?   @map("revoked_reason")
   lastUsedAt    DateTime? @map("last_used_at")
   userAgent     String?   @map("user_agent")
+  // Step 5 (migration 079): last time the user re-proved identity for a T3/T4 action.
+  stepUpAt      DateTime? @map("step_up_at")
+  mfaMethod     String?   @map("mfa_method")
   createdAt     DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -2636,4 +2639,499 @@ model AuthorizationEvidence {
   @@index([permissionCode, decidedAt])
   @@index([correlationId])
   @@map("authorization_evidence")
+}
+
+// ============================================================================================
+// STEP 5 (part 2, migration 079) -- shared admin modules: work queue, notifications, parties,
+// documents, support, comments/timeline, approvals, settings, feature flags, service accounts.
+// ============================================================================================
+
+enum WorkItemType {
+  DOCUMENT_REVIEW
+  ACCESS_REQUEST
+  SECURITY_REVIEW
+  APPROVAL
+  SUPPORT_ESCALATION
+  PLATFORM_SETUP
+
+  @@map("work_item_type")
+}
+
+enum WorkItemStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+
+  @@map("work_item_status")
+}
+
+enum AdminPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+
+  @@map("admin_priority")
+}
+
+enum AdminRisk {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+
+  @@map("admin_risk")
+}
+
+enum NotificationType {
+  TASK
+  APPROVAL
+  SECURITY
+  DOCUMENT
+  SUPPORT
+  SYSTEM
+
+  @@map("admin_notification_type")
+}
+
+enum PartyKind {
+  PERSON
+  ORGANIZATION
+
+  @@map("party_kind")
+}
+
+enum PartyStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+
+  @@map("party_status")
+}
+
+enum AdminDocumentStatus {
+  UPLOADED
+  PROCESSING
+  EXTRACTED
+  NEEDS_REVIEW
+  VERIFIED
+  REJECTED
+  ARCHIVED
+
+  @@map("admin_document_status")
+}
+
+enum SupportCaseStatus {
+  OPEN
+  PENDING_CUSTOMER
+  PENDING_INTERNAL
+  RESOLVED
+  CLOSED
+
+  @@map("support_case_status")
+}
+
+enum SupportMessageDirection {
+  INBOUND
+  OUTBOUND
+
+  @@map("support_message_direction")
+}
+
+enum ApprovalKind {
+  ACCESS
+  DOCUMENT
+  PLATFORM
+  FINANCIAL
+
+  @@map("approval_kind")
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  INVALIDATED
+
+  @@map("approval_status")
+}
+
+enum FeatureFlagScope {
+  ORGANIZATION
+  LEGAL_ENTITY
+  PLATFORM
+
+  @@map("feature_flag_scope")
+}
+
+model WorkItem {
+  id               String         @id @default(uuid())
+  type             WorkItemType
+  title            String
+  platformId       String?        @map("platform_id")
+  priority         AdminPriority  @default(NORMAL)
+  status           WorkItemStatus @default(OPEN)
+  assignedUserId   String?        @map("assigned_user_id")
+  assignedTeam     String?        @map("assigned_team")
+  dueAt            DateTime?      @map("due_at")
+  linkedEntityType String?        @map("linked_entity_type")
+  linkedEntityId   String?        @map("linked_entity_id")
+  risk             AdminRisk      @default(NONE)
+  createdById      String?        @map("created_by_id")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  completedAt      DateTime?      @map("completed_at")
+
+  @@index([assignedUserId, status])
+  @@index([status, priority])
+  @@index([platformId])
+  @@map("work_items")
+}
+
+model AdminNotification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  body      String?
+  link      String?
+  priority  AdminPriority    @default(NORMAL)
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@index([userId, readAt, createdAt])
+  @@map("admin_notifications")
+}
+
+model Party {
+  id          String      @id @default(uuid())
+  kind        PartyKind
+  displayName String      @map("display_name")
+  legalName   String?     @map("legal_name")
+  email       String?
+  phone       String?
+  status      PartyStatus @default(ACTIVE)
+  createdById String?     @map("created_by_id")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  roles     PartyRole[]
+  addresses PartyAddress[]
+  userLinks UserPartyLink[]
+
+  @@index([displayName])
+  @@index([status])
+  @@map("parties")
+}
+
+// One party, many roles (restaurant owner AND courier AND seller). History is kept: a role ends by
+// setting effective_to / status, never by deleting the row.
+model PartyRole {
+  id            String    @id @default(uuid())
+  partyId       String    @map("party_id")
+  roleType      String    @map("role_type")
+  platformId    String?   @map("platform_id")
+  status        String    @default("ACTIVE")
+  effectiveFrom DateTime  @default(now()) @map("effective_from")
+  effectiveTo   DateTime? @map("effective_to")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Restrict)
+
+  @@index([partyId])
+  @@index([roleType])
+  @@index([platformId])
+  @@map("party_roles")
+}
+
+model PartyAddress {
+  id         String   @id @default(uuid())
+  partyId    String   @map("party_id")
+  label      String?
+  line1      String
+  line2      String?
+  city       String?
+  region     String?
+  postalCode String?  @map("postal_code")
+  country    String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Restrict)
+
+  @@index([partyId])
+  @@map("party_addresses")
+}
+
+model UserPartyLink {
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  partyId       String    @map("party_id")
+  verifiedAt    DateTime? @map("verified_at")
+  verifiedById  String?   @map("verified_by_id")
+  effectiveFrom DateTime  @default(now()) @map("effective_from")
+  effectiveTo   DateTime? @map("effective_to")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([partyId])
+  @@map("user_party_links")
+}
+
+model AdminDocument {
+  id               String              @id @default(uuid())
+  documentType     String              @map("document_type")
+  title            String
+  status           AdminDocumentStatus @default(UPLOADED)
+  platformId       String?             @map("platform_id")
+  partyId          String?             @map("party_id")
+  uploadedById     String?             @map("uploaded_by_id")
+  currentVersionId String?             @map("current_version_id")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+
+  versions DocumentVersion[]
+  links    DocumentLink[]
+  reviews  DocumentReview[]
+
+  @@index([status])
+  @@index([partyId])
+  @@index([platformId])
+  @@map("admin_documents")
+}
+
+// Every upload is a new immutable version; the original is never replaced (Step 5 section 18).
+model DocumentVersion {
+  id                  String   @id @default(uuid())
+  documentId          String   @map("document_id")
+  versionNumber       Int      @map("version_number")
+  storageKey          String   @map("storage_key")
+  sha256              String
+  filename            String
+  mimeType            String   @map("mime_type")
+  sizeBytes           Int      @map("size_bytes")
+  uploadedById        String?  @map("uploaded_by_id")
+  supersedesVersionId String?  @map("supersedes_version_id")
+  retentionUntil      DateTime? @map("retention_until")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  document AdminDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@unique([documentId, versionNumber])
+  @@map("document_versions")
+}
+
+model DocumentLink {
+  id         String   @id @default(uuid())
+  documentId String   @map("document_id")
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document AdminDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@unique([documentId, entityType, entityId])
+  @@index([entityType, entityId])
+  @@map("document_links")
+}
+
+model DocumentReview {
+  id         String   @id @default(uuid())
+  documentId String   @map("document_id")
+  versionId  String   @map("version_id")
+  reviewerId String   @map("reviewer_id")
+  decision   String
+  reason     String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document AdminDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@index([documentId])
+  @@map("document_reviews")
+}
+
+model SupportCase {
+  id               String            @id @default(uuid())
+  caseNumber       Int               @unique @default(autoincrement()) @map("case_number")
+  platformId       String?           @map("platform_id")
+  type             String
+  priority         AdminPriority     @default(NORMAL)
+  status           SupportCaseStatus @default(OPEN)
+  partyId          String?           @map("party_id")
+  linkedEntityType String?           @map("linked_entity_type")
+  linkedEntityId   String?           @map("linked_entity_id")
+  assignedUserId   String?           @map("assigned_user_id")
+  summary          String
+  createdById      String?           @map("created_by_id")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  closedAt         DateTime?         @map("closed_at")
+
+  messages SupportMessage[]
+
+  @@index([status, priority])
+  @@index([assignedUserId])
+  @@index([platformId])
+  @@map("support_cases")
+}
+
+// Customer-facing messages live here and ONLY here. Internal notes are admin_comments with
+// visibility INTERNAL, so a note can never be sent to a customer by a mistaken flag.
+model SupportMessage {
+  id         String                  @id @default(uuid())
+  caseId     String                  @map("case_id")
+  direction  SupportMessageDirection
+  authorId   String?                 @map("author_id")
+  body       String
+  createdAt  DateTime                @default(now()) @map("created_at")
+
+  supportCase SupportCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, createdAt])
+  @@map("support_messages")
+}
+
+model AdminComment {
+  id             String    @id @default(uuid())
+  entityType     String    @map("entity_type")
+  entityId       String    @map("entity_id")
+  authorId       String    @map("author_id")
+  body           String
+  mentions       Json      @default("[]")
+  attachmentRefs Json      @default("[]") @map("attachment_refs")
+  resolvedAt     DateTime? @map("resolved_at")
+  resolvedById   String?   @map("resolved_by_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([entityType, entityId, createdAt])
+  @@map("admin_comments")
+}
+
+// User-facing operational history. NOT the audit trail: audit (admin_audit_logs) is authoritative.
+model TimelineEvent {
+  id          String   @id @default(uuid())
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  eventType   String   @map("event_type")
+  actorUserId String?  @map("actor_user_id")
+  summary     String
+  detail      Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId, createdAt])
+  @@map("timeline_events")
+}
+
+model ApprovalRequest {
+  id              String         @id @default(uuid())
+  kind            ApprovalKind
+  subjectType     String         @map("subject_type")
+  subjectId       String         @map("subject_id")
+  title           String
+  requesterUserId String         @map("requester_user_id")
+  status          ApprovalStatus @default(PENDING)
+  platformId      String?        @map("platform_id")
+  // The exact subject content that was put up for approval, and its hash. If the live subject no
+  // longer hashes to this, the approval shows a material-change warning (Step 5 section 15).
+  subjectSnapshot Json           @map("subject_snapshot")
+  snapshotHash    String         @map("snapshot_hash")
+  requiredApprovals Int          @default(1) @map("required_approvals")
+  decidedAt       DateTime?      @map("decided_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  steps ApprovalStep[]
+
+  @@index([status, kind])
+  @@index([requesterUserId])
+  @@map("approval_requests")
+}
+
+model ApprovalStep {
+  id             String    @id @default(uuid())
+  requestId      String    @map("request_id")
+  approverUserId String?   @map("approver_user_id")
+  decision       String?
+  reason         String?
+  decidedAt      DateTime? @map("decided_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  request ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+
+  @@index([requestId])
+  @@map("approval_steps")
+}
+
+model AdminSetting {
+  id          String   @id @default(uuid())
+  category    String
+  key         String
+  value       Json
+  version     Int      @default(1)
+  updatedById String?  @map("updated_by_id")
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@unique([category, key])
+  @@map("admin_settings")
+}
+
+model FeatureFlag {
+  id          String           @id @default(uuid())
+  key         String
+  scopeKind   FeatureFlagScope @map("scope_kind")
+  scopeRef    String           @default("") @map("scope_ref")
+  enabled     Boolean          @default(false)
+  description String?
+  updatedById String?          @map("updated_by_id")
+  updatedAt   DateTime         @default(now()) @map("updated_at")
+
+  @@unique([key, scopeKind, scopeRef])
+  @@map("feature_flags")
+}
+
+model ServiceAccount {
+  id              String   @id @default(uuid())
+  name            String
+  description     String?
+  integrationCode String?  @map("integration_code")
+  platformId      String?  @map("platform_id")
+  organizationId  String   @map("organization_id")
+  status          String   @default("ACTIVE")
+  // Reference into the secret manager. The secret itself is never stored or shown here.
+  secretRef       String?  @map("secret_ref")
+  permissionCodes String[] @default([]) @map("permission_codes")
+  createdAt       DateTime @default(now()) @map("created_at")
+  disabledAt      DateTime? @map("disabled_at")
+  disabledById    String?  @map("disabled_by_id")
+
+  @@map("service_accounts")
+}
+
+model AdminDelegation {
+  id              String    @id @default(uuid())
+  delegatorUserId String    @map("delegator_user_id")
+  delegateUserId  String    @map("delegate_user_id")
+  permissionCodes String[]  @default([]) @map("permission_codes")
+  reason          String
+  effectiveFrom   DateTime  @default(now()) @map("effective_from")
+  effectiveTo     DateTime? @map("effective_to")
+  status          String    @default("ACTIVE")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([delegateUserId, status])
+  @@map("admin_delegations")
+}
+
+model AdminSavedView {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  viewKey   String   @map("view_key")
+  name      String
+  filters   Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, viewKey])
+  @@map("admin_saved_views")
 }

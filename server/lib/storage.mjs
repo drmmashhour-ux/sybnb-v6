@@ -42,6 +42,8 @@ const BUCKETS = {
   'driver-photo': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
   'food-photo': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
   'host-photo': { private: true, mime: ['image/jpeg', 'image/png', 'image/webp'], maxBytes: 5 * 1024 * 1024 },
+  // Step 5 admin Document Center: private, signed/authorised retrieval only.
+  'admin-documents': { private: true, mime: ['image/jpeg', 'image/png', 'application/pdf'], maxBytes: 10 * 1024 * 1024 },
   'ride-recording': { private: true, mime: ['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/ogg', 'audio/aac'], maxBytes: 8 * 1024 * 1024 },
 }
 

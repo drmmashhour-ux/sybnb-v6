@@ -7,6 +7,7 @@ import { channelEnabled, defaultCurrency } from '../lib/country.mjs'
 import { isRateLimited, clientIp } from '../lib/rateLimit.mjs'
 import { loginPausedFor } from '../lib/login-pause.mjs'
 import { consumeMagicLink } from '../lib/magic-link.mjs'
+import { staffLoginRoles } from '../lib/authz/staff-login.mjs'
 import { ADMIN_LOGIN_OTP_PURPOSE, ADMIN_LOGIN_OTP_WINDOW_MS, requiresAdminLoginCode } from '../lib/admin-login.mjs'
 
 // DRIVER is intentionally NOT self-registerable: an unvetted self-registered driver could claim
@@ -320,7 +321,9 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
     // the password matched, so it reveals nothing about which accounts are admins to a stranger.
     // Roles are read live on every request, so any session for this account carries ADMIN: there
     // is no "sign in as a guest, then act as admin" path around this check.
-    if (requiresAdminLoginCode(user.roles)) {
+    // Step 5: accounts with new-model role assignments are staff for this policy too (never widens access).
+    const loginRoles = await staffLoginRoles(user)
+    if (requiresAdminLoginCode(loginRoles)) {
       const codeRequired = () => {
         const error = new Error('Admin sign-in needs a fresh email code. Use the admin portal: request the code, enter it, then sign in.')
         error.statusCode = 403
@@ -349,7 +352,7 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
 
     // Each login issues its OWN session row, so two devices signing into the same account get two
     // independently revocable sessions rather than two copies of one indistinguishable credential.
-    const session = await issueUserSession(user, req)
+    const session = await issueUserSession({ ...user, roles: loginRoles }, req)
     return json(res, 200, {
       ok: true,
       user: publicUser(user),

@@ -11,6 +11,7 @@ import { sweepIntervalMinutes } from './lib/booking-policy.mjs'
 import { handleRouteError, json, notFound, publicUrl } from './lib/responses.mjs'
 import { log, logRequest, newRequestId } from './lib/logger.mjs'
 import { handleAdmin } from './routes/admin.mjs'
+import { handleAdmin2 } from './routes/admin2/index.mjs'
 import { handleAuth } from './routes/auth.mjs'
 import { handleWebhooks } from './routes/webhooks.mjs'
 import { handleSesWebhooks } from './routes/ses-webhooks.mjs'
@@ -113,7 +114,9 @@ const CORS_ORIGINS = Array.from(new Set([
   ...NATIVE_APP_ORIGINS,
 ]))
 // Routes that must stay reachable even while gates.publicAccess is closed -- see the check below.
-const PUBLIC_ACCESS_EXEMPT_PREFIXES = ['/api/auth', '/api/otp', '/api/webhooks', '/api/legal']
+// '/api/admin2' (Step 5 admin foundation) authorizes every route itself, deny by default, so staff holding
+// only new-model role assignments are not locked out by the pre-launch gate; it exposes nothing publicly.
+const PUBLIC_ACCESS_EXEMPT_PREFIXES = ['/api/auth', '/api/otp', '/api/webhooks', '/api/legal', '/api/admin2']
 // A security audit found the payment webhook intake routes live under /api/payments/, not
 // /api/webhooks/ -- so they were NOT actually covered by the prefix list above, despite this
 // file's own comment claiming durable webhook intake stays reachable "the same way payment
@@ -261,7 +264,7 @@ const server = createServer(async (req, res) => {
     // mutating requests only -- an admin reading the review queue repeatedly isn't the risk this
     // closes. Keyed per admin account (never per IP), so it can't be defeated by rotating source
     // IPs the way an IP-keyed limit could, and one over-eager admin can't exhaust another's quota.
-    if (req.method !== 'GET' && url.pathname.startsWith('/api/admin/') && context?.roles?.includes('ADMIN')) {
+    if (req.method !== 'GET' && context?.user && ((url.pathname.startsWith('/api/admin/') && context.roles?.includes('ADMIN')) || url.pathname.startsWith('/api/admin2/'))) {
       if (await isRateLimited(`admin-action:${context.user.id}`, ADMIN_ACTION_RATE_WINDOW_MS, ADMIN_ACTION_RATE_MAX)) {
         return json(res, 429, {
           ok: false,
@@ -309,6 +312,7 @@ async function dispatch(req, res, url, context) {
     handleHost,
     handleDriver,
     handleDriverBase,
+    handleAdmin2,
     handleAdmin,
     handleRideRecordings,
     handleSrRides,

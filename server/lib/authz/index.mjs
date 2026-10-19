@@ -25,7 +25,9 @@ function authError(statusCode, code, message, extra = {}) {
 // account holding the legacy ADMIN role cannot sign in without an emailed one-time code
 // (server/lib/admin-login.mjs). Recorded as derived evidence; richer MFA methods plug in here later.
 export function sessionAuthFacts(ctx, sessionRow) {
-  const legacyAdmin = Array.isArray(ctx?.roles) && ctx.roles.includes('ADMIN')
+  // Strength comes from how THIS session was issued (user_sessions.mfa_method, set only when the
+  // emailed admin code was verified). Legacy ADMIN sessions issued before 080 are recognised by role.
+  const legacyAdmin = sessionRow?.mfaMethod === 'EMAIL_OTP' || (Array.isArray(ctx?.roles) && ctx.roles.includes('ADMIN'))
   const issuedAt = sessionRow?.issuedAt ?? null
   const stepUpAt = sessionRow?.stepUpAt ?? null
   const recentAuthAt = [issuedAt, stepUpAt].filter(Boolean).sort((a, b) => b.getTime() - a.getTime())[0] ?? null
@@ -37,47 +39,46 @@ export function sessionAuthFacts(ctx, sessionRow) {
   }
 }
 
-/**
- * @param ctx        result of getAuthContext(req): { user, roles, sessionId }
- * @param code       permission code, e.g. 'iam.user.read'
- * @param resource   { type, id?, platform?, platforms?, facts? } -- facts carry the resource's scope facts
- * @param options    { requestId, correlationId, tx, evidence (force), action, now, auditEventId, approvalSnapshotId }
- */
-export async function can(ctx, code, resource = {}, options = {}) {
+/** Load everything the evaluator needs ONCE, so many decisions in one request cost one round of queries. */
+export async function loadSnapshot(ctx, options = {}) {
   const client = options.tx || db()
   const now = options.now ?? new Date()
-  if (!ctx?.user) return { decision: 'DENY', reason: 'NOT_AUTHENTICATED', grant: null, visiblePlatforms: null, stepUpRequired: false }
-
-  const [permission, assignments, suspensions, orgIndex, policy, sessionRow] = await Promise.all([
-    loadPermission(client, code),
+  const [assignments, suspensions, orgIndex, policy, sessionRow] = await Promise.all([
     loadAssignmentsForUser(client, ctx.user.id),
     loadSuspensions(client),
     loadOrgIndex(client),
     loadPolicy(client, now),
-    ctx.sessionId ? client.userSession.findUnique({ where: { id: ctx.sessionId }, select: { issuedAt: true } }) : null,
+    ctx.sessionId ? client.userSession.findUnique({ where: { id: ctx.sessionId }, select: { issuedAt: true, stepUpAt: true, mfaMethod: true } }) : null,
   ])
-  const auth = sessionAuthFacts(ctx, sessionRow)
-  const result = evaluateAccess({
-    user: { id: ctx.user.id, status: ctx.user.status }, permission, assignments, suspensions, resource, orgIndex, policy,
-    context: { now, session: { recentAuthAt: auth.recentAuthAt } },
-  })
+  return { client, now, assignments, suspensions, orgIndex, policy, auth: sessionAuthFacts(ctx, sessionRow) }
+}
 
-  const mustRecord = options.evidence === true || (permission && permission.tier >= 3)
-  if (mustRecord) {
-    const record = {
-      userId: ctx.user.id, sessionId: ctx.sessionId ?? null,
-      roleAssignmentId: result.grant?.assignmentId ?? null, roleVersionId: result.grant?.roleVersionId ?? null,
-      roleCode: result.grant?.roleCode ?? null, roleVersionNumber: result.grant?.roleVersionNumber ?? null,
-      permissionId: permission?.id ?? null, permissionCode: code,
-      scopeId: result.grant?.scopeId ?? null, scopeKind: result.grant?.scopeKind ?? null, scopeTarget: result.grant?.scopeTarget ?? null,
-      scopeDescription: result.grant?.scopeDescription ?? null, platformContext: result.grant?.platformContext ?? null,
-      resourceType: resource.type ?? null, resourceId: resource.id != null ? String(resource.id) : null,
-      action: options.action ?? code.split('.').pop(),
-      authStrength: auth.authStrength, mfaMethod: auth.mfaMethod, mfaResult: auth.mfaResult, recentAuthAt: auth.recentAuthAt,
-      requestId: options.requestId ?? null, correlationId: options.correlationId ?? options.requestId ?? null,
-      decision: result.decision, denyReason: result.reason, policyVersionId: policy.id ?? null,
-      auditEventId: options.auditEventId ?? null, approvalSnapshotId: options.approvalSnapshotId ?? null,
-    }
+function evidenceRecord(ctx, code, permission, resource, result, snap, options) {
+  return {
+    userId: ctx.user.id, sessionId: ctx.sessionId ?? null,
+    roleAssignmentId: result.grant?.assignmentId ?? null, roleVersionId: result.grant?.roleVersionId ?? null,
+    roleCode: result.grant?.roleCode ?? null, roleVersionNumber: result.grant?.roleVersionNumber ?? null,
+    permissionId: permission?.id ?? null, permissionCode: code,
+    scopeId: result.grant?.scopeId ?? null, scopeKind: result.grant?.scopeKind ?? null, scopeTarget: result.grant?.scopeTarget ?? null,
+    scopeDescription: result.grant?.scopeDescription ?? null, platformContext: result.grant?.platformContext ?? null,
+    resourceType: resource.type ?? null, resourceId: resource.id != null ? String(resource.id) : null,
+    action: options.action ?? code.split('.').pop(),
+    authStrength: snap.auth.authStrength, mfaMethod: snap.auth.mfaMethod, mfaResult: snap.auth.mfaResult, recentAuthAt: snap.auth.recentAuthAt,
+    requestId: options.requestId ?? null, correlationId: options.correlationId ?? options.requestId ?? null,
+    decision: result.decision, denyReason: result.reason, policyVersionId: snap.policy.id ?? null,
+    auditEventId: options.auditEventId ?? null, approvalSnapshotId: options.approvalSnapshotId ?? null,
+  }
+}
+
+/** Decide against an already-loaded snapshot. Writes evidence for T3/T4 (or when forced). */
+export async function decide(snap, ctx, code, resource = {}, options = {}) {
+  const permission = await loadPermission(snap.client, code)
+  const result = evaluateAccess({
+    user: { id: ctx.user.id, status: ctx.user.status }, permission, assignments: snap.assignments, suspensions: snap.suspensions,
+    resource, orgIndex: snap.orgIndex, policy: snap.policy, context: { now: snap.now, session: { recentAuthAt: snap.auth.recentAuthAt } },
+  })
+  if (options.evidence === true || (permission && permission.tier >= 3)) {
+    const record = evidenceRecord(ctx, code, permission, resource, result, snap, options)
     // Inside the caller's transaction when one was given; otherwise its own (fail closed on error).
     if (options.tx) await writeEvidence(options.tx, record)
     else await db().$transaction((tx) => writeEvidence(tx, record))
@@ -85,7 +86,28 @@ export async function can(ctx, code, resource = {}, options = {}) {
   if (result.decision === 'DENY') {
     log.warn('authz_denied', { userId: ctx.user.id, permission: code, reason: result.reason, requestId: options.requestId })
   }
-  return result
+  return { ...result, permission }
+}
+
+/**
+ * @param ctx        result of getAuthContext(req): { user, roles, sessionId }
+ * @param code       permission code, e.g. 'iam.user.read'
+ * @param resource   { type, id?, platform?, platforms?, facts? } -- facts carry the resource's scope facts
+ * @param options    { requestId, correlationId, tx, evidence (force), action, now, auditEventId, approvalSnapshotId }
+ */
+export async function can(ctx, code, resource = {}, options = {}) {
+  if (!ctx?.user) return { decision: 'DENY', reason: 'NOT_AUTHENTICATED', grant: null, visiblePlatforms: null, stepUpRequired: false }
+  const snap = await loadSnapshot(ctx, options)
+  return decide(snap, ctx, code, resource, options)
+}
+
+/** Many resources, one permission, one snapshot (e.g. which platforms may this user open?). */
+export async function canMany(ctx, code, resources, options = {}) {
+  if (!ctx?.user) return resources.map(() => ({ decision: 'DENY', reason: 'NOT_AUTHENTICATED' }))
+  const snap = await loadSnapshot(ctx, options)
+  const out = []
+  for (const r of resources) out.push(await decide(snap, ctx, code, r, options))
+  return out
 }
 
 export async function authorize(ctx, code, resource = {}, options = {}) {

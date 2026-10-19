@@ -21,7 +21,7 @@
 import { randomUUID } from 'node:crypto'
 import { db } from './prisma.mjs'
 import { createSessionToken } from './security.mjs'
-import { sessionTtlSecondsForRoles } from './admin-login.mjs'
+import { sessionTtlSecondsForRoles, requiresAdminLoginCode } from './admin-login.mjs'
 import { runBoundedRevocation } from './revocation-contention.mjs'
 
 export const REVOCATION_REASONS = {
@@ -72,7 +72,7 @@ export async function issueUserSession(user, req = null) {
       throw error
     }
     await tx.userSession.create({
-      data: { id: sessionId, userId: user.id, expiresAt, userAgent: safeUserAgent(req) },
+      data: { id: sessionId, userId: user.id, expiresAt, userAgent: safeUserAgent(req), mfaMethod: requiresAdminLoginCode(roles) ? 'EMAIL_OTP' : null },
     })
     return current.sessionEpoch
   })

@@ -12,6 +12,7 @@ type Props = {
   dropTarget?: DropTarget | null
   /** Live-ride camera mode, see RideMapProps.phase. */
   phase?: 'approach' | 'trip' | null
+  route?: LatLng[] | null
   /** Compact status chip over the map (e.g. "Driver arrives in 3 min"). */
   banner?: string | null
   onPick?: (target: DropTarget, point: LatLng) => void
@@ -29,7 +30,7 @@ function isLowBandwidth(): boolean {
  * The map hero at the top of the screen. The map module is loaded lazily AFTER first paint (never in
  * the initial bundle). On data-saver / 2g connections it starts collapsed behind a "Show map" button.
  */
-export function MapHero({ lang, pickup: rawPickup, dropoff: rawDropoff, stops: rawStops, driver: rawDriver, dropTarget, phase, banner, onPick, height = '46vh', labels }: Props) {
+export function MapHero({ lang, pickup: rawPickup, dropoff: rawDropoff, stops: rawStops, driver: rawDriver, dropTarget, phase, route, banner, onPick, height = '46vh', labels }: Props) {
   // Server coordinates can arrive as numeric strings or with nulls: normalise once, drop anything invalid.
   const pickup = toPoint(rawPickup)
   const dropoff = toPoint(rawDropoff)
@@ -68,6 +69,7 @@ export function MapHero({ lang, pickup: rawPickup, dropoff: rawDropoff, stops: r
             driver={driver}
             dropTarget={dropTarget}
             phase={phase}
+            route={route}
             onPick={onPick}
             recenterLabel={labels.recenter}
             loadingLabel={labels.loading}

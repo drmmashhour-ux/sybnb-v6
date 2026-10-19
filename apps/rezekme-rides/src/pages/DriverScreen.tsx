@@ -755,8 +755,9 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
       )}
       <MapHero
         lang={lang}
-        pickup={toDropoff ? (ride.pickupCoords ?? null) : routeFrom}
-        dropoff={toDropoff ? (ride.dropoffCoords ?? null) : (ride.pickupCoords ?? null)}
+        pickup={ride.pickupCoords ?? null}
+        dropoff={ride.dropoffCoords ?? null}
+        route={routeFrom && (toDropoff ? ride.dropoffCoords : ride.pickupCoords) ? [routeFrom, (toDropoff ? ride.dropoffCoords : ride.pickupCoords) as { lat: number; lng: number }] : null}
         driver={me}
         phase={toDropoff ? 'trip' : 'approach'}
         banner={toDropoff ? t('في الطريق إلى الوجهة', 'On the way to the destination', 'En route vers la destination') : t('في الطريق إلى الراكب', 'On the way to the rider', 'En route vers le client')}

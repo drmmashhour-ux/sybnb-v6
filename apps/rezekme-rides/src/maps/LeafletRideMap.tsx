@@ -24,7 +24,7 @@ const dot = (bg: string, size: number, round = true, text = '') =>
 const carIcon = (heading: number) => L.divIcon({ className: '', html: carHtml(heading), iconSize: [44, 44], iconAnchor: [22, 22] })
 
 export function LeafletRideMap(props: RideMapProps) {
-  const { pickup, dropoff, stops, driver, userLocation, dropTarget, onPick, command, phase } = props
+  const { pickup, dropoff, stops, driver, userLocation, dropTarget, onPick, command, phase, route } = props
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const layersRef = useRef<{ pickup?: L.Marker; dropoff?: L.Marker; driver?: L.Marker; user?: L.Marker; line?: L.Polyline; stops: L.Marker[] }>({ stops: [] })
@@ -96,6 +96,7 @@ export function LeafletRideMap(props: RideMapProps) {
 
   const stopsKey = JSON.stringify(stops || [])
   const hasDriver = Boolean(driver)
+  const routeKey = route ? route.map((p) => `${p.lat.toFixed(3)},${p.lng.toFixed(3)}`).join('|') : ''
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -115,7 +116,7 @@ export function LeafletRideMap(props: RideMapProps) {
     layers.stops.forEach((marker) => map.removeLayer(marker))
     layers.stops = (stops || []).map((point, index) => L.marker([point.lat, point.lng], { icon: dot('#6b6b6b', 22, true, String(index + 1)), keyboard: false }).addTo(map))
 
-    const path: LatLng[] = [...(pickup ? [pickup] : []), ...(stops || []), ...(dropoff ? [dropoff] : [])]
+    const path: LatLng[] = route && route.length >= 2 ? route : [...(pickup ? [pickup] : []), ...(stops || []), ...(dropoff ? [dropoff] : [])]
     if (layers.line) {
       map.removeLayer(layers.line)
       layers.line = undefined
@@ -146,7 +147,7 @@ export function LeafletRideMap(props: RideMapProps) {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, stopsKey, hasDriver])
+  }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, stopsKey, hasDriver, routeKey])
 
   // Driver car: rotated to its heading (from the last two fixes) and gliding between polls.
   useEffect(() => {

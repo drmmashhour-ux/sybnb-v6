@@ -15,6 +15,7 @@ type Props = {
   driver?: LatLng | null
   dropTarget?: DropTarget | null
   phase?: 'approach' | 'trip' | null
+  route?: LatLng[] | null
   onPick?: (target: DropTarget, point: LatLng) => void
   recenterLabel: string
   loadingLabel: string
@@ -25,7 +26,7 @@ type Props = {
  * otherwise (no key / script error / auth failure) the keyless Leaflet+OSM map. Also owns the
  * round "recenter / my location" button.
  */
-export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, phase, onPick, recenterLabel, loadingLabel }: Props) {
+export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, phase, route, onPick, recenterLabel, loadingLabel }: Props) {
   const [provider, setProvider] = useState<'google' | 'osm'>(hasGoogleMapsKey && !googleMapsFailed() ? 'google' : 'osm')
   const [command, setCommand] = useState<MapCommand | null>(null)
   const [user, setUser] = useState<LatLng | null>(null)
@@ -57,7 +58,7 @@ export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, 
     )
   }
 
-  const common = { pickup, dropoff, stops, driver, userLocation: user, dropTarget, onPick, command, phase }
+  const common = { pickup, dropoff, stops, driver, userLocation: user, dropTarget, onPick, command, phase, route }
   return (
     <div style={styles.wrap}>
       <Suspense fallback={<div style={styles.loading}>{loadingLabel}</div>}>

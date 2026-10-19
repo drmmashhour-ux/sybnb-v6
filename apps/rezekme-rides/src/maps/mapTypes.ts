@@ -25,6 +25,8 @@ export interface RideMapProps {
    * pans/zooms by hand, until they press recenter. Omit for the booking screen.
    */
   phase?: 'approach' | 'trip' | null
+  /** Explicit route to draw (e.g. driver -> pickup). Pins stay pickup/dropoff. Omit for pickup -> stops -> dropoff. */
+  route?: LatLng[] | null
 }
 
 /** Neutral initial view when nothing is known yet: no country is baked in. */

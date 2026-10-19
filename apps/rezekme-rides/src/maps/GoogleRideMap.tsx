@@ -74,7 +74,7 @@ const WHITE = '#ffffff'
 type Props = RideMapProps & { lang: string }
 
 export function GoogleRideMap(props: Props) {
-  const { pickup, dropoff, stops, driver, userLocation, dropTarget, onPick, command, onProviderFail, lang, phase } = props
+  const { pickup, dropoff, stops, driver, userLocation, dropTarget, onPick, command, onProviderFail, lang, phase, route } = props
   const containerRef = useRef<HTMLDivElement | null>(null)
   const gRef = useRef<GoogleNs>(null)
   const mapRef = useRef<GoogleNs>(null)
@@ -163,6 +163,7 @@ export function GoogleRideMap(props: Props) {
   // --- static pins + route line, refit when they change
   const stopsKey = JSON.stringify(stops || [])
   const hasDriver = Boolean(driver)
+  const routeKey = route ? route.map((p) => `${p.lat.toFixed(3)},${p.lng.toFixed(3)}`).join('|') : ''
   useEffect(() => {
     const g = gRef.current
     const map = mapRef.current
@@ -196,7 +197,7 @@ export function GoogleRideMap(props: Props) {
         }),
     )
 
-    const path: LatLng[] = [...(pickup ? [pickup] : []), ...(stops || []), ...(dropoff ? [dropoff] : [])]
+    const path: LatLng[] = route && route.length >= 2 ? route : [...(pickup ? [pickup] : []), ...(stops || []), ...(dropoff ? [dropoff] : [])]
 
     // Plain polyline (default, free).
     const drawPolyline = () => {
@@ -210,7 +211,7 @@ export function GoogleRideMap(props: Props) {
       else lineRef.current = new g.maps.Polyline({ map, path, strokeColor: BLACK, strokeOpacity: 0.9, strokeWeight: 4, geodesic: true })
     }
     drawPolyline() // instant straight line; replaced by the road route below when it arrives
-    if (USE_DIRECTIONS && path.length >= 2 && pickup && dropoff) {
+    if (USE_DIRECTIONS && path.length >= 2) {
       // Billed per route (Google Routes API); cached per pickup/dropoff/stops so re-renders never re-bill.
       fetchRoadRoute(path)
         .then((road) => {
@@ -223,7 +224,7 @@ export function GoogleRideMap(props: Props) {
 
     if (!interactedRef.current) fit()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, stopsKey, hasDriver])
+  }, [ready, pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, stopsKey, hasDriver, routeKey])
 
   // --- driver car: rotated to its heading (from the last two fixes) and gliding between polls
   useEffect(() => {

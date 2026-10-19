@@ -57,9 +57,12 @@ export async function sendSms({ to, body, purpose }) {
       body: form,
     })
     if (!res.ok) {
+      let detail = ''
+      try { const e = await res.json(); detail = `twilio ${e.code || ''} ${e.message || ''}`.trim() } catch { /* ignore */ }
       const error = new Error('SMS provider rejected the message.')
       error.statusCode = 502
       error.code = 'SMS_SEND_FAILED'
+      error.detail = detail
       error.expose = true
       throw error
     }

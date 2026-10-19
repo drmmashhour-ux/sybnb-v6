@@ -14,6 +14,7 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
   const [code, setCode] = useState('')
   const [smsCode, setSmsCode] = useState('')
   const [password, setPassword] = useState('')
+  const [password2, setPassword2] = useState('')
   const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -40,6 +41,10 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
   }
 
   async function save() {
+    if (password !== password2) {
+      setError(pick(lang, 'كلمتا المرور غير متطابقتين.', 'The two passwords do not match.', 'Les deux mots de passe ne correspondent pas.'))
+      return
+    }
     if (code.trim().length !== 6 || password.length < 8 || (admin && smsCode.trim().length !== 6)) {
       setError(pick(lang, 'أدخل الرمز المكوّن من 6 أرقام وكلمة مرور من 8 أحرف على الأقل.', 'Enter the 6-digit code and a password of at least 8 characters.', 'Saisissez le code à 6 chiffres et un mot de passe d’au moins 8 caractères.'))
       return
@@ -98,6 +103,10 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
           <label style={s.label}>
             {pick(lang, 'كلمة المرور الجديدة', 'New password', 'Nouveau mot de passe')}
             <input style={s.input} dir="ltr" type={show ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </label>
+          <label style={s.label}>
+            {pick(lang, 'أعد كتابة كلمة المرور', 'Repeat new password', 'Répétez le nouveau mot de passe')}
+            <input style={s.input} dir="ltr" type={show ? 'text' : 'password'} autoComplete="new-password" value={password2} onChange={(e) => setPassword2(e.target.value)} />
           </label>
           <button type="button" style={s.link} aria-pressed={show} onClick={() => setShow((v) => !v)}>
             {show ? pick(lang, 'إخفاء كلمة المرور', 'Hide password', 'Masquer le mot de passe') : pick(lang, 'إظهار كلمة المرور', 'Show password', 'Afficher le mot de passe')}

@@ -1,6 +1,7 @@
 import { db } from '../lib/prisma.mjs'
 import { hashPhone, hashEmail, generateOtpCode, hashOtpCode, verifyOtpCode } from '../lib/security.mjs'
 import { sendSms } from '../lib/sms.mjs'
+import { log } from '../lib/logger.mjs'
 import { sendEmail } from '../lib/email.mjs'
 import { channelEnabled } from '../lib/country.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
@@ -137,9 +138,16 @@ export async function handleOtp(req, res, url) {
       const adminUser0 = id.kind === 'email' ? await db().user.findUnique({ where: { email: id.value.toLowerCase() }, include: { roles: true } }) : null
       const isAdmin0 = Boolean(adminUser0 && adminUser0.status === 'ACTIVE' && adminUser0.roles.some((r) => r.role === 'ADMIN'))
       if (!isAdmin0 || !/^\+[1-9]\d{7,14}$/.test(adminSmsTo0)) {
+        log.warn?.('admin_reset_sms_skipped', { isAdmin: isAdmin0, phoneConfigured: Boolean(adminSmsTo0), phoneFormatOk: /^\+[1-9]\d{7,14}$/.test(adminSmsTo0) })
         return json(res, 201, { ok: true, sent: true, channel: 'sms', expiresAt, provider: 'none' })
       }
-      delivery = await sendSms({ to: adminSmsTo0, body: otpMessage(code), purpose })
+      try {
+        delivery = await sendSms({ to: adminSmsTo0, body: otpMessage(code), purpose })
+        log.info?.('admin_reset_sms_sent', { provider: delivery.provider })
+      } catch (smsError) {
+        log.error?.('admin_reset_sms_failed', { code: smsError?.code, status: smsError?.statusCode, detail: smsError?.detail })
+        throw smsError
+      }
     } else {
       delivery = await deliverCode(id, code, purpose, idempotencyKey)
     }
@@ -149,6 +157,7 @@ export async function handleOtp(req, res, url) {
     // the password and a verified single-use code are still both required (server/routes/auth.mjs).
     let smsAlso = false
     const adminSmsTo = (process.env.ADMIN_LOGIN_SMS_TO || '').trim()
+    if (purpose === 'admin-login' && !adminSmsTo) log.warn('admin_login_sms_not_configured', {})
     if (purpose === 'admin-login' && id.kind === 'email' && adminSmsTo && /^\+[1-9]\d{7,14}$/.test(adminSmsTo)) {
       try {
         const adminUser = await db().user.findUnique({ where: { email: id.value.toLowerCase() }, include: { roles: true } })
@@ -156,7 +165,9 @@ export async function handleOtp(req, res, url) {
           await sendSms({ to: adminSmsTo, body: otpMessage(code), purpose })
           smsAlso = true
         }
-      } catch { /* SMS is optional; email delivery already succeeded */ }
+      } catch (smsError) {
+        log.error('admin_login_sms_failed', { code: smsError?.code, detail: smsError?.detail })
+      }
     }
 
     const record = await db().verificationCode.create({

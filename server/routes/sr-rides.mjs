@@ -751,7 +751,8 @@ export async function handleSrRides(req, res, url, context) {
     // path — a ride is never blocked by prepayment. The DEBIT moves the rider's OWN money into
     // platform custody (same pattern as funding a wallet gift), with recordWalletEntry's atomic
     // no-overdraw guard preventing double-spend.
-    if (!shareable && finalFareMinor > 0) {
+    // Skip wallet debit when ride was already paid via guest Stripe or when pending Sham Cash admin verification.
+    if (!shareable && finalFareMinor > 0 && !ride.metadata?.prepaid && !ride.metadata?.guestShamCashRef) {
       try {
         await db().$transaction(async (tx) => {
           await recordWalletEntry(tx, {

@@ -26,7 +26,7 @@ const LOW_RATING = 4.6
 
 // Everything that stops a driver going on duty: a required document missing, still in review,
 // rejected or expired. Used by the key-code step and shown on the dashboard checklist.
-async function dutyBlockers(userId, profile) {
+export async function dutyBlockers(userId, profile) {
   const docs = await db().driverDocument.findMany({ where: { userId }, select: { kind: true, status: true, expiresAt: true } })
   const have = new Map(docs.map((d) => [d.kind, d]))
   const isCar = profile?.vehicleCategory && profile.vehicleCategory !== 'BIKE'
@@ -53,6 +53,25 @@ function fail(status, code, message) {
   error.code = code
   error.expose = true
   return error
+}
+
+// Uber and Lyft only dispatch to a driver who is online AND whose documents are all valid. Same here:
+// the key code puts the driver on duty, and any rejected, missing or expired document takes them off.
+export async function assertDriverOnDuty(userId) {
+  const profile = await db().driverProfile.findUnique({ where: { userId } })
+  if (!profile?.onDutyAt) throw fail(403, 'DRIVER_NOT_ON_DUTY', 'Enter your key code to start work.')
+  const { blockers } = await dutyBlockers(userId, profile)
+  if (blockers.length) throw fail(403, 'DRIVER_DOCUMENTS_BLOCK_DUTY', 'Some documents need your attention before you can take rides.')
+  return profile
+}
+
+// Pure check shared by the request list and the claim gate: does the driver's car carry these bags?
+export function carryBags(profile, bags) {
+  const large = Math.max(0, Number(bags?.large) || 0)
+  const hand = Math.max(0, Number(bags?.hand) || 0)
+  if (!large && !hand) return true
+  if (profile?.largeBagCapacity == null || profile?.handBagCapacity == null) return false
+  return large <= profile.largeBagCapacity && hand <= profile.handBagCapacity
 }
 
 const hashKey = (code) => crypto.createHash('sha256').update(`driver-key:${code}`).digest('hex')

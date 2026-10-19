@@ -8,7 +8,7 @@ import {
   confirmOtp,
   createStaffAccountSession,
   fetchDriverIdentityStatus,
-  fetchPendingSrRides,
+  fetchPendingSrRidesEx,
   fetchPrototypeDriverOverview,
   getStoredStaffSession,
   markDriverArrived,
@@ -22,6 +22,8 @@ import {
   type PlatformDriverOverview,
   type PlatformRideRequest,
 } from '@platform/shared/api/platformApi'
+
+import { fetchDriverBase, verifyKeyCode, type DriverBase } from '../driverBaseApi'
 
 /**
  * Rezekme driver screen: the phone-sized view a driver sees (not the full SYBNB dashboard).
@@ -191,6 +193,8 @@ function Home({ lang, name, onSignOut }: { lang: Lang; name: string; onSignOut: 
   const [overview, setOverview] = useState<PlatformDriverOverview | null>(null)
   const [idStatus, setIdStatus] = useState<string | null | undefined>(undefined)
   const [pending, setPending] = useState<PlatformRideRequest[]>([])
+  const [hiddenTooBig, setHiddenTooBig] = useState(0)
+  const [base, setBase] = useState<DriverBase | null>(null)
   const [online, setOnline] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState<{ fare: number; currency: string } | null>(null)
@@ -200,6 +204,7 @@ function Home({ lang, name, onSignOut }: { lang: Lang; name: string; onSignOut: 
       const [o, id] = await Promise.all([fetchPrototypeDriverOverview(), fetchDriverIdentityStatus()])
       setOverview(o)
       setIdStatus(id)
+      fetchDriverBase().then(setBase).catch(() => undefined)
     } catch (e) {
       const err = e as { status?: number; message?: string }
       if (err.status === 401) onSignOut()
@@ -218,7 +223,10 @@ function Home({ lang, name, onSignOut }: { lang: Lang; name: string; onSignOut: 
   const idApproved = idStatus === 'APPROVED'
   const vehicleOk = Boolean(driver?.vehiclePlate) && driver?.vehicleStatus === 'APPROVED'
   const inspectionOk = !driver?.inspectionRequired || driver?.inspectionStatus === 'PASSED'
-  const ready = idApproved && vehicleOk && inspectionOk
+  const registered = idApproved && vehicleOk && inspectionOk
+  // Shared driver base: on duty (key code entered) with every document valid. Nothing is dispatched before.
+  const onDuty = Boolean(base?.onDutyAt) && (base?.dutyBlockers.length ?? 1) === 0
+  const ready = registered && onDuty
 
   // GPS: reported while online or during a live trip, so dispatch and the rider's map can see us.
   const tracking = ready && (online || Boolean(active))
@@ -243,7 +251,7 @@ function Home({ lang, name, onSignOut }: { lang: Lang; name: string; onSignOut: 
       return
     }
     let stop = false
-    const tick = () => fetchPendingSrRides().then((r) => !stop && setPending(r)).catch(() => undefined)
+    const tick = () => fetchPendingSrRidesEx().then((r) => { if (stop) return; setPending(r.rides); setHiddenTooBig(r.hiddenTooBig ?? 0) }).catch(() => undefined)
     void tick()
     const id = window.setInterval(tick, 4000)
     return () => {
@@ -268,7 +276,9 @@ function Home({ lang, name, onSignOut }: { lang: Lang; name: string; onSignOut: 
 
       {!overview || idStatus === undefined ? (
         <p style={S.muted}>…</p>
-      ) : !ready ? (
+      ) : registered && !onDuty && !active ? (
+        <StartWork lang={lang} base={base} onChanged={() => void load()} />
+      ) : !ready && !active ? (
         <Onboarding
           lang={lang}
           idStatus={idStatus}
@@ -293,9 +303,15 @@ function Home({ lang, name, onSignOut }: { lang: Lang; name: string; onSignOut: 
             {online ? t('أنت متصل. اضغط للإيقاف', 'You are online. Tap to go offline', 'En ligne. Touchez pour passer hors ligne') : t('ابدأ الاستقبال', 'Go online', 'Se mettre en ligne')}
           </button>
           {online && pending.length === 0 && <p style={S.muted}>{t('نبحث عن طلبات قريبة…', 'Looking for nearby requests…', 'Recherche de demandes proches…')}</p>}
-          {pending.map((ride) => (
-            <Offer key={ride.id} lang={lang} ride={ride} rate={rate} onChanged={() => void load()} />
+          {online && pending.length > 0 && (
+            <div style={S.muted}>{pending.length} {t('طلبات حولك. الأقرب أولاً.', 'requests around you. Nearest first.', 'demandes autour de vous. La plus proche d’abord.')}</div>
+          )}
+          {pending.map((ride, i) => (
+            <Offer key={ride.id} lang={lang} ride={ride} rate={rate} nearest={i === 0 && typeof ride.pickupDistanceKm === 'number'} onChanged={() => void load()} />
           ))}
+          {online && hiddenTooBig > 0 && (
+            <p style={S.note}>{hiddenTooBig} {t('طلب مخفي لأن سيارتك لا تتسع لحقائبه.', 'request hidden: your car cannot carry its luggage.', 'demande masquée : votre voiture ne peut pas porter ses bagages.')}</p>
+          )}
           <Earnings lang={lang} overview={overview} rate={rate} currency={currency} />
         </>
       )}
@@ -420,7 +436,7 @@ function Onboarding({ lang, idStatus, driver, idApproved, vehicleOk, inspectionO
 
 /* -------------------------------------------------------------------- offer */
 
-function Offer({ lang, ride, rate, onChanged }: { lang: Lang; ride: PlatformRideRequest; rate: number; onChanged: () => void }) {
+function Offer({ lang, ride, rate, nearest, onChanged }: { lang: Lang; ride: PlatformRideRequest; rate: number; nearest: boolean; onChanged: () => void }) {
   const t = (ar: string, en: string, fr: string) => pick(lang, ar, en, fr)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
@@ -464,15 +480,72 @@ function Offer({ lang, ride, rate, onChanged }: { lang: Lang; ride: PlatformRide
     <div style={{ ...S.card, borderColor: '#000', borderWidth: 2 }}>
       <div style={S.row}>
         <strong style={{ fontSize: 26 }}>{money(net, ride.currency)}</strong>
-        {left !== null && <span style={S.pill}>{left}s</span>}
+        <span style={{ display: 'flex', gap: 6 }}>
+          {nearest && <span style={{ ...S.pill, background: '#e8f7ee', color: '#116b34' }}>{t('الأقرب', 'Nearest', 'Plus proche')}</span>}
+          {left !== null && <span style={S.pill}>{left}s</span>}
+        </span>
       </div>
       <div style={S.muted}>{t('ربحك الصافي', 'Your net earnings', 'Vos gains nets')}{typeof ride.pickupDistanceKm === 'number' ? ` · ${ride.pickupDistanceKm.toFixed(1)} km ${t('عن الراكب', 'to pickup', 'du client')}` : ''}</div>
       <Route ride={ride} />
+      <div style={{ ...S.muted, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {typeof ride.metadata.distanceKm === 'number' && <span dir="ltr">{ride.metadata.distanceKm} km {t('الرحلة', 'trip', 'course')}</span>}
+        <span>{bagsLine(ride)}</span>
+      </div>
       {msg && <p style={S.note}>{msg}</p>}
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
         {ride.offeredToYou && <button style={S.secondary} disabled={busy} onClick={() => void decline()}>{t('رفض', 'Decline', 'Refuser')}</button>}
         <button style={{ ...S.primary, flex: 1, marginTop: 0 }} disabled={busy} onClick={() => void accept()}>{t('قبول', 'Accept', 'Accepter')}</button>
       </div>
+    </div>
+  )
+}
+
+function bagsLine(ride: PlatformRideRequest) {
+  const b = (ride.metadata as { bags?: { large?: number; hand?: number } }).bags
+  const large = Number(b?.large) || 0
+  const hand = Number(b?.hand) || 0
+  if (!large && !hand) return 'No bags'
+  return [large ? `${large} large` : '', hand ? `${hand} hand` : ''].filter(Boolean).join(', ')
+}
+
+/** Key code to start work. Every document must be approved first; the code is issued by the Rezekme team. */
+function StartWork({ lang, base, onChanged }: { lang: Lang; base: DriverBase | null; onChanged: () => void }) {
+  const t = (ar: string, en: string, fr: string) => pick(lang, ar, en, fr)
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const blockers = base?.dutyBlockers ?? []
+  async function start() {
+    setBusy(true)
+    setMsg('')
+    try {
+      await verifyKeyCode(code.trim())
+      onChanged()
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Could not start work')
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!base) return <p style={S.muted}>…</p>
+  return (
+    <div style={S.card}>
+      <strong style={{ fontSize: 18 }}>{t('ابدأ العمل', 'Start work', 'Commencer à travailler')}</strong>
+      {blockers.length > 0 ? (
+        <>
+          <p style={S.note}>{blockers.length} {t('مستندات تحتاج انتباهك قبل أن تبدأ.', 'documents need your attention before you can start.', 'documents demandent votre attention avant de commencer.')}</p>
+          <a style={{ ...S.primary, display: 'block', textAlign: 'center', textDecoration: 'none' }} href="#/driver/apply">{t('أكمل طلبك', 'Finish your application', 'Terminer votre demande')}</a>
+        </>
+      ) : !base.hasKeyCode ? (
+        <p style={S.muted}>{t('كل شيء معتمد. سيرسل لك فريق Rezekme رمز البدء.', 'Everything is approved. The Rezekme team will give you your key code.', 'Tout est approuvé. L’équipe Rezekme vous donnera votre code.')}</p>
+      ) : (
+        <>
+          <div style={S.muted}>{t('أدخل رمز البدء المكوّن من 6 أرقام.', 'Enter your 6-digit key code.', 'Entrez votre code à 6 chiffres.')}</div>
+          <input style={S.input} inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
+          {msg && <p style={S.note}>{msg}</p>}
+          <button style={S.primary} disabled={busy || code.length !== 6} onClick={() => void start()}>{t('ابدأ', 'Start work', 'Commencer')}</button>
+        </>
+      )}
     </div>
   )
 }

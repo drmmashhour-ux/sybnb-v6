@@ -1,4 +1,5 @@
 import { db } from '../lib/prisma.mjs'
+import { dutyBlockers, carryBags } from './driver-base.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.mjs'
@@ -440,6 +441,11 @@ export async function handleDriver(req, res, url, context) {
     // come within the driver-visibility window -- see server/lib/ride-schedule.mjs. Unscoped here
     // (unlike the single-ride GET) since this is exactly the read path meant to surface every
     // ride ready for dispatch, scheduled or not.
+    // Shared driver base (2026-10-19): nothing is shown until the driver is on duty with valid documents.
+    const dutyProfile = await db().driverProfile.findUnique({ where: { userId: context.user.id } })
+    if (!dutyProfile?.onDutyAt || (await dutyBlockers(context.user.id, dutyProfile)).blockers.length) {
+      return json(res, 200, { ok: true, rides: [], driverLocated: false, onDuty: false, hiddenTooBig: 0 })
+    }
     await activateScheduledRides()
     // Full auto-dispatch (2026-10-10): no daemon in this deployment, so the offer-escalation sweep
     // runs here on the pending-list read -- mirroring activateScheduledRides() above. It expires
@@ -491,7 +497,10 @@ export async function handleDriver(req, res, url, context) {
       if (b.pickupDistanceKm == null) return -1
       return a.pickupDistanceKm - b.pickupDistanceKm
     })
-    return json(res, 200, { ok: true, rides: withProximity, driverLocated: Boolean(driverLoc) })
+    // Only rides this car can carry, nearest first, at most 10 (the driver picks among the closest).
+    const carriable = withProximity.filter((r) => carryBags(dutyProfile, r.metadata?.bags))
+    const hiddenTooBig = withProximity.length - carriable.length
+    return json(res, 200, { ok: true, rides: carriable.slice(0, 10), driverLocated: Boolean(driverLoc), onDuty: true, hiddenTooBig })
   }
 
   if (url.pathname === '/api/driver/rides') {

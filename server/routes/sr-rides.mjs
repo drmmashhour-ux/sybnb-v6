@@ -1,4 +1,5 @@
 import { db } from '../lib/prisma.mjs'
+import { assertDriverOnDuty, carryBags } from './driver-base.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { randomInt } from 'node:crypto'
@@ -202,7 +203,7 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
   }
   const claimingVehicle = await db().driverProfile.findUnique({
     where: { userId: context.user.id },
-    select: { vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true },
+    select: { vehiclePlate: true, vehicleStatus: true, vehicleCategory: true, registrationExpiresAt: true, inspectionStatus: true, inspectionExpiresAt: true, largeBagCapacity: true, handBagCapacity: true },
   })
   if (!claimingVehicle?.vehiclePlate) {
     const error = new Error('Register your vehicle (make, model and plate) before accepting rides.')
@@ -215,6 +216,15 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
     const error = new Error('Your vehicle is awaiting review. You can accept rides once it is approved.')
     error.statusCode = 403
     error.code = 'DRIVER_VEHICLE_NOT_APPROVED'
+    error.expose = true
+    throw error
+  }
+  // Shared driver base (2026-10-19): on duty with valid documents, and a car that carries the bags.
+  await assertDriverOnDuty(context.user.id)
+  if (!carryBags(claimingVehicle, existing.metadata?.bags)) {
+    const error = new Error('Your car cannot carry this rider\'s luggage.')
+    error.statusCode = 403
+    error.code = 'DRIVER_CAR_TOO_SMALL_FOR_BAGS'
     error.expose = true
     throw error
   }

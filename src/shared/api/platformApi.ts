@@ -2718,6 +2718,14 @@ export async function fetchPendingSrRides() {
   return response.rides
 }
 
+// Driver request list with the shared-driver-base extras (on duty, rides hidden because the car is too small).
+export async function fetchPendingSrRidesEx() {
+  const session = await ensurePrototypeDriverSession()
+  return apiRequest<{ ok: true; rides: PlatformRideRequest[]; onDuty?: boolean; hiddenTooBig?: number; driverLocated?: boolean }>('/api/driver/rides/pending', {
+    token: session.token,
+  })
+}
+
 export async function claimPrototypeSrRide(rideId: string) {
   const session = await ensurePrototypeDriverSession()
   const response = await apiRequest<{ ok: true; ride: PlatformRideRequest }>(`/api/sr/rides/${rideId}/claim`, {

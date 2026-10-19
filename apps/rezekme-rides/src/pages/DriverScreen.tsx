@@ -24,7 +24,7 @@ import {
 } from '@platform/shared/api/platformApi'
 
 import { fetchDriverBase, verifyKeyCode, type DriverBase } from '../driverBaseApi'
-import { RideMapView } from '../maps/RideMapView'
+import { MapHero } from '../maps/MapHero'
 import { RecordingControls } from './RecordingControls'
 
 /**
@@ -629,17 +629,21 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
 
   return (
     <>
-      <div style={{ position: 'relative', height: 260, borderRadius: 14, overflow: 'hidden', border: '1px solid #e5e5e5' }}>
-        <RideMapView
-          lang={lang}
-          pickup={ride.pickupCoords ?? null}
-          dropoff={ride.dropoffCoords ?? null}
-          driver={me}
-          phase={toDropoff ? 'trip' : 'approach'}
-          recenterLabel={t('توسيط', 'Recenter', 'Recentrer')}
-          loadingLabel={t('جارٍ تحميل الخريطة…', 'Loading map…', 'Chargement de la carte…')}
-        />
-      </div>
+      <MapHero
+        lang={lang}
+        pickup={ride.pickupCoords ?? null}
+        dropoff={ride.dropoffCoords ?? null}
+        driver={ride.driver?.location ? { lat: ride.driver.location.lat, lng: ride.driver.location.lng } : me}
+        phase={toDropoff ? 'trip' : 'approach'}
+        banner={toDropoff ? t('في الطريق إلى الوجهة', 'On the way to the destination', 'En route vers la destination') : t('في الطريق إلى الراكب', 'On the way to the rider', 'En route vers le client')}
+        height="46vh"
+        labels={{
+          show: t('عرض الخريطة', 'Show map', 'Afficher la carte'),
+          hide: t('إخفاء الخريطة', 'Hide map', 'Masquer la carte'),
+          recenter: t('إعادة التمركز', 'Recenter', 'Recentrer'),
+          loading: t('جار تحميل الخريطة…', 'Loading map…', 'Chargement de la carte…'),
+        }}
+      />
 
       <div style={S.card}>
         <div style={S.row}>

@@ -617,7 +617,7 @@ function Earnings({ lang, overview, rate, currency }: { lang: Lang; overview: Pl
         <strong>{t('أرباحك', 'Your earnings', 'Vos gains')}</strong>
         <strong style={{ fontSize: 22 }}>{money(overview.totals.earningsMinor, currency)}</strong>
       </div>
-      <div style={S.muted}>{t('رحلات مكتملة', overview.totals.completed === 1 ? 'completed trip' : 'completed trips', 'courses terminées')}: {overview.totals.completed} · {Math.round((1 - rate) * 100)}% {t('لك من كل أجرة', 'of every fare is yours', 'de chaque course pour vous')}</div>
+      <div style={S.muted}>{t('رحلات مكتملة', overview.totals.completed === 1 ? 'completed trip' : 'completed trips', 'courses terminées')}: {overview.totals.completed}</div>
       {recent.map((r) => (
         <div key={r.id} style={{ ...S.row, borderTop: '1px solid #eee', paddingTop: 8, marginTop: 8, fontSize: 14 }}>
           <span dir="ltr">{String(r.metadata.dropoff || '-')}</span>

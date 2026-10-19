@@ -694,6 +694,9 @@ function ShortRentAdminCommandDashboard({
         <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/listing-reports')}>
           {pick(lang, 'بلاغات الإعلانات', 'Listing reports', 'Signalements d’annonces')}
         </button>
+        <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/ops')}>
+          {pick(lang, 'لوحة العمليات المباشرة', 'Live operations', 'Opérations en direct')}
+        </button>
         <button style={commandStyles.secondaryCommand} onClick={() => (window.location.hash = '/admin/drivers')}>
           {pick(lang, 'مراجعة السائقين', 'Driver review', 'Contrôle des chauffeurs')}
         </button>

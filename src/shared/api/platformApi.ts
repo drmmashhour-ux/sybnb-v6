@@ -3034,6 +3034,36 @@ export type PlatformAdminSrRide = {
   noShow?: boolean
 }
 
+export type AdminOpsRide = {
+  id: string; status: string; fareMinor: number | null; currency: string; requestedAt: string; updatedAt: string
+  pickup: string; dropoff: string; category: string; prepaid: boolean
+  rider: { id: string; displayName: string } | null
+  driver: { id: string; displayName: string } | null
+  pickupCoords: { lat: number; lng: number } | null
+  dropoffCoords: { lat: number; lng: number } | null
+  driverLocation: { lat: number; lng: number; updatedAt: string } | null
+  gpsStale: boolean
+}
+export type AdminOps = {
+  kpis: {
+    active: number; searching: number; inProgress: number; gpsLost: number; onlineDrivers: number; onDutyDrivers: number
+    completed24h: number; cancelled24h: number; gross24hMinor: number; commission24hMinor: number
+    openIncidents: number; driversInReview: number
+  }
+  rides: AdminOpsRide[]
+}
+
+/** Operations hub: KPIs + every active ride with the car's live position. */
+export async function fetchAdminOps(): Promise<AdminOps> {
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true } & AdminOps>('/api/admin/sr/ops', { token }))
+  return { kpis: response.kpis, rides: response.rides }
+}
+
+/** Recorded GPS route of any ride (staff). */
+export async function fetchAdminRideRoute(rideId: string) {
+  return runAdminRequest((token) => apiRequest<{ ok: true } & RideRouteRecord>(`/api/sr/rides/${encodeURIComponent(rideId)}/route`, { token }))
+}
+
 export async function fetchAdminSrRides(status?: string) {
   const query = status ? `?status=${encodeURIComponent(status)}` : ''
   const response = await runAdminRequest((token) =>

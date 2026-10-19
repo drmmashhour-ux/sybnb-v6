@@ -1,6 +1,8 @@
 import { waiveRideCancellationFee } from '../lib/ride-fee-waiver.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { db } from '../lib/prisma.mjs'
+import { getDriverLocation, getRideCoords } from '../lib/live-map.mjs'
+import { SR_RIDE_COMMISSION_RATE } from '../lib/booking-policy.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { approvePaymentProof, bookingFinanceSplit, createRefundRequest, executeManualRailRefund, finalizeCancellationLedgerEffects, markPayoutRequestPaid, recordWalletEntry, rejectPayoutRequest, reverseBookingPlatformShare, reverseRidePayment } from '../lib/finance-ledger.mjs'
 import { appLink, formatMoney, notifyBooking, notifyUser } from '../lib/notifications.mjs'
@@ -1379,6 +1381,67 @@ export async function handleAdmin(req, res, url, context) {
   // 2026-10-09: live-rides view. Operators previously had no way to see open/active rides (only
   // aggregate status counts in platform-metrics), so they couldn't watch the service or find a ride
   // to dispatch without direct DB access. Lists the operationally-interesting rides, newest first.
+  // Operations hub (Uber/Lyft style): one read for the admin home -- KPIs, every active ride with the
+  // car's live position, and the work queues (driver documents, safety incidents). Read-only.
+  if (url.pathname === '/api/admin/sr/ops') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const LIVE = ['REQUESTED', 'MATCHING', 'DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS', 'DISPUTED']
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const [rows, completed24, cancelled24, openIncidents, docsInReview, onDuty, onlineRows] = await Promise.all([
+      db().rideRequest.findMany({
+        where: { status: { in: LIVE } },
+        orderBy: { requestedAt: 'desc' },
+        take: 100,
+        select: {
+          id: true, status: true, fareMinor: true, currency: true, requestedAt: true, updatedAt: true, metadata: true,
+          rider: { select: { id: true, displayName: true } },
+          driver: { select: { id: true, displayName: true } },
+        },
+      }),
+      db().rideRequest.aggregate({ where: { status: 'COMPLETED', updatedAt: { gte: since } }, _count: { _all: true }, _sum: { fareMinor: true } }),
+      db().rideRequest.count({ where: { status: 'CANCELLED', updatedAt: { gte: since } } }),
+      db().incident.count({ where: { status: 'OPEN' } }),
+      db().driverDocument.findMany({ where: { status: 'IN_REVIEW' }, distinct: ['userId'], select: { userId: true } }),
+      db().driverProfile.count({ where: { onDutyAt: { not: null } } }),
+      db().$queryRaw`SELECT count(*)::int AS n FROM driver_profiles WHERE last_location_updated_at > now() - interval '2 minutes'`,
+    ])
+    const rides = await Promise.all(rows.map(async (row) => {
+      const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
+      const [coords, driverLocation] = await Promise.all([
+        getRideCoords(row.id).catch(() => ({ pickup: null, dropoff: null })),
+        row.driver ? getDriverLocation(row.driver.id).catch(() => null) : Promise.resolve(null),
+      ])
+      return {
+        id: row.id, status: row.status, fareMinor: row.fareMinor, currency: row.currency,
+        requestedAt: row.requestedAt, updatedAt: row.updatedAt,
+        pickup: String(meta.pickup || ''), dropoff: String(meta.dropoff || ''), category: String(meta.category || ''),
+        prepaid: Boolean(meta.prepaid), rider: row.rider, driver: row.driver,
+        pickupCoords: coords.pickup, dropoffCoords: coords.dropoff, driverLocation,
+        gpsStale: Boolean(row.driver) && !driverLocation && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'].includes(row.status),
+      }
+    }))
+    const gross24 = completed24._sum.fareMinor || 0
+    return json(res, 200, {
+      ok: true,
+      kpis: {
+        active: rides.length,
+        searching: rides.filter((r) => r.status === 'REQUESTED' || r.status === 'MATCHING').length,
+        inProgress: rides.filter((r) => r.status === 'IN_PROGRESS').length,
+        gpsLost: rides.filter((r) => r.gpsStale).length,
+        onlineDrivers: onlineRows[0]?.n ?? 0,
+        onDutyDrivers: onDuty,
+        completed24h: completed24._count._all,
+        cancelled24h: cancelled24,
+        gross24hMinor: gross24,
+        commission24hMinor: Math.round(gross24 * SR_RIDE_COMMISSION_RATE),
+        openIncidents,
+        driversInReview: docsInReview.length,
+      },
+      rides,
+    })
+  }
+
   if (url.pathname === '/api/admin/sr/rides') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context, ['ADMIN', 'SUPPORT'])

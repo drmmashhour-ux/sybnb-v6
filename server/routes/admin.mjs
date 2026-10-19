@@ -167,6 +167,92 @@ export async function handleAdmin(req, res, url, context) {
   }
 
   // ---------------------------------------------------------------------------
+  // Daily money-in / money-out report (read-only). One business day (in the requested IANA time
+  // zone) of the master book, per currency: money IN by payment method, money OUT (paid payouts),
+  // movements inside the platform (ride holds, refunds to wallets, commissions), opening/closing
+  // wallet liability, and any provider event that did not reach the ledger. Pure read.
+  if (url.pathname === '/api/admin/daily-report') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+
+    const tzParam = String(url.searchParams.get('tz') || 'UTC')
+    let tz = 'UTC'
+    try { new Intl.DateTimeFormat('en', { timeZone: tzParam }); tz = tzParam } catch { /* invalid tz -> UTC */ }
+    const todayInTz = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+    const dateParam = String(url.searchParams.get('date') || '')
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayInTz
+
+    // Business-day window as real instants: [date 00:00 tz, date+1 00:00 tz).
+    const [{ start, end }] = await db().$queryRaw`
+      SELECT (${date}::date)::timestamp AT TIME ZONE ${tz} AS start,
+             ((${date}::date) + 1)::timestamp AT TIME ZONE ${tz} AS end`
+
+    const [lines, opening, closing, payouts, unbooked, liability] = await Promise.all([
+      db().$queryRaw`
+        SELECT we.reference_type AS "referenceType", we.type::text AS type, we.currency, count(*)::int AS count, sum(we.amount_minor)::int AS "totalMinor"
+        FROM wallet_entries we WHERE we.created_at >= ${start} AND we.created_at < ${end}
+        GROUP BY 1,2,3 ORDER BY 3,1,2`,
+      db().$queryRaw`
+        SELECT currency, coalesce(sum(CASE WHEN type::text IN ('CREDIT','RELEASE','REFUND') THEN amount_minor WHEN type::text = 'DEBIT' THEN -amount_minor ELSE 0 END),0)::int AS "balanceMinor"
+        FROM wallet_entries WHERE created_at < ${start} GROUP BY 1`,
+      db().$queryRaw`
+        SELECT currency, coalesce(sum(CASE WHEN type::text IN ('CREDIT','RELEASE','REFUND') THEN amount_minor WHEN type::text = 'DEBIT' THEN -amount_minor ELSE 0 END),0)::int AS "balanceMinor"
+        FROM wallet_entries WHERE created_at < ${end} GROUP BY 1`,
+      db().$queryRaw`
+        SELECT currency, coalesce(method,'unspecified') AS method, count(*)::int AS count, sum(amount_minor)::int AS "totalMinor"
+        FROM payout_requests WHERE status::text = 'PAID' AND decided_at >= ${start} AND decided_at < ${end}
+        GROUP BY 1,2 ORDER BY 1,2`,
+      db().$queryRaw`
+        SELECT provider, type, processing_status::text AS status, count(*)::int AS count
+        FROM payment_events WHERE received_at >= ${start} AND received_at < ${end} AND processing_status::text NOT IN ('APPLIED') AND type IN ('payment_intent.succeeded','checkout.session.completed')
+        GROUP BY 1,2,3 ORDER BY 4 DESC`,
+      db().$queryRaw`SELECT currency, coalesce(sum(cached_balance_minor),0)::int AS "totalMinor" FROM wallets GROUP BY 1`,
+    ])
+
+    // How each CREDIT reference type is classified. Money IN = real money entering the platform.
+    const IN_LABELS = {
+      stripe_card_prepay: 'Credit card (Stripe)',
+      wallet_topup: 'Sham Cash / wallet top-up',
+    }
+    const TEST_TYPES = new Set(['test_credit'])
+    const currencies = [...new Set([...lines.map((l) => l.currency), ...opening.map((o) => o.currency), ...closing.map((c) => c.currency), ...payouts.map((p) => p.currency)])]
+    const report = currencies.map((currency) => {
+      const mine = lines.filter((l) => l.currency === currency)
+      const moneyIn = mine.filter((l) => l.type === 'CREDIT' && IN_LABELS[l.referenceType]).map((l) => ({ method: IN_LABELS[l.referenceType], referenceType: l.referenceType, count: l.count, totalMinor: l.totalMinor }))
+      const testCredits = mine.filter((l) => l.type === 'CREDIT' && TEST_TYPES.has(l.referenceType)).reduce((a, l) => a + l.totalMinor, 0)
+      const moneyOut = payouts.filter((p) => p.currency === currency).map((p) => ({ method: p.method, count: p.count, totalMinor: p.totalMinor }))
+      const internal = mine
+        .filter((l) => !(l.type === 'CREDIT' && (IN_LABELS[l.referenceType] || TEST_TYPES.has(l.referenceType))))
+        .map((l) => ({ referenceType: l.referenceType, type: l.type, count: l.count, totalMinor: l.totalMinor }))
+      const sum = (rows) => rows.reduce((a, r) => a + r.totalMinor, 0)
+      return {
+        currency,
+        moneyIn,
+        moneyInTotalMinor: sum(moneyIn),
+        moneyOut,
+        moneyOutTotalMinor: sum(moneyOut),
+        testCreditsMinor: testCredits,
+        netExternalMinor: sum(moneyIn) - sum(moneyOut),
+        internal,
+        openingWalletMinor: opening.find((o) => o.currency === currency)?.balanceMinor || 0,
+        closingWalletMinor: closing.find((c) => c.currency === currency)?.balanceMinor || 0,
+        currentWalletLiabilityMinor: liability.find((l) => l.currency === currency)?.totalMinor || 0,
+      }
+    })
+
+    return json(res, 200, {
+      ok: true,
+      date,
+      timeZone: tz,
+      window: { start, end },
+      report,
+      // Provider events received that day that never reached APPLIED (ignored/quarantined/failed):
+      // money Stripe may have taken that the books do not show. Should be empty.
+      unbookedProviderEvents: unbooked,
+    })
+  }
+
+  // ---------------------------------------------------------------------------
   // Transactions & money-flow explorer (read-only). A platform-wide, filterable
   // browser over the wallet ledger — every CREDIT/DEBIT/HOLD/RELEASE/REFUND with
   // the account it belongs to and what it references. Pure read; no money moves.

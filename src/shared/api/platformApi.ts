@@ -2133,6 +2133,39 @@ export async function fetchAdminLedger(params: { limit?: number; offset?: number
   return result as PlatformLedgerResult
 }
 
+export type AdminDailyReportCurrency = {
+  currency: string
+  moneyIn: { method: string; referenceType: string; count: number; totalMinor: number }[]
+  moneyInTotalMinor: number
+  moneyOut: { method: string; count: number; totalMinor: number }[]
+  moneyOutTotalMinor: number
+  testCreditsMinor: number
+  netExternalMinor: number
+  internal: { referenceType: string; type: string; count: number; totalMinor: number }[]
+  openingWalletMinor: number
+  closingWalletMinor: number
+  currentWalletLiabilityMinor: number
+}
+export type AdminDailyReport = {
+  date: string
+  timeZone: string
+  report: AdminDailyReportCurrency[]
+  unbookedProviderEvents: { provider: string; type: string; status: string; count: number }[]
+}
+
+export async function fetchAdminDailyReport(params: { date?: string; tz?: string } = {}) {
+  const search = new URLSearchParams()
+  if (params.date) search.set('date', params.date)
+  if (params.tz) search.set('tz', params.tz)
+  const qs = search.toString()
+  const response = await runAdminRequest((token) => apiRequest<{ ok: true } & AdminDailyReport>(
+    `/api/admin/daily-report${qs ? `?${qs}` : ''}`,
+    { token },
+  ))
+  const { ok: _ok, ...result } = response
+  return result as AdminDailyReport
+}
+
 export type PlatformAiAssistRecommendation = {
   recommendation: 'APPROVE' | 'REJECT' | 'HOLD' | 'NEEDS_INFO'
   confidence: 'low' | 'medium' | 'high'

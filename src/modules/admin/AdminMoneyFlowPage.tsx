@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { moneyText } from '../../shared/i18n/display'
+import { AdminDailyReport } from './AdminDailyReport'
 import {
   fetchAdminLedger,
   getStoredStaffSession,
@@ -124,6 +125,8 @@ export function AdminMoneyFlowPage({ lang }: Props) {
       </header>
 
       {!isStaff && <section style={{ ...styles.alert, background: 'linear-gradient(90deg, rgba(232,189,42,.14), rgba(232,189,42,.04))', borderColor: 'rgba(232,189,42,.4)', color: '#f3d672' }}>{pick(lang, 'سجّل الدخول كمسؤول لعرض حركة الأموال.', 'Sign in as admin to view money flow.', 'Connectez-vous en tant qu’admin.')}</section>}
+
+      {isStaff && <AdminDailyReport lang={lang} />}
 
       {(summaries.length ? summaries : [null]).map((sc, i) => (
         <section key={sc?.currency || i} style={styles.statsRow}>

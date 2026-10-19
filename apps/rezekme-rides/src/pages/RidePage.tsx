@@ -1409,6 +1409,57 @@ export function RidePage({ lang }: Props) {
   }
   const tipOptions = [10, 15, 20]
   const liveDriverPin = ride?.driver?.location ? { lat: ride.driver.location.lat, lng: ride.driver.location.lng } : null
+  // ---- driver proximity alerts: "arrives within 2 min" once, and "driver is here" once per ride.
+  const [driverAlert, setDriverAlert] = useState<'soon' | 'here' | null>(null)
+  const alertedRef = useRef<{ rideId: string; soon: boolean; here: boolean }>({ rideId: '', soon: false, here: false })
+  const alertEta = ride && typeof ride.etaToPickupMinutes === 'number' ? ride.etaToPickupMinutes : null
+  const alertStatus = ride?.status ?? null
+  const alertArrived = Boolean(ride?.wait?.arrivedAt)
+  const alertRideId = ride?.id ?? ''
+  useEffect(() => {
+    if (!alertRideId) return
+    if (alertedRef.current.rideId !== alertRideId) alertedRef.current = { rideId: alertRideId, soon: false, here: false }
+    const state = alertedRef.current
+    const beep = (pattern: number[]) => {
+      try { navigator.vibrate?.(pattern) } catch { /* not supported */ }
+      try {
+        const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+        if (!Ctx) return
+        const ctx = new Ctx()
+        pattern.forEach((ms, index) => {
+          if (index % 2 !== 0) return
+          const start = ctx.currentTime + pattern.slice(0, index).reduce((a, b) => a + b, 0) / 1000
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.frequency.value = 880
+          gain.gain.value = 0.2
+          osc.connect(gain)
+          gain.connect(ctx.destination)
+          osc.start(start)
+          osc.stop(start + ms / 1000)
+        })
+        setTimeout(() => { void ctx.close() }, 4000)
+      } catch { /* audio blocked until a user gesture; the banner still shows */ }
+    }
+    const notify = (title: string) => {
+      try {
+        if ('Notification' in window && Notification.permission === 'granted') new Notification(title)
+      } catch { /* ignore */ }
+    }
+    if (alertArrived && !state.here && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(alertStatus || '')) {
+      state.here = true
+      state.soon = true
+      setDriverAlert('here')
+      beep([400, 150, 400, 150, 400, 150, 800])
+      notify(pick(lang, 'السائق وصل', 'Your driver is here', 'Votre chauffeur est arrivé'))
+    } else if (!state.soon && alertEta !== null && alertEta <= 2 && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(alertStatus || '')) {
+      state.soon = true
+      setDriverAlert('soon')
+      beep([300, 150, 300])
+      notify(pick(lang, 'السائق يصل خلال دقيقتين', 'Your driver arrives in under 2 minutes', 'Votre chauffeur arrive dans moins de 2 minutes'))
+    }
+    if (alertStatus === 'IN_PROGRESS' || alertStatus === 'COMPLETED' || alertStatus === 'CANCELLED') setDriverAlert(null)
+  }, [alertRideId, alertEta, alertStatus, alertArrived, lang])
   const liveStopPins = (ride?.stops || []).filter((stop) => stop.lat != null && stop.lng != null).map((stop) => ({ lat: stop.lat as number, lng: stop.lng as number }))
   const etaText = ride && typeof ride.etaToPickupMinutes === 'number' ? `${t.etaPrefix}${ride.etaToPickupMinutes}${t.etaSuffix}` : null
   const liveHeadline = !ride
@@ -1934,6 +1985,16 @@ export function RidePage({ lang }: Props) {
           </h1>
           {etaText && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status) && <span style={styles.etaPill} dir="ltr">{etaText}</span>}
         </div>
+        {driverAlert && ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING'].includes(ride.status) && (
+          <div
+            role="alert"
+            style={{ padding: '12px 14px', borderRadius: 12, fontWeight: 700, fontSize: 15, background: driverAlert === 'here' ? '#16a34a' : '#f59e0b', color: '#fff', margin: '8px 0' }}
+          >
+            {driverAlert === 'here'
+              ? pick(lang, '🚗 السائق وصل إلى نقطة الاستلام!', '🚗 Your driver is here!', '🚗 Votre chauffeur est arrivé !')
+              : pick(lang, '⏱ السائق يصل خلال أقل من دقيقتين', '⏱ Your driver arrives in under 2 minutes', '⏱ Votre chauffeur arrive dans moins de 2 minutes')}
+          </div>
+        )}
         {['REQUESTED', 'MATCHING'].includes(ride.status) && (
           <div style={styles.hint}>{ride.matchTimedOut ? t.stillLooking : t.waitingForDriver}</div>
         )}

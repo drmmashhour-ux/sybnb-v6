@@ -81,8 +81,13 @@ export async function createSrRideWithCoords(input: {
   bagCount?: number
   bonusMinor?: number
   autoSwitch?: boolean
+  guestStripeSessionId?: string
+  guestShamCashRef?: string
 }): Promise<PlatformRideRequest> {
   const response = await post<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
+    // Paid Stripe Checkout session (guest/client card): the server verifies it and marks the ride prepaid.
+    ...(input.guestStripeSessionId ? { guestStripeSessionId: input.guestStripeSessionId } : {}),
+    ...(input.guestShamCashRef ? { guestShamCashRef: input.guestShamCashRef } : {}),
     pickup: input.pickup,
     dropoff: input.dropoff,
     category: input.category,

@@ -726,7 +726,7 @@ export function RidePage({ lang }: Props) {
             currency: 'USD',
             lowDataMode: false,
             guestStripeSessionId: guestCheckoutSessionId,
-          } as never).then((nextRide) => {
+          }).then((nextRide) => {
             if (cancelled) return
             setRide(nextRide)
             setStatus('idle')

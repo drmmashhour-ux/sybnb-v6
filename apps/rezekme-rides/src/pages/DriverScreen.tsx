@@ -644,7 +644,11 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
   const [sosState, setSosState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
 
   const verified = typeof ride.metadata.pickupVerifiedAt === 'string'
+  const toDropoff = ride.status === 'IN_PROGRESS'
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(ride.driver?.location ? { lat: ride.driver.location.lat, lng: ride.driver.location.lng } : null)
+
+  // Route starts at the driver (rounded to ~100 m so a moving car does not re-request the route on every GPS fix).
+  const routeFrom = me ? { lat: Math.round(me.lat * 1000) / 1000, lng: Math.round(me.lng * 1000) / 1000 } : null
 
   useEffect(() => {
     if (!navigator.geolocation) return
@@ -714,7 +718,6 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
     }
   }
 
-  const toDropoff = ride.status === 'IN_PROGRESS'
   const title =
     ride.status === 'DRIVER_ASSIGNED'
       ? t('توجّه إلى الراكب', 'Head to the rider', 'Allez vers le client')
@@ -739,8 +742,8 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
       })()}
       <MapHero
         lang={lang}
-        pickup={ride.pickupCoords ?? null}
-        dropoff={ride.dropoffCoords ?? null}
+        pickup={toDropoff ? (ride.pickupCoords ?? null) : routeFrom}
+        dropoff={toDropoff ? (ride.dropoffCoords ?? null) : (ride.pickupCoords ?? null)}
         driver={ride.driver?.location ? { lat: ride.driver.location.lat, lng: ride.driver.location.lng } : me}
         phase={toDropoff ? 'trip' : 'approach'}
         banner={toDropoff ? t('في الطريق إلى الوجهة', 'On the way to the destination', 'En route vers la destination') : t('في الطريق إلى الراكب', 'On the way to the rider', 'En route vers le client')}
@@ -807,9 +810,7 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
       )}
 
       {ride.status === 'IN_PROGRESS' && (
-        <button style={S.primary} disabled={busy} onClick={() => void run(() => updatePrototypeDriverRideStatus(ride.id, 'COMPLETED'), () => onCompleted(ride.fareMinor ?? 0, ride.currency))}>
-          {t('إنهاء الرحلة', 'Complete trip', 'Terminer la course')}
-        </button>
+        <SlideButton disabled={busy} label={t('اسحب لإنهاء الرحلة', 'Slide to complete trip', 'Glisser pour terminer')} onDone={() => void run(() => updatePrototypeDriverRideStatus(ride.id, 'COMPLETED'), () => onCompleted(ride.fareMinor ?? 0, ride.currency))} />
       )}
 
       {msg && <p style={S.note}>{msg}</p>}

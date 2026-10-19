@@ -4749,3 +4749,77 @@ export async function fetchProjectUnits(projectId: string) {
   const response = await apiRequest<{ ok: true; units: ProjectUnit[] }>(`/api/listings/${projectId}/units`)
   return response.units
 }
+
+// --- Shared driver base: admin review (2026-10-19) -----------------------------------------------
+export type DriverReviewRow = {
+  userId: string
+  user: { displayName: string | null; email: string | null } | null
+  vehicleMake: string | null
+  vehicleModel: string | null
+  vehiclePlate: string | null
+  vehicleStatus: string | null
+  vehicleCategory: string | null
+  vehicleYear: number | null
+  vehicleColor: string | null
+  largeBagCapacity: number | null
+  handBagCapacity: number | null
+  seatCount: number | null
+  smokingAllowed: boolean
+  tyreType: string | null
+  tyresFittedOn: string | null
+  hasKeyCode: boolean
+  onDutyAt: string | null
+  createdAt: string
+  updatedAt: string
+  inReview: number
+  rejected: number
+  dutyBlockers: { kind: string; reason: string }[]
+  expiringSoon: { kind: string; days: number }[]
+  rating: { averageRating: number | null; ratingCount: number }
+  lowRating: boolean
+}
+
+export type DriverReviewDoc = {
+  id: string
+  kind: string
+  status: 'IN_REVIEW' | 'APPROVED' | 'REJECTED'
+  adminNote: string | null
+  expiresAt: string | null
+  updatedAt: string
+}
+
+export async function fetchDriverReviewQueue() {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; drivers: DriverReviewRow[]; lowRatingThreshold: number }>('/api/admin/drivers/review-queue', { token }),
+  )
+  return response
+}
+
+export async function fetchDriverReviewDocs(userId: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; documents: DriverReviewDoc[] }>(`/api/admin/drivers/${encodeURIComponent(userId)}/documents`, { token }),
+  )
+  return response.documents
+}
+
+export async function reviewDriverDoc(id: string, input: { status: 'APPROVED' | 'REJECTED'; note?: string }) {
+  return runAdminRequest((token) =>
+    apiRequest<{ ok: true }>(`/api/admin/driver-documents/${encodeURIComponent(id)}`, { method: 'PATCH', token, body: input }),
+  )
+}
+
+export async function fetchDriverDocBlobUrl(id: string) {
+  const session = await ensurePrototypeAdminSession()
+  const response = await fetch(`${API_BASE_URL}/api/admin/driver-documents/${encodeURIComponent(id)}/file`, {
+    headers: { authorization: `Bearer ${session.token}` },
+  })
+  if (!response.ok) throw new Error(`Could not load document: ${response.status}`)
+  return URL.createObjectURL(await response.blob())
+}
+
+export async function issueDriverKeyCode(userId: string) {
+  const response = await runAdminRequest((token) =>
+    apiRequest<{ ok: true; code: string }>(`/api/admin/drivers/${encodeURIComponent(userId)}/key-code`, { method: 'POST', token }),
+  )
+  return response.code
+}

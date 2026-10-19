@@ -21,6 +21,8 @@ const CLEAN_DAYS = { OUTSIDE: 1, INSIDE: 7 }
 // must be recent (Uber accepts 90 days), so its date is also required.
 const NEEDS_EXPIRY = new Set(['LICENCE', 'INSURANCE', 'REGISTRATION', 'CRIMINAL_RECORD', 'MECHANIC_REPORT'])
 const EXPIRING_SOON_DAYS = 30
+// Owner decision 2026-10-19: warn on an average under 4.6 (Uber-style), once there are enough ratings.
+const LOW_RATING = 4.6
 
 // Everything that stops a driver going on duty: a required document missing, still in review,
 // rejected or expired. Used by the key-code step and shown on the dashboard checklist.
@@ -169,6 +171,43 @@ export async function handleDriverBase(req, res, url, context) {
     }
     await db().driverProfile.update({ where: { userId: context.user.id }, data: { onDutyAt: new Date() } })
     return json(res, 200, { ok: true })
+  }
+
+  // ---- Admin: review queue (one row per driver, newest activity first) --------------------------
+  if (p === '/api/admin/drivers/review-queue') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['ADMIN', 'SUPPORT'])
+    const profiles = await db().driverProfile.findMany({
+      orderBy: { updatedAt: 'desc' },
+      take: 100,
+      select: {
+        userId: true, vehicleMake: true, vehicleModel: true, vehiclePlate: true, vehicleStatus: true, vehicleCategory: true,
+        vehicleYear: true, vehicleColor: true, largeBagCapacity: true, handBagCapacity: true, seatCount: true,
+        smokingAllowed: true, tyreType: true, tyresFittedOn: true, keyCodeHash: true, onDutyAt: true, createdAt: true, updatedAt: true,
+        user: { select: { displayName: true, email: true } },
+      },
+    })
+    const drivers = []
+    for (const pr of profiles) {
+      const [{ blockers, expiringSoon }, rating, docs] = await Promise.all([
+        dutyBlockers(pr.userId, pr),
+        getDriverRatingSummary(pr.userId),
+        db().driverDocument.groupBy({ by: ['status'], where: { userId: pr.userId }, _count: true }),
+      ])
+      const count = (st) => docs.find((d) => d.status === st)?._count || 0
+      const { keyCodeHash, ...rest } = pr
+      drivers.push({
+        ...rest,
+        hasKeyCode: Boolean(keyCodeHash),
+        inReview: count('IN_REVIEW'),
+        rejected: count('REJECTED'),
+        dutyBlockers: blockers,
+        expiringSoon,
+        rating,
+        lowRating: rating.ratingCount >= 5 && rating.averageRating !== null && rating.averageRating < LOW_RATING,
+      })
+    }
+    return json(res, 200, { ok: true, drivers, lowRatingThreshold: LOW_RATING })
   }
 
   // ---- Admin: list a driver's documents ------------------------------------------------------

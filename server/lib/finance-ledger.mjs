@@ -604,6 +604,42 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
 // pays it out: the driver receives the fare net of the SR commission, and the platform keeps the
 // commission — the exact same split as a proof-approved ride, just funded from the prepayment
 // instead of a post-ride proof. Idempotent by ride id, so a re-run of the completion sweep is safe.
+// Master-book entry for a card payment received BEFORE a ride exists (guest or client Stripe
+// Checkout pre-pay). Every card payment lands in the ledger as: (1) a payment_intents row (provider,
+// provider reference, amount, who paid) and (2) a wallet CREDIT labelled with its method
+// (reference_type 'stripe_card_prepay'). The ride fare is then DEBITed from that wallet by the normal
+// ride_prepayment path, so settlement (85% driver / 15% platform) and cancellation refunds need no
+// special case. Idempotent on the Stripe PaymentIntent id: the webhook and the ride-creation path can
+// both call this and only one CREDIT is ever written.
+export async function recordCardPrepayCredit(tx, { userId, paymentIntentId, sessionId = null, amountMinor, currency = 'USD', method = 'stripe_card' }) {
+  const amount = Math.max(0, Math.round(amountMinor || 0))
+  if (!userId || !paymentIntentId || !amount) return null
+  const cur = String(currency || 'USD').toUpperCase()
+  await tx.paymentIntent.upsert({
+    where: { reference: `stripe-preride:${paymentIntentId}` },
+    create: {
+      userId,
+      reference: `stripe-preride:${paymentIntentId}`,
+      amountMinor: amount,
+      currency: cur,
+      status: 'SUCCEEDED',
+      provider: 'stripe',
+      providerRef: paymentIntentId,
+    },
+    update: {},
+  })
+  return recordWalletEntry(tx, {
+    userId,
+    type: 'CREDIT',
+    amountMinor: amount,
+    currency: cur,
+    referenceType: 'stripe_card_prepay',
+    referenceId: paymentIntentId,
+    keyParts: ['stripe-preride', paymentIntentId],
+    note: `Card payment received (${method}) - pre-ride funding${sessionId ? ` [${sessionId}]` : ''}`,
+  })
+}
+
 export async function settlePrepaidRide(tx, { ride }) {
   const fareMinor = Math.round(ride.fareMinor || 0)
   if (!ride.driverId || fareMinor <= 0) return { settled: false }
@@ -974,8 +1010,11 @@ async function finalizeRuleBasedCancellation(tx, { booking, approvedPayment, can
     note: `Commission on the refunded part reversed (${cancellation.rule}, ${who}-cancelled); commission on the retained ${cancellation.retainedStayMinor} kept.`,
   })
 
+  // A retained-share release from an earlier finalize is not a pre-cancellation full payout.
+  // Exclude that exact movement: a retry must not claw back the share it just released.
+  const retainedReleaseKey = idempotencyKey(['booking-host-cancel-retained-release', booking.id, approvedPayment.id])
   const priorRelease = await tx.walletEntry.findFirst({
-    where: { referenceType: 'booking_payout', type: 'RELEASE', referenceId: booking.id },
+    where: { referenceType: 'booking_payout', type: 'RELEASE', referenceId: booking.id, idempotencyKey: { not: retainedReleaseKey } },
   })
   let hostClawedBack = false
   let hostReleasedMinor = 0

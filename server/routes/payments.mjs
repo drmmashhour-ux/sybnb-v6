@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth, requireVerifiedEmail } from '../lib/auth-context.mjs'
-import { expectedTotalMinor, isProviderRefUniqueViolation, sypPerUsd } from '../lib/finance-ledger.mjs'
+import { expectedTotalMinor, isProviderRefUniqueViolation, sypPerUsd, recordCardPrepayCredit } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
@@ -237,6 +237,16 @@ export async function handlePayments(req, res, url, context) {
         riderId: context.user.id,
         fareMinor: String(fareMinor),
         currency,
+      },
+      // Same metadata on the underlying PaymentIntent, so the payment_intent.succeeded webhook can
+      // attribute the money (who paid, how much) even if the rider never returns to the app.
+      payment_intent_data: {
+        metadata: {
+          intentType: context.roles.includes('CLIENT') ? 'client_preride' : 'guest_preride',
+          riderId: context.user.id,
+          fareMinor: String(fareMinor),
+          currency,
+        },
       },
       success_url: `${origin}/?guest_checkout_session_id={CHECKOUT_SESSION_ID}#/ride`,
       cancel_url: `${origin}/#/ride`,
@@ -549,6 +559,8 @@ export async function handlePayments(req, res, url, context) {
     const isRideEvent = !obj.metadata?.bookingId && Boolean(obj.metadata?.rideId)
     // A save-card session (Option B) is a setup-mode Checkout carrying metadata.userId + purpose.
     const isSetupEvent = obj.mode === 'setup' || obj.metadata?.purpose === 'save_card'
+    // Pre-ride card payment (guest/client Stripe Checkout before a ride exists): no booking, no ride yet.
+    const isPrerideEvent = ['guest_preride', 'client_preride'].includes(obj.metadata?.intentType)
     const providerReference = String(
       (isSetupEvent ? obj.metadata?.userId : obj.metadata?.bookingId || obj.metadata?.rideId) || '',
     )
@@ -562,7 +574,7 @@ export async function handlePayments(req, res, url, context) {
       provider: 'stripe',
       providerEndpointKey: 'stripe-checkout',
       environment: policyEnvironment(),
-      subjectType: isSetupEvent ? 'CARD_SETUP' : isRideEvent ? 'SR_RIDE' : 'BOOKING',
+      subjectType: isSetupEvent ? 'CARD_SETUP' : (isRideEvent || isPrerideEvent) ? 'SR_RIDE' : 'BOOKING',
       providerReference,
       providerEventId: event.id,
       type: event.type,
@@ -590,6 +602,42 @@ export async function handlePayments(req, res, url, context) {
       // acknowledge with 200 so Stripe stops retrying.
       log.warn('payment_webhook_dead_lettered_redelivery', { eventId: event.id, rail: 'stripe_checkout' })
       return json(res, 200, { ok: true, applied: false, deadLettered: true, received: true })
+    }
+
+    // Pre-ride card payment -> master book. Records the payment intent + a wallet CREDIT (method
+    // stripe_card) the moment Stripe confirms the money, independent of the rider's browser. The ride
+    // creation path makes the identical idempotent call, so exactly one CREDIT is ever written.
+    if (isPrerideEvent) {
+      const isPi = obj.object === 'payment_intent'
+      const paid = isPi ? obj.status === 'succeeded' : obj.payment_status === 'paid'
+      const eligible = (isPi && event.type === 'payment_intent.succeeded') || (!isPi && event.type === 'checkout.session.completed')
+      if (!eligible || !paid) {
+        await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'IGNORED', appliedAt: new Date() } })
+        return json(res, 200, { ok: true, ignored: event.type, received: true })
+      }
+      const piId = isPi ? obj.id : (typeof obj.payment_intent === 'string' ? obj.payment_intent : obj.payment_intent?.id)
+      const userId = obj.metadata?.riderId || obj.metadata?.guestId
+      const amountMinor = Math.round(Number(obj.metadata?.fareMinor || 0))
+      try {
+        await db().$transaction(async (tx) => {
+          await recordCardPrepayCredit(tx, {
+            userId,
+            paymentIntentId: piId,
+            sessionId: isPi ? null : obj.id,
+            amountMinor,
+            currency: obj.metadata?.currency || 'USD',
+          })
+          await tx.paymentEvent.update({
+            where: { id: eventRow.id },
+            data: { processingStatus: 'APPLIED', appliedAt: new Date(), amountMinor, currency: String(obj.metadata?.currency || 'USD').toLowerCase(), claimToken: null, claimExpiresAt: null },
+          })
+        })
+        return json(res, 200, { ok: true, applied: true, preride: true, received: true })
+      } catch (err) {
+        log.warn('stripe_preride_credit_failed', { eventId: event.id, message: err?.message })
+        await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: 'PRERIDE_CREDIT_FAILED' } })
+        return json(res, 200, { ok: true, quarantined: true, received: true })
+      }
     }
 
     // Interpretation, entirely AFTER durable persistence.

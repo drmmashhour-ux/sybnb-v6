@@ -24,7 +24,7 @@ import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { rideCategoryToVehicle, isKnownRideCategory } from '../lib/vehicle-category.mjs'
 import { isRateLimited } from '../lib/rateLimit.mjs'
 import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
-import { recordWalletEntry, refundPrepaidRide } from '../lib/finance-ledger.mjs'
+import { recordWalletEntry, refundPrepaidRide, recordCardPrepayCredit } from '../lib/finance-ledger.mjs'
 import { cardHoldAvailable, riderHasSavedCard, placeCardHold, releaseCardHold, replaceCardHold } from '../lib/ride-card-hold.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
 // file -- promo-code creation, promo-code activation toggling, and business-account onboarding --
@@ -659,22 +659,44 @@ export async function handleSrRides(req, res, url, context) {
       // verify it is paid and matches the fare, then mark the ride as prepaid and skip the gate.
       const guestStripeSessionId = String(body.guestStripeSessionId || '')
       let guestStripePrepaid = false
-      if (guestStripeSessionId && process.env.SR_GUEST_STRIPE_ENABLED === '1') {
+      if (guestStripeSessionId) {
+        // A Stripe session id was supplied: it MUST verify. Never silently fall back to another
+        // payment source, or the rider would be charged twice (card + wallet).
+        const notVerified = (message) => {
+          const error = new Error(message)
+          error.statusCode = 402
+          error.code = 'STRIPE_PAYMENT_NOT_VERIFIED'
+          error.expose = true
+          return error
+        }
+        if (process.env.SR_GUEST_STRIPE_ENABLED !== '1') throw notVerified('Card payments are not enabled on this server.')
         const { default: Stripe } = await import('stripe')
         const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY)
         const session = await stripeClient.checkout.sessions.retrieve(guestStripeSessionId)
-        const validIntentTypes = ['guest_preride', 'client_preride']
-        if (session.payment_status === 'paid' && validIntentTypes.includes(session.metadata?.intentType)) {
-          // Amount verification: session.amount_total is in cents; fareMinor is in dollars for USD.
-          const sessionFareMinor = Math.round((session.amount_total || 0) / 100)
-          if (sessionFareMinor >= finalFareMinor) {
-            rideData.metadata.prepaid = true
-            rideData.metadata.prepaidBy = session.metadata?.intentType === 'client_preride' ? 'stripe_client' : 'stripe_guest'
-            rideData.metadata.prepaidAmountMinor = sessionFareMinor
-            rideData.metadata.guestStripeSessionId = session.id
-            guestStripePrepaid = true
-          }
-        }
+        const intentType = session.metadata?.intentType
+        const owner = session.metadata?.riderId || session.metadata?.guestId
+        // Fare in USD units, recorded by OUR server when the session was created (immune to the
+        // presentment-currency conversion Stripe may apply on the hosted page).
+        const paidFareMinor = Math.round(Number(session.metadata?.fareMinor || 0))
+        if (session.payment_status !== 'paid') throw notVerified('Card payment not completed.')
+        if (!['guest_preride', 'client_preride'].includes(intentType)) throw notVerified('Payment session is not a ride payment.')
+        if (owner !== context.user.id) throw notVerified('Payment session belongs to another rider.')
+        if (paidFareMinor < finalFareMinor) throw notVerified('Card payment does not cover this fare.')
+        const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id
+        if (!paymentIntentId) throw notVerified('Card payment reference missing.')
+        // Master book: payment intent + wallet CREDIT (method stripe_card). The normal wallet debit
+        // below then holds the fare for the ride. Idempotent with the webhook's identical call.
+        await db().$transaction((tx) => recordCardPrepayCredit(tx, {
+          userId: context.user.id,
+          paymentIntentId,
+          sessionId: session.id,
+          amountMinor: paidFareMinor,
+          currency: session.metadata?.currency || 'USD',
+        }))
+        rideData.metadata.paymentMethod = 'stripe_card'
+        rideData.metadata.stripeSessionId = session.id
+        rideData.metadata.stripePaymentIntentId = paymentIntentId
+        guestStripePrepaid = true
       }
 
       // ---- guest Sham Cash: bypass prepay gate; admin verifies before dispatch ----

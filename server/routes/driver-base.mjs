@@ -122,26 +122,15 @@ export async function handleDriverBase(req, res, url, context) {
       if (expiresAt.getTime() <= Date.now()) throw fail(400, 'DRIVER_DOC_EXPIRED', 'This document has already expired. Upload a valid one.')
     }
     const userId = context.user.id
-    // TEMPORARY DIAGNOSTIC (2026-10-19): label the failing stage. Remove once uploads are confirmed.
-    let stage = 'find'
-    let prev, storageKey, doc
-    try {
-      prev = await db().driverDocument.findUnique({ where: { userId_kind: { userId, kind } } })
-      stage = 'store'
-      storageKey = await saveIdDocument(fileBase64, mimeType)
-      stage = 'save'
-      doc = await db().driverDocument.upsert({
-        where: { userId_kind: { userId, kind } },
-        create: { userId, kind, storageKey, mimeType, expiresAt },
-        update: { storageKey, mimeType, expiresAt, status: 'IN_REVIEW', adminNote: null, reviewedAt: null },
-        select: { kind: true, status: true, expiresAt: true, updatedAt: true },
-      })
-      stage = 'cleanup'
-      if (prev?.storageKey && prev.storageKey !== storageKey) await deleteIdDocument(prev.storageKey)
-    } catch (cause) {
-      if (cause?.expose) throw cause
-      throw fail(500, 'DRIVER_DOC_STAGE_FAILED', `Upload failed at stage "${stage}": ${cause?.name || 'Error'}: ${String(cause?.message || '').replace(/\s+/g, ' ').slice(0, 220)}`)
-    }
+    const prev = await db().driverDocument.findUnique({ where: { userId_kind: { userId, kind } } })
+    const storageKey = await saveIdDocument(fileBase64, mimeType)
+    const doc = await db().driverDocument.upsert({
+      where: { userId_kind: { userId, kind } },
+      create: { userId, kind, storageKey, mimeType, expiresAt },
+      update: { storageKey, mimeType, expiresAt, status: 'IN_REVIEW', adminNote: null, reviewedAt: null },
+      select: { kind: true, status: true, expiresAt: true, updatedAt: true },
+    })
+    if (prev?.storageKey && prev.storageKey !== storageKey) await deleteIdDocument(prev.storageKey)
     return json(res, 200, { ok: true, document: doc })
   }
 

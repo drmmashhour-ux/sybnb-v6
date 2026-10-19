@@ -1864,7 +1864,6 @@ export function RidePage({ lang }: Props) {
               walletBalanceMinor={walletBalanceMinor}
               fareMinor={fareMinor}
               currency="USD"
-              savedCard={savedCard}
               value={selectedPayMethod}
               onChange={setSelectedPayMethod}
               shamCashRef={shamCashRef}

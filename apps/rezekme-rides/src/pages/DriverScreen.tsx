@@ -9,6 +9,9 @@ import {
   createStaffAccountSession,
   fetchDriverIdentityStatus,
   fetchPendingSrRidesEx,
+  fetchPrototypeSrRideThread,
+  sendPrototypeSrRideMessage,
+  triggerSrSos,
   fetchPrototypeDriverOverview,
   getStoredStaffSession,
   markDriverArrived,
@@ -20,6 +23,7 @@ import {
   updatePrototypeDriverRideStatus,
   verifySrPickup,
   type PlatformDriverOverview,
+  type PlatformMessage,
   type PlatformRideRequest,
 } from '@platform/shared/api/platformApi'
 
@@ -563,6 +567,62 @@ function Route({ ride }: { ride: PlatformRideRequest }) {
 
 /* --------------------------------------------------------------------- trip */
 
+/* Slide to confirm: avoids accidental taps (Uber-style). Enter/Space also confirms for keyboards. */
+function SlideButton({ label, disabled, onDone }: { label: string; disabled?: boolean; onDone: () => void }) {
+  const track = useRef<HTMLDivElement>(null)
+  const [x, setX] = useState(0)
+  const drag = useRef<{ startX: number; max: number } | null>(null)
+  const KNOB = 56
+
+  function down(e: React.PointerEvent) {
+    if (disabled) return
+    const w = track.current?.clientWidth ?? 300
+    drag.current = { startX: e.clientX - x, max: w - KNOB - 8 }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  }
+  function move(e: React.PointerEvent) {
+    const d = drag.current
+    if (!d) return
+    setX(Math.min(d.max, Math.max(0, e.clientX - d.startX)))
+  }
+  function up() {
+    const d = drag.current
+    drag.current = null
+    if (!d) return
+    if (x >= d.max * 0.85) {
+      setX(0)
+      onDone()
+    } else setX(0)
+  }
+  return (
+    <div ref={track} style={{ position: 'relative', height: 64, borderRadius: 32, background: disabled ? '#999' : '#000', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 700, fontSize: 17, userSelect: 'none', touchAction: 'none' }}>
+      <span style={{ opacity: Math.max(0.25, 1 - x / 160), paddingInlineStart: KNOB }}>{label}</span>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={label}
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerCancel={up}
+        onKeyDown={(e) => { if (!disabled && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onDone() } }}
+        style={{ position: 'absolute', insetInlineStart: 4, top: 4, width: KNOB, height: KNOB, borderRadius: '50%', background: '#fff', color: '#000', display: 'grid', placeItems: 'center', fontSize: 24, transform: `translateX(${x}px)`, transition: drag.current ? 'none' : 'transform .2s', cursor: disabled ? 'default' : 'grab' }}
+      >
+        ➜
+      </div>
+    </div>
+  )
+}
+
+function distKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 6371
+  const rad = (d: number) => (d * Math.PI) / 180
+  const dLat = rad(b.lat - a.lat)
+  const dLng = rad(b.lng - a.lng)
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
 function Trip({ lang, ride, rate, onChanged, onCompleted }: {
   lang: Lang
   ride: PlatformRideRequest
@@ -576,6 +636,12 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
   const [pin, setPin] = useState('')
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [secs, setSecs] = useState<number | null>(null)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatMsgs, setChatMsgs] = useState<PlatformMessage[]>([])
+  const [chatText, setChatText] = useState('')
+  const [safetyOpen, setSafetyOpen] = useState(false)
+  const [sosArm, setSosArm] = useState(false)
+  const [sosState, setSosState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
 
   const verified = typeof ride.metadata.pickupVerifiedAt === 'string'
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(ride.driver?.location ? { lat: ride.driver.location.lat, lng: ride.driver.location.lng } : null)
@@ -601,6 +667,35 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
   }, [ride.wait])
+
+  useEffect(() => {
+    let cancelled = false
+    const poll = () => fetchPrototypeSrRideThread(ride.id, true).then((th) => { if (!cancelled) setChatMsgs(th.messages) }).catch(() => {})
+    poll()
+    const id = window.setInterval(poll, 5000)
+    return () => { cancelled = true; window.clearInterval(id) }
+  }, [ride.id])
+
+  async function sendChat() {
+    const body = chatText.trim()
+    if (!body) return
+    setChatText('')
+    try {
+      const m = await sendPrototypeSrRideMessage(ride.id, body, true)
+      setChatMsgs((prev) => [...prev, m])
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Failed')
+    }
+  }
+
+  function sendSos() {
+    setSosState('sending')
+    const go = async (c: { lat?: number; lng?: number }) => {
+      try { await triggerSrSos(ride.id, c, true); setSosState('sent') } catch { setSosState('error') }
+    }
+    if (navigator.geolocation) navigator.geolocation.getCurrentPosition((p) => void go({ lat: p.coords.latitude, lng: p.coords.longitude }), () => void go({}), { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 })
+    else void go({})
+  }
 
   const refreshRef = useRef(onChanged)
   refreshRef.current = onChanged
@@ -629,6 +724,19 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
 
   return (
     <>
+      {(() => {
+        const target = toDropoff ? ride.dropoffCoords : ride.pickupCoords
+        const from = ride.driver?.location ?? me
+        if (!target || !from) return null
+        const km = distKm(from, target)
+        const mins = Math.max(1, Math.round((km / 30) * 60))
+        return (
+          <div style={{ ...S.card, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#000', color: '#fff', border: 0 }}>
+            <strong style={{ fontSize: 22 }}>{mins} {t('د', 'min', 'min')}</strong>
+            <span>{km.toFixed(1)} km · {toDropoff ? t('إلى الوجهة', 'to destination', 'vers la destination') : t('إلى الراكب', 'to pickup', 'vers le client')}</span>
+          </div>
+        )
+      })()}
       <MapHero
         lang={lang}
         pickup={ride.pickupCoords ?? null}
@@ -675,9 +783,7 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
       </div>
 
       {ride.status === 'DRIVER_ASSIGNED' && (
-        <button style={S.primary} disabled={busy} onClick={() => void run(() => markDriverArrived(ride.id))}>
-          {t('وصلت إلى نقطة الاستلام', 'I’ve arrived', 'Je suis arrivé')}
-        </button>
+        <SlideButton disabled={busy} label={t('اسحب: وصلت', 'Slide: I’ve arrived', 'Glisser : je suis arrivé')} onDone={() => void run(() => markDriverArrived(ride.id))} />
       )}
 
       {ride.status === 'DRIVER_ARRIVING' && !verified && (
@@ -697,9 +803,7 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
       )}
 
       {ride.status === 'DRIVER_ARRIVING' && verified && (
-        <button style={S.primary} disabled={busy} onClick={() => void run(() => updatePrototypeDriverRideStatus(ride.id, 'IN_PROGRESS'))}>
-          {t('بدء الرحلة', 'Start trip', 'Démarrer la course')}
-        </button>
+        <SlideButton disabled={busy} label={t('اسحب لبدء الرحلة', 'Slide to start trip', 'Glisser pour démarrer')} onDone={() => void run(() => updatePrototypeDriverRideStatus(ride.id, 'IN_PROGRESS'))} />
       )}
 
       {ride.status === 'IN_PROGRESS' && (
@@ -710,9 +814,43 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
 
       {msg && <p style={S.note}>{msg}</p>}
 
-      <div style={S.card}>
-        <RecordingControls rideId={ride.id} lang={lang} />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button style={{ ...S.secondary, flex: 1 }} onClick={() => setChatOpen((v) => !v)}>💬 {t('راسل الراكب', 'Message rider', 'Écrire au client')}{chatMsgs.length ? ` (${chatMsgs.length})` : ''}</button>
+        <button style={{ ...S.secondary, flex: 1 }} onClick={() => setSafetyOpen((v) => !v)}>🛡️ {t('السلامة', 'Safety', 'Sécurité')}</button>
       </div>
+
+      {chatOpen && (
+        <div style={S.card}>
+          {chatMsgs.length === 0 && <div style={S.muted}>{t('لا توجد رسائل بعد.', 'No messages yet.', 'Aucun message pour l’instant.')}</div>}
+          <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {chatMsgs.map((m) => (
+              <div key={m.id} style={{ alignSelf: m.senderRole === 'DRIVER' ? 'flex-end' : 'flex-start', background: m.senderRole === 'DRIVER' ? '#000' : '#eee', color: m.senderRole === 'DRIVER' ? '#fff' : '#000', borderRadius: 12, padding: '6px 10px', maxWidth: '80%' }}>{m.body}</div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input style={{ ...S.input, flex: 1 }} value={chatText} placeholder={t('اكتب رسالة...', 'Type a message...', 'Écrivez un message...')} onChange={(e) => setChatText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void sendChat() }} />
+            <button style={{ ...S.secondary, width: 'auto', padding: '0 16px' }} onClick={() => void sendChat()}>{t('إرسال', 'Send', 'Envoyer')}</button>
+          </div>
+        </div>
+      )}
+
+      {safetyOpen && (
+        <div style={S.card}>
+          <strong>{t('السلامة', 'Safety', 'Sécurité')}</strong>
+          <RecordingControls rideId={ride.id} lang={lang} />
+          {sosState === 'sent' ? (
+            <p style={S.note}>{t('تم إرسال تنبيه الطوارئ إلى الدعم.', 'Emergency alert sent to support.', 'Alerte envoyée au support.')}</p>
+          ) : sosArm ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={S.secondary} onClick={() => setSosArm(false)}>{t('تراجع', 'Cancel', 'Annuler')}</button>
+              <button style={{ ...S.secondary, color: '#fff', background: '#b00020', borderColor: '#b00020' }} disabled={sosState === 'sending'} onClick={sendSos}>{t('تأكيد الطوارئ', 'Confirm emergency', 'Confirmer l’urgence')}</button>
+            </div>
+          ) : (
+            <button style={{ ...S.secondary, color: '#b00020', borderColor: '#b00020' }} onClick={() => setSosArm(true)}>🚨 {t('طوارئ SOS', 'Emergency SOS', 'Urgence SOS')}</button>
+          )}
+          {sosState === 'error' && <p style={S.note}>{t('فشل الإرسال', 'Could not send. Try again.', 'Échec. Réessayez.')}</p>}
+        </div>
+      )}
 
       {ride.status !== 'IN_PROGRESS' && (
         confirmCancel ? (

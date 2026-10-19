@@ -645,7 +645,8 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
 
   const verified = typeof ride.metadata.pickupVerifiedAt === 'string'
   const toDropoff = ride.status === 'IN_PROGRESS'
-  const [me, setMe] = useState<{ lat: number; lng: number } | null>(ride.driver?.location ? { lat: ride.driver.location.lat, lng: ride.driver.location.lng } : null)
+  const [me, setMe] = useState<{ lat: number; lng: number } | null>(null)
+  const [gpsDenied, setGpsDenied] = useState(false)
 
   // Route starts at the driver (rounded to ~100 m so a moving car does not re-request the route on every GPS fix).
   const routeFrom = me ? { lat: Math.round(me.lat * 1000) / 1000, lng: Math.round(me.lng * 1000) / 1000 } : null
@@ -653,8 +654,8 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
   useEffect(() => {
     if (!navigator.geolocation) return
     const id = navigator.geolocation.watchPosition(
-      (p) => setMe({ lat: p.coords.latitude, lng: p.coords.longitude }),
-      () => {},
+      (p) => { setGpsDenied(false); setMe({ lat: p.coords.latitude, lng: p.coords.longitude }) },
+      () => setGpsDenied(true),
       { enableHighAccuracy: true, maximumAge: 5000 },
     )
     return () => navigator.geolocation.clearWatch(id)
@@ -729,7 +730,7 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
     <>
       {(() => {
         const target = toDropoff ? ride.dropoffCoords : ride.pickupCoords
-        const from = ride.driver?.location ?? me
+        const from = me
         if (!target || !from) return null
         const km = distKm(from, target)
         const mins = Math.max(1, Math.round((km / 30) * 60))
@@ -740,11 +741,14 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
           </div>
         )
       })()}
+      {(gpsDenied || !me) && (
+        <p style={S.note}>{t('شغّل الموقع (GPS) ليتبع الخريطة موقعك ويراك الراكب.', 'Turn on location (GPS) so the map follows you and the rider can see you.', 'Activez la localisation (GPS) pour que la carte vous suive et que le client vous voie.')}</p>
+      )}
       <MapHero
         lang={lang}
         pickup={toDropoff ? (ride.pickupCoords ?? null) : routeFrom}
         dropoff={toDropoff ? (ride.dropoffCoords ?? null) : (ride.pickupCoords ?? null)}
-        driver={ride.driver?.location ? { lat: ride.driver.location.lat, lng: ride.driver.location.lng } : me}
+        driver={me}
         phase={toDropoff ? 'trip' : 'approach'}
         banner={toDropoff ? t('في الطريق إلى الوجهة', 'On the way to the destination', 'En route vers la destination') : t('في الطريق إلى الراكب', 'On the way to the rider', 'En route vers le client')}
         height="46vh"

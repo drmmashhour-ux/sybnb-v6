@@ -87,8 +87,10 @@ export function storageStatus() {
 }
 
 function requireS3Config() {
-  if (!process.env.STORAGE_S3_BUCKET || !process.env.STORAGE_S3_REGION) {
-    throw storageError(503, 'STORAGE_NOT_CONFIGURED', 'Object storage is not configured for durable delivery.')
+  // All four are required (bucket, region, access key id, secret). Checking only bucket and region let
+  // a missing key fall through to a null-config crash that surfaced as an unexplained internal error.
+  if (!process.env.STORAGE_S3_BUCKET || !process.env.STORAGE_S3_REGION || !process.env.STORAGE_S3_ACCESS_KEY_ID || !process.env.STORAGE_S3_SECRET_ACCESS_KEY) {
+    throw storageError(503, 'STORAGE_NOT_CONFIGURED', 'Object storage is not configured: a bucket, region, access key or secret is missing.')
   }
 }
 

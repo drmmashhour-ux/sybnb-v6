@@ -11,6 +11,7 @@ const GuestAccountPage = lazy(() =>
 const LegalDocumentPage = lazy(() =>
   import('@platform/modules/legal/LegalDocumentPage').then((m) => ({ default: m.LegalDocumentPage })),
 )
+const DriverScreen = lazy(() => import('./pages/DriverScreen').then((m) => ({ default: m.DriverScreen })))
 const RidePage = lazy(() => import('./pages/RidePage').then((m) => ({ default: m.RidePage })))
 const SharedRidePage = lazy(() => import('./pages/SharedRidePage').then((m) => ({ default: m.SharedRidePage })))
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })))
@@ -84,6 +85,8 @@ export function App() {
   let content
   if (needsGate || isAccountRoute) {
     content = <GuestAccountPage lang={lang} flow="ride" returnPath={needsGate ? path : '/ride'} />
+  } else if (path === '/driver') {
+    content = <DriverScreen lang={lang} />
   } else if (isRideRoute && !hasGuestSession) {
     // Email only (no code for a new email); the session starts here and the ride page appears.
     // Uber-style entry: continue as a one-time guest, or as a client with an account (code, stays signed in).

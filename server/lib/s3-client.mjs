@@ -109,7 +109,18 @@ async function s3Request(cfg, { method, objectPath, body, contentType }) {
 
 export async function putObjectS3(cfg, objectPath, bytes, contentType) {
   const { res } = await s3Request(cfg, { method: 'PUT', objectPath, body: bytes, contentType })
-  if (!res.ok) throw new Error(`S3 put failed: ${res.status}`)
+  if (!res.ok) throw storageUpstreamError('save', res.status)
+}
+
+// A storage failure must reach the person as a clear message, not as "internal error". Only the
+// upstream HTTP status is included (never keys or endpoints), so it is safe to show and lets the
+// owner tell a missing bucket (404) from bad credentials (401/403) at a glance.
+function storageUpstreamError(action, status) {
+  const error = new Error(`Document storage is unavailable right now (upstream ${status}). Please try again shortly.`)
+  error.statusCode = 503
+  error.code = 'STORAGE_UPSTREAM_FAILED'
+  error.expose = true
+  return error
 }
 
 export async function getObjectS3(cfg, objectPath) {

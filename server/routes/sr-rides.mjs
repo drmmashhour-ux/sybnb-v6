@@ -9,7 +9,7 @@ import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
 import { resolveTrafficDistance } from '../lib/traffic-distance.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
-import { getDriverLocation, getRideCoords, etaMinutesBetween } from '../lib/live-map.mjs'
+import { getDriverLocation, getRideCoords, etaMinutesBetween, haversineKm } from '../lib/live-map.mjs'
 import { waitState, noShowFeeMinor, withMinCancellationFee } from '../lib/ride-wait.mjs'
 import { countOffences, isOffenceBlocked, riderOffenceFeeMinor, restrictedError, offenceFeeMinor, offenceBlockThreshold, offenceWindowMs } from '../lib/ride-offences.mjs'
 import { signRideShareToken, verifyRideShareToken } from '../lib/ride-share.mjs'
@@ -1326,6 +1326,42 @@ export async function handleSrRides(req, res, url, context) {
     void logRideEventSafe(db(), { rideId: ride.id, type: 'DISPUTED', actorId: context.user.id, actorRole: openedBy, meta: { openedBy, reason } })
     notifyAdmin('admin_ride_disputed', { rideId: ride.id, openedBy }, `admin_ride_disputed:${ride.id}`)
     return json(res, 200, { ok: true, ride })
+  }
+
+  // Security (Syria): the recorded route of a trip, readable by its rider, its driver and staff. Built
+  // from the driver's GPS breadcrumbs (accept -> arrive -> trip -> finish) plus the key trip events;
+  // gaps longer than GPS_GAP_SECONDS are flagged so a switched-off phone is visible in the history.
+  const routeMatch = url.pathname.match(/^\/api\/sr\/rides\/([^/]+)\/route$/)
+  if (routeMatch) {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context, ['GUEST', 'DRIVER', 'ADMIN', 'SUPPORT'])
+    const ride = await db().rideRequest.findUnique({ where: { id: routeMatch[1] }, select: { id: true, riderId: true, driverId: true, status: true } })
+    const isStaff = (context.roles || []).some((r) => r === 'ADMIN' || r === 'SUPPORT')
+    if (!ride || (!isStaff && ride.riderId !== context.user.id && ride.driverId !== context.user.id)) {
+      const error = new Error('Ride not found for this account.')
+      error.statusCode = 404
+      error.code = 'RIDE_NOT_FOUND'
+      error.expose = true
+      throw error
+    }
+    const events = await db().rideEvent.findMany({ where: { rideId: ride.id }, orderBy: { createdAt: 'asc' }, select: { type: true, lat: true, lng: true, createdAt: true, meta: true } })
+    const points = events
+      .filter((e) => e.type === 'LOCATION_PING' && typeof e.lat === 'number' && typeof e.lng === 'number')
+      .map((e) => ({ lat: e.lat, lng: e.lng, at: e.createdAt.toISOString(), phase: e.meta?.phase || null }))
+    const GPS_GAP_SECONDS = 90
+    const gaps = []
+    let distanceKm = 0
+    for (let i = 1; i < points.length; i += 1) {
+      const a = points[i - 1]
+      const b = points[i]
+      const seconds = Math.round((Date.parse(b.at) - Date.parse(a.at)) / 1000)
+      if (seconds > GPS_GAP_SECONDS) gaps.push({ from: a.at, to: b.at, seconds })
+      distanceKm += haversineKm(a, b)
+    }
+    const milestones = events
+      .filter((e) => e.type !== 'LOCATION_PING')
+      .map((e) => ({ type: e.type, at: e.createdAt.toISOString(), lat: e.lat, lng: e.lng }))
+    return json(res, 200, { ok: true, rideId: ride.id, status: ride.status, points, milestones, gaps, distanceKm: Math.round(distanceKm * 10) / 10 })
   }
 
   // Safety Phase 1 (2026-10-10): SOS / PANIC. Either party to an ACTIVE ride -- the rider (GUEST)

@@ -30,6 +30,7 @@ import {
 import { fetchDriverBase, verifyKeyCode, type DriverBase } from '../driverBaseApi'
 import { MapHero } from '../maps/MapHero'
 import { RecordingControls } from './RecordingControls'
+import { RouteViewer } from './RouteViewer'
 
 /**
  * Rezekme driver screen: the phone-sized view a driver sees (not the full SYBNB dashboard).
@@ -647,6 +648,14 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
   const toDropoff = ride.status === 'IN_PROGRESS'
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null)
   const [gpsDenied, setGpsDenied] = useState(false)
+  const [lastFixAt, setLastFixAt] = useState<number>(Date.now())
+  const [nowTick, setNowTick] = useState<number>(Date.now())
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 5000)
+    return () => window.clearInterval(id)
+  }, [])
+  const gpsLost = nowTick - lastFixAt > 30_000
 
   // Route starts at the driver (rounded to ~100 m so a moving car does not re-request the route on every GPS fix).
   const routeFrom = me ? { lat: Math.round(me.lat * 1000) / 1000, lng: Math.round(me.lng * 1000) / 1000 } : null
@@ -654,7 +663,7 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
   useEffect(() => {
     if (!navigator.geolocation) return
     const id = navigator.geolocation.watchPosition(
-      (p) => { setGpsDenied(false); setMe({ lat: p.coords.latitude, lng: p.coords.longitude }) },
+      (p) => { setGpsDenied(false); setLastFixAt(Date.now()); setMe({ lat: p.coords.latitude, lng: p.coords.longitude }) },
       () => setGpsDenied(true),
       { enableHighAccuracy: true, maximumAge: 5000 },
     )
@@ -741,8 +750,8 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
           </div>
         )
       })()}
-      {(gpsDenied || !me) && (
-        <p style={S.note}>{t('شغّل الموقع (GPS) ليتبع الخريطة موقعك ويراك الراكب.', 'Turn on location (GPS) so the map follows you and the rider can see you.', 'Activez la localisation (GPS) pour que la carte vous suive et que le client vous voie.')}</p>
+      {(gpsDenied || !me || gpsLost) && (
+        <p style={S.note}>{t('شغّل الموقع (GPS) ليتبع الخريطة موقعك ويراك الراكب.', 'GPS signal lost. Turn on location: your route is recorded for everyone’s safety.', 'Activez la localisation (GPS) pour que la carte vous suive et que le client vous voie.')}</p>
       )}
       <MapHero
         lang={lang}
@@ -878,6 +887,7 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
 function Earnings({ lang, overview, rate, currency }: { lang: Lang; overview: PlatformDriverOverview; rate: number; currency: string }) {
   const t = (ar: string, en: string, fr: string) => pick(lang, ar, en, fr)
   const recent = overview.rides.filter((r) => r.status === 'COMPLETED').slice(0, 5)
+  const [openRoute, setOpenRoute] = useState<string | null>(null)
   return (
     <div style={S.card}>
       <div style={S.row}>
@@ -886,9 +896,13 @@ function Earnings({ lang, overview, rate, currency }: { lang: Lang; overview: Pl
       </div>
       <div style={S.muted}>{t('رحلات مكتملة', overview.totals.completed === 1 ? 'completed trip' : 'completed trips', 'courses terminées')}: {overview.totals.completed}</div>
       {recent.map((r) => (
-        <div key={r.id} style={{ ...S.row, borderTop: '1px solid #eee', paddingTop: 8, marginTop: 8, fontSize: 14 }}>
-          <span dir="ltr">{String(r.metadata.dropoff || '-')}</span>
-          <strong>{money((r.fareMinor ?? 0) * (1 - rate), r.currency)}</strong>
+        <div key={r.id} style={{ borderTop: '1px solid #eee', paddingTop: 8, marginTop: 8, fontSize: 14 }}>
+          <div style={S.row}>
+            <span dir="ltr">{String(r.metadata.dropoff || '-')}</span>
+            <strong>{money((r.fareMinor ?? 0) * (1 - rate), r.currency)}</strong>
+          </div>
+          <button style={S.link} onClick={() => setOpenRoute(openRoute === r.id ? null : r.id)}>{t('المسار المسجّل', 'Recorded route', 'Trajet enregistré')}</button>
+          {openRoute === r.id && <RouteViewer rideId={r.id} lang={lang} asDriver />}
         </div>
       ))}
     </div>

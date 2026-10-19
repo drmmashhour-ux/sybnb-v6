@@ -2647,6 +2647,22 @@ if (typeof window !== 'undefined') {
   })
 }
 
+export type RideRouteRecord = {
+  rideId: string
+  status: string
+  points: Array<{ lat: number; lng: number; at: string; phase: string | null }>
+  milestones: Array<{ type: string; at: string; lat: number | null; lng: number | null }>
+  gaps: Array<{ from: string; to: string; seconds: number }>
+  distanceKm: number
+}
+
+/** The recorded GPS route of a trip (rider, driver or staff). */
+export async function fetchRideRoute(rideId: string, asDriver = false): Promise<RideRouteRecord> {
+  const session = asDriver ? await ensurePrototypeDriverSession() : await ensurePrototypeGuestSession()
+  const response = await apiRequest<{ ok: true } & RideRouteRecord>(`/api/sr/rides/${rideId}/route`, { token: session.token })
+  return response
+}
+
 export async function reportPrototypeDriverLocation(lat: number, lng: number) {
   const at = new Date().toISOString()
   try {

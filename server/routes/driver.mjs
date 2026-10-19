@@ -33,7 +33,9 @@ const COMMIT_PROTECTED_DRIVER_STATUSES = new Set(['COMPLETED', 'CANCELLED'])
 // so the trip's route trail gets at most one ping per active ride per ~20s, regardless of the
 // driver client's much faster GPS-report cadence. A plain in-process Map is right-sized (single
 // persistent process); a lost entry only ever costs one extra ping, never correctness.
-const LOCATION_PING_MIN_INTERVAL_MS = 20_000
+const LOCATION_PING_MIN_INTERVAL_MS = 15_000
+// Security (Syria): the car's route is recorded from the moment the driver accepts, not only during the trip.
+const TRACKED_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 const lastLocationPingAt = new Map()
 
 // Safety Phase 2 (2026-10-10): the IN_PROGRESS gate honours env SR_REQUIRE_PICKUP_CODE (default ON;
@@ -74,21 +76,17 @@ export async function handleDriver(req, res, url, context) {
 
     let trail = 0
     const activeRide = await db().rideRequest.findFirst({
-      where: { driverId: context.user.id, status: 'IN_PROGRESS' },
-      select: { id: true },
+      where: { driverId: context.user.id, status: { in: TRACKED_RIDE_STATUSES } },
+      select: { id: true, status: true, metadata: true },
     })
     if (activeRide) {
-      const started = await db().rideEvent.findFirst({
-        where: { rideId: activeRide.id, type: 'IN_PROGRESS' },
-        orderBy: { createdAt: 'desc' },
-        select: { createdAt: true },
-      })
-      const since = started ? started.createdAt.getTime() : Date.now()
+      const assignedAt = Date.parse(String(activeRide.metadata?.snapshot?.assignedAt || ''))
+      const since = Number.isFinite(assignedAt) ? assignedAt : Date.now()
       const kept = thinPoints(points.filter((p) => p.at >= since), LOCATION_PING_MIN_INTERVAL_MS, 60)
       for (const p of kept) {
         await logRideEventSafe(db(), {
           rideId: activeRide.id, type: 'LOCATION_PING', actorId: context.user.id, actorRole: 'DRIVER',
-          lat: p.lat, lng: p.lng, meta: { buffered: true }, createdAt: new Date(p.at),
+          lat: p.lat, lng: p.lng, meta: { buffered: true, phase: activeRide.status }, createdAt: new Date(p.at),
         })
         trail += 1
       }
@@ -121,8 +119,8 @@ export async function handleDriver(req, res, url, context) {
     void (async () => {
       try {
         const activeRide = await db().rideRequest.findFirst({
-          where: { driverId: context.user.id, status: 'IN_PROGRESS' },
-          select: { id: true },
+          where: { driverId: context.user.id, status: { in: TRACKED_RIDE_STATUSES } },
+          select: { id: true, status: true },
         })
         if (!activeRide) return
         const now = Date.now()
@@ -136,6 +134,7 @@ export async function handleDriver(req, res, url, context) {
           actorRole: 'DRIVER',
           lat,
           lng,
+          meta: { phase: activeRide.status },
         })
       } catch {
         // breadcrumb is best-effort; a failure here must never surface to the driver client

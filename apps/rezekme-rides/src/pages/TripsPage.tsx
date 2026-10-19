@@ -8,6 +8,7 @@ import {
   type PlatformRideRequest,
 } from '@platform/shared/api/platformApi'
 import { moneyText, statusText } from '@platform/shared/i18n/display'
+import { RouteViewer } from './RouteViewer'
 
 type Props = { lang: Lang }
 
@@ -20,6 +21,7 @@ export function TripsPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const [rides, setRides] = useState<PlatformRideRequest[] | null>(null)
   const [error, setError] = useState('')
+  const [openRoute, setOpenRoute] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -71,12 +73,18 @@ export function TripsPage({ lang }: Props) {
                 </div>
                 <div style={styles.row}>
                   <strong dir={isAr ? 'rtl' : 'ltr'}>{charged > 0 ? moneyText(charged, ride.currency, lang) : '-'}</strong>
+                  {(finished || ride.status === 'IN_PROGRESS') && (
+                    <button type="button" style={{ ...styles.receiptBtn, background: '#eee', color: '#000' }} onClick={() => setOpenRoute(openRoute === ride.id ? null : ride.id)}>
+                      {pick(lang, 'المسار', 'Route', 'Trajet')}
+                    </button>
+                  )}
                   {finished && charged > 0 && (
                     <button type="button" style={styles.receiptBtn} onClick={() => void openRideInvoice(ride.id)}>
                       {pick(lang, 'الإيصال', 'Receipt', 'Reçu')}
                     </button>
                   )}
                 </div>
+                {openRoute === ride.id && <RouteViewer rideId={ride.id} lang={lang} />}
               </article>
             )
           })}

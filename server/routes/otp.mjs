@@ -126,6 +126,21 @@ export async function handleOtp(req, res, url) {
     // Idempotency key (email provider): identical retried send de-duplicates; a new code differs.
     const idempotencyKey = `otp:${identifierHash}:${purpose}:${codeHash.slice(0, 16)}`
     const delivery = await deliverCode(id, code, purpose, idempotencyKey)
+    // Admin sign-in: ALSO text the same code to the owner's phone (ADMIN_LOGIN_SMS_TO, E.164, set in the
+    // server env -- never stored in the database). Only for an email that holds ADMIN; best effort, the
+    // emailed code stays valid if SMS fails. This is the owner's second delivery channel, not a bypass:
+    // the password and a verified single-use code are still both required (server/routes/auth.mjs).
+    let smsAlso = false
+    const adminSmsTo = (process.env.ADMIN_LOGIN_SMS_TO || '').trim()
+    if (purpose === 'admin-login' && id.kind === 'email' && adminSmsTo && /^\+[1-9]\d{7,14}$/.test(adminSmsTo)) {
+      try {
+        const adminUser = await db().user.findUnique({ where: { email: id.value.toLowerCase() }, include: { roles: true } })
+        if (adminUser && adminUser.status === 'ACTIVE' && adminUser.roles.some((r) => r.role === 'ADMIN')) {
+          await sendSms({ to: adminSmsTo, body: otpMessage(code), purpose })
+          smsAlso = true
+        }
+      } catch { /* SMS is optional; email delivery already succeeded */ }
+    }
 
     const record = await db().verificationCode.create({
       data: {
@@ -143,6 +158,7 @@ export async function handleOtp(req, res, url) {
       masked: id.masked,
       ...(id.kind === 'phone' ? { maskedPhone: id.masked } : { maskedEmail: id.masked }),
       expiresAt,
+      ...(smsAlso ? { smsAlso: true } : {}),
       provider: delivery.provider,
       ...(EXPOSE_CODE ? { devCode: code } : {}),
     })

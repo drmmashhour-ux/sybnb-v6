@@ -4,6 +4,8 @@
 // Selection via env SMS_PROVIDER:
 //   'sandbox' (default) — does NOT send anything. Returns a synthetic message id. Never logs the
 //                         message body (which contains the OTP). Used for local/dev/staging.
+//   'twilio'            — Twilio Messages API. Requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and
+//                         TWILIO_FROM (a Twilio number or messaging service SID, MG...).
 //   'http'              — POSTs to a generic provider endpoint. Requires SMS_HTTP_ENDPOINT and
 //                         SMS_API_KEY; throws SMS_PROVIDER_NOT_CONFIGURED if missing (prepared but
 //                         inert until real credentials are supplied — a reserved owner action).
@@ -18,6 +20,9 @@ function providerName() {
 export function smsProviderStatus() {
   const provider = providerName()
   if (provider === 'sandbox') return { provider, configured: true, live: false }
+  if (provider === 'twilio') {
+    return { provider, configured: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM), live: true }
+  }
   if (provider === 'http') {
     return { provider, configured: Boolean(process.env.SMS_HTTP_ENDPOINT && process.env.SMS_API_KEY), live: true }
   }
@@ -31,6 +36,36 @@ export async function sendSms({ to, body, purpose }) {
   if (provider === 'sandbox') {
     // No real delivery. Do NOT log `body` — it contains the plaintext OTP.
     return { provider: 'sandbox', messageId: `sandbox-${Date.now()}`, delivered: true }
+  }
+
+  if (provider === 'twilio') {
+    const sid = process.env.TWILIO_ACCOUNT_SID
+    const token = process.env.TWILIO_AUTH_TOKEN
+    const from = process.env.TWILIO_FROM
+    if (!sid || !token || !from) {
+      const error = new Error('SMS provider is not configured for live delivery.')
+      error.statusCode = 503
+      error.code = 'SMS_PROVIDER_NOT_CONFIGURED'
+      error.expose = true
+      throw error
+    }
+    const form = new URLSearchParams({ To: to, Body: body })
+    form.set(/^MG/i.test(from) ? 'MessagingServiceSid' : 'From', from)
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString('base64')}` },
+      body: form,
+    })
+    if (!res.ok) {
+      const error = new Error('SMS provider rejected the message.')
+      error.statusCode = 502
+      error.code = 'SMS_SEND_FAILED'
+      error.expose = true
+      throw error
+    }
+    let data = {}
+    try { data = await res.json() } catch { /* empty body */ }
+    return { provider: 'twilio', messageId: data.sid || `twilio-${Date.now()}`, delivered: true }
   }
 
   if (provider === 'http') {

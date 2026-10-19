@@ -12,6 +12,7 @@ const LegalDocumentPage = lazy(() =>
   import('@platform/modules/legal/LegalDocumentPage').then((m) => ({ default: m.LegalDocumentPage })),
 )
 const DriverScreen = lazy(() => import('./pages/DriverScreen').then((m) => ({ default: m.DriverScreen })))
+const DriverApplication = lazy(() => import('./pages/DriverApplication').then((m) => ({ default: m.DriverApplication })))
 const RidePage = lazy(() => import('./pages/RidePage').then((m) => ({ default: m.RidePage })))
 const SharedRidePage = lazy(() => import('./pages/SharedRidePage').then((m) => ({ default: m.SharedRidePage })))
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })))
@@ -85,6 +86,8 @@ export function App() {
   let content
   if (needsGate || isAccountRoute) {
     content = <GuestAccountPage lang={lang} flow="ride" returnPath={needsGate ? path : '/ride'} />
+  } else if (path === '/driver/apply') {
+    content = <DriverApplication lang={lang} />
   } else if (path === '/driver') {
     content = <DriverScreen lang={lang} />
   } else if (isRideRoute && !hasGuestSession) {

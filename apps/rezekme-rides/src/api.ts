@@ -79,6 +79,7 @@ export async function createSrRideWithCoords(input: {
   shareable?: boolean
   riderCount?: number
   bagCount?: number
+  handBagCount?: number
   bonusMinor?: number
   autoSwitch?: boolean
   guestStripeSessionId?: string
@@ -105,6 +106,7 @@ export async function createSrRideWithCoords(input: {
     shareable: input.shareable,
     riderCount: input.riderCount,
     bagCount: input.bagCount,
+    handBagCount: input.handBagCount,
     bonusMinor: input.bonusMinor,
     metadata: {
       accuracyMeters: input.accuracyMeters,

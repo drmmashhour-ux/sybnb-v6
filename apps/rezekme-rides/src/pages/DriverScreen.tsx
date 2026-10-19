@@ -488,7 +488,7 @@ function Offer({ lang, ride, rate, nearest, onChanged }: { lang: Lang; ride: Pla
       <div style={S.muted}>{t('ربحك الصافي', 'Your net earnings', 'Vos gains nets')}{typeof ride.pickupDistanceKm === 'number' ? ` · ${ride.pickupDistanceKm.toFixed(1)} km ${t('عن الراكب', 'to pickup', 'du client')}` : ''}</div>
       <Route ride={ride} />
       <div style={{ ...S.muted, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {typeof ride.metadata.distanceKm === 'number' && <span dir="ltr">{ride.metadata.distanceKm} km {t('الرحلة', 'trip', 'course')}</span>}
+        {typeof ride.metadata.distanceKm === 'number' && <span dir="ltr">{ride.metadata.distanceKm} km{typeof ride.metadata.estimatedMinutes === 'number' ? ` · ${ride.metadata.estimatedMinutes} min` : ''} {t('الرحلة', 'trip', 'course')}</span>}
         <span>{bagsLine(ride)}</span>
       </div>
       {msg && <p style={S.note}>{msg}</p>}

@@ -478,6 +478,17 @@ const CATEGORY_META: Record<string, { kind: VehicleKind; seats: number }> = {
   'SR VIP': { kind: 'vip', seats: 4 },
 }
 
+// What each car class carries (large 23 kg bags / hand bags). Used to grey out classes that are too small
+// for the rider's luggage, so nobody books a car whose driver would have to refuse them at the door.
+const CATEGORY_CAPACITY: Record<string, { large: number; hand: number }> = {
+  'SR Bike': { large: 0, hand: 1 },
+  'SR Economy': { large: 2, hand: 2 },
+  'SR Comfort': { large: 3, hand: 3 },
+  'SR SUV': { large: 5, hand: 4 },
+  'SR Van': { large: 8, hand: 6 },
+  'SR VIP': { large: 3, hand: 3 },
+}
+
 const rideCategoryByFilter: Record<string, string> = {
   bike: 'SR Bike',
   economy: 'SR Economy',
@@ -611,6 +622,7 @@ export function RidePage({ lang }: Props) {
   const [shareable, setShareable] = useState(false)
   const [riderCount, setRiderCount] = useState(1)
   const [bagCount, setBagCount] = useState(0)
+  const [handBagCount, setHandBagCount] = useState(0)
   // Yallago gap-closure #3: optional driver bonus (whole USD, 0..20) to attract a driver faster.
   const [bonusMinor, setBonusMinor] = useState(0)
   const [moreOpen, setMoreOpen] = useState(false)
@@ -713,7 +725,7 @@ export function RidePage({ lang }: Props) {
         const pendingRaw = window.localStorage.getItem('rezekme.guestPendingRide')
         if (pendingRaw) {
           const pending = JSON.parse(pendingRaw) as {
-            pickup: string; dropoff: string; category: string; pickupCoords?: { lat: number; lng: number }; dropoffCoords?: { lat: number; lng: number }
+            pickup: string; dropoff: string; category: string; pickupCoords?: { lat: number; lng: number }; dropoffCoords?: { lat: number; lng: number }; bagCount?: number; handBagCount?: number
           }
           window.localStorage.removeItem('rezekme.guestPendingRide')
           const clean = window.location.pathname + window.location.hash
@@ -725,6 +737,8 @@ export function RidePage({ lang }: Props) {
             category: pending.category as never,
             currency: 'USD',
             lowDataMode: false,
+            bagCount: pending.bagCount,
+            handBagCount: pending.handBagCount,
             guestStripeSessionId: guestCheckoutSessionId,
           }).then((nextRide) => {
             if (cancelled) return
@@ -1082,6 +1096,8 @@ export function RidePage({ lang }: Props) {
             category,
             pickupCoords,
             dropoffCoords,
+            bagCount,
+            handBagCount,
           }))
         } catch { /* storage blocked */ }
         const { url } = await createGuestPreRideCheckout(fareMinor, 'USD')
@@ -1117,6 +1133,7 @@ export function RidePage({ lang }: Props) {
         stopCoords: trimmedStopCoords,
         riderCount,
         bagCount,
+        handBagCount,
         bonusMinor: bonusMinor > 0 ? bonusMinor : undefined,
         promoCode: promoCode.trim() || undefined,
         billToBusinessAccount: businessAccountName ? billToBusinessAccount : undefined,
@@ -1480,6 +1497,18 @@ export function RidePage({ lang }: Props) {
                   ? t.cancelled
                   : statusText(ride.status, lang)
 
+  const fitsBags = (item: string) => {
+    const cap = CATEGORY_CAPACITY[item]
+    return !cap || (bagCount <= cap.large && handBagCount <= cap.hand)
+  }
+  // If the luggage no longer fits the chosen class, move to the smallest class that does.
+  useEffect(() => {
+    if (fitsBags(category)) return
+    const next = categories.find((item) => fitsBags(item))
+    if (next) setCategory(next)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bagCount, handBagCount, category])
+
   function pickCategory(item: string) {
     setCategory(item)
     // Keep the filter-panel category in sync, so toggling a feature chip (which runs
@@ -1679,6 +1708,16 @@ export function RidePage({ lang }: Props) {
               </div>
             )
           })()}
+          <div style={styles.moreBody}>
+            <div style={styles.optRow}>
+              <span>{pick(lang, 'حقائب كبيرة (حتى 23 كغ)', 'Large bags (up to 23 kg)', 'Grands bagages (jusqu’à 23 kg)')}</span>
+              {stepper(bagCount, 0, 10, setBagCount, 'large bags')}
+            </div>
+            <div style={styles.optRow}>
+              <span>{pick(lang, 'حقائب يد', 'Hand bags', 'Bagages à main')}</span>
+              {stepper(handBagCount, 0, 20, setHandBagCount, 'hand bags')}
+            </div>
+          </div>
           <div role="radiogroup" aria-label={ui.chooseRide} style={styles.vehicleList}>
             {categories.map((item) => {
               const selected = item === category
@@ -1692,6 +1731,8 @@ export function RidePage({ lang }: Props) {
               const avail = availability[item]
               const anyDriverNearby = Object.values(availability).some((row) => row.drivers > 0)
               const noDriversHere = confirmedLocations && Boolean(avail) && anyDriverNearby && avail.drivers === 0
+              const tooSmall = !fitsBags(item)
+              const cap = CATEGORY_CAPACITY[item]
               const availText = !confirmedLocations || !avail
                 ? null
                 : avail.drivers > 0
@@ -1707,8 +1748,8 @@ export function RidePage({ lang }: Props) {
                   type="button"
                   role="radio"
                   aria-checked={selected}
-                  disabled={noDriversHere}
-                  style={{ ...(selected ? { ...styles.vehicleRow, ...styles.vehicleRowActive } : styles.vehicleRow), ...(noDriversHere ? { opacity: 0.45, cursor: 'not-allowed' } : {}) }}
+                  disabled={noDriversHere || tooSmall}
+                  style={{ ...(selected ? { ...styles.vehicleRow, ...styles.vehicleRowActive } : styles.vehicleRow), ...(noDriversHere || tooSmall ? { opacity: 0.45, cursor: 'not-allowed' } : {}) }}
                   onClick={() => pickCategory(item)}
                 >
                   <span style={styles.vehicleArt}>
@@ -1723,6 +1764,13 @@ export function RidePage({ lang }: Props) {
                       </span>
                     </span>
                     <span style={styles.vehicleDesc}>{description}</span>
+                    {cap ? (
+                      <span style={{ ...styles.vehicleMeta, fontWeight: 700, color: tooSmall ? '#b3261e' : '#1b6e3c' }}>
+                        {tooSmall
+                          ? pick(lang, `صغيرة جداً: تتسع ${cap.large} حقائب كبيرة و${cap.hand} حقائب يد`, `Too small: fits ${cap.large} large + ${cap.hand} hand bags`, `Trop petite : ${cap.large} grands + ${cap.hand} bagages à main`)
+                          : pick(lang, `تتسع ${cap.large} كبيرة + ${cap.hand} حقائب يد`, `Fits ${cap.large} large + ${cap.hand} hand bags`, `${cap.large} grands + ${cap.hand} bagages à main`)}
+                      </span>
+                    ) : null}
                     {availText ? <span style={{ ...styles.vehicleMeta, fontWeight: 700, color: noDriversHere ? '#b3261e' : '#1b6e3c' }}>{availText}</span> : null}
                     {confirmedLocations && quote?.estimatedMinutes ? (
                       <span style={styles.vehicleMeta} dir="ltr">{`${quote.estimatedMinutes} ${ui.minShort} ${ui.trip}`}</span>
@@ -1752,10 +1800,6 @@ export function RidePage({ lang }: Props) {
               <div style={styles.optRow}>
                 <span>{ui.riders}</span>
                 {stepper(riderCount, 1, 8, setRiderCount, 'riders')}
-              </div>
-              <div style={styles.optRow}>
-                <span>{ui.bags}</span>
-                {stepper(bagCount, 0, 10, setBagCount, 'bags')}
               </div>
               <div style={styles.optRow}>
                 <span>{ui.bonus}</span>

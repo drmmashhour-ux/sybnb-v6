@@ -616,6 +616,12 @@ export async function handleSrRides(req, res, url, context) {
       currency: quote.currency || body.currency || defaultCurrency(),
       metadata: {
         ...(body.metadata || {}),
+        // Luggage the rider declared (large = 23 kg bags). Drivers whose car cannot carry it never see
+        // this ride (driver list) and cannot claim it (claim gate). Whole numbers only, bounded.
+        bags: {
+          large: Math.min(10, Math.max(0, Math.trunc(Number(body.bagCount)) || 0)),
+          hand: Math.min(20, Math.max(0, Math.trunc(Number(body.handBagCount)) || 0)),
+        },
         pickup,
         dropoff,
         category,

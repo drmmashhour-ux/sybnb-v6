@@ -26,9 +26,11 @@ export const STR_COMMISSION_RATE = 0.15
 // keeps 85%, in line with local competitors. Applies to the ride fare only; a cancellation fee stays
 // 100% with the driver. Overridable via env (SR_RIDE_COMMISSION_RATE, a 0..1 fraction) without a
 // code change -- e.g. 0.12 for the low end, or 0.20 for the high end of the local range.
+// OWNER DECISION 2026-10-18 (supersedes the 15% default above): 20% platform / 80% driver. The 20%
+// covers payment-processor (Stripe) fees, which the platform absorbs; the driver always keeps 80%.
 export const SR_RIDE_COMMISSION_RATE = (() => {
   const raw = Number(process.env.SR_RIDE_COMMISSION_RATE)
-  return Number.isFinite(raw) && raw >= 0 && raw < 1 ? raw : 0.15
+  return Number.isFinite(raw) && raw >= 0 && raw < 1 ? raw : 0.20
 })()
 // Cancellation protection add-on: 3% of the FULL stay amount (all nights, before cleaning/taxes).
 export const PROTECTION_RATE = 0.03

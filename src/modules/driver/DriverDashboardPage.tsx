@@ -637,7 +637,7 @@ export function DriverDashboardPage({ lang }: Props) {
   }
 
   const stats = useMemo(() => {
-    const pct = Math.round((1 - (overview?.totals.commissionRate ?? 0.15)) * 100)
+    const pct = Math.round((1 - (overview?.totals.commissionRate ?? 0.20)) * 100)
     const base = [
       { label: t.assigned, value: String(overview?.totals.assigned || 0) },
       { label: t.active, value: String(overview?.totals.active || 0) },
@@ -845,7 +845,7 @@ export function DriverDashboardPage({ lang }: Props) {
                     </span>
                   ) : null}
                   <small dir="ltr" style={{ color: '#7dd3b0' }}>
-                    {t.netEarn}: {moneyText(Math.round((pendingRide.fareMinor || 0) * (1 - (overview?.totals.commissionRate ?? 0.15))), pendingRide.currency, lang)}
+                    {t.netEarn}: {moneyText(Math.round((pendingRide.fareMinor || 0) * (1 - (overview?.totals.commissionRate ?? 0.20))), pendingRide.currency, lang)}
                   </small>
                   <i dir="ltr">
                     {pendingRide.metadata.distanceKm ? `${pendingRide.metadata.distanceKm} km` : ''}

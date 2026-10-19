@@ -81,6 +81,8 @@ function SignIn({ lang, onDone }: { lang: Lang; onDone: () => void }) {
   const [code, setCode] = useState('')
   const [purpose, setPurpose] = useState<'staff-login' | 'admin-login'>('staff-login')
   const [sent, setSent] = useState(false)
+  const [needsAdmin, setNeedsAdmin] = useState(false)
+  const [adminMode, setAdminMode] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
 
@@ -107,20 +109,21 @@ function SignIn({ lang, onDone }: { lang: Lang; onDone: () => void }) {
         setMsg(t('الرمز غير صحيح أو منتهي.', 'That code is wrong or expired.', 'Code incorrect ou expiré.'))
         return
       }
-      await createStaffAccountSession('DRIVER', { email, password })
+      await createStaffAccountSession(adminMode ? 'ADMIN' : 'DRIVER', { email, password })
+      if (!getStoredStaffSession('DRIVER')) {
+        clearStoredStaffSession()
+        setMsg(t('هذا الحساب ليس سائقاً.', 'This account is not a driver.', 'Ce compte n’est pas chauffeur.'))
+        return
+      }
       window.dispatchEvent(new Event('sybnb-session-changed'))
       onDone()
     } catch (e) {
-      const err = e as { code?: string; message?: string }
-      if (err.code === 'ADMIN_LOGIN_CODE_REQUIRED') {
-        // This account also holds an admin role: the server wants the admin-login code instead.
-        setPurpose('admin-login')
-        setCode('')
-        await requestOtp({ email: email.trim(), purpose: 'admin-login' }).catch(() => undefined)
-        setMsg(t('هذا الحساب إداري أيضاً. أرسلنا رمزاً جديداً، أدخله.', 'This account is also an admin account. We sent a new code, enter it.', 'Ce compte est aussi administrateur. Nouveau code envoyé, saisissez-le.'))
-      } else {
-        setMsg(err.message || t('تعذر تسجيل الدخول', 'Could not sign in', 'Connexion impossible'))
-      }
+      // The server refuses an account that also holds an admin role until an admin-login code is used;
+      // the client falls back to a register() call whose own error hides that reason, so offer it.
+      setNeedsAdmin(true)
+      setSent(false)
+      setCode('')
+      setMsg((e as { message?: string }).message || t('تعذر تسجيل الدخول. تحقق من كلمة المرور.', 'Could not sign in. Check your password.', 'Connexion impossible. Vérifiez votre mot de passe.'))
     } finally {
       setBusy(false)
     }
@@ -141,6 +144,20 @@ function SignIn({ lang, onDone }: { lang: Lang; onDone: () => void }) {
         </>
       )}
       {msg && <p style={S.note}>{msg}</p>}
+      {needsAdmin && !sent && (
+        <button
+          style={S.secondary}
+          disabled={busy}
+          onClick={() => {
+            setAdminMode(true)
+            setPurpose('admin-login')
+            setNeedsAdmin(false)
+            void sendCode('admin-login')
+          }}
+        >
+          {t('حسابي إداري أيضاً: استخدم رمز الإدارة', 'My account is also admin: use the admin code', 'Mon compte est aussi admin : utiliser le code admin')}
+        </button>
+      )}
       {!sent ? (
         <button style={S.primary} disabled={busy || !email || !password} onClick={() => void sendCode()}>
           {t('إرسال الرمز', 'Send code', 'Envoyer le code')}

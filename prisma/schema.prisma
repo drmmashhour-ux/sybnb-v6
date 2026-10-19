@@ -206,6 +206,7 @@ model User {
   updatedAt    DateTime      @updatedAt @map("updated_at")
 
   roles             UserRole[]
+  roleAssignments   RoleAssignment[]  @relation("UserRoleAssignments")
   sessions          UserSession[]
   sellerProfile     SellerProfile?
   hostProfile       HostProfile?
@@ -1773,12 +1774,18 @@ model AdminAuditLog {
   before      Json?
   after       Json?
   ipHash      String?  @map("ip_hash")
+  // Step 5 (migration 078): correlation across logs/evidence, platform context and stated reason.
+  correlationId String? @map("correlation_id")
+  platformCode  String? @map("platform_code")
+  reason        String?
   createdAt   DateTime @default(now()) @map("created_at")
 
   actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
 
   @@index([entityType, entityId, createdAt])
   @@index([actorUserId, createdAt])
+  @@index([correlationId])
+  @@index([action, createdAt])
   @@map("admin_audit_logs")
 }
 
@@ -2261,4 +2268,372 @@ model DriverCarCare {
 
   @@index([userId, kind, doneAt(sort: Desc)])
   @@map("driver_car_care")
+}
+
+// ============================================================================================
+// STEP 5 -- ADMIN FOUNDATION (additive; Step 3A model). Parallel to the legacy user_roles table,
+// which the live app keeps using unchanged. See docs/admin/STEP5_ADMIN_FOUNDATION.md.
+// ============================================================================================
+
+enum AdminEntityStatus {
+  ACTIVE
+  INACTIVE
+
+  @@map("admin_entity_status")
+}
+
+enum PlatformStatus {
+  ACTIVE
+  SETUP
+  DEGRADED
+  DISABLED
+  NO_DATA
+
+  @@map("platform_status")
+}
+
+enum RoleStatus {
+  ACTIVE
+  RETIRED
+
+  @@map("role_status")
+}
+
+enum RoleVersionStatus {
+  DRAFT
+  IN_SECURITY_REVIEW
+  APPROVED
+  EFFECTIVE
+  SUPERSEDED
+  REJECTED
+  WITHDRAWN
+
+  @@map("role_version_status")
+}
+
+enum RoleVersionClassification {
+  INITIAL
+  REDUCING
+  EXPANDING_ORDINARY
+  EXPANDING_HIGH_RISK
+
+  @@map("role_version_classification")
+}
+
+enum RoleAssignmentStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  REVOKED
+  SUPERSEDED
+
+  @@map("role_assignment_status")
+}
+
+enum ScopeKind {
+  ORGANIZATION
+  LEGAL_ENTITY
+  BUSINESS_UNIT
+  PLATFORM
+  DEPARTMENT
+  PROPERTY
+  VEHICLE
+  PROJECT
+  SELF
+
+  @@map("scope_kind")
+}
+
+enum AuthzDecision {
+  ALLOW
+  DENY
+
+  @@map("authz_decision")
+}
+
+model Organization {
+  id        String            @id @default(uuid())
+  code      String            @unique
+  name      String
+  status    AdminEntityStatus @default(ACTIVE)
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  legalEntities LegalEntity[]
+  departments   Department[]
+
+  @@map("organizations")
+}
+
+model LegalEntity {
+  id             String            @id @default(uuid())
+  organizationId String            @map("organization_id")
+  code           String            @unique
+  legalName      String            @map("legal_name")
+  status         AdminEntityStatus @default(ACTIVE)
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  businessUnits BusinessUnit[]
+
+  @@index([organizationId])
+  @@map("legal_entities")
+}
+
+model BusinessUnit {
+  id            String            @id @default(uuid())
+  legalEntityId String            @map("legal_entity_id")
+  code          String            @unique
+  name          String
+  status        AdminEntityStatus @default(ACTIVE)
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  legalEntity LegalEntity @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  platforms   Platform[]
+
+  @@index([legalEntityId])
+  @@map("business_units")
+}
+
+model Platform {
+  id             String         @id @default(uuid())
+  code           String         @unique
+  displayName    String         @map("display_name")
+  businessUnitId String?        @map("business_unit_id")
+  status         PlatformStatus @default(SETUP)
+  iconRef        String?        @map("icon_ref")
+  route          String
+  featureFlagKey String?        @map("feature_flag_key")
+  config         Json           @default("{}")
+  sortOrder      Int            @default(0) @map("sort_order")
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  businessUnit BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: Restrict)
+
+  @@index([businessUnitId])
+  @@map("platforms")
+}
+
+model Department {
+  id             String            @id @default(uuid())
+  organizationId String            @map("organization_id")
+  code           String
+  name           String
+  status         AdminEntityStatus @default(ACTIVE)
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, code])
+  @@map("departments")
+}
+
+model PermissionDefinition {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  area        String
+  resource    String
+  action      String
+  tier        Int
+  highRisk    Boolean  @default(false) @map("high_risk")
+  deprecated  Boolean  @default(false)
+  description String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  versionLinks RoleVersionPermission[]
+  suspensions  PermissionSuspension[]
+
+  @@map("permission_definitions")
+}
+
+model Role {
+  id          String     @id @default(uuid())
+  code        String     @unique
+  name        String
+  description String
+  status      RoleStatus @default(ACTIVE)
+  ownerUserId String?    @map("owner_user_id")
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  versions RoleVersion[]
+
+  @@map("roles")
+}
+
+model RoleVersion {
+  id               String                    @id @default(uuid())
+  roleId           String                    @map("role_id")
+  versionNumber    Int                       @map("version_number")
+  status           RoleVersionStatus         @default(DRAFT)
+  effectiveFrom    DateTime?                 @map("effective_from")
+  effectiveTo      DateTime?                 @map("effective_to")
+  classification   RoleVersionClassification @default(INITIAL)
+  // Platform codes this version may act on, or ['*'] for all platforms (Step 3A.4).
+  platformCoverage String[]                  @default([]) @map("platform_coverage")
+  contentHash      String                    @map("content_hash")
+  changeReason     String                    @map("change_reason")
+  changeReference  String?                   @map("change_reference")
+  createdById      String?                   @map("created_by_id")
+  reviewedById     String?                   @map("reviewed_by_id")
+  approvedById     String?                   @map("approved_by_id")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+
+  role        Role                    @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permissions RoleVersionPermission[]
+  assignments RoleAssignment[]
+  suspensions PermissionSuspension[]
+
+  @@unique([roleId, versionNumber])
+  @@index([roleId, status])
+  @@map("role_versions")
+}
+
+model RoleVersionPermission {
+  roleVersionId String @map("role_version_id")
+  permissionId  String @map("permission_id")
+
+  roleVersion RoleVersion          @relation(fields: [roleVersionId], references: [id], onDelete: Restrict)
+  permission  PermissionDefinition @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleVersionId, permissionId])
+  @@index([permissionId])
+  @@map("role_version_permissions")
+}
+
+model RoleAssignment {
+  id                     String               @id @default(uuid())
+  userId                 String               @map("user_id")
+  roleVersionId          String               @map("role_version_id")
+  status                 RoleAssignmentStatus @default(ACTIVE)
+  effectiveFrom          DateTime             @default(now()) @map("effective_from")
+  effectiveTo            DateTime?            @map("effective_to")
+  grantReason            String               @map("grant_reason")
+  grantedById            String?              @map("granted_by_id")
+  approvedById           String?              @map("approved_by_id")
+  revokedAt              DateTime?            @map("revoked_at")
+  revokedById            String?              @map("revoked_by_id")
+  revokeReason           String?              @map("revoke_reason")
+  supersedesAssignmentId String?              @map("supersedes_assignment_id")
+  // Optional narrowing qualifier (platform codes). Can only reduce the role version's coverage.
+  platformQualifier      String[]             @default([]) @map("platform_qualifier")
+  isTemporary            Boolean              @default(false) @map("is_temporary")
+  createdAt              DateTime             @default(now()) @map("created_at")
+
+  user        User              @relation("UserRoleAssignments", fields: [userId], references: [id], onDelete: Restrict)
+  roleVersion RoleVersion       @relation(fields: [roleVersionId], references: [id], onDelete: Restrict)
+  scopes      AssignmentScope[]
+  events      RoleAssignmentEvent[]
+
+  @@index([userId, status])
+  @@index([roleVersionId])
+  @@map("role_assignments")
+}
+
+model AssignmentScope {
+  id             String    @id @default(uuid())
+  assignmentId   String    @map("assignment_id")
+  kind           ScopeKind
+  organizationId String?   @map("organization_id")
+  legalEntityId  String?   @map("legal_entity_id")
+  businessUnitId String?   @map("business_unit_id")
+  platformId     String?   @map("platform_id")
+  departmentId   String?   @map("department_id")
+  // PROPERTY / VEHICLE / PROJECT targets are opaque references until those modules exist (no FK).
+  propertyRef    String?   @map("property_ref")
+  vehicleRef     String?   @map("vehicle_ref")
+  projectRef     String?   @map("project_ref")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  assignment RoleAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([assignmentId])
+  @@map("assignment_scopes")
+}
+
+model RoleAssignmentEvent {
+  id            String   @id @default(uuid())
+  assignmentId  String   @map("assignment_id")
+  eventType     String   @map("event_type")
+  actorUserId   String?  @map("actor_user_id")
+  detail        Json     @default("{}")
+  correlationId String?  @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  assignment RoleAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@index([assignmentId, createdAt])
+  @@map("role_assignment_events")
+}
+
+model PermissionSuspension {
+  id            String    @id @default(uuid())
+  permissionId  String?   @map("permission_id")
+  roleVersionId String?   @map("role_version_id")
+  reason        String
+  effectiveFrom DateTime  @default(now()) @map("effective_from")
+  effectiveTo   DateTime? @map("effective_to")
+  createdById   String?   @map("created_by_id")
+  approvedById  String?   @map("approved_by_id")
+  liftedAt      DateTime? @map("lifted_at")
+  liftedById    String?   @map("lifted_by_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  permission  PermissionDefinition? @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+  roleVersion RoleVersion?          @relation(fields: [roleVersionId], references: [id], onDelete: Restrict)
+
+  @@map("permission_suspensions")
+}
+
+model SecurityPolicyVersion {
+  id            String    @id @default(uuid())
+  versionNumber Int       @unique @map("version_number")
+  config        Json
+  effectiveFrom DateTime  @default(now()) @map("effective_from")
+  createdById   String?   @map("created_by_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@map("security_policy_versions")
+}
+
+// Append-only, hash-chained proof of WHY a request was allowed or denied (Step 3A.3). Written in
+// the same transaction as the action. Denormalised on purpose so it stays readable after renames.
+model AuthorizationEvidence {
+  id                 String        @id @default(uuid())
+  sequence           BigInt        @unique @default(autoincrement())
+  userId             String?       @map("user_id")
+  sessionId          String?       @map("session_id")
+  roleAssignmentId   String?       @map("role_assignment_id")
+  roleVersionId      String?       @map("role_version_id")
+  roleCode           String?       @map("role_code")
+  roleVersionNumber  Int?          @map("role_version_number")
+  permissionId       String?       @map("permission_id")
+  permissionCode     String        @map("permission_code")
+  scopeId            String?       @map("scope_id")
+  scopeKind          ScopeKind?    @map("scope_kind")
+  scopeTarget        String?       @map("scope_target")
+  scopeDescription   String?       @map("scope_description")
+  platformContext    String?       @map("platform_context")
+  resourceType       String?       @map("resource_type")
+  resourceId         String?       @map("resource_id")
+  action             String
+  authStrength       String?       @map("auth_strength")
+  mfaMethod          String?       @map("mfa_method")
+  mfaResult          String?       @map("mfa_result")
+  recentAuthAt       DateTime?     @map("recent_auth_at")
+  requestId          String?       @map("request_id")
+  correlationId      String?       @map("correlation_id")
+  decision           AuthzDecision
+  denyReason         String?       @map("deny_reason")
+  policyVersionId    String?       @map("policy_version_id")
+  delegationId       String?       @map("delegation_id")
+  auditEventId       String?       @map("audit_event_id")
+  approvalSnapshotId String?       @map("approval_snapshot_id")
+  prevHash           String?       @map("prev_hash")
+  hash               String
+  decidedAt          DateTime      @default(now()) @map("decided_at")
+
+  @@index([userId, decidedAt])
+  @@index([permissionCode, decidedAt])
+  @@index([correlationId])
+  @@map("authorization_evidence")
 }

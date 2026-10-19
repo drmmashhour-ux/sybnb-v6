@@ -18,11 +18,12 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
   const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [note, setNote] = useState('')
 
   const fail = (err: unknown) =>
     setError(err instanceof Error && err.message ? err.message : pick(lang, 'تعذّر المتابعة. حاول مرة أخرى.', 'Could not continue. Please try again.', 'Impossible de continuer. Veuillez réessayer.'))
 
-  async function sendCode() {
+  async function sendCode(which: 'email' | 'sms' | 'both' = 'both') {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
       setError(pick(lang, 'أدخل بريداً إلكترونياً صحيحاً.', 'Enter a valid email.', 'Saisissez un courriel valide.'))
       return
@@ -30,8 +31,9 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
     setBusy(true)
     setError('')
     try {
-      await requestOtp({ email: email.trim(), purpose: 'password-reset' })
-      if (admin) await requestOtp({ email: email.trim(), purpose: 'admin-reset-sms' })
+      if (!admin || which !== 'sms') await requestOtp({ email: email.trim(), purpose: 'password-reset' })
+      if (admin && which !== 'email') await requestOtp({ email: email.trim(), purpose: 'admin-reset-sms' })
+      setNote(admin ? (which === 'email' ? pick(lang, 'أُرسل الرمز إلى بريدك.', 'Code emailed.', 'Code envoyé par courriel.') : which === 'sms' ? pick(lang, 'أُرسل الرمز إلى هاتفك.', 'Code texted to your phone.', 'Code envoyé par texto.') : pick(lang, 'أُرسل رمزان: بريد ورسالة نصية.', 'Two codes sent: one by email, one by text.', 'Deux codes envoyés : courriel et texto.')) : '')
       setStep('code')
     } catch (err) {
       fail(err)
@@ -82,16 +84,30 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
             {pick(lang, 'البريد الإلكتروني', 'Email', 'Courriel')}
             <input style={s.input} dir="ltr" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </label>
-          <button type="button" style={s.primary} disabled={busy} onClick={() => void sendCode()}>
+          <button type="button" style={s.primary} disabled={busy} onClick={() => void sendCode(admin ? 'email' : 'both')}>
             {busy ? '…' : pick(lang, 'أرسل الرمز', 'Email me a code', 'M’envoyer un code')}
           </button>
+          {admin && (
+            <button type="button" style={s.primary} disabled={busy} onClick={() => void sendCode('sms')}>
+              {busy ? '…' : pick(lang, 'أرسل الرمز برسالة نصية', 'Text me a code', 'M’envoyer un code par texto')}
+            </button>
+          )}
         </>
       )}
       {step === 'code' && (
         <>
           <small>{pick(lang, `أرسلنا رمزاً من 6 أرقام إلى ${email.trim()}.`, `We sent a 6-digit code to ${email.trim()}.`, `Nous avons envoyé un code à 6 chiffres à ${email.trim()}.`)}</small>
+          {admin && (
+            <>
+              <small role="status">{note}</small>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                <button type="button" style={s.link} disabled={busy} onClick={() => void sendCode('email')}>{pick(lang, 'أعد إرسال رمز البريد', 'Email the code again', 'Renvoyer le code par courriel')}</button>
+                <button type="button" style={s.link} disabled={busy} onClick={() => void sendCode('sms')}>{pick(lang, 'أرسل رمزاً برسالة نصية', 'Text me a code', 'Recevoir un code par texto')}</button>
+              </div>
+            </>
+          )}
           <label style={s.label}>
-            {pick(lang, 'الرمز', 'Code', 'Code')}
+            {admin ? pick(lang, 'رمز البريد الإلكتروني', 'Code from the email', 'Code reçu par courriel') : pick(lang, 'الرمز', 'Code', 'Code')}
             <input style={s.input} dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} />
           </label>
           {admin && (

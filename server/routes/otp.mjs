@@ -20,6 +20,9 @@ const ALLOWED_PURPOSES = new Set([
   'password-reset',
   // Admin portal: every admin sign-in needs a fresh code under this purpose (server/routes/auth.mjs).
   'admin-login',
+  // Admin password reset needs a SECOND, independent code texted to the owner's phone
+  // (ADMIN_LOGIN_SMS_TO) in addition to the emailed 'password-reset' code (server/routes/auth.mjs).
+  'admin-reset-sms',
 ])
 
 // The plaintext code is exposed back to the caller ONLY in explicit test mode. In production this
@@ -94,7 +97,7 @@ export async function handleOtp(req, res, url) {
     const id = resolveIdentifier(body)
     if (!id) throw fail(400, 'OTP_IDENTIFIER_REQUIRED', 'An email (or phone) is required.')
     // Email uses the 'email' channel; phone keeps sms/whatsapp selection.
-    const channel = id.kind === 'email' ? 'email' : (body.channel === 'whatsapp' ? 'whatsapp' : 'sms')
+    const channel = purpose === 'admin-reset-sms' ? 'sms' : id.kind === 'email' ? 'email' : (body.channel === 'whatsapp' ? 'whatsapp' : 'sms')
     if (!ALLOWED_PURPOSES.has(purpose)) throw fail(400, 'OTP_PURPOSE_INVALID', 'Unsupported verification purpose.')
 
     const identifierHash = id.identifierHash
@@ -121,11 +124,25 @@ export async function handleOtp(req, res, url) {
 
     const code = generateOtpCode()
     const codeHash = hashOtpCode(identifierHash, purpose, code)
+    const smsOnly = purpose === 'admin-reset-sms'
     const expiresAt = new Date(Date.now() + CODE_TTL_MS)
 
     // Idempotency key (email provider): identical retried send de-duplicates; a new code differs.
     const idempotencyKey = `otp:${identifierHash}:${purpose}:${codeHash.slice(0, 16)}`
-    const delivery = await deliverCode(id, code, purpose, idempotencyKey)
+    let delivery
+    if (smsOnly) {
+      // Texted to the owner's phone ONLY for an ACTIVE ADMIN email; any other email gets the same
+      // answer without a code being created or sent, so this never reveals who is an admin.
+      const adminSmsTo0 = (process.env.ADMIN_LOGIN_SMS_TO || '').trim()
+      const adminUser0 = id.kind === 'email' ? await db().user.findUnique({ where: { email: id.value.toLowerCase() }, include: { roles: true } }) : null
+      const isAdmin0 = Boolean(adminUser0 && adminUser0.status === 'ACTIVE' && adminUser0.roles.some((r) => r.role === 'ADMIN'))
+      if (!isAdmin0 || !/^\+[1-9]\d{7,14}$/.test(adminSmsTo0)) {
+        return json(res, 201, { ok: true, sent: true, channel: 'sms', expiresAt, provider: 'none' })
+      }
+      delivery = await sendSms({ to: adminSmsTo0, body: otpMessage(code), purpose })
+    } else {
+      delivery = await deliverCode(id, code, purpose, idempotencyKey)
+    }
     // Admin sign-in: ALSO text the same code to the owner's phone (ADMIN_LOGIN_SMS_TO, E.164, set in the
     // server env -- never stored in the database). Only for an email that holds ADMIN; best effort, the
     // emailed code stays valid if SMS fails. This is the owner's second delivery channel, not a bypass:

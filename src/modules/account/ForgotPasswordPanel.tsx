@@ -6,12 +6,13 @@ import { confirmOtp, requestOtp, resetPassword } from '../../shared/api/platform
 // Forgot password, shared by the seller, host and staff screens (the guest screen has its own copy).
 // Three small steps: email -> emailed 6-digit code + new password -> done (go back and sign in).
 // Uses the same server rules as the guest reset: a verified 'password-reset' code, then the new password.
-type Props = { lang: Lang; initialEmail?: string; onClose: () => void }
+type Props = { lang: Lang; initialEmail?: string; onClose: () => void; admin?: boolean }
 
-export function ForgotPasswordPanel({ lang, initialEmail = '', onClose }: Props) {
+export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = false }: Props) {
   const [email, setEmail] = useState(initialEmail)
   const [step, setStep] = useState<'ask' | 'code' | 'done'>('ask')
   const [code, setCode] = useState('')
+  const [smsCode, setSmsCode] = useState('')
   const [password, setPassword] = useState('')
   const [show, setShow] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -29,6 +30,7 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose }: Props)
     setError('')
     try {
       await requestOtp({ email: email.trim(), purpose: 'password-reset' })
+      if (admin) await requestOtp({ email: email.trim(), purpose: 'admin-reset-sms' })
       setStep('code')
     } catch (err) {
       fail(err)
@@ -38,7 +40,7 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose }: Props)
   }
 
   async function save() {
-    if (code.trim().length !== 6 || password.length < 8) {
+    if (code.trim().length !== 6 || password.length < 8 || (admin && smsCode.trim().length !== 6)) {
       setError(pick(lang, 'أدخل الرمز المكوّن من 6 أرقام وكلمة مرور من 8 أحرف على الأقل.', 'Enter the 6-digit code and a password of at least 8 characters.', 'Saisissez le code à 6 chiffres et un mot de passe d’au moins 8 caractères.'))
       return
     }
@@ -49,6 +51,13 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose }: Props)
       if (!ok) {
         setError(pick(lang, 'الرمز غير صحيح.', 'The code is not correct.', 'Le code est incorrect.'))
         return
+      }
+      if (admin) {
+        const smsOk = await confirmOtp({ email: email.trim(), purpose: 'admin-reset-sms', code: smsCode.trim() })
+        if (!smsOk) {
+          setError(pick(lang, 'رمز الرسالة النصية غير صحيح.', 'The text-message code is not correct.', 'Le code reçu par texto est incorrect.'))
+          return
+        }
       }
       await resetPassword(email, password)
       setStep('done')
@@ -80,6 +89,12 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose }: Props)
             {pick(lang, 'الرمز', 'Code', 'Code')}
             <input style={s.input} dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} />
           </label>
+          {admin && (
+            <label style={s.label}>
+              {pick(lang, 'رمز الرسالة النصية', 'Code from the text message', 'Code reçu par texto')}
+              <input style={s.input} dir="ltr" inputMode="numeric" autoComplete="off" maxLength={6} value={smsCode} onChange={(e) => setSmsCode(e.target.value)} />
+            </label>
+          )}
           <label style={s.label}>
             {pick(lang, 'كلمة المرور الجديدة', 'New password', 'Nouveau mot de passe')}
             <input style={s.input} dir="ltr" type={show ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />

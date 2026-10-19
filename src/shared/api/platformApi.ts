@@ -3564,7 +3564,7 @@ async function register(body: {
 
 // Server-authoritative OTP. The browser never generates or trusts the code — it asks the backend to
 // send it (by email; phone optional) and to verify it. The plaintext code is not returned in production.
-export type OtpPurpose = 'guest-login' | 'staff-login' | 'seller-login' | 'host-login' | 'account-verify' | 'payment-proof' | 'wallet-claim' | 'password-reset' | 'admin-login'
+export type OtpPurpose = 'guest-login' | 'staff-login' | 'seller-login' | 'host-login' | 'account-verify' | 'payment-proof' | 'wallet-claim' | 'password-reset' | 'admin-login' | 'admin-reset-sms'
 
 export async function requestOtp(input: { email?: string; phone?: string; purpose: OtpPurpose; channel?: 'email' | 'sms' | 'whatsapp' }) {
   return apiRequest<{ ok: true; sent: boolean; channel: string; masked: string; maskedEmail?: string; maskedPhone?: string; expiresAt: string; provider: string; devCode?: string }>(

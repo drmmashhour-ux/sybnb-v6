@@ -243,7 +243,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               {showPassword ? pick(lang, 'إخفاء كلمة المرور', 'Hide password', 'Masquer le mot de passe') : pick(lang, 'إظهار كلمة المرور', 'Show password', 'Afficher le mot de passe')}
             </button>
           </label>
-          {!isAdmin && (
+          {(
             <button
               type="button"
               onClick={() => setForgotOpen((value) => !value)}
@@ -252,7 +252,7 @@ export function StaffAccessPage({ lang, role, returnPath }: Props) {
               {pick(lang, 'نسيت كلمة المرور؟', 'Forgot password?', 'Mot de passe oublié ?')}
             </button>
           )}
-          {!isAdmin && forgotOpen && <ForgotPasswordPanel lang={lang} initialEmail={email} onClose={() => setForgotOpen(false)} />}
+          {forgotOpen && <ForgotPasswordPanel admin={isAdmin} lang={lang} initialEmail={email} onClose={() => setForgotOpen(false)} />}
           {!isAdmin && (
             <label style={styles.label}>
               {pick(lang, 'رقم الهاتف (اختياري)', 'Phone number (optional)', 'Numéro de téléphone (facultatif)')}

@@ -24,6 +24,8 @@ import {
 } from '@platform/shared/api/platformApi'
 
 import { fetchDriverBase, verifyKeyCode, type DriverBase } from '../driverBaseApi'
+import { RideMapView } from '../maps/RideMapView'
+import { RecordingControls } from './RecordingControls'
 
 /**
  * Rezekme driver screen: the phone-sized view a driver sees (not the full SYBNB dashboard).
@@ -576,6 +578,17 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
   const [secs, setSecs] = useState<number | null>(null)
 
   const verified = typeof ride.metadata.pickupVerifiedAt === 'string'
+  const [me, setMe] = useState<{ lat: number; lng: number } | null>(ride.driver?.location ? { lat: ride.driver.location.lat, lng: ride.driver.location.lng } : null)
+
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    const id = navigator.geolocation.watchPosition(
+      (p) => setMe({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 5000 },
+    )
+    return () => navigator.geolocation.clearWatch(id)
+  }, [])
 
   useEffect(() => {
     if (!ride.wait) {
@@ -616,6 +629,36 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
 
   return (
     <>
+      <div style={{ position: 'relative', height: 260, borderRadius: 14, overflow: 'hidden', border: '1px solid #e5e5e5' }}>
+        <RideMapView
+          lang={lang}
+          pickup={ride.pickupCoords ?? null}
+          dropoff={ride.dropoffCoords ?? null}
+          driver={me}
+          phase={toDropoff ? 'trip' : 'approach'}
+          recenterLabel={t('توسيط', 'Recenter', 'Recentrer')}
+          loadingLabel={t('جارٍ تحميل الخريطة…', 'Loading map…', 'Chargement de la carte…')}
+        />
+      </div>
+
+      <div style={S.card}>
+        <div style={S.row}>
+          <div>
+            <strong style={{ fontSize: 18 }}>{ride.rider?.displayName || t('الراكب', 'Rider', 'Client')}</strong>
+            <div style={S.muted}>{t('مدفوع بالبطاقة. لا نقد.', 'Paid by card. No cash.', 'Payé par carte. Pas d’espèces.')}</div>
+          </div>
+          <span style={{ ...S.pill, width: 44, height: 44, display: 'grid', placeItems: 'center', borderRadius: '50%', fontWeight: 700 }}>
+            {(ride.rider?.displayName || '?').trim().charAt(0).toUpperCase()}
+          </span>
+        </div>
+        {(() => {
+          const b = ride.metadata.bags as { large?: number; hand?: number } | undefined
+          return b && (b.large || b.hand) ? (
+            <div style={S.muted}>🧳 {b.large ?? 0} {t('كبيرة', 'large', 'grandes')}, {b.hand ?? 0} {t('يدوية', 'hand', 'à main')}</div>
+          ) : null
+        })()}
+      </div>
+
       <div style={S.card}>
         <div style={S.row}>
           <strong style={{ fontSize: 20 }}>{title}</strong>
@@ -662,6 +705,10 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
       )}
 
       {msg && <p style={S.note}>{msg}</p>}
+
+      <div style={S.card}>
+        <RecordingControls rideId={ride.id} lang={lang} />
+      </div>
 
       {ride.status !== 'IN_PROGRESS' && (
         confirmCancel ? (

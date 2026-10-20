@@ -70,7 +70,7 @@ export function registerWork(router) {
     const open = { status: { in: ['OPEN', 'IN_PROGRESS', 'BLOCKED'] } }
     const viewWhere = {
       mine: { assignedUserId: me, ...open }, unassigned: { assignedUserId: null, ...open }, team: { assignedUserId: { not: me }, ...open },
-      overdue: { dueAt: { lt: now }, ...open }, blocked: { status: 'BLOCKED' }, done: { status: 'DONE' }, all: {},
+      overdue: { dueAt: { lt: now }, ...open }, priority: { priority: { in: ['HIGH', 'URGENT'] }, ...open }, blocked: { status: 'BLOCKED' }, done: { status: 'DONE' }, all: {},
     }[view]
     if (!viewWhere) throw badRequest('Unknown view.', 'VIEW_UNKNOWN')
     const where = {
@@ -83,7 +83,10 @@ export function registerWork(router) {
     }
     const orderBy = sortParam(r.query, ['dueAt', 'createdAt', 'priority', 'status'], { createdAt: 'desc' })
     const [total, rows] = await Promise.all([db().workItem.count({ where }), db().workItem.findMany({ where, orderBy, skip: p.skip, take: p.take })])
-    r.ok(pageResult(rows.map(workView), total, p))
+    // Assignee display names only (no email / contact) so the list can say who has the item.
+    const ids = [...new Set(rows.map((w) => w.assignedUserId).filter(Boolean))]
+    const names = new Map((ids.length ? await db().user.findMany({ where: { id: { in: ids } }, select: { id: true, displayName: true } }) : []).map((u) => [u.id, u.displayName]))
+    r.ok(pageResult(rows.map((w) => ({ ...workView(w), assignedUserName: w.assignedUserId ? names.get(w.assignedUserId) ?? null : null })), total, p))
   })
 
   router.get('/work/summary', async (r) => {

@@ -1,3 +1,4 @@
+import { isConsolePath } from '../admin/nav'
 import { Suspense, lazy, useEffect, useState, type ComponentType } from 'react'
 import { findDivisionByRoute } from '../engines/navigation/divisions'
 import type { Lang } from '../engines/language/languageEngine'
@@ -66,6 +67,8 @@ const AdminVehiclesPage = lazyNamed(() => import('../modules/admin/AdminVehicles
 const AdminLiveRidesPage = lazyNamed(() => import('../modules/admin/AdminLiveRidesPage'), 'AdminLiveRidesPage')
 const AdminFoodPage = lazyNamed(() => import('../modules/admin/AdminFoodPage'), 'AdminFoodPage')
 const BusinessAccountPage = lazyNamed(() => import('../modules/sr/BusinessAccountPage'), 'BusinessAccountPage')
+// STEP 5F: the new admin console (own shell + design system). Rendered only for its console paths.
+const AdminConsole = lazy(() => import('../admin/AdminApp'))
 const StaffAccessPage = lazyNamed(() => import('../modules/account/StaffAccessPage'), 'StaffAccessPage')
 const SyrianLocalWalletPaymentPage = lazyNamed(
   () => import('../modules/payments/SyrianLocalWalletPaymentPage'),
@@ -194,6 +197,18 @@ export function App() {
         : staffRequiredRole && !hasStaffSession
           ? 'staff'
           : undefined
+
+  // STEP 5F: the new admin console replaces the consumer shell for its own paths. The server still
+  // authorizes every call; this only chooses which screen to draw for a signed-in staff session.
+  // Staff access here is assignment-based (not the legacy ADMIN role flag), so a signed-in staff token is
+  // enough to draw the console; /api/admin2/me answers 403 for anyone without console access.
+  if (isConsolePath(path.split('?')[0]) && hasStaffToken()) {
+    return (
+      <Suspense fallback={<RouteLoading lang={lang} />}>
+        <AdminConsole path={path} />
+      </Suspense>
+    )
+  }
 
   return (
     <AppShell lang={lang} onLanguageChange={setLang} path={path} gate={shellGate}>
@@ -414,6 +429,15 @@ function hasRequiredStaffSession(requiredRole: 'ADMIN' | 'HOST' | 'DRIVER' | nul
     if (!session.token) return false
     if (requiredRole === 'HOST') return roles.includes('HOST') || roles.includes('SELLER')
     return roles.includes(requiredRole)
+  } catch {
+    return false
+  }
+}
+
+function hasStaffToken() {
+  try {
+    const raw = authStorage.getItem('sybnb.v6.staffSession')
+    return Boolean(raw && (JSON.parse(raw) as { token?: string }).token)
   } catch {
     return false
   }

@@ -39,6 +39,8 @@ try {
     ['PLATFORM_SETUP', 'Confirm Radio Mailo station onboarding steps', 'radio_mailo', 'LOW', 'NONE', 10, null],
     ['DOCUMENT_REVIEW', 'Review tax registration document', null, 'NORMAL', 'LOW', 4, owner.id],
     ['ACCESS_REQUEST', 'Review contractor access expiry', null, 'LOW', 'NONE', -3, owner.id],
+    // 5G: a deliberately long title to exercise the two-line clamp on phones
+    ['DOCUMENT_REVIEW', 'Review the renewed commercial kitchen inspection certificate and the insurance documents submitted by the restaurant owner during onboarding', 'sr_restaurants', 'NORMAL', 'LOW', 2, owner.id],
   ]
   const created = []
   for (const [type, title, plat, priority, risk, dueDays, assigned] of items) {
@@ -50,10 +52,12 @@ try {
   const done = created[4]
   await s.http.patch(A(`/work/items/${done.id}`), { status: 'DONE' })
   // Back-date creation times so "age" is meaningful.
-  const ageHours = [3, 30, 52, 6, 120, 1, 26, 70, 9, 200, 15, 80]
+  const ageHours = [3, 30, 52, 6, 120, 1, 26, 70, 9, 200, 15, 80, 5]
   for (let i = 0; i < created.length; i += 1) await p.workItem.update({ where: { id: created[i].id }, data: { createdAt: new Date(Date.now() - ageHours[i] * 3600_000) } })
   await s.http.post(A('/comments'), { entityType: 'work_item', entityId: created[0].id, body: 'Licence number matches the registry extract. Waiting on the second page of the scan.' })
   await s.http.patch(A(`/work/items/${created[0].id}`), { status: 'IN_PROGRESS' })
+  await s.http.patch(A(`/work/items/${created[0].id}`), { priority: 'HIGH', assignedUserId: owner.id })
+  await s.http.patch(A(`/work/items/${created[5].id}`), { status: 'BLOCKED' })
 
   // Parties: one person holding several roles on different platforms, plus a company.
   const mk = async (body) => (await s.http.post(A('/parties'), body)).json.id
@@ -76,7 +80,7 @@ try {
   const platCodes = ctx.platforms.map((x) => x.code)
   for (const path of ['/me', '/context', '/command-center', '/health', '/work/summary', '/notifications?pageSize=8']) await grab(path)
   for (const c of platCodes) await grab(`/platforms/${c}`)
-  for (const v of ['mine', 'team', 'unassigned', 'priority', 'overdue', 'done']) await grab(`/work/items?view=${v}&page=1&pageSize=25`)
+  for (const v of ['mine', 'team', 'unassigned', 'priority', 'overdue', 'blocked', 'done']) await grab(`/work/items?view=${v}&page=1&pageSize=25`)
   await grab('/work/items?view=all&pageSize=100')
   await grab('/audit/events?pageSize=8')
   await grab('/parties?page=1&pageSize=25')
@@ -87,6 +91,9 @@ try {
   await grab(`/comments?entityType=work_item&entityId=${created[0].id}`)
   await grab(`/timeline?entityType=work_item&entityId=${created[0].id}`)
   await grab('/search?q=layla')
+  // 5G: the order page reads the real audit trail for the order id; record the two ids the review screens use
+  for (const oid of ['00000000-0000-4000-8000-000000000001', 'fx-1001']) await grab(`/audit/events?entityType=restaurant_order&entityId=${oid}&pageSize=10`)
+  await grab('/work/items?view=mine&q=licence&page=1&pageSize=25')
   fs.writeFileSync(out, JSON.stringify({ recordedAt: new Date().toISOString(), ids: { layla, firstWork: created[0].id, owner: owner.id }, rec }, null, 1))
   console.log('recorded', Object.keys(rec).length, 'responses; party roles:', detail.roles?.length)
   const bad = Object.entries(rec).filter(([, v]) => v.status !== 200).map(([k, v]) => `${k}=${v.status}`)

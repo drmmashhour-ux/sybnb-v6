@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { AdminApiError, adminFetch, qs, useAdminGet, type Comment, type TimelineEvent } from '../api'
 import { dateTime, initials } from '../format'
+import { describeError, STATE_LABEL, type StateKind } from '../states'
+import { formatEvent } from '../events'
 
 /* ---------- navigation helper (hash router) ---------- */
 export function Link({ to, children, className, ...rest }: { to: string; children: ReactNode; className?: string } & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href'>) {
@@ -33,14 +35,14 @@ export function RiskBadge({ risk }: { risk: string | null | undefined }) {
 }
 
 /* ---------- page header, entity header ---------- */
-export function PageHeader({ title, subtitle, crumbs, actions, identity }: { title?: ReactNode; subtitle?: ReactNode; crumbs?: Array<{ label: string; to?: string }>; actions?: ReactNode; identity?: boolean }) {
+export function PageHeader({ title, subtitle, crumbs, actions, identity, hideCrumbsOnPhone }: { title?: ReactNode; subtitle?: ReactNode; crumbs?: Array<{ label: string; to?: string }>; actions?: ReactNode; identity?: boolean; hideCrumbsOnPhone?: boolean }) {
   return (
     <header className="adm-ph">
       <div className={identity ? 'adm-identity' : undefined}>
         {identity ? <span className="adm-identity-bar" aria-hidden="true" /> : null}
         <div>
           {crumbs && crumbs.length > 0 ? (
-            <nav className="adm-crumbs" aria-label="Breadcrumb">
+            <nav className={`adm-crumbs${hideCrumbsOnPhone ? ' hide-phone' : ''}`} aria-label="Breadcrumb">
               {crumbs.map((c, i) => (<span key={c.label}>{i > 0 ? ' / ' : ''}{c.to ? <Link to={c.to}>{c.label}</Link> : c.label}</span>))}
             </nav>
           ) : null}
@@ -94,28 +96,36 @@ export function PlatformCard({ name, status, statusLabel, attention, href, note 
   )
 }
 
-export function TaskCard({ title, meta, onOpen, badges }: { title: string; meta: ReactNode; onOpen: () => void; badges: ReactNode }) {
+/** Scan order: title, platform, priority/status (+ the few critical flags), then quiet metadata. */
+export function TaskCard({ title, platform, meta, onOpen, badges }: { title: string; platform?: string; meta: ReactNode; onOpen: () => void; badges: ReactNode }) {
   return (
-    <button type="button" className="adm-card adm-card-b" style={{ width: '100%', textAlign: 'left', cursor: 'pointer', display: 'block' }} onClick={onOpen}>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>{badges}</div>
-      <div style={{ fontWeight: 600 }}>{title}</div>
-      <div className="adm-note" style={{ marginTop: 4 }}>{meta}</div>
+    <button type="button" className="adm-task" onClick={onOpen}>
+      <span className="adm-task-title">{title}</span>
+      {platform ? <span className="adm-task-plat">{platform}</span> : null}
+      <span className="adm-task-badges">{badges}</span>
+      <span className="adm-task-meta">{meta}</span>
     </button>
   )
 }
 
 /* ---------- states ---------- */
-export function EmptyState({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
-  return <div className="adm-empty" role="status"><h3>{title}</h3>{children ? <p>{children}</p> : null}{action}</div>
-}
-export function ErrorState({ error, onRetry }: { error: AdminApiError | Error; onRetry?: () => void }) {
-  const status = (error as AdminApiError).status
-  const title = status === 401 ? 'Your session has ended' : status === 403 ? 'You do not have access to this' : status === 404 ? 'Not found' : 'Something went wrong'
-  const text = status === 403 ? 'Your role does not include this area. Nothing was changed.' : status === 401 ? 'Sign in again to continue.' : error.message
+export function EmptyState({ title, children, action, kind }: { title: string; children?: ReactNode; action?: ReactNode; kind?: StateKind }) {
   return (
-    <div className="adm-empty is-error" role="alert">
-      <h3>{title}</h3><p>{text}</p>
-      {onRetry && status !== 403 ? <button type="button" className="adm-btn" onClick={onRetry}>Try again</button> : null}
+    <div className="adm-empty" role="status" data-state-kind={kind}>
+      {kind ? <span className="adm-state-tag">{STATE_LABEL[kind]}</span> : null}
+      <h3>{title}</h3>{children ? <p>{children}</p> : null}{action}
+    </div>
+  )
+}
+/** Distinguishes: no permission, not found, service unavailable, not implemented, signed out, other. */
+export function ErrorState({ error, onRetry }: { error: AdminApiError | Error; onRetry?: () => void }) {
+  const e = error as AdminApiError
+  const d = describeError(e.status ?? -1, e.code, error.message)
+  return (
+    <div className={`adm-empty is-error${d.kind === 'no-permission' ? ' is-denied' : ''}`} role="alert" data-state-kind={d.kind}>
+      <span className="adm-state-tag">{STATE_LABEL[d.kind]}</span>
+      <h3>{d.title}</h3><p>{d.text}</p>
+      {onRetry && d.retry ? <Button onClick={onRetry}>Try again</Button> : null}
     </div>
   )
 }
@@ -128,11 +138,57 @@ export function LoadingSkeleton({ rows = 5, label = 'Loading' }: { rows?: number
   )
 }
 
+/* ---------- buttons: one hierarchy used everywhere ----------
+   primary   = the single main action on a screen         secondary = routine actions (default)
+   tertiary  = low-emphasis text action                   danger    = destructive / hard-to-undo (always confirmed) */
+export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'danger'
+export function Button({ variant = 'secondary', className, type, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
+  return <button type={type ?? 'button'} className={`adm-btn adm-btn-${variant}${className ? ` ${className}` : ''}`} {...rest} />
+}
+
+/* ---------- connected / not yet connected ---------- */
+export function ConnectionTag({ state }: { state: 'connected' | 'fixture' | 'pending' }) {
+  if (state === 'connected') return <StatusBadge tone="pos">Connected</StatusBadge>
+  if (state === 'fixture') return <StatusBadge tone="warn">Fixture data</StatusBadge>
+  return <StatusBadge tone="neu">Not yet connected</StatusBadge>
+}
+
+/** Actions that are not available yet. They are rows of text, NOT buttons, so nothing looks clickable and does nothing. */
+export type PlannedAction = { key: string; label: string; reason: string; danger?: boolean }
+export function PlannedActions({ actions, label }: { actions: PlannedAction[]; label: string }) {
+  return (
+    <ul className="adm-planned" aria-label={label}>
+      {actions.map((a) => (
+        <li key={a.key} className={a.danger ? 'is-danger' : undefined}><span>{a.label}</span><span className="adm-state-tag">{a.reason}</span></li>
+      ))}
+    </ul>
+  )
+}
+
 /* ---------- tabs (arrow-key navigation, roving tabindex) ---------- */
 export type TabDef = { key: string; label: string; count?: number | null; hidden?: boolean }
 export function Tabs({ tabs, value, onChange, label, idPrefix }: { tabs: TabDef[]; value: string; onChange: (k: string) => void; label: string; idPrefix: string }) {
   const list = tabs.filter((t) => !t.hidden)
   const refs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const strip = useRef<HTMLDivElement>(null)
+  const [edges, setEdges] = useState({ left: false, right: false })
+  const measure = useCallback(() => {
+    const el = strip.current
+    if (el) setEdges({ left: el.scrollLeft > 2, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 2 })
+  }, [])
+  useEffect(() => { measure(); window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure) }, [measure, list.length])
+  // The selected tab is always brought fully into view, so it can never sit clipped off-screen.
+  // Keep the selected tab fully inside the strip by moving the strip's own scroll position. scrollIntoView is avoided on
+  // purpose: it moves the browser's keyboard starting point, so the first Tab press would skip past the skip link.
+  useEffect(() => {
+    const el = refs.current[value]; const box = strip.current
+    if (el && box) {
+      const a = el.getBoundingClientRect(); const b = box.getBoundingClientRect()
+      if (a.left < b.left) box.scrollLeft -= b.left - a.left + 8
+      else if (a.right > b.right) box.scrollLeft += a.right - b.right + 8
+    }
+    measure()
+  }, [value, measure])
   const onKey = (e: React.KeyboardEvent) => {
     const i = list.findIndex((t) => t.key === value)
     let n = -1
@@ -143,12 +199,14 @@ export function Tabs({ tabs, value, onChange, label, idPrefix }: { tabs: TabDef[
     if (n >= 0) { e.preventDefault(); onChange(list[n].key); refs.current[list[n].key]?.focus() }
   }
   return (
-    <div className="adm-tabs" role="tablist" aria-label={label} onKeyDown={onKey}>
-      {list.map((t) => (
-        <button key={t.key} ref={(el) => { refs.current[t.key] = el }} type="button" role="tab" id={`${idPrefix}-tab-${t.key}`} aria-controls={`${idPrefix}-panel`} aria-selected={t.key === value} tabIndex={t.key === value ? 0 : -1} className="adm-tab" onClick={() => onChange(t.key)}>
-          {t.label}{t.count !== undefined && t.count !== null ? <span className="adm-tab-n">{t.count}</span> : null}
-        </button>
-      ))}
+    <div className="adm-tabs-wrap" data-more-left={edges.left} data-more-right={edges.right}>
+      <div className="adm-tabs" role="tablist" aria-label={label} onKeyDown={onKey} ref={strip} onScroll={measure}>
+        {list.map((t) => (
+          <button key={t.key} ref={(el) => { refs.current[t.key] = el }} type="button" role="tab" id={`${idPrefix}-tab-${t.key}`} aria-controls={`${idPrefix}-panel`} aria-selected={t.key === value} tabIndex={t.key === value ? 0 : -1} className="adm-tab" onClick={() => onChange(t.key)}>
+            {t.label}{t.count !== undefined && t.count !== null ? <span className="adm-tab-n">{t.count}</span> : null}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -172,16 +230,14 @@ export type TimelineRow = { id: string; at: string | null; title: string; detail
 export function Timeline({ rows, label }: { rows: TimelineRow[]; label: string }) {
   return (
     <ol className="adm-tl" aria-label={label}>
-      {rows.map((r) => (<li key={r.id}><b>{r.title}</b>{r.detail ? <span className="adm-muted"> — {r.detail}</span> : null}<time dateTime={r.at ?? undefined}>{dateTime(r.at)}</time></li>))}
+      {rows.map((r) => (<li key={r.id}><b>{r.title}</b>{r.detail ? <span className="adm-muted"> · {r.detail}</span> : null}<time dateTime={r.at ?? undefined}>{dateTime(r.at)}</time></li>))}
     </ol>
   )
 }
 
-/* ---------- dialog focus management: side panel ---------- */
+/* ---------- dialog focus management: shared by the side panel and the confirm dialog ---------- */
 const FOCUSABLE = 'a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])'
-export function SidePanel({ open, onClose, title, subtitle, children }: { open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const titleId = useId()
+function useDialogFocus(open: boolean, ref: React.RefObject<HTMLElement | null>, onClose: () => void) {
   useEffect(() => {
     if (!open) return
     const prev = document.activeElement as HTMLElement | null
@@ -198,17 +254,44 @@ export function SidePanel({ open, onClose, title, subtitle, children }: { open: 
     }
     document.addEventListener('keydown', onKey, true)
     return () => { document.removeEventListener('keydown', onKey, true); prev?.focus?.() }
-  }, [open, onClose])
+  }, [open, onClose, ref])
+}
+export function SidePanel({ open, onClose, title, subtitle, children, footer, variant = 'drawer' }: { open: boolean; onClose: () => void; title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode; variant?: 'drawer' | 'sheet' }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogFocus(open, ref, onClose)
   if (!open) return null
   return (
     <>
       <div className="adm-panel-scrim" onClick={onClose} aria-hidden="true" />
-      <div className="adm-panel" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref}>
+      <div className={`adm-panel${variant === 'sheet' ? ' is-sheet' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref}>
         <div className="adm-panel-h">
           <div><h2 id={titleId}>{title}</h2>{subtitle ? <div className="adm-note" style={{ marginTop: 4 }}>{subtitle}</div> : null}</div>
           <button type="button" className="adm-iconbtn" data-autofocus aria-label="Close panel" onClick={onClose}>✕</button>
         </div>
         <div className="adm-panel-b">{children}</div>
+        {footer ? <div className="adm-panel-f">{footer}</div> : null}
+      </div>
+    </>
+  )
+}
+
+/** Confirmation for hard-to-undo actions. Focus starts on Cancel, Esc cancels, the consequence is spelled out. */
+export function ConfirmDialog({ open, title, children, confirmLabel, onConfirm, onCancel, danger = true, busy = false }: { open: boolean; title: string; children: ReactNode; confirmLabel: string; onConfirm: () => void; onCancel: () => void; danger?: boolean; busy?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const titleId = useId(); const descId = useId()
+  useDialogFocus(open, ref, onCancel)
+  if (!open) return null
+  return (
+    <>
+      <div className="adm-panel-scrim" onClick={onCancel} aria-hidden="true" />
+      <div className="adm-confirm" role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} ref={ref}>
+        <h2 id={titleId}>{title}</h2>
+        <div id={descId} className="adm-confirm-body">{children}</div>
+        <div className="adm-actions" style={{ justifyContent: 'flex-end' }}>
+          <Button data-autofocus onClick={onCancel}>Cancel</Button>
+          <Button variant={danger ? 'danger' : 'primary'} className="is-solid" disabled={busy} onClick={onConfirm}>{busy ? 'Working…' : confirmLabel}</Button>
+        </div>
       </div>
     </>
   )
@@ -236,7 +319,7 @@ export function ActionMenu({ label, actions }: { label: string; actions: MenuAct
   const id = useId()
   return (
     <div className="adm-menu" ref={wrap}>
-      <button type="button" ref={btn} className="adm-btn" aria-haspopup="menu" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>{label} ▾</button>
+      <button type="button" ref={btn} className="adm-btn adm-btn-secondary" aria-haspopup="menu" aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>{label} ▾</button>
       {open ? (
         <div className="adm-pop" role="menu" id={id}>
           {actions.map((a) => (
@@ -275,7 +358,7 @@ export function CommentPanel({ entityType, entityId }: { entityType: string; ent
         <label className="adm-sr" htmlFor={`cmt-${entityId}`}>Add an internal comment</label>
         <textarea id={`cmt-${entityId}`} className="adm-input" style={{ width: '100%', height: 64, padding: 8 }} value={body} maxLength={4000} onChange={(e) => setBody(e.target.value)} placeholder="Add an internal comment" />
         {err ? <div className="adm-note" role="alert" style={{ color: 'var(--adm-crit)' }}>{err}</div> : null}
-        <div style={{ marginTop: 6 }}><button className="adm-btn" type="submit" disabled={busy || !body.trim()}>{busy ? 'Posting…' : 'Add comment'}</button></div>
+        <div style={{ marginTop: 6 }}><button className="adm-btn adm-btn-secondary" type="submit" disabled={busy || !body.trim()}>{busy ? 'Posting…' : 'Add comment'}</button></div>
       </form>
     </section>
   )
@@ -287,5 +370,5 @@ export function EntityTimeline({ entityType, entityId }: { entityType: string; e
   if (q.loading) return <LoadingSkeleton rows={3} label="Loading activity" />
   if (q.error) return <ErrorState error={q.error} onRetry={q.reload} />
   if (!q.data || q.data.events.length === 0) return <p className="adm-note">No recorded activity yet.</p>
-  return <Timeline label="Activity" rows={q.data.events.map((e) => ({ id: e.id, at: e.createdAt, title: e.summary }))} />
+  return <Timeline label="Activity" rows={q.data.events.map((e) => { const f = formatEvent(e, entityType); return { id: e.id, at: e.createdAt, title: f.title, detail: f.detail } })} />
 }

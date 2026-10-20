@@ -125,6 +125,6 @@ export type PartyDetail = {
   supportCases: Array<{ id: string; caseNumber: number; summary: string; status: string }>
 }
 export type Comment = { id: string; authorId: string; authorName: string | null; body: string; createdAt: string; resolvedAt: string | null }
-export type TimelineEvent = { id: string; eventType: string; summary: string; actorUserId: string | null; createdAt: string }
+export type TimelineEvent = { id: string; eventType: string; summary: string; actorUserId: string | null; actorName?: string | null; change?: import('./events').EventChange | null; createdAt: string }
 export type NotificationsPage = Page<{ id: string; type: string; title: string; body: string | null; readAt: string | null; createdAt: string }> & { unread: number }
 export type SearchResults = { query: string; results: Record<string, Array<{ id: string; title: string; subtitle: string; route: string }>> }

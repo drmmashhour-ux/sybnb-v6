@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useAdminGet, type ContextInfo, type Me, type NotificationsPage, type SearchResults, adminFetch, qs, type WorkSummary } from '../api'
 import { visibleNav, isConsolePath, type NavItem } from '../nav'
 import { splitPath, initials, ageLabel } from '../format'
+import { legalEntityView, pageScope } from '../context'
+import { ContextPanel } from './ContextPanel'
 import { EmptyState, ErrorState, LoadingSkeleton, Link, SidePanel, usePopover } from './ui'
 import { signOutStaff } from '../../shared/api/platformApi'
 
@@ -65,33 +67,27 @@ function Sidebar({ pathname, open, onClose, workCount }: { pathname: string; ope
   )
 }
 
-/* ---------- global context switcher ---------- */
-function ContextSwitcher() {
+/* ---------- global context switcher ----------
+   Honest by construction: it offers only what the server really applies.
+   - Legal entity: selection does not exist on the server, so it is shown as information, never as a choice.
+   - Platform: a real choice only where the page sends it with its requests (Command Center, My Work).
+     Elsewhere the radios are disabled and the page says what it actually covers. */
+export function ContextSwitcher({ pathname }: { pathname: string }) {
   const c = useConsole()
   const { open, setOpen, wrap, btn } = usePopover()
-  const org = c.ctx?.organizations[0]
-  const le = c.ctx?.legalEntities[0]
+  const legal = legalEntityView(c.ctx)
+  const scope = pageScope(pathname)
   const authorized = c.me.platforms.filter((p) => p.authorized)
-  const label = c.platform === 'ALL' ? 'All platforms' : authorized.find((p) => p.code === c.platform)?.displayName ?? c.platform
+  const current = scope.kind === 'platform-filter' ? (c.platform === 'ALL' ? 'All platforms' : authorized.find((p) => p.code === c.platform)?.displayName ?? c.platform) : scope.label
   return (
     <div className="adm-pop-wrap" ref={wrap}>
       <button type="button" ref={btn} className="adm-ctx" aria-haspopup="true" aria-expanded={open} onClick={() => setOpen(!open)}>
-        <span>{le?.name ?? org?.name ?? 'Organization'}</span><b>{label}</b><span aria-hidden="true">▾</span>
-        <span className="adm-sr">Change platform context</span>
+        <span className="adm-ctx-legal">{legal.label}</span><b className="adm-ctx-full">{current}</b><b className="adm-ctx-short" aria-hidden="true">{current === 'All platforms' ? 'All' : current}</b>{scope.kind === 'platform-filter' ? null : <span className="adm-ctx-fixed">fixed</span>}<span aria-hidden="true" className="adm-ctx-caret">▾</span>
+        <span className="adm-sr">{scope.kind === 'platform-filter' ? `Context: ${current}. Change platform filter` : `Context: ${current}. Shows what this page covers`}</span>
       </button>
       {open ? (
-        <div className="adm-pop" style={{ left: 0, top: 40 }} role="group" aria-label="Context">
-          <div className="adm-pop-title">Legal entity</div>
-          <div className="adm-pop-item" style={{ cursor: 'default' }}>{le?.name ?? '—'}<small>{org?.name ?? ''}</small></div>
-          <div className="adm-pop-title">Platform</div>
-          <div role="radiogroup" aria-label="Platform scope">
-            {[{ code: 'ALL', displayName: 'All platforms' }, ...authorized].map((p) => (
-              <button key={p.code} type="button" role="radio" aria-checked={c.platform === p.code} className="adm-pop-item" onClick={() => { c.setPlatform(p.code); setOpen(false) }}>
-                {c.platform === p.code ? '✓ ' : '   '}{p.displayName}
-              </button>
-            ))}
-          </div>
-          <div className="adm-note" style={{ padding: '6px 10px' }}>Only platforms you are authorized for are listed.</div>
+        <div className="adm-pop" style={{ left: 0, top: 40 }}>
+          <ContextPanel legal={legal} scope={scope} platform={c.platform} platforms={authorized} onPick={(code) => { c.setPlatform(code); setOpen(false) }} />
         </div>
       ) : null}
     </div>
@@ -208,7 +204,16 @@ export function AppShell({ path, children }: { path: string; children: ReactNode
     if (meQ.data && platform !== 'ALL' && !meQ.data.platforms.some((p) => p.authorized && p.code === platform)) setPlatform('ALL')
   }, [meQ.data, platform, setPlatform])
 
-  if (meQ.loading) return <div className="adm" dir="ltr" lang="en" style={{ padding: 32 }}><LoadingSkeleton rows={4} label="Loading console" /></div>
+  if (meQ.loading) {
+    return (
+      <div className="adm" dir="ltr" lang="en">
+        <div className="adm-shell">
+          <aside className="adm-side" aria-hidden="true"><div className="adm-brand"><span className="adm-brand-mark">S</span><span>SYBNB<small>Admin console</small></span></div></aside>
+          <div className="adm-main"><header className="adm-top" aria-hidden="true" /><main id="adm-main" className="adm-content" tabIndex={-1}><LoadingSkeleton rows={5} label="Loading console" /></main></div>
+        </div>
+      </div>
+    )
+  }
   if (meQ.error || !meQ.data) {
     return (
       <div className="adm" dir="ltr" lang="en" style={{ padding: 32, maxWidth: 560 }}>
@@ -234,7 +239,7 @@ export function AppShell({ path, children }: { path: string; children: ReactNode
           <div className="adm-main">
             <header className="adm-top">
               <button type="button" className="adm-iconbtn adm-menu-btn" aria-label="Open navigation" aria-expanded={menu} aria-controls="adm-sidebar" onClick={() => setMenu(true)}>☰</button>
-              <ContextSwitcher />
+              <ContextSwitcher pathname={pathname} />
               <div className="adm-top-spacer" />
               <button type="button" className="adm-search" onClick={() => setSearching(true)} aria-label="Search">
                 <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="m11 11 3.5 3.5" stroke="currentColor" strokeWidth="1.6" /></svg>

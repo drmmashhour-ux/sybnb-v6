@@ -67,8 +67,8 @@ export function Pager({ label, page, totalPages, total, onPage }: { label: strin
     <nav className="adm-pager" aria-label={`${label} pagination`}>
       <span aria-live="polite">{total} result{total === 1 ? '' : 's'} · page {page} of {totalPages}</span>
       <span style={{ display: 'flex', gap: 6 }}>
-        <button type="button" className="adm-btn" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</button>
-        <button type="button" className="adm-btn" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>Next</button>
+        <button type="button" className="adm-btn adm-btn-secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</button>
+        <button type="button" className="adm-btn adm-btn-secondary" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>Next</button>
       </span>
     </nav>
   )

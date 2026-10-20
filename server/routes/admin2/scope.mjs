@@ -27,6 +27,8 @@ export async function recordFacts(platformId, extra = {}) {
  * authorized per record instead). Throws 403 when the user can see nothing.
  */
 export async function visibleScope(r, code) {
+  // Step 5G: an anonymous call used to crash with a 500 further down; it is an authentication failure, answered as one.
+  if (!r.auth?.user) throw err(401, 'AUTH_REQUIRED', 'Authentication required.')
   const snap = await loadSnapshot(r.auth)
   const { org, platforms } = await registryContext()
   const ok = async (facts) => (await decide(snap, r.auth, code, { type: 'list', facts }, { requestId: r.requestId })).decision === 'ALLOW'

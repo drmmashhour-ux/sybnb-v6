@@ -59,6 +59,9 @@ async function entityAccess(type, id) {
   return { spec, platformId: rec.platformId }
 }
 
+// Prisma does not escape LIKE wildcards: without this, searching "%" or "_" would match every row.
+const likeEscape = (v) => String(v).replace(/[\\%_]/g, '\\$&')
+
 export function registerWork(router) {
   // ---- My Work ---------------------------------------------------------------------------------
   router.get('/work/items', async (r) => {
@@ -73,9 +76,25 @@ export function registerWork(router) {
       overdue: { dueAt: { lt: now }, ...open }, priority: { priority: { in: ['HIGH', 'URGENT'] }, ...open }, blocked: { status: 'BLOCKED' }, done: { status: 'DONE' }, all: {},
     }[view]
     if (!viewWhere) throw badRequest('Unknown view.', 'VIEW_UNKNOWN')
+    // Step 5G: optional text search. It only ever NARROWS the already-authorized set (scope.where is ANDed below),
+    // and it uses fields the queue really has: title, task type, and the platform's display name.
+    // Linked-entity names are not indexed on work items, so they are deliberately not searched.
+    const search = String(r.query.q ?? '').trim()
+    if (search && (search.length < 2 || search.length > 80)) throw badRequest('Search text must be 2 to 80 characters.', 'SEARCH_INVALID')
+    let searchWhere = {}
+    if (search) {
+      const needle = search.toLowerCase().replace(/[_\s]+/g, ' ').trim()
+      const typeHits = needle.length >= 2 ? WORK_TYPES.filter((t) => t.toLowerCase().replace(/_/g, ' ').includes(needle)) : []
+      const platformHits = await db().platform.findMany({ where: { displayName: { contains: likeEscape(search), mode: 'insensitive' } }, select: { id: true }, take: 20 })
+      searchWhere = { OR: [
+        { title: { contains: likeEscape(search), mode: 'insensitive' } },
+        ...(typeHits.length ? [{ type: { in: typeHits } }] : []),
+        ...(platformHits.length ? [{ platformId: { in: platformHits.map((x) => x.id) } }] : []),
+      ] }
+    }
     const where = {
       AND: [
-        scope.where, viewWhere,
+        scope.where, viewWhere, searchWhere,
         WORK_TYPES.includes(r.query.type) ? { type: r.query.type } : {}, PRIORITIES.includes(r.query.priority) ? { priority: r.query.priority } : {},
         WORK_STATUSES.includes(r.query.status) ? { status: r.query.status } : {}, RISKS.includes(r.query.risk) ? { risk: r.query.risk } : {},
         r.query.platformId ? { platformId: String(r.query.platformId) } : {},
@@ -294,7 +313,26 @@ export function registerWork(router) {
     const { spec, platformId } = await entityAccess(String(r.query.entityType ?? ''), String(r.query.entityId ?? ''))
     await requireRecord(r, spec.read, platformId, String(r.query.entityType), String(r.query.entityId))
     const rows = await db().timelineEvent.findMany({ where: { entityType: String(r.query.entityType), entityId: String(r.query.entityId) }, orderBy: { createdAt: 'desc' }, take: 100 })
-    r.ok({ events: rows.map((e) => ({ id: e.id, eventType: e.eventType, summary: e.summary, actorUserId: e.actorUserId, createdAt: e.createdAt })) })
+    // Step 5G: presentation helpers only. Display names (never email) for the actor and for an assignment change, plus
+    // the status / priority / assignee change of a work-item update, so the console can write business language.
+    // The stored event and its raw `detail` are untouched, and the same record-level authorization applied above.
+    const changeOf = (e) => {
+      if (e.entityType !== 'work_item' || e.eventType !== 'updated' || !e.detail || typeof e.detail !== 'object') return null
+      const from = e.detail.from ?? {}; const to = e.detail.to ?? {}; const out = {}
+      for (const k of ['status', 'priority']) if (typeof to[k] === 'string' && /^[A-Z_]{2,20}$/.test(to[k])) out[k] = { from: typeof from[k] === 'string' ? from[k] : null, to: to[k] }
+      if ('assignedUserId' in to) out.assigned = { fromId: from.assignedUserId ?? null, toId: to.assignedUserId ?? null }
+      return Object.keys(out).length ? out : null
+    }
+    const changes = new Map(rows.map((e) => [e.id, changeOf(e)]))
+    const nameIds = new Set()
+    for (const e of rows) { if (e.actorUserId) nameIds.add(e.actorUserId); const a = changes.get(e.id)?.assigned; if (a?.fromId) nameIds.add(a.fromId); if (a?.toId) nameIds.add(a.toId) }
+    const people = nameIds.size ? await db().user.findMany({ where: { id: { in: [...nameIds] } }, select: { id: true, displayName: true } }) : []
+    const nameOf = new Map(people.map((u) => [u.id, u.displayName]))
+    r.ok({ events: rows.map((e) => {
+      const c = changes.get(e.id)
+      const change = c ? { ...(c.status ? { status: c.status } : {}), ...(c.priority ? { priority: c.priority } : {}), ...(c.assigned ? { assigned: { fromName: c.assigned.fromId ? nameOf.get(c.assigned.fromId) ?? null : null, toName: c.assigned.toId ? nameOf.get(c.assigned.toId) ?? null : null, unassigned: !c.assigned.toId } } : {}) } : null
+      return { id: e.id, eventType: e.eventType, summary: e.summary, actorUserId: e.actorUserId, actorName: e.actorUserId ? nameOf.get(e.actorUserId) ?? null : null, change, createdAt: e.createdAt }
+    }) })
   })
 }
 

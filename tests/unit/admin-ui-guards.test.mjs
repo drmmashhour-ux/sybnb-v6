@@ -41,15 +41,20 @@ test('the console never writes tokens or credentials anywhere', () => {
   assert.doesNotMatch(src['src/admin/api.ts'], /setItem/, 'api.ts only reads the token')
 })
 
-test('operational actions that have no reviewed backend stay disabled', () => {
+test('operational actions that have no reviewed backend are not buttons, and the order page performs no writes', () => {
+  // Step 5G: unavailable actions are plain text rows (PlannedActions) with a reason, so nothing looks clickable and does nothing.
   const s = src['src/admin/pages/OrderDetail.tsx']
-  for (const a of ['Contact Restaurant', 'Contact Courier', 'Open Support Case', 'Request Cancellation', 'Reassign Delivery']) assert.match(s, new RegExp(a))
-  assert.match(s, /aria-disabled="true"/); assert.doesNotMatch(s, /adminFetch|useAdminGet/, 'the order page performs no writes and loads no order API that does not exist')
+  for (const a of ['Contact restaurant', 'Contact courier', 'Open support case', 'Request cancellation', 'Reassign delivery']) assert.match(s, new RegExp(a))
+  assert.match(s, /PlannedActions/); assert.doesNotMatch(s, /<button|<Button/, 'no button anywhere on the order page')
+  assert.doesNotMatch(s, /adminFetch/, 'no writes')
+  const reads = [...s.matchAll(/useAdminGet[^(]*\(\s*`([^`]*)`/g)].map((m) => m[1])
+  assert.ok(reads.length >= 1 && reads.every((r) => r.startsWith('/audit/events')), `only the real audit trail is read: ${reads.join(', ')}`)
+  assert.match(s, /Requires delivery module/); assert.match(s, /Requires ordering module/)
 })
 
 test('every interactive icon-only control has an accessible name', () => {
   const shell = src['src/admin/components/shell.tsx']
-  for (const label of ['Open navigation', 'Search', 'Notifications', 'Account menu for', 'Change platform context']) assert.match(shell, new RegExp(label))
+  for (const label of ['Open navigation', 'Search', 'Notifications', 'Account menu for', 'Context: ']) assert.match(shell, new RegExp(label))
   assert.match(shell, /Skip to content/)
   assert.match(shell, /dir="ltr" lang="en"/, 'the console must not inherit the consumer site direction')
 })

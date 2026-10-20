@@ -94,7 +94,7 @@ export async function decide(snap, ctx, code, resource = {}, options = {}) {
 
 /**
  * @param ctx        result of getAuthContext(req): { user, roles, sessionId }
- * @param code       permission code, e.g. 'iam.user.read'
+ * @param code       permission code, e.g. 'user.view'
  * @param resource   { type, id?, platform?, platforms?, facts? } -- facts carry the resource's scope facts
  * @param options    { requestId, correlationId, tx, evidence (force), action, now, auditEventId, approvalSnapshotId }
  */

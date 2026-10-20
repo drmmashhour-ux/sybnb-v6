@@ -50,9 +50,9 @@ const foreignPlatform = await p.platform.create({ data: { code: `s5t_${run}`, di
 
 await t('deny by default: a user with no role assignment is denied everything', async () => {
   const u = await mkUser('nobody')
-  const r = await can(ctxOf(u), 'admin.console.access', { type: 'console' })
+  const r = await can(ctxOf(u), 'console.access', { type: 'console' })
   assert.equal(r.decision, 'DENY')
-  await rejects(authorize(ctxOf(u), 'admin.console.access'), /permission/i)
+  await rejects(authorize(ctxOf(u), 'console.access'), /permission/i)
 })
 
 await t('unknown permission code is denied', async () => {
@@ -63,23 +63,23 @@ await t('unknown permission code is denied', async () => {
 })
 
 await t('unauthenticated context is denied (401 via authorize)', async () => {
-  await rejects(authorize(null, 'admin.console.access'), /Authentication required/)
+  await rejects(authorize(null, 'console.access'), /Authentication required/)
 })
 
 await t('Owner with ORGANIZATION scope is allowed a T1 permission and no evidence is forced', async () => {
   const u = await mkUser('owner')
   await assign(u, 'OWNER', [{ kind: 'ORGANIZATION', organizationId: org.id }])
-  const r = await authorize(ctxOf(u), 'iam.user.read', { type: 'user_list', facts: { organizationId: org.id } })
+  const r = await authorize(ctxOf(u), 'user.view', { type: 'user_list', facts: { organizationId: org.id } })
   assert.equal(r.decision, 'ALLOW')
-  assert.equal(r.grant.roleCode, 'OWNER')
-  assert.equal(r.grant.roleVersionNumber, 1)
+  assert.equal(r.grant.roleCode, 'OWNER')  // OWNER v2 is the EFFECTIVE version after the STEP 5A seed
+  assert.equal(r.grant.roleVersionNumber, 2)
 })
 
 await t('STR manager (LEGAL_ENTITY scope) reaches STR but not Marketplace-only data (wrong platform)', async () => {
   const u = await mkUser('strmgr')
   await assign(u, 'STR_MANAGER', [{ kind: 'LEGAL_ENTITY', legalEntityId: le.id }])
-  const strShell = await can(ctxOf(u), 'platform.shell.read', { type: 'platform_shell', platform: 'str', facts: { platformCode: 'str' } })
-  const mktShell = await can(ctxOf(u), 'platform.shell.read', { type: 'platform_shell', platform: 'marketplace', facts: { platformCode: 'marketplace' } })
+  const strShell = await can(ctxOf(u), 'platform.view', { type: 'platform_shell', platform: 'str', facts: { platformCode: 'str' } })
+  const mktShell = await can(ctxOf(u), 'platform.view', { type: 'platform_shell', platform: 'marketplace', facts: { platformCode: 'marketplace' } })
   assert.equal(strShell.decision, 'ALLOW')
   assert.equal(mktShell.decision, 'DENY')
   assert.equal(mktShell.reason, 'PLATFORM_NOT_COVERED')
@@ -88,10 +88,10 @@ await t('STR manager (LEGAL_ENTITY scope) reaches STR but not Marketplace-only d
 await t('wrong legal entity is denied even with full platform coverage', async () => {
   const u = await mkUser('foreign')
   await assign(u, 'FINANCE_VIEWER', [{ kind: 'LEGAL_ENTITY', legalEntityId: otherEntity.id }])
-  const r = await can(ctxOf(u), 'fin.shell.read', { type: 'finance_shell', facts: { platformCode: 'str' } })
+  const r = await can(ctxOf(u), 'finance.view', { type: 'finance_shell', facts: { platformCode: 'str' } })
   assert.equal(r.decision, 'DENY')
   assert.equal(r.reason, 'SCOPE_NOT_MATCHED')
-  const own = await can(ctxOf(u), 'fin.shell.read', { type: 'finance_shell', facts: { platformCode: foreignPlatform.code } })
+  const own = await can(ctxOf(u), 'finance.view', { type: 'finance_shell', facts: { platformCode: foreignPlatform.code } })
   assert.equal(own.decision, 'ALLOW')
 })
 
@@ -99,23 +99,23 @@ await t('PROPERTY scope: Property 123 STR records yes, its Syntrise records no, 
   const u = await mkUser('property')
   await assign(u, 'STR_MANAGER', [{ kind: 'PROPERTY', propertyRef: 'prop-123' }])
   const ctx = ctxOf(u)
-  assert.equal((await can(ctx, 'party.party.read', { type: 'reservation', platform: 'str', facts: { platformCode: 'str', propertyRef: 'prop-123' } })).decision, 'ALLOW')
-  assert.equal((await can(ctx, 'party.party.read', { type: 'offer', platform: 'syntrise', facts: { platformCode: 'syntrise', propertyRef: 'prop-123' } })).reason, 'PLATFORM_NOT_COVERED')
-  assert.equal((await can(ctx, 'party.party.read', { type: 'reservation', platform: 'str', facts: { platformCode: 'str', propertyRef: 'prop-456' } })).reason, 'SCOPE_NOT_MATCHED')
+  assert.equal((await can(ctx, 'party.view', { type: 'reservation', platform: 'str', facts: { platformCode: 'str', propertyRef: 'prop-123' } })).decision, 'ALLOW')
+  assert.equal((await can(ctx, 'party.view', { type: 'offer', platform: 'syntrise', facts: { platformCode: 'syntrise', propertyRef: 'prop-123' } })).reason, 'PLATFORM_NOT_COVERED')
+  assert.equal((await can(ctx, 'party.view', { type: 'reservation', platform: 'str', facts: { platformCode: 'str', propertyRef: 'prop-456' } })).reason, 'SCOPE_NOT_MATCHED')
 })
 
 await t('expired and revoked assignments are denied; suspended user is denied', async () => {
   const expired = await mkUser('expired')
   await assign(expired, 'OWNER', [{ kind: 'ORGANIZATION', organizationId: org.id }], { effectiveFrom: new Date('2026-01-01'), effectiveTo: new Date('2026-02-01') })
-  assert.equal((await can(ctxOf(expired), 'iam.user.read', { type: 'u', facts: { organizationId: org.id } })).reason, 'NO_ACTIVE_ASSIGNMENT')
+  assert.equal((await can(ctxOf(expired), 'user.view', { type: 'u', facts: { organizationId: org.id } })).reason, 'NO_ACTIVE_ASSIGNMENT')
   const revoked = await mkUser('revoked')
   const a = await assign(revoked, 'OWNER', [{ kind: 'ORGANIZATION', organizationId: org.id }])
   await p.roleAssignment.update({ where: { id: a.id }, data: { status: 'REVOKED', revokedAt: new Date(), revokedById: revoked.id, revokeReason: 's5 test' } })
-  assert.equal((await can(ctxOf(revoked), 'iam.user.read', { type: 'u', facts: { organizationId: org.id } })).decision, 'DENY')
+  assert.equal((await can(ctxOf(revoked), 'user.view', { type: 'u', facts: { organizationId: org.id } })).decision, 'DENY')
   const susp = await mkUser('suspended')
   await assign(susp, 'OWNER', [{ kind: 'ORGANIZATION', organizationId: org.id }])
   const suspended = await p.user.update({ where: { id: susp.id }, data: { status: 'SUSPENDED' } })
-  assert.equal((await can(ctxOf(suspended), 'iam.user.read', { type: 'u', facts: { organizationId: org.id } })).reason, 'USER_NOT_ACTIVE')
+  assert.equal((await can(ctxOf(suspended), 'user.view', { type: 'u', facts: { organizationId: org.id } })).reason, 'USER_NOT_ACTIVE')
 })
 
 await t('T3/T4: step-up is required (fail closed) and every decision writes hash-chained evidence', async () => {
@@ -124,18 +124,18 @@ await t('T3/T4: step-up is required (fail closed) and every decision writes hash
   const session = await p.userSession.create({ data: { userId: u.id, expiresAt: new Date(Date.now() + 3600_000), issuedAt: new Date(Date.now() - 3600_000) } })
   const ctx = ctxOf(u, { sessionId: session.id })
   const before = await p.authorizationEvidence.count()
-  const stale = await can(ctx, 'iam.role_assignment.assign', { type: 'role_assignment', id: 'x', facts: { organizationId: org.id } }, { requestId: `req-${run}-1` })
+  const stale = await can(ctx, 'access.assign', { type: 'role_assignment', id: 'x', facts: { organizationId: org.id } }, { requestId: `req-${run}-1` })
   assert.equal(stale.reason, 'STEP_UP_REQUIRED')
-  await rejects(authorize(ctx, 'iam.role_assignment.assign', { type: 'role_assignment', facts: { organizationId: org.id } }), /confirm your identity/)
+  await rejects(authorize(ctx, 'access.assign', { type: 'role_assignment', facts: { organizationId: org.id } }), /confirm your identity/)
   await p.userSession.update({ where: { id: session.id }, data: { issuedAt: new Date() } })
-  const fresh = await can(ctx, 'iam.role_assignment.assign', { type: 'role_assignment', id: 'x', facts: { organizationId: org.id } }, { requestId: `req-${run}-2` })
+  const fresh = await can(ctx, 'access.assign', { type: 'role_assignment', id: 'x', facts: { organizationId: org.id } }, { requestId: `req-${run}-2` })
   assert.equal(fresh.decision, 'ALLOW')
   const rows = await p.authorizationEvidence.findMany({ where: { userId: u.id }, orderBy: { sequence: 'asc' } })
   assert.equal(rows.length, 3, 'two denies + one allow all recorded')
   assert.ok((await p.authorizationEvidence.count()) >= before + 3)
   const allow = rows[2]
-  assert.equal(allow.decision, 'ALLOW'); assert.equal(allow.roleCode, 'OWNER'); assert.equal(allow.roleVersionNumber, 1)
-  assert.equal(allow.permissionCode, 'iam.role_assignment.assign'); assert.equal(allow.scopeKind, 'ORGANIZATION')
+  assert.equal(allow.decision, 'ALLOW'); assert.equal(allow.roleCode, 'OWNER'); assert.equal(allow.roleVersionNumber, 2)
+  assert.equal(allow.permissionCode, 'access.assign'); assert.equal(allow.scopeKind, 'ORGANIZATION')
   assert.equal(allow.requestId, `req-${run}-2`); assert.ok(allow.hash && allow.prevHash)
   const chain = await verifyEvidenceChain(p)
   assert.equal(chain.ok, true, JSON.stringify(chain))
@@ -149,7 +149,7 @@ await t('evidence is append-only: UPDATE and DELETE are refused by the database'
 
 await t('published role versions are immutable: membership, content and deletion are refused', async () => {
   const rv = await versionFor('SUPPORT_AGENT')
-  const perm = await p.permissionDefinition.findUnique({ where: { code: 'iam.role.manage' } })
+  const perm = await p.permissionDefinition.findUnique({ where: { code: 'role.manage' } })
   await rejects(p.roleVersionPermission.create({ data: { roleVersionId: rv.id, permissionId: perm.id } }), /DRAFT/)
   await rejects(p.roleVersionPermission.deleteMany({ where: { roleVersionId: rv.id } }), /DRAFT/)
   await rejects(p.roleVersion.update({ where: { id: rv.id }, data: { platformCoverage: ['str'] } }), /immutable/)
@@ -185,14 +185,14 @@ await t('role-version history: FINANCE v1 (Jan-Jun) payment.approve proven in Ma
     await p.roleVersionPermission.createMany({ data: codes.map((c) => ({ roleVersionId: rv.id, permissionId: perms[c] })) })
     return p.roleVersion.update({ where: { id: rv.id }, data: { status, effectiveFrom: from, effectiveTo: to } })
   }
-  const v1 = await publish(1, ['party.party.read', 'party.party.write'], new Date('2026-01-01'), 'SUPERSEDED', new Date('2026-07-01'))
-  const v2 = await publish(2, ['party.party.read'], new Date('2026-07-01'))
+  const v1 = await publish(1, ['party.view', 'party.manage'], new Date('2026-01-01'), 'SUPERSEDED', new Date('2026-07-01'))
+  const v2 = await publish(2, ['party.view'], new Date('2026-07-01'))
   const u = await mkUser('fin')
   const mk = (rv, from, to, status) => p.roleAssignment.create({ data: { userId: u.id, roleVersionId: rv.id, effectiveFrom: from, effectiveTo: to, status, grantReason: 'test', scopes: { create: [{ kind: 'ORGANIZATION', organizationId: org.id }] } } })
   await mk(v1, new Date('2026-01-01'), new Date('2026-07-01'), 'SUPERSEDED')
   await mk(v2, new Date('2026-07-01'), null, 'ACTIVE')
   const orgIndex = await loadOrgIndex(p)
-  const permission = await loadPermission(p, 'party.party.write')
+  const permission = await loadPermission(p, 'party.manage')
   const suspensions = await loadSuspensions(p)
   const at = async (iso) => evaluateAccess({ user: { id: u.id, status: 'ACTIVE' }, permission, assignments: await loadAssignmentsAsOf(p, u.id, new Date(iso)), suspensions, resource: { type: 'party', facts: { organizationId: org.id } }, context: { now: new Date(iso) }, orgIndex })
   const march = await at('2026-03-15T10:00:00Z')
@@ -213,8 +213,8 @@ await t('policy B: a newer role version does not change an existing pinned assig
 await t('permissionSummary reports what a user holds anywhere (navigation only)', async () => {
   const u = await mkUser('nav')
   await assign(u, 'SUPPORT_AGENT', [{ kind: 'ORGANIZATION', organizationId: org.id }])
-  const s = await permissionSummary(ctxOf(u), ['support.case.read', 'iam.role.manage', 'nope.nope.nope'])
-  assert.deepEqual(s, { 'support.case.read': true, 'iam.role.manage': false, 'nope.nope.nope': false })
+  const s = await permissionSummary(ctxOf(u), ['support.view', 'role.manage', 'nope.nope.nope'])
+  assert.deepEqual(s, { 'support.view': true, 'role.manage': false, 'nope.nope.nope': false })
 })
 
 await t('audit helper writes an append-only event with correlation id, platform and reason', async () => {

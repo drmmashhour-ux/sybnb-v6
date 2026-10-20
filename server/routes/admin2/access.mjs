@@ -7,6 +7,8 @@ import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { roleVersionContentHash } from '../../lib/authz/catalogue.mjs'
 import { badRequest, notFoundError, conflict, pageParams, sortParam, pageResult } from './router.mjs'
 import { heldCodes } from './core.mjs'
+import { suspendUser, reactivateUser } from '../../lib/authz/emergency.mjs'
+import { createAssignment, reviewAssignment, approveAssignment, revokeAssignment, migrateAssignment, activateDueAssignments, autoMigrateIfReducing, TX } from '../../lib/authz/assignment-workflow.mjs'
 
 const REASON_MIN = 8
 
@@ -97,7 +99,7 @@ const ASSIGNMENT_INCLUDE = { user: { select: { id: true, displayName: true, emai
 // iam.role_assignment.assign + iam.role.manage cannot be revoked/suspended away.
 async function isLastAccessAdmin(tx, assignmentId) {
   const holders = await tx.roleAssignment.findMany({
-    where: { status: 'ACTIVE', roleVersion: { permissions: { some: { permission: { code: 'iam.role_assignment.assign' } } } }, user: { status: 'ACTIVE' } },
+    where: { status: { in: ['ACTIVE', 'PENDING_ACTIVATION'] }, roleVersion: { permissions: { some: { permission: { code: 'access.assign' } } } }, user: { status: 'ACTIVE' } },
     select: { id: true, userId: true },
   })
   return holders.length > 0 && holders.every((h) => h.id === assignmentId)
@@ -110,7 +112,7 @@ async function userRow(u) {
 export function registerAccess(router) {
   // ---- Users --------------------------------------------------------------------------------
   router.get('/access/users', async (r) => {
-    await r.require('iam.user.read', await orgResource('admin_user'))
+    await r.require('user.view', await orgResource('admin_user'))
     const p = pageParams(r.query)
     const q = String(r.query.q ?? '').trim().slice(0, 80)
     const where = {
@@ -136,7 +138,7 @@ export function registerAccess(router) {
   })
 
   router.get('/access/users/:id', async (r) => {
-    await r.require('iam.user.read', await orgResource('admin_user', r.params.id))
+    await r.require('user.view', await orgResource('admin_user', r.params.id))
     const u = await db().user.findUnique({ where: { id: r.params.id }, include: { roles: true } })
     if (!u) throw notFoundError('User not found.')
     const assignments = await db().roleAssignment.findMany({ where: { userId: u.id }, orderBy: { createdAt: 'desc' }, include: ASSIGNMENT_INCLUDE })
@@ -153,33 +155,37 @@ export function registerAccess(router) {
     })
   })
 
-  async function setUserStatus(r, to) {
+  // ---- User suspension (standard, emergency) and reactivation --------------------------------------
+  // The service enforces the invariants; the route authorizes through the central evaluator with the
+  // subject user in the facts so noSelf permissions (SoD) are checked by the evaluator, not here.
+  async function suspendRoute(r, kind) {
     const body = await r.body()
     const reason = needReason(body)
     const target = await db().user.findUnique({ where: { id: r.params.id } })
     if (!target) throw notFoundError('User not found.')
     if (target.id === r.auth.user.id) throw badRequest('You cannot change your own account status.', 'SELF_ACTION_FORBIDDEN')
-    await r.require('iam.user.suspend', await orgResource('admin_user', target.id, { relations: [{ relation: 'SELF_USER', userId: target.id }] }))
-    if (to === 'SUSPENDED') {
-      const act = await db().roleAssignment.findMany({ where: { userId: target.id, status: 'ACTIVE' }, select: { id: true } })
-      for (const a of act) if (await isLastAccessAdmin(db(), a.id)) throw conflict('This is the last active access administrator; suspending them would lock everyone out.', 'LAST_ACCESS_ADMIN')
-    }
-    await db().$transaction(async (tx) => {
-      await tx.user.update({ where: { id: target.id }, data: { status: to, ...(to === 'SUSPENDED' ? { sessionEpoch: { increment: 1 } } : {}) } })
-      if (to === 'SUSPENDED') await tx.userSession.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: 'admin2_user_suspended' } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: to === 'SUSPENDED' ? 'iam.user.suspended' : 'iam.user.reactivated', entityType: 'user', entityId: target.id, before: { status: target.status }, after: { status: to }, reason, correlationId: r.requestId })
-    })
-    r.ok({ status: to })
+    await r.require(kind === 'EMERGENCY' ? 'user.suspend_emergency' : 'user.suspend', await orgResource('admin_user', target.id, { subjectUserId: target.id }), { evidence: true })
+    const out = await suspendUser(db(), { actorUserId: r.auth.user.id, targetUserId: target.id, reason, kind, requestId: r.requestId })
+    r.ok({ status: 'SUSPENDED', kind, sessionsRevoked: out.sessionsRevoked, securityEventId: out.securityEvent.id, severity: out.securityEvent.severity })
   }
-  router.post('/access/users/:id/suspend', (r) => setUserStatus(r, 'SUSPENDED'))
-  router.post('/access/users/:id/reactivate', (r) => setUserStatus(r, 'ACTIVE'))
+  router.post('/access/users/:id/suspend', (r) => suspendRoute(r, 'STANDARD'))
+  router.post('/access/users/:id/emergency-suspend', (r) => suspendRoute(r, 'EMERGENCY'))
+  router.post('/access/users/:id/reactivate', async (r) => {
+    const body = await r.body()
+    const reason = needReason(body)
+    const target = await db().user.findUnique({ where: { id: r.params.id } })
+    if (!target) throw notFoundError('User not found.')
+    await r.require('user.reactivate', await orgResource('admin_user', target.id, { subjectUserId: target.id }), { evidence: true })
+    r.ok(await reactivateUser(db(), { actorUserId: r.auth.user.id, targetUserId: target.id, reason, acknowledgeAssignmentReview: body?.acknowledgeAssignmentReview === true, requestId: r.requestId }))
+  })
 
   // ---- Assignments ----------------------------------------------------------------------------
   router.get('/access/assignments', async (r) => {
-    await r.require('iam.role_assignment.read', await orgResource('role_assignment'))
+    await r.require('access.view', await orgResource('role_assignment'))
+    await activateDueAssignments(db())
     const p = pageParams(r.query)
     const where = {
-      ...(['PENDING_APPROVAL', 'ACTIVE', 'SUSPENDED', 'EXPIRED', 'REVOKED', 'SUPERSEDED'].includes(r.query.status) ? { status: r.query.status } : {}),
+      ...(['PENDING_APPROVAL', 'UNDER_REVIEW', 'PENDING_ACTIVATION', 'REJECTED', 'ACTIVE', 'SUSPENDED', 'EXPIRED', 'REVOKED', 'SUPERSEDED'].includes(r.query.status) ? { status: r.query.status } : {}),
       ...(r.query.userId ? { userId: String(r.query.userId) } : {}),
       ...(r.query.roleCode ? { roleVersion: { role: { code: String(r.query.roleCode) } } } : {}),
       ...(r.query.temporary === 'true' ? { isTemporary: true } : {}),
@@ -190,6 +196,12 @@ export function registerAccess(router) {
     ])
     r.ok(pageResult(rows.map(assignmentView), total, p))
   })
+
+  async function authorizeScopes(r, permission, scopeFacts, target, extra = {}, options = {}) {
+    for (const f of scopeFacts) {
+      await r.require(permission, { type: 'role_assignment', ...extra, facts: { ...f, organizationId: f.organizationId ?? (await theOrg())?.id, subjectUserId: target.id } }, options)
+    }
+  }
 
   router.post('/access/assignments', async (r) => {
     const body = await r.body()
@@ -208,75 +220,83 @@ export function registerAccess(router) {
       if (Number.isNaN(effectiveTo.getTime()) || effectiveTo <= new Date()) throw badRequest('effectiveTo must be a future date.', 'EFFECTIVE_TO_INVALID')
     }
     // 1) The grantor must be authorized to assign at EVERY scope being granted (tier 4: step-up + evidence).
-    for (const s of scopes) {
-      await r.require('iam.role_assignment.assign', { type: 'role_assignment', facts: { ...factsForScope({ kind: s.facts.kind, ...s.facts }), organizationId: (await theOrg())?.id, ...(s.facts.kind === 'ORGANIZATION' ? { organizationId: s.facts.organizationId } : {}), relations: [{ relation: 'SELF_USER', userId: target.id }] } })
-    }
+    await authorizeScopes(r, 'access.assign', scopes.map((s) => factsForScope(s.facts)), target)
     // 2) Anti-escalation: the grantor must themselves hold every permission in the version.
     const snap = await loadSnapshot(r.auth)
     for (const rp of version.permissions) {
       const ok = holdsPermissionAnywhere({ user: { id: r.auth.user.id, status: r.auth.user.status }, permission: { code: rp.permission.code, deprecated: rp.permission.deprecated }, assignments: snap.assignments, suspensions: snap.suspensions, now: snap.now })
       if (!ok) throw badRequest('You cannot grant a role containing permissions you do not hold yourself.', 'ESCALATION_FORBIDDEN')
     }
-    const highRisk = version.permissions.some((rp) => rp.permission.highRisk)
-    const created = await db().$transaction(async (tx) => {
-      const a = await tx.roleAssignment.create({
-        data: {
-          userId: target.id, roleVersionId: version.id, status: highRisk ? 'PENDING_APPROVAL' : 'ACTIVE', effectiveTo, isTemporary: Boolean(effectiveTo || body?.isTemporary),
-          grantReason: reason, grantedById: r.auth.user.id, scopes: { create: scopes.map((s) => s.row) },
-        },
-        include: ASSIGNMENT_INCLUDE,
-      })
-      await tx.roleAssignmentEvent.create({ data: { assignmentId: a.id, eventType: highRisk ? 'REQUESTED' : 'GRANTED', actorUserId: r.auth.user.id, detail: { roleCode: role.code, versionNumber: version.versionNumber }, correlationId: r.requestId } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: highRisk ? 'iam.role_assignment.requested' : 'iam.role_assignment.granted', entityType: 'role_assignment', entityId: a.id, after: { userId: target.id, roleCode: role.code, versionNumber: version.versionNumber, scopes: scopes.map((s) => s.row) }, reason, correlationId: r.requestId })
-      return a
-    })
-    r.ok({ assignment: assignmentView(created), needsSecondApproval: highRisk }, 201)
+    const out = await createAssignment(db(), { actorUserId: r.auth.user.id, targetUserId: target.id, roleVersionId: version.id, scopeRows: scopes.map((s) => s.row), effectiveTo, isTemporary: Boolean(body?.isTemporary), reason, requestId: r.requestId })
+    r.ok({ assignment: assignmentView(out.assignment), needsSecondApproval: out.highRisk, highRiskPermissions: out.highRiskPermissions }, 201)
   })
 
-  router.post('/access/assignments/:id/approve', async (r) => {
+  async function loadForDecision(r) {
     const a = await db().roleAssignment.findUnique({ where: { id: r.params.id }, include: ASSIGNMENT_INCLUDE })
     if (!a) throw notFoundError('Assignment not found.')
-    if (a.status !== 'PENDING_APPROVAL') throw conflict('This assignment is not waiting for approval.', 'NOT_PENDING')
-    if (a.grantedById === r.auth.user.id) throw badRequest('The person who requested the grant cannot approve it.', 'SELF_APPROVAL_FORBIDDEN')
-    if (a.userId === r.auth.user.id) throw badRequest('You cannot approve your own access.', 'SELF_ACTION_FORBIDDEN')
-    for (const s of a.scopes) {
-      await r.require('iam.role_assignment.assign', { type: 'role_assignment', id: a.id, facts: { ...factsForScope({ kind: s.kind, organizationId: s.organizationId, legalEntityId: s.legalEntityId, businessUnitId: s.businessUnitId, platformCode: s.platformId ? (await db().platform.findUnique({ where: { id: s.platformId } }))?.code : undefined }), organizationId: (await theOrg())?.id, relations: [{ relation: 'SELF_USER', userId: a.userId }] } }, { evidence: true })
-    }
+    return a
+  }
+
+  // Step 1 of a high-risk grant: security review (privileged_access.review). Reviewer is neither requester nor target.
+  router.post('/access/assignments/:id/review', async (r) => {
+    const a = await loadForDecision(r)
     const body = await r.body()
-    const reason = needReason(body)
-    await db().$transaction(async (tx) => {
-      await tx.roleAssignment.update({ where: { id: a.id }, data: { status: 'ACTIVE', approvedById: r.auth.user.id } })
-      await tx.roleAssignmentEvent.create({ data: { assignmentId: a.id, eventType: 'APPROVED', actorUserId: r.auth.user.id, detail: { reason }, correlationId: r.requestId } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'iam.role_assignment.approved', entityType: 'role_assignment', entityId: a.id, reason, correlationId: r.requestId })
-    })
-    r.ok({ status: 'ACTIVE' })
+    await r.require('privileged_access.review', await orgResource('role_assignment', a.id, { subjectUserId: a.userId }), { evidence: true })
+    const out = await reviewAssignment(db(), { actorUserId: r.auth.user.id, assignmentId: a.id, decision: String(body?.decision ?? 'APPROVE').toUpperCase(), reason: body?.reason, requestId: r.requestId })
+    r.ok(out)
   })
 
+  // Step 2: Owner approval (access.approve). Starts the 48 hour clock; the grant is NOT usable before activation_at.
+  router.post('/access/assignments/:id/approve', async (r) => {
+    const a = await loadForDecision(r)
+    const body = await r.body()
+    await r.require('access.approve', await orgResource('role_assignment', a.id, { subjectUserId: a.userId }), { evidence: true })
+    const out = await approveAssignment(db(), { actorUserId: r.auth.user.id, assignmentId: a.id, decision: String(body?.decision ?? 'APPROVE').toUpperCase(), reason: body?.reason, requestId: r.requestId })
+    r.ok(out)
+  })
+
+  router.post('/access/assignments/:id/reject', async (r) => {
+    const a = await loadForDecision(r)
+    const body = await r.body()
+    if (a.status === 'PENDING_APPROVAL') {
+      await r.require('privileged_access.review', await orgResource('role_assignment', a.id, { subjectUserId: a.userId }), { evidence: true })
+      return r.ok(await reviewAssignment(db(), { actorUserId: r.auth.user.id, assignmentId: a.id, decision: 'REJECT', reason: body?.reason, requestId: r.requestId }))
+    }
+    await r.require('access.approve', await orgResource('role_assignment', a.id, { subjectUserId: a.userId }), { evidence: true })
+    r.ok(await approveAssignment(db(), { actorUserId: r.auth.user.id, assignmentId: a.id, decision: 'REJECT', reason: body?.reason, requestId: r.requestId }))
+  })
+
+  // Removal is immediate. No delay, no second approver.
   router.post('/access/assignments/:id/revoke', async (r) => {
-    const a = await db().roleAssignment.findUnique({ where: { id: r.params.id }, include: ASSIGNMENT_INCLUDE })
-    if (!a) throw notFoundError('Assignment not found.')
-    if (!['ACTIVE', 'PENDING_APPROVAL', 'SUSPENDED'].includes(a.status)) throw conflict('This assignment is already closed.', 'NOT_REVOCABLE')
-    const reason = needReason(await r.body())
+    const a = await loadForDecision(r)
+    const body = await r.body()
+    needReason(body)
     if (a.userId === r.auth.user.id) throw badRequest('You cannot revoke your own access.', 'SELF_ACTION_FORBIDDEN')
-    await r.require('iam.role_assignment.assign', { type: 'role_assignment', id: a.id, facts: { organizationId: (await theOrg())?.id, relations: [{ relation: 'SELF_USER', userId: a.userId }] } })
-    if (a.status === 'ACTIVE' && await isLastAccessAdmin(db(), a.id)) throw conflict('This is the last active access administrator assignment; it cannot be revoked.', 'LAST_ACCESS_ADMIN')
-    await db().$transaction(async (tx) => {
-      await tx.roleAssignment.update({ where: { id: a.id }, data: { status: 'REVOKED', revokedAt: new Date(), revokedById: r.auth.user.id, revokeReason: reason } })
-      await tx.roleAssignmentEvent.create({ data: { assignmentId: a.id, eventType: 'REVOKED', actorUserId: r.auth.user.id, detail: { reason }, correlationId: r.requestId } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'iam.role_assignment.revoked', entityType: 'role_assignment', entityId: a.id, reason, correlationId: r.requestId })
-    })
-    r.ok({ status: 'REVOKED' })
+    await r.require('access.assign', await orgResource('role_assignment', a.id, { subjectUserId: a.userId }))
+    if (['ACTIVE', 'PENDING_ACTIVATION'].includes(a.status) && await isLastAccessAdmin(db(), a.id)) throw conflict('This is the last active access administrator assignment; it cannot be revoked.', 'LAST_ACCESS_ADMIN')
+    r.ok(await revokeAssignment(db(), { actorUserId: r.auth.user.id, assignmentId: a.id, reason: body.reason, requestId: r.requestId }))
+  })
+
+  // Move a holder to another version of the same role. Expanding with high-risk permissions goes through the full workflow.
+  router.post('/access/assignments/:id/migrate', async (r) => {
+    const a = await loadForDecision(r)
+    const body = await r.body()
+    needReason(body)
+    if (a.userId === r.auth.user.id) throw badRequest('You cannot change your own access.', 'SELF_ACTION_FORBIDDEN')
+    await r.require('access.assign', await orgResource('role_assignment', a.id, { subjectUserId: a.userId }))
+    const out = await migrateAssignment(db(), { actorUserId: r.auth.user.id, assignmentId: a.id, targetVersionId: String(body?.targetVersionId ?? ''), reason: body.reason, requestId: r.requestId })
+    r.ok({ assignment: assignmentView(out.assignment), needsSecondApproval: out.highRisk, highRiskPermissions: out.highRiskPermissions }, 201)
   })
 
   router.get('/access/assignments/:id/events', async (r) => {
-    await r.require('iam.role_assignment.read', await orgResource('role_assignment', r.params.id))
+    await r.require('access.view', await orgResource('role_assignment', r.params.id))
     const events = await db().roleAssignmentEvent.findMany({ where: { assignmentId: r.params.id }, orderBy: { createdAt: 'asc' } })
     r.ok({ events })
   })
 
   // ---- Roles, versions, permissions, scopes --------------------------------------------------
   router.get('/access/roles', async (r) => {
-    await r.require('iam.role.read', await orgResource('role'))
+    await r.require('role.view', await orgResource('role'))
     const roles = await db().role.findMany({ orderBy: { code: 'asc' }, include: { versions: { orderBy: { versionNumber: 'desc' }, include: { _count: { select: { permissions: true, assignments: true } } } } } })
     r.ok({
       roles: roles.map((x) => {
@@ -291,7 +311,7 @@ export function registerAccess(router) {
   })
 
   router.get('/access/roles/:code', async (r) => {
-    await r.require('iam.role.read', await orgResource('role', r.params.code))
+    await r.require('role.view', await orgResource('role', r.params.code))
     const role = await db().role.findUnique({ where: { code: r.params.code }, include: { versions: { orderBy: { versionNumber: 'desc' }, include: { permissions: { include: { permission: true } }, _count: { select: { assignments: true } } } } } })
     if (!role) throw notFoundError('Role not found.')
     r.ok({
@@ -308,7 +328,7 @@ export function registerAccess(router) {
   router.post('/access/roles/:code/versions', async (r) => {
     const body = await r.body()
     const reason = needReason(body)
-    await r.require('iam.role.manage', await orgResource('role', r.params.code))
+    await r.require('role.manage', await orgResource('role', r.params.code))
     const role = await db().role.findUnique({ where: { code: r.params.code }, include: { versions: { orderBy: { versionNumber: 'desc' }, include: { permissions: { include: { permission: true } } } } } })
     if (!role) throw notFoundError('Role not found.')
     const base = role.versions.find((v) => v.status === 'EFFECTIVE')
@@ -335,40 +355,44 @@ export function registerAccess(router) {
     r.ok({ version: { id: created.id, versionNumber: created.versionNumber, status: created.status, classification } }, 201)
   })
 
-  async function transition(r, { from, to, field, needDifferentFrom, action }) {
+  async function transition(r, { from, to, field, needDifferentFrom, action, permission = 'role.manage' }) {
     const v = await db().roleVersion.findUnique({ where: { id: r.params.id }, include: { role: true } })
     if (!v) throw notFoundError('Role version not found.')
     if (v.status !== from) throw conflict(`This version is ${v.status}, not ${from}.`, 'WRONG_STATE')
     const reason = needReason(await r.body())
-    await r.require('iam.role.manage', await orgResource('role_version', v.id))
+    await r.require(permission, await orgResource('role_version', v.id), to === 'EFFECTIVE' ? { evidence: true } : {})
     // Separation of duties: author, reviewer and approver are three different people.
     const me = r.auth.user.id
     const people = { author: v.createdById, reviewer: v.reviewedById }
     for (const k of needDifferentFrom) if (people[k] && people[k] === me) throw badRequest(`The ${k} of this version cannot perform this step.`, 'SEPARATION_OF_DUTIES')
+    let prior = null
+    let migrated = null
     await db().$transaction(async (tx) => {
       const data = { status: to, ...(field ? { [field]: me } : {}) }
       if (to === 'EFFECTIVE') {
         data.effectiveFrom = new Date()
+        prior = await tx.roleVersion.findFirst({ where: { roleId: v.roleId, status: 'EFFECTIVE' } })
         await tx.roleVersion.updateMany({ where: { roleId: v.roleId, status: 'EFFECTIVE' }, data: { status: 'SUPERSEDED', effectiveTo: new Date() } })
       }
       await tx.roleVersion.update({ where: { id: v.id }, data })
-      await writeAdminAudit(tx, { actorUserId: me, action, entityType: 'role_version', entityId: v.id, after: { roleCode: v.role.code, versionNumber: v.versionNumber, status: to }, reason, correlationId: r.requestId })
-    })
-    r.ok({ status: to })
+      if (prior) migrated = await autoMigrateIfReducing(tx, { oldVersionId: prior.id, newVersionId: v.id, actorUserId: me, requestId: r.requestId })
+      await writeAdminAudit(tx, { actorUserId: me, action, entityType: 'role_version', entityId: v.id, after: { roleCode: v.role.code, versionNumber: v.versionNumber, status: to, autoMigrated: migrated }, reason, correlationId: r.requestId })
+    }, TX)
+    r.ok({ status: to, autoMigrated: migrated })
   }
   router.post('/access/role-versions/:id/submit', (r) => transition(r, { from: 'DRAFT', to: 'IN_SECURITY_REVIEW', needDifferentFrom: [], action: 'iam.role_version.submitted' }))
   router.post('/access/role-versions/:id/review', (r) => transition(r, { from: 'IN_SECURITY_REVIEW', to: 'APPROVED', field: 'reviewedById', needDifferentFrom: ['author'], action: 'iam.role_version.reviewed' }))
-  router.post('/access/role-versions/:id/activate', (r) => transition(r, { from: 'APPROVED', to: 'EFFECTIVE', field: 'approvedById', needDifferentFrom: ['author', 'reviewer'], action: 'iam.role_version.activated' }))
+  router.post('/access/role-versions/:id/activate', (r) => transition(r, { from: 'APPROVED', to: 'EFFECTIVE', field: 'approvedById', needDifferentFrom: ['author', 'reviewer'], action: 'iam.role_version.activated', permission: 'role.publish' }))
   router.post('/access/role-versions/:id/withdraw', (r) => transition(r, { from: 'DRAFT', to: 'WITHDRAWN', needDifferentFrom: [], action: 'iam.role_version.withdrawn' }))
 
   router.get('/access/permissions', async (r) => {
-    await r.require('iam.role.read', await orgResource('permission'))
+    await r.require('role.view', await orgResource('permission'))
     const defs = await db().permissionDefinition.findMany({ orderBy: { code: 'asc' }, include: { versionLinks: { where: { roleVersion: { status: 'EFFECTIVE' } }, include: { roleVersion: { include: { role: true } } } } } })
     r.ok({ permissions: defs.map((d) => ({ code: d.code, area: d.area, resource: d.resource, action: d.action, tier: d.tier, highRisk: d.highRisk, deprecated: d.deprecated, description: d.description, roles: d.versionLinks.map((l) => l.roleVersion.role.code) })) })
   })
 
   router.get('/access/scopes', async (r) => {
-    await r.require('iam.role_assignment.read', await orgResource('scope'))
+    await r.require('access.view', await orgResource('scope'))
     const [orgs, les, bus, platforms, departments] = await Promise.all([
       db().organization.findMany({ orderBy: { code: 'asc' } }), db().legalEntity.findMany({ orderBy: { code: 'asc' } }), db().businessUnit.findMany({ orderBy: { code: 'asc' } }),
       db().platform.findMany({ orderBy: { sortOrder: 'asc' } }), db().department.findMany({ orderBy: { code: 'asc' } }),
@@ -385,7 +409,7 @@ export function registerAccess(router) {
 
   // ---- Sessions (org-wide), MFA, service accounts, delegations -------------------------------
   router.get('/access/sessions', async (r) => {
-    await r.require('iam.session.read_org', await orgResource('session'), { evidence: true })
+    await r.require('session.view', await orgResource('session'), { evidence: true })
     const p = pageParams(r.query)
     const staffIds = (await db().roleAssignment.findMany({ where: { status: 'ACTIVE' }, select: { userId: true }, distinct: ['userId'] })).map((x) => x.userId)
     const where = { userId: { in: staffIds }, revokedAt: null, expiresAt: { gt: new Date() } }
@@ -397,7 +421,7 @@ export function registerAccess(router) {
     const reason = needReason(await r.body())
     const s = await db().userSession.findUnique({ where: { id: r.params.id } })
     if (!s) throw notFoundError('Session not found.')
-    await r.require('iam.session.revoke_org', await orgResource('session', s.id))
+    await r.require('session.revoke', await orgResource('session', s.id))
     await db().$transaction(async (tx) => {
       await tx.userSession.updateMany({ where: { id: s.id, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: 'admin2_security_revoke' } })
       await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'security.session_revoked_by_admin', entityType: 'user_session', entityId: s.id, reason, correlationId: r.requestId })
@@ -406,7 +430,7 @@ export function registerAccess(router) {
   })
 
   router.get('/access/mfa', async (r) => {
-    await r.require('sec.event.read', await orgResource('mfa_status'))
+    await r.require('security_event.view', await orgResource('mfa_status'))
     const staff = await db().user.findMany({ where: { roleAssignments: { some: { status: 'ACTIVE' } } }, select: { id: true, displayName: true, email: true, status: true } })
     const last = await db().userSession.findMany({ where: { userId: { in: staff.map((u) => u.id) } }, orderBy: { issuedAt: 'desc' }, select: { userId: true, mfaMethod: true, issuedAt: true } })
     const lastBy = new Map(); for (const s of last) if (!lastBy.has(s.userId)) lastBy.set(s.userId, s)
@@ -417,7 +441,7 @@ export function registerAccess(router) {
   })
 
   router.get('/access/service-accounts', async (r) => {
-    await r.require('iam.service_account.read', await orgResource('service_account'))
+    await r.require('service_account.view', await orgResource('service_account'))
     const rows = await db().serviceAccount.findMany({ orderBy: { createdAt: 'desc' } })
     // The secret itself is never stored; only an opaque reference into the secret manager.
     r.ok({ serviceAccounts: rows.map((s) => ({ id: s.id, name: s.name, description: s.description, integrationCode: s.integrationCode, status: s.status, hasSecretRef: Boolean(s.secretRef), permissionCodes: s.permissionCodes, createdAt: s.createdAt, disabledAt: s.disabledAt })) })
@@ -426,7 +450,7 @@ export function registerAccess(router) {
   router.post('/access/service-accounts', async (r) => {
     const b = await r.body()
     const reason = needReason(b)
-    await r.require('iam.role.manage', await orgResource('service_account'))
+    await r.require('role.manage', await orgResource('service_account'))
     const name = String(b?.name ?? '').trim()
     const secretRef = b?.secretRef == null ? null : String(b.secretRef).trim()
     if (name.length < 3 || name.length > 80) throw badRequest('Name must be 3-80 characters.', 'NAME_INVALID')
@@ -449,7 +473,7 @@ export function registerAccess(router) {
     const reason = needReason(await r.body())
     const sa = await db().serviceAccount.findUnique({ where: { id: r.params.id } }).catch(() => null)
     if (!sa) throw notFoundError('Service account not found.')
-    await r.require('iam.service_account.disable', await orgResource('service_account', sa.id))
+    await r.require('service_account.disable', await orgResource('service_account', sa.id))
     await db().$transaction(async (tx) => {
       await tx.serviceAccount.update({ where: { id: sa.id }, data: { status: 'DISABLED', disabledAt: new Date(), disabledById: r.auth.user.id } })
       await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'iam.service_account.disabled', entityType: 'service_account', entityId: sa.id, reason, correlationId: r.requestId })
@@ -458,7 +482,7 @@ export function registerAccess(router) {
   })
 
   router.get('/access/delegations', async (r) => {
-    await r.require('iam.role_assignment.read', await orgResource('delegation'))
+    await r.require('access.view', await orgResource('delegation'))
     r.ok({ delegations: await db().adminDelegation.findMany({ orderBy: { createdAt: 'desc' }, take: 100 }), note: 'Delegation creation is not enabled in this release.' })
   })
 }

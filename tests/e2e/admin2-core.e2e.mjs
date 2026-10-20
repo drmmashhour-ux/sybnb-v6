@@ -50,7 +50,7 @@ await t('Owner: /me lists permissions, authorizes all platforms, lands on Comman
   const r = await s.http.get('/api/admin2/me')
   assert.equal(r.status, 200)
   assert.equal(r.json.landing.route, '/admin')
-  assert.ok(r.json.permissions.includes('iam.role.manage'))
+  assert.ok(r.json.permissions.includes('role.manage'))
   assert.equal(r.json.platforms.filter((x) => x.authorized).length >= 8, true)
   assert.equal(r.json.authentication.strength, 'PASSWORD_PLUS_EMAIL_CODE')
   assert.equal(JSON.stringify(r.json).includes(s.token), false, 'no token is ever echoed')

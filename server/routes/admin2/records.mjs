@@ -36,7 +36,7 @@ function partyBase(x, sensitive) {
 export function registerRecords(router) {
   // ---- Party Center -------------------------------------------------------------------------------
   router.get('/parties', async (r) => {
-    const scope = await visibleScope(r, 'party.party.read')
+    const scope = await visibleScope(r, 'party.view')
     const p = pageParams(r.query)
     const q = String(r.query.q ?? '').trim().slice(0, 80)
     const where = {
@@ -56,8 +56,8 @@ export function registerRecords(router) {
   router.get('/parties/:id', async (r) => {
     const x = await db().party.findUnique({ where: { id: r.params.id }, include: { roles: true, addresses: true, userLinks: true } }).catch(() => null)
     if (!x) throw notFoundError('Party not found.')
-    await partyAccess(r, 'party.party.read', x)
-    const sensitive = await canRecord(r, 'party.contact.read_sensitive', null, 'party', x.id)
+    await partyAccess(r, 'party.view', x)
+    const sensitive = await canRecord(r, 'party.contact_sensitive.view', null, 'party', x.id)
     const [docs, cases] = await Promise.all([
       db().adminDocument.findMany({ where: { partyId: x.id }, select: { id: true, title: true, documentType: true, status: true }, take: 50 }),
       db().supportCase.findMany({ where: { partyId: x.id }, select: { id: true, caseNumber: true, summary: true, status: true }, orderBy: { createdAt: 'desc' }, take: 20 }),
@@ -73,7 +73,7 @@ export function registerRecords(router) {
   })
 
   router.post('/parties', async (r) => {
-    await requireRecord(r, 'party.party.write', null, 'party')
+    await requireRecord(r, 'party.manage', null, 'party')
     const b = await r.body()
     const kind = validateEnum(b?.kind, PARTY_KINDS, 'kind')
     const roleTypes = [...new Set((b?.roles ?? []).map((x) => String(x).trim().toUpperCase().slice(0, 40)).filter(Boolean))]
@@ -89,7 +89,7 @@ export function registerRecords(router) {
   router.patch('/parties/:id', async (r) => {
     const x = await db().party.findUnique({ where: { id: r.params.id }, include: { roles: true } }).catch(() => null)
     if (!x) throw notFoundError('Party not found.')
-    await partyAccess(r, 'party.party.write', x)
+    await partyAccess(r, 'party.manage', x)
     const b = await r.body()
     const data = {}
     if (b?.displayName) data.displayName = cleanText(b.displayName, { max: 160, name: 'Display name' })
@@ -106,7 +106,7 @@ export function registerRecords(router) {
   router.post('/parties/:id/roles', async (r) => {
     const x = await db().party.findUnique({ where: { id: r.params.id }, include: { roles: true } }).catch(() => null)
     if (!x) throw notFoundError('Party not found.')
-    await partyAccess(r, 'party.party.write', x)
+    await partyAccess(r, 'party.manage', x)
     const b = await r.body()
     const roleType = cleanText(b?.roleType, { max: 40, name: 'Role type' }).toUpperCase()
     const platformId = b?.platformId ? String(b.platformId) : null
@@ -124,7 +124,7 @@ export function registerRecords(router) {
   const docView = (d) => ({ id: d.id, title: d.title, documentType: d.documentType, status: d.status, platformId: d.platformId, partyId: d.partyId, currentVersionId: d.currentVersionId, uploadedById: d.uploadedById, createdAt: d.createdAt, updatedAt: d.updatedAt })
 
   router.get('/documents', async (r) => {
-    const scope = await visibleScope(r, 'doc.document.read')
+    const scope = await visibleScope(r, 'document.view')
     const p = pageParams(r.query)
     const q = String(r.query.q ?? '').trim().slice(0, 80)
     const where = { AND: [scope.where, DOC_STATUSES.includes(r.query.status) ? { status: r.query.status } : {}, r.query.documentType ? { documentType: String(r.query.documentType).slice(0, 60) } : {}, r.query.partyId ? { partyId: String(r.query.partyId) } : {}, q ? { title: { contains: q, mode: 'insensitive' } } : {}] }
@@ -136,7 +136,7 @@ export function registerRecords(router) {
   router.get('/documents/:id', async (r) => {
     const d = await db().adminDocument.findUnique({ where: { id: r.params.id }, include: { versions: { orderBy: { versionNumber: 'desc' } }, reviews: { orderBy: { createdAt: 'desc' } }, links: true } }).catch(() => null)
     if (!d) throw notFoundError('Document not found.')
-    await requireRecord(r, 'doc.document.read', d.platformId, 'admin_document', d.id)
+    await requireRecord(r, 'document.view', d.platformId, 'admin_document', d.id)
     // Metadata only. The file itself is served by /download, which is a separate, higher-tier permission.
     r.ok({
       document: docView(d),
@@ -160,7 +160,7 @@ export function registerRecords(router) {
     if (platformId && !(await db().platform.findUnique({ where: { id: platformId } }).catch(() => null))) throw badRequest('Unknown platform.', 'PLATFORM_UNKNOWN')
     const partyId = b?.partyId ? String(b.partyId) : null
     if (partyId && !(await db().party.findUnique({ where: { id: partyId } }).catch(() => null))) throw badRequest('Unknown party.', 'PARTY_UNKNOWN')
-    await requireRecord(r, 'doc.document.upload', platformId, 'admin_document')
+    await requireRecord(r, 'document.upload', platformId, 'admin_document')
     if (!b?.file?.base64) throw badRequest('A file is required.', 'FILE_REQUIRED')
     const title = cleanText(b?.title, { max: 200, name: 'Title' }); const documentType = cleanText(b?.documentType, { max: 60, name: 'Document type' })
     const out = await db().$transaction(async (tx) => {
@@ -178,7 +178,7 @@ export function registerRecords(router) {
   router.post('/documents/:id/versions', async (r) => {
     const d = await db().adminDocument.findUnique({ where: { id: r.params.id }, include: { versions: { orderBy: { versionNumber: 'desc' }, take: 1 } } }).catch(() => null)
     if (!d) throw notFoundError('Document not found.')
-    await requireRecord(r, 'doc.document.upload', d.platformId, 'admin_document', d.id)
+    await requireRecord(r, 'document.upload', d.platformId, 'admin_document', d.id)
     if (d.status === 'ARCHIVED') throw conflict('An archived document cannot receive new versions.', 'DOCUMENT_ARCHIVED')
     const b = await r.body()
     if (!b?.file?.base64) throw badRequest('A file is required.', 'FILE_REQUIRED')
@@ -197,7 +197,7 @@ export function registerRecords(router) {
   router.post('/documents/:id/status', async (r) => {
     const d = await db().adminDocument.findUnique({ where: { id: r.params.id } }).catch(() => null)
     if (!d) throw notFoundError('Document not found.')
-    await requireRecord(r, 'doc.document.upload', d.platformId, 'admin_document', d.id)
+    await requireRecord(r, 'document.upload', d.platformId, 'admin_document', d.id)
     const b = await r.body()
     const to = validateEnum(String(b?.to ?? ''), DOC_STATUSES, 'status')
     if (!DOC_TRANSITIONS[d.status].includes(to)) throw conflict(`A ${d.status} document cannot move to ${to}.`, 'INVALID_TRANSITION')
@@ -216,7 +216,7 @@ export function registerRecords(router) {
     const cur = d.currentVersionId ? await db().documentVersion.findUnique({ where: { id: d.currentVersionId } }) : null
     if (!cur) throw conflict('This document has no current version.', 'NO_CURRENT_VERSION')
     // Separation of duties: whoever uploaded the version under review cannot verify it.
-    await requireRecord(r, 'doc.document.review', d.platformId, 'admin_document', d.id, { facts: { relations: cur.uploadedById ? [{ relation: 'SELF_USER', userId: cur.uploadedById }] : [] } })
+    await requireRecord(r, 'document.review', d.platformId, 'admin_document', d.id, { facts: { subjectUserId: cur.uploadedById ?? undefined } })
     if (cur.uploadedById === r.auth.user.id) throw badRequest('You cannot review a version you uploaded.', 'SELF_REVIEW_FORBIDDEN')
     if (!REVIEWABLE.includes(d.status)) throw conflict(`A ${d.status} document is not waiting for review.`, 'NOT_REVIEWABLE')
     const b = await r.body()
@@ -236,7 +236,7 @@ export function registerRecords(router) {
   router.get('/documents/:id/download', async (r) => {
     const d = await db().adminDocument.findUnique({ where: { id: r.params.id } }).catch(() => null)
     if (!d) throw notFoundError('Document not found.')
-    await requireRecord(r, 'doc.document.download', d.platformId, 'admin_document', d.id)
+    await requireRecord(r, 'document.download', d.platformId, 'admin_document', d.id)
     const versionId = r.query.versionId ? String(r.query.versionId) : d.currentVersionId
     const v = await db().documentVersion.findFirst({ where: { id: versionId ?? '', documentId: d.id } }).catch(() => null)
     if (!v) throw notFoundError('Version not found.')
@@ -253,7 +253,7 @@ export function registerRecords(router) {
   const caseView = (c) => ({ id: c.id, caseNumber: c.caseNumber, platformId: c.platformId, type: c.type, priority: c.priority, status: c.status, partyId: c.partyId, assignedUserId: c.assignedUserId, summary: c.summary, createdAt: c.createdAt, updatedAt: c.updatedAt, closedAt: c.closedAt })
 
   router.get('/support/cases', async (r) => {
-    const scope = await visibleScope(r, 'support.case.read')
+    const scope = await visibleScope(r, 'support.view')
     const p = pageParams(r.query)
     const q = String(r.query.q ?? '').trim().slice(0, 80)
     const where = { AND: [scope.where, CASE_STATUSES.includes(r.query.status) ? { status: r.query.status } : {}, PRIORITIES.includes(r.query.priority) ? { priority: r.query.priority } : {}, r.query.assignedToMe === 'true' ? { assignedUserId: r.auth.user.id } : {}, q ? { summary: { contains: q, mode: 'insensitive' } } : {}] }
@@ -265,9 +265,9 @@ export function registerRecords(router) {
   router.get('/support/cases/:id', async (r) => {
     const c = await db().supportCase.findUnique({ where: { id: r.params.id }, include: { messages: { orderBy: { createdAt: 'asc' } } } }).catch(() => null)
     if (!c) throw notFoundError('Case not found.')
-    await requireRecord(r, 'support.case.read', c.platformId, 'support_case', c.id)
+    await requireRecord(r, 'support.view', c.platformId, 'support_case', c.id)
     // Customer-visible messages and internal notes are different tables and different permissions.
-    const canNotes = await canRecord(r, 'support.note.internal', c.platformId, 'support_case', c.id)
+    const canNotes = await canRecord(r, 'support.note_internal', c.platformId, 'support_case', c.id)
     const notes = canNotes ? await db().adminComment.findMany({ where: { entityType: 'support_case', entityId: c.id }, orderBy: { createdAt: 'asc' }, take: 200 }) : null
     r.ok({
       case: caseView(c),
@@ -281,7 +281,7 @@ export function registerRecords(router) {
     const b = await r.body()
     const platformId = b?.platformId ? String(b.platformId) : null
     if (platformId && !(await db().platform.findUnique({ where: { id: platformId } }).catch(() => null))) throw badRequest('Unknown platform.', 'PLATFORM_UNKNOWN')
-    await requireRecord(r, 'support.case.write', platformId, 'support_case')
+    await requireRecord(r, 'support.manage', platformId, 'support_case')
     const partyId = b?.partyId ? String(b.partyId) : null
     if (partyId && !(await db().party.findUnique({ where: { id: partyId } }).catch(() => null))) throw badRequest('Unknown party.', 'PARTY_UNKNOWN')
     const priority = b?.priority ? validateEnum(b.priority, PRIORITIES, 'priority') : 'NORMAL'
@@ -297,7 +297,7 @@ export function registerRecords(router) {
   router.patch('/support/cases/:id', async (r) => {
     const c = await db().supportCase.findUnique({ where: { id: r.params.id } }).catch(() => null)
     if (!c) throw notFoundError('Case not found.')
-    await requireRecord(r, 'support.case.write', c.platformId, 'support_case', c.id)
+    await requireRecord(r, 'support.manage', c.platformId, 'support_case', c.id)
     const b = await r.body()
     const data = {}
     if (b?.status) { data.status = validateEnum(b.status, CASE_STATUSES, 'status'); data.closedAt = ['RESOLVED', 'CLOSED'].includes(data.status) ? new Date() : null }
@@ -319,7 +319,7 @@ export function registerRecords(router) {
   router.post('/support/cases/:id/messages', async (r) => {
     const c = await db().supportCase.findUnique({ where: { id: r.params.id } }).catch(() => null)
     if (!c) throw notFoundError('Case not found.')
-    await requireRecord(r, 'support.case.write', c.platformId, 'support_case', c.id)
+    await requireRecord(r, 'support.manage', c.platformId, 'support_case', c.id)
     if (c.status === 'CLOSED') throw conflict('This case is closed.', 'CASE_CLOSED')
     const b = await r.body()
     const direction = validateEnum(String(b?.direction ?? 'OUTBOUND'), ['INBOUND', 'OUTBOUND'], 'direction')
@@ -336,7 +336,7 @@ export function registerRecords(router) {
   router.post('/support/cases/:id/notes', async (r) => {
     const c = await db().supportCase.findUnique({ where: { id: r.params.id } }).catch(() => null)
     if (!c) throw notFoundError('Case not found.')
-    await requireRecord(r, 'support.note.internal', c.platformId, 'support_case', c.id)
+    await requireRecord(r, 'support.note_internal', c.platformId, 'support_case', c.id)
     const body = cleanText((await r.body())?.body, { max: 4000, name: 'Note' })
     const n = await db().$transaction(async (tx) => {
       const x = await tx.adminComment.create({ data: { entityType: 'support_case', entityId: c.id, authorId: r.auth.user.id, body } })

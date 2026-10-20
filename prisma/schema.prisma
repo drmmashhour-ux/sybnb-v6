@@ -207,6 +207,7 @@ model User {
 
   roles             UserRole[]
   roleAssignments   RoleAssignment[]  @relation("UserRoleAssignments")
+  suspensions       UserSuspension[]
   sessions          UserSession[]
   sellerProfile     SellerProfile?
   hostProfile       HostProfile?
@@ -1785,6 +1786,9 @@ model AdminAuditLog {
 
   actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
 
+  retentionCategory String @default("AUDIT") @map("retention_category")
+  retainUntil DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
+
   @@index([entityType, entityId, createdAt])
   @@index([actorUserId, createdAt])
   @@index([correlationId])
@@ -2325,6 +2329,9 @@ enum RoleVersionClassification {
 
 enum RoleAssignmentStatus {
   PENDING_APPROVAL
+  UNDER_REVIEW
+  PENDING_ACTIVATION
+  REJECTED
   ACTIVE
   SUSPENDED
   EXPIRED
@@ -2445,6 +2452,7 @@ model PermissionDefinition {
 
   versionLinks RoleVersionPermission[]
   suspensions  PermissionSuspension[]
+  aliases      PermissionCodeAlias[]
 
   @@map("permission_definitions")
 }
@@ -2486,6 +2494,9 @@ model RoleVersion {
   assignments RoleAssignment[]
   suspensions PermissionSuspension[]
 
+  retentionCategory String @default("ROLE_HISTORY") @map("retention_category")
+  retainUntil DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
+
   @@unique([roleId, versionNumber])
   @@index([roleId, status])
   @@map("role_versions")
@@ -2520,6 +2531,13 @@ model RoleAssignment {
   // Optional narrowing qualifier (platform codes). Can only reduce the role version's coverage.
   platformQualifier      String[]             @default([]) @map("platform_qualifier")
   isTemporary            Boolean              @default(false) @map("is_temporary")
+  // STEP 5A (3A-4): high-risk grants are usable only from activationAt (approval + 48h policy delay).
+  activationAt           DateTime?            @map("activation_at")
+  reviewedById           String?              @map("reviewed_by_id")
+  reviewedAt             DateTime?            @map("reviewed_at")
+  approvedAt             DateTime?            @map("approved_at")
+  retentionCategory      String               @default("PRIVILEGED_ACCESS") @map("retention_category")
+  retainUntil            DateTime             @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
   createdAt              DateTime             @default(now()) @map("created_at")
 
   user        User              @relation("UserRoleAssignments", fields: [userId], references: [id], onDelete: Restrict)
@@ -2563,6 +2581,9 @@ model RoleAssignmentEvent {
   createdAt     DateTime @default(now()) @map("created_at")
 
   assignment RoleAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  retentionCategory String @default("PRIVILEGED_ACCESS") @map("retention_category")
+  retainUntil DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
 
   @@index([assignmentId, createdAt])
   @@map("role_assignment_events")
@@ -2634,6 +2655,9 @@ model AuthorizationEvidence {
   prevHash           String?       @map("prev_hash")
   hash               String
   decidedAt          DateTime      @default(now()) @map("decided_at")
+
+  retentionCategory String @default("AUTHORIZATION_EVIDENCE") @map("retention_category")
+  retainUntil DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
 
   @@index([userId, decidedAt])
   @@index([permissionCode, decidedAt])
@@ -3134,4 +3158,108 @@ model AdminSavedView {
 
   @@index([userId, viewKey])
   @@map("admin_saved_views")
+}
+
+// ---------------------------------------------------------------------------------------------
+// STEP 5A (migration 081)
+// ---------------------------------------------------------------------------------------------
+enum SecurityEventSeverity {
+  INFO
+  WARNING
+  HIGH
+  CRITICAL
+
+  @@map("security_event_severity")
+}
+
+enum SecurityEventStatus {
+  OPEN
+  ACKNOWLEDGED
+  REVIEWED
+
+  @@map("security_event_status")
+}
+
+enum UserSuspensionKind {
+  STANDARD
+  EMERGENCY
+
+  @@map("user_suspension_kind")
+}
+
+// Old (first-cut) permission names, kept so historical evidence written under them stays queryable.
+model PermissionCodeAlias {
+  legacyCode   String   @id @map("legacy_code")
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  permission PermissionDefinition @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@index([permissionId])
+  @@map("permission_code_aliases")
+}
+
+// Minimum 7 years (database floor); longer by category. There is deliberately no purge job.
+model RetentionPolicy {
+  category    String   @id
+  minYears    Int      @map("min_years")
+  years       Int
+  description String
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@map("retention_policies")
+}
+
+// A security event is NOT an audit event: both are written for privileged actions.
+model SecurityEvent {
+  id                String                @id @default(uuid())
+  severity          SecurityEventSeverity
+  eventType         String                @map("event_type")
+  actorUserId       String?               @map("actor_user_id")
+  subjectUserId     String?               @map("subject_user_id")
+  entityType        String?               @map("entity_type")
+  entityId          String?               @map("entity_id")
+  summary           String
+  detail            Json                  @default("{}")
+  correlationId     String?               @map("correlation_id")
+  auditEventId      String?               @map("audit_event_id")
+  notifiedCount     Int                   @default(0) @map("notified_count")
+  status            SecurityEventStatus   @default(OPEN)
+  reviewedById      String?               @map("reviewed_by_id")
+  reviewedAt        DateTime?             @map("reviewed_at")
+  reviewNote        String?               @map("review_note")
+  retentionCategory String                @default("SECURITY_EVENT") @map("retention_category")
+  retainUntil       DateTime              @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
+  createdAt         DateTime              @default(now()) @map("created_at")
+
+  @@index([severity, createdAt])
+  @@index([status, createdAt])
+  @@index([subjectUserId])
+  @@index([correlationId])
+  @@map("security_events")
+}
+
+model UserSuspension {
+  id                           String             @id @default(uuid())
+  userId                       String             @map("user_id")
+  kind                         UserSuspensionKind
+  reason                       String
+  suspendedById                String             @map("suspended_by_id")
+  suspendedAt                  DateTime           @default(now()) @map("suspended_at")
+  priorStatus                  String             @map("prior_status")
+  sessionsRevoked              Int                @default(0) @map("sessions_revoked")
+  assignmentsSnapshot          Json               @default("[]") @map("assignments_snapshot")
+  securityEventId              String?            @map("security_event_id")
+  correlationId                String?            @map("correlation_id")
+  reactivatedAt                DateTime?          @map("reactivated_at")
+  reactivatedById              String?            @map("reactivated_by_id")
+  reactivationReason           String?            @map("reactivation_reason")
+  reactivationSecurityEventId  String?            @map("reactivation_security_event_id")
+  retentionCategory            String             @default("USER_SUSPENSION") @map("retention_category")
+  retainUntil                  DateTime           @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, suspendedAt])
+  @@map("user_suspensions")
 }

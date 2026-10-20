@@ -17,17 +17,18 @@ export async function loadOrgIndex(client) {
 
 export async function loadPermission(client, code) {
   const row = await client.permissionDefinition.findUnique({ where: { code } })
-  return row ? { id: row.id, code: row.code, tier: row.tier, highRisk: row.highRisk, deprecated: row.deprecated, noSelf: NO_SELF.has(row.code) } : null
+  return row ? { id: row.id, code: row.code, tier: row.tier, highRisk: row.highRisk, deprecated: row.deprecated, noSelf: NO_SELF.has(row.code), reserved: RESERVED.has(row.code) } : null
 }
 
 // "noSelf" is a property of the permission's definition in the catalogue; it is mirrored here to
 // avoid a schema change in this step (documented limitation: not yet a database column).
 import { PERMISSIONS } from './catalogue.mjs'
 const NO_SELF = new Set(PERMISSIONS.filter((p) => p.noSelf).map((p) => p.code))
+const RESERVED = new Set(PERMISSIONS.filter((p) => p.reserved).map((p) => p.code))
 
 function mapAssignment(a) {
   return {
-    id: a.id, userId: a.userId, status: a.status, effectiveFrom: a.effectiveFrom, effectiveTo: a.effectiveTo,
+    id: a.id, userId: a.userId, status: a.status, activationAt: a.activationAt ?? null, approvedAt: a.approvedAt ?? null, effectiveFrom: a.effectiveFrom, effectiveTo: a.effectiveTo,
     revokedAt: a.revokedAt, platformQualifier: a.platformQualifier || [],
     roleVersion: {
       id: a.roleVersion.id, versionNumber: a.roleVersion.versionNumber, status: a.roleVersion.status,
@@ -51,7 +52,7 @@ const ASSIGNMENT_INCLUDE = {
 // Live authorization: only assignments that could be active now (cheap filter; the evaluator still
 // re-checks every date and status rule).
 export async function loadAssignmentsForUser(client, userId) {
-  const rows = await client.roleAssignment.findMany({ where: { userId, status: 'ACTIVE' }, include: ASSIGNMENT_INCLUDE })
+  const rows = await client.roleAssignment.findMany({ where: { userId, status: { in: ['ACTIVE', 'PENDING_ACTIVATION'] } }, include: ASSIGNMENT_INCLUDE })
   return rows.map(mapAssignment)
 }
 
@@ -62,11 +63,12 @@ export async function loadAssignmentsAsOf(client, userId, at) {
   const rows = await client.roleAssignment.findMany({ where: { userId }, include: ASSIGNMENT_INCLUDE })
   const t = new Date(at).getTime()
   return rows
-    .filter((a) => a.status !== 'PENDING_APPROVAL' || a.effectiveFrom.getTime() <= t)
+    .filter((a) => !['PENDING_APPROVAL', 'UNDER_REVIEW', 'REJECTED'].includes(a.status) && a.effectiveFrom.getTime() <= t)
+    .filter((a) => a.approvedAt == null || a.approvedAt.getTime() <= t)
     .map((a) => {
       const m = mapAssignment(a)
       const revokedByT = a.revokedAt != null && a.revokedAt.getTime() <= t
-      m.status = revokedByT ? 'REVOKED' : 'ACTIVE'
+      m.status = revokedByT ? 'REVOKED' : 'ACTIVE' // activationAt (if any) still gates use at T
       return m
     })
 }
@@ -84,5 +86,8 @@ export async function loadPolicy(client, at = new Date()) {
   if (!row) return { ...DEFAULT_POLICY, id: null }
   const cfg = row.config || {}
   const w = cfg.stepUpWindowMs || {}
-  return { id: row.id, version: row.versionNumber, stepUpWindowMs: { 3: Number(w['3'] ?? DEFAULT_POLICY.stepUpWindowMs[3]), 4: Number(w['4'] ?? DEFAULT_POLICY.stepUpWindowMs[4]) } }
+  const delayH = Number(cfg.highRiskActivationDelayHours)
+  // The delay can be lengthened by policy but never shortened below the approved 48 hours.
+  const delayMs = Math.max(DEFAULT_POLICY.highRiskActivationDelayMs, Number.isFinite(delayH) ? delayH * 3_600_000 : 0)
+  return { id: row.id, version: row.versionNumber, highRiskActivationDelayMs: delayMs, stepUpWindowMs: { 3: Number(w['3'] ?? DEFAULT_POLICY.stepUpWindowMs[3]), 4: Number(w['4'] ?? DEFAULT_POLICY.stepUpWindowMs[4]) } }
 }

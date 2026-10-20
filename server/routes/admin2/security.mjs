@@ -4,6 +4,7 @@
 import { db } from '../../lib/prisma.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { verifyEvidenceChain } from '../../lib/authz/evidence.mjs'
+import { recordSecurityEvent, SEVERITIES } from '../../lib/authz/security-events.mjs'
 import { badRequest, notFoundError, pageParams, pageResult } from './router.mjs'
 
 let orgCache = null
@@ -63,30 +64,57 @@ function csvCell(v) {
 export function registerSecurity(router) {
   // ---- Security Center ---------------------------------------------------------------------
   router.get('/security/overview', async (r) => {
-    await r.require('sec.event.read', await orgResource('security_overview'))
+    await r.require('security_event.view', await orgResource('security_overview'))
     const day = new Date(Date.now() - 24 * 3600_000); const week = new Date(Date.now() - 7 * 24 * 3600_000)
     const [privileged, activeSessions, stepUpFailed, pending, critical, sessionsMfa] = await Promise.all([
-      db().user.count({ where: { status: 'ACTIVE', roleAssignments: { some: { status: 'ACTIVE', roleVersion: { permissions: { some: { permission: { OR: [{ tier: { gte: 3 } }, { highRisk: true }] } } } } } } } }),
+      db().user.count({ where: { status: 'ACTIVE', roleAssignments: { some: { status: { in: ['ACTIVE', 'PENDING_ACTIVATION'] }, roleVersion: { permissions: { some: { permission: { OR: [{ tier: { gte: 3 } }, { highRisk: true }] } } } } } } } }),
       db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: new Date() }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
       db().adminAuditLog.count({ where: { action: 'security.step_up_failed', createdAt: { gte: day } } }),
-      db().roleAssignment.count({ where: { status: 'PENDING_APPROVAL' } }),
-      db().adminAuditLog.count({ where: { action: { in: CRITICAL_ACTIONS }, createdAt: { gte: week } } }),
+      db().roleAssignment.count({ where: { status: { in: ['PENDING_APPROVAL', 'UNDER_REVIEW'] } } }),
+      db().securityEvent.count({ where: { severity: 'CRITICAL', createdAt: { gte: week } } }),
       db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: new Date() }, mfaMethod: { not: null }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
     ])
     r.ok({ metrics: { privilegedUsers: privileged, activeStaffSessions: activeSessions, activeStaffSessionsWithMfa: sessionsMfa, failedStepUps24h: stepUpFailed, pendingAccessApprovals: pending, criticalEvents7d: critical } })
   })
 
+  // Security events (severity INFO/WARNING/HIGH/CRITICAL) are their own records, separate from audit events.
+  const eventView = (e) => ({ id: e.id, severity: e.severity, eventType: e.eventType, summary: e.summary, actorUserId: e.actorUserId, subjectUserId: e.subjectUserId, entityType: e.entityType, entityId: e.entityId, detail: e.detail, correlationId: e.correlationId, auditEventId: e.auditEventId, notifiedCount: e.notifiedCount, status: e.status, reviewedById: e.reviewedById, reviewedAt: e.reviewedAt, reviewNote: e.reviewNote, createdAt: e.createdAt, retainUntil: e.retainUntil })
   router.get('/security/events', async (r) => {
-    await r.require('sec.event.read', await orgResource('security_event'))
+    await r.require('security_event.view', await orgResource('security_event'))
     const p = pageParams(r.query)
-    const base = auditWhere(r.query)
-    const where = { AND: [base, r.query.critical === 'true' ? { action: { in: CRITICAL_ACTIONS } } : { OR: SECURITY_PREFIXES.map((x) => ({ action: { startsWith: x } })) }] }
-    const [total, rows] = await Promise.all([db().adminAuditLog.count({ where }), db().adminAuditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: p.skip, take: p.take, include: { actor: ACTOR } })])
-    r.ok(pageResult(rows.map((a) => auditView(a)), total, p))
+    const sev = String(r.query.severity ?? '').toUpperCase()
+    const where = {
+      ...(SEVERITIES.includes(sev) ? { severity: sev } : r.query.critical === 'true' ? { severity: 'CRITICAL' } : {}),
+      ...(['OPEN', 'ACKNOWLEDGED', 'REVIEWED'].includes(String(r.query.status)) ? { status: String(r.query.status) } : {}),
+      ...(r.query.subjectUserId ? { subjectUserId: String(r.query.subjectUserId) } : {}),
+      ...(r.query.eventType ? { eventType: String(r.query.eventType).slice(0, 60) } : {}),
+    }
+    const [total, rows] = await Promise.all([db().securityEvent.count({ where }), db().securityEvent.findMany({ where, orderBy: { createdAt: 'desc' }, skip: p.skip, take: p.take })])
+    r.ok(pageResult(rows.map(eventView), total, p))
+  })
+  router.get('/security/events/:id', async (r) => {
+    await r.require('security_event.view', await orgResource('security_event', r.params.id))
+    const e = await db().securityEvent.findUnique({ where: { id: r.params.id } }).catch(() => null)
+    if (!e) throw notFoundError('Security event not found.')
+    r.ok({ event: eventView(e) })
+  })
+  // Reviewing never edits the event (facts are immutable); it records who looked at it and what they concluded.
+  router.post('/security/events/:id/review', async (r) => {
+    const body = await r.body()
+    const note = String(body?.note ?? '').trim()
+    if (note.length < 8) throw badRequest('A review note of at least 8 characters is required.', 'REASON_REQUIRED')
+    const e = await db().securityEvent.findUnique({ where: { id: r.params.id } }).catch(() => null)
+    if (!e) throw notFoundError('Security event not found.')
+    await r.require('security_event.review', await orgResource('security_event', e.id, { subjectUserId: e.subjectUserId ?? undefined }), { evidence: true })
+    await db().$transaction(async (tx) => {
+      await tx.securityEvent.update({ where: { id: e.id }, data: { status: body?.status === 'ACKNOWLEDGED' ? 'ACKNOWLEDGED' : 'REVIEWED', reviewedById: r.auth.user.id, reviewedAt: new Date(), reviewNote: note } })
+      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'security.event_reviewed', entityType: 'security_event', entityId: e.id, reason: note, correlationId: r.requestId })
+    })
+    r.ok({ reviewed: true })
   })
 
   router.get('/security/privileged-users', async (r) => {
-    await r.require('sec.event.read', await orgResource('privileged_users'))
+    await r.require('security_event.view', await orgResource('privileged_users'))
     const users = await db().user.findMany({
       where: { roleAssignments: { some: { status: { in: ['ACTIVE', 'PENDING_APPROVAL'] }, roleVersion: { permissions: { some: { permission: { OR: [{ tier: { gte: 3 } }, { highRisk: true }] } } } } } } },
       select: { id: true, displayName: true, email: true, status: true, roleAssignments: { where: { status: { in: ['ACTIVE', 'PENDING_APPROVAL'] } }, include: { roleVersion: { include: { role: true } } } } },
@@ -96,7 +124,7 @@ export function registerSecurity(router) {
   })
 
   router.get('/security/access-changes', async (r) => {
-    await r.require('sec.event.read', await orgResource('access_changes'))
+    await r.require('security_event.view', await orgResource('access_changes'))
     const p = pageParams(r.query)
     const where = { action: { startsWith: 'iam.role' } }
     const [total, rows] = await Promise.all([db().adminAuditLog.count({ where }), db().adminAuditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: p.skip, take: p.take, include: { actor: ACTOR } })])
@@ -106,21 +134,26 @@ export function registerSecurity(router) {
   // Break-glass FOUNDATION: records the request as an audit event and raises a notification for
   // security administrators. It grants NOTHING; real emergency access is a later step.
   router.get('/security/break-glass', async (r) => {
-    await r.require('sec.event.read', await orgResource('break_glass'))
+    await r.require('security_event.view', await orgResource('break_glass'))
     const rows = await db().adminAuditLog.findMany({ where: { action: { startsWith: 'security.break_glass' } }, orderBy: { createdAt: 'desc' }, take: 50, include: { actor: ACTOR } })
     r.ok({ enabled: false, note: 'Break-glass is recorded only; it does not elevate access in this release.', events: rows.map((a) => auditView(a)) })
   })
   router.post('/security/break-glass/request', async (r) => {
     const reason = String((await r.body())?.reason ?? '').trim()
     if (reason.length < 20) throw badRequest('Explain the emergency in at least 20 characters.', 'REASON_REQUIRED')
-    await r.require('sec.break_glass.activate', await orgResource('break_glass'), { evidence: true })
-    const row = await writeAdminAudit(db(), { actorUserId: r.auth.user.id, action: 'security.break_glass.requested', entityType: 'break_glass', entityId: r.requestId ?? 'n/a', reason, correlationId: r.requestId })
-    r.ok({ recorded: true, auditEventId: row.id, grantsAccess: false }, 201)
+    await r.require('break_glass.use', await orgResource('break_glass'), { evidence: true })
+    const out = await db().$transaction(async (tx) => {
+      const row = await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'security.break_glass.requested', entityType: 'break_glass', entityId: r.requestId ?? 'n/a', reason, correlationId: r.requestId })
+      const ev = await recordSecurityEvent(tx, { severity: 'CRITICAL', eventType: 'BREAK_GLASS_REQUESTED', actorUserId: r.auth.user.id, entityType: 'break_glass', entityId: row.id, summary: 'Break-glass emergency access requested', detail: { reason, grantsAccess: false }, correlationId: r.requestId, auditEventId: row.id })
+      return { row, ev }
+    })
+    // Foundation only: it grants nothing, and it never edits a role to bypass the 48h activation delay.
+    r.ok({ recorded: true, auditEventId: out.row.id, securityEventId: out.ev.id, grantsAccess: false }, 201)
   })
 
   // ---- Audit Center (read-only) -----------------------------------------------------------------
   router.get('/audit/events', async (r) => {
-    await r.require('audit.event.read', await orgResource('audit_event'))
+    await r.require('audit.view', await orgResource('audit_event'))
     const p = pageParams(r.query)
     const where = auditWhere(r.query)
     const [total, rows] = await Promise.all([db().adminAuditLog.count({ where }), db().adminAuditLog.findMany({ where, orderBy: { createdAt: 'desc' }, skip: p.skip, take: p.take, include: { actor: ACTOR } })])
@@ -128,7 +161,7 @@ export function registerSecurity(router) {
   })
 
   router.get('/audit/events/:id', async (r) => {
-    await r.require('audit.event.read', await orgResource('audit_event', r.params.id))
+    await r.require('audit.view', await orgResource('audit_event', r.params.id))
     const a = await db().adminAuditLog.findUnique({ where: { id: r.params.id }, include: { actor: ACTOR } }).catch(() => null)
     if (!a) throw notFoundError('Audit event not found.')
     const related = a.correlationId ? await db().adminAuditLog.findMany({ where: { correlationId: a.correlationId, NOT: { id: a.id } }, orderBy: { createdAt: 'asc' }, take: 20, include: { actor: ACTOR } }) : []
@@ -138,7 +171,7 @@ export function registerSecurity(router) {
   // Sensitive export: separate permission (tier 3 => step-up + evidence), row-capped, and the export
   // itself is audited with the filters used.
   router.get('/audit/export', async (r) => {
-    await r.require('audit.event.export', await orgResource('audit_export'))
+    await r.require('audit.export', await orgResource('audit_export'))
     const where = auditWhere(r.query)
     const rows = await db().adminAuditLog.findMany({ where, orderBy: { createdAt: 'desc' }, take: 5001, include: { actor: ACTOR } })
     const capped = rows.length > 5000
@@ -152,7 +185,7 @@ export function registerSecurity(router) {
   })
 
   router.get('/audit/evidence', async (r) => {
-    await r.require('audit.evidence.read', await orgResource('authorization_evidence'))
+    await r.require('audit.evidence.view', await orgResource('authorization_evidence'))
     const p = pageParams(r.query)
     const where = {
       ...(r.query.userId ? { userId: String(r.query.userId) } : {}),
@@ -164,7 +197,7 @@ export function registerSecurity(router) {
   })
 
   router.get('/audit/evidence/verify', async (r) => {
-    await r.require('audit.evidence.read', await orgResource('authorization_evidence'))
+    await r.require('audit.evidence.view', await orgResource('authorization_evidence'))
     r.ok({ result: await verifyEvidenceChain(db(), { limit: 50_000 }) })
   })
 }

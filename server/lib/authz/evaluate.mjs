@@ -17,6 +17,7 @@ export const DENY = Object.freeze({
   UNKNOWN_SCOPE_KIND: 'UNKNOWN_SCOPE_KIND',
   SOD_SELF_ACTION: 'SOD_SELF_ACTION',
   STEP_UP_REQUIRED: 'STEP_UP_REQUIRED',
+  ACTIVATION_PENDING: 'ACTIVATION_PENDING',
 })
 
 // Candidate failures are ranked; the furthest-reached reason is reported (all of them are a DENY).
@@ -29,12 +30,26 @@ export const SCOPE_KINDS = Object.freeze(['ORGANIZATION', 'LEGAL_ENTITY', 'BUSIN
 export const SELF_RELATIONS = Object.freeze(['SELF_USER', 'SELF_PARTY', 'SELF_DRIVER_PROFILE', 'SELF_COURIER_PROFILE', 'SELF_EMPLOYEE', 'MERCHANT_ASSIGNMENT', 'DRAFT_AUTHOR'])
 
 // Default step-up windows by tier (Step 3). Overridden by the security policy version in force.
-export const DEFAULT_POLICY = Object.freeze({ version: 0, stepUpWindowMs: { 3: 15 * 60_000, 4: 5 * 60_000 } })
+export const HIGH_RISK_ACTIVATION_DELAY_MS = 48 * 3_600_000
+export const DEFAULT_POLICY = Object.freeze({ version: 0, stepUpWindowMs: { 3: 15 * 60_000, 4: 5 * 60_000 }, highRiskActivationDelayMs: HIGH_RISK_ACTIVATION_DELAY_MS })
 
 const T = (d) => (d == null ? null : new Date(d).getTime())
 
+// STEP 5A (3A-4): a high-risk grant is usable only once activationAt (approval + 48h) has passed. This is
+// enforced HERE (backend authorization), independent of any sweeper or UI. A PENDING_ACTIVATION row whose
+// activationAt has passed is treated as active even before the sweeper flips its status; an ACTIVE row
+// that still carries a future activationAt is NOT usable.
+export function isAssignmentPendingActivationAt(a, nowMs) {
+  if (!a) return false
+  if (a.status === 'PENDING_ACTIVATION') return true
+  return a.status === 'ACTIVE' && a.activationAt != null && T(a.activationAt) > nowMs
+}
+
 export function isAssignmentActiveAt(a, nowMs) {
-  if (!a || a.status !== 'ACTIVE') return false
+  if (!a) return false
+  if (a.status !== 'ACTIVE' && a.status !== 'PENDING_ACTIVATION') return false
+  if (a.status === 'PENDING_ACTIVATION' && (a.activationAt == null || a.approvedAt == null)) return false
+  if (a.activationAt != null && T(a.activationAt) > nowMs) return false
   if (T(a.effectiveFrom) > nowMs) return false
   if (a.effectiveTo != null && nowMs >= T(a.effectiveTo)) return false
   if (a.revokedAt != null && T(a.revokedAt) <= nowMs) return false
@@ -157,7 +172,10 @@ export function evaluateAccess(input) {
 
   const active = assignments.filter((a) => a.userId == null || a.userId === user.id).filter((a) => isAssignmentActiveAt(a, nowMs))
   active.sort((a, b) => String(a.id).localeCompare(String(b.id)))
-  if (!active.length) return deny(DENY.NO_ACTIVE_ASSIGNMENT)
+  if (!active.length) {
+    const waiting = assignments.some((a) => (a.userId == null || a.userId === user.id) && isAssignmentPendingActivationAt(a, nowMs) && a.revokedAt == null)
+    return deny(waiting ? DENY.ACTIVATION_PENDING : DENY.NO_ACTIVE_ASSIGNMENT)
+  }
 
   for (const a of active) {
     const rv = a.roleVersion

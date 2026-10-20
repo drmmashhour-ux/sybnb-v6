@@ -59,7 +59,7 @@ export function client(base, token = null) {
     try { json = JSON.parse(text) } catch { /* binary or empty */ }
     return { status: res.status, json, text, headers: res.headers }
   }
-  return { get: (p) => call('GET', p), post: (p, b = {}) => call('POST', p, b), patch: (p, b = {}) => call('PATCH', p, b), withToken: (t) => client(base, t) }
+  return { get: (p) => call('GET', p), post: (p, b = {}) => call('POST', p, b), patch: (p, b = {}) => call('PATCH', p, b), put: (p, b = {}) => call('PUT', p, b), delete: (p) => call('DELETE', p), call, withToken: (t) => client(base, t) }
 }
 
 export const PASSWORD = 'S5-test-password-1!'
@@ -89,6 +89,14 @@ export async function assignRole(user, roleCode, scopes, over = {}) {
   const role = await p.role.findUnique({ where: { code: roleCode } })
   const rv = await p.roleVersion.findFirst({ where: { roleId: role.id, status: 'EFFECTIVE' } })
   return p.roleAssignment.create({ data: { userId: user.id, roleVersionId: rv.id, grantReason: 's5 e2e', scopes: { create: scopes }, ...over } })
+}
+
+/** Assign a SPECIFIC role version (used to prove that holders stay pinned to the version they were granted). */
+export async function assignRoleVersion(user, roleCode, versionNumber, scopes, over = {}) {
+  const p = db()
+  const role = await p.role.findUnique({ where: { code: roleCode } })
+  const rv = await p.roleVersion.findUnique({ where: { roleId_versionNumber: { roleId: role.id, versionNumber } } })
+  return p.roleAssignment.create({ data: { userId: user.id, roleVersionId: rv.id, grantReason: 's5 e2e pinned', scopes: { create: scopes }, ...over } })
 }
 
 export function makeRunner() {

@@ -27,7 +27,7 @@ const shellBody = (title, sections) => ({ title, status: 'NOT_CONFIGURED', messa
 export function registerConfig(router) {
   // ---- Command Center -------------------------------------------------------------------------------
   router.get('/command-center', async (r) => {
-    await r.requireAnywhere('admin.console.access')
+    await r.requireAnywhere('console.access')
     const me = r.auth.user.id; const now = new Date()
     const open = { status: { in: ['OPEN', 'IN_PROGRESS', 'BLOCKED'] } }
     const tiles = {}
@@ -35,15 +35,15 @@ export function registerConfig(router) {
     const scoped = async (code, model, extra) => {
       try { const s = await visibleScope(r, code); return await db()[model].count({ where: { AND: [s.where, extra] } }) } catch (e) { if (e.statusCode === 403) return undefined; throw e }
     }
-    tiles.myOpenWork = await scoped('work.item.read', 'workItem', { assignedUserId: me, ...open })
-    tiles.overdueWork = await scoped('work.item.read', 'workItem', { dueAt: { lt: now }, ...open })
-    tiles.pendingApprovals = await scoped('approval.request.read', 'approvalRequest', { status: 'PENDING', requesterUserId: { not: me } })
-    tiles.documentsNeedingReview = await scoped('doc.document.read', 'adminDocument', { status: { in: ['UPLOADED', 'EXTRACTED', 'NEEDS_REVIEW'] } })
-    tiles.openSupportCases = await scoped('support.case.read', 'supportCase', { status: { in: ['OPEN', 'PENDING_INTERNAL'] } })
+    tiles.myOpenWork = await scoped('work.view', 'workItem', { assignedUserId: me, ...open })
+    tiles.overdueWork = await scoped('work.view', 'workItem', { dueAt: { lt: now }, ...open })
+    tiles.pendingApprovals = await scoped('approval.view', 'approvalRequest', { status: 'PENDING', requesterUserId: { not: me } })
+    tiles.documentsNeedingReview = await scoped('document.view', 'adminDocument', { status: { in: ['UPLOADED', 'EXTRACTED', 'NEEDS_REVIEW'] } })
+    tiles.openSupportCases = await scoped('support.view', 'supportCase', { status: { in: ['OPEN', 'PENDING_INTERNAL'] } })
     const snap = await loadSnapshot(r.auth)
     const held = await heldCodes(snap, { id: r.auth.user.id, status: r.auth.user.status })
-    if (held.has('iam.role_assignment.read')) tiles.pendingAccessApprovals = await db().roleAssignment.count({ where: { status: 'PENDING_APPROVAL' } })
-    if (held.has('sec.event.read')) tiles.securityEvents7d = await db().adminAuditLog.count({ where: { action: { startsWith: 'security.' }, createdAt: { gte: new Date(Date.now() - 7 * 86400_000) } } })
+    if (held.has('access.view')) tiles.pendingAccessApprovals = await db().roleAssignment.count({ where: { status: 'PENDING_APPROVAL' } })
+    if (held.has('security_event.view')) tiles.securityEvents7d = await db().adminAuditLog.count({ where: { action: { startsWith: 'security.' }, createdAt: { gte: new Date(Date.now() - 7 * 86400_000) } } })
     const platforms = (await authorizedPlatformsFor(snap, r.auth, r.requestId)).filter((p) => p.authorized)
     r.ok({
       tiles: Object.fromEntries(Object.entries(tiles).filter(([, v]) => v !== undefined)),
@@ -58,7 +58,7 @@ export function registerConfig(router) {
     const { platforms } = await registryContext()
     const p = platforms.find((x) => x.code === r.params.code)
     if (!p) throw notFoundError('Platform not found.')
-    await requireRecord(r, 'platform.shell.read', p.id, 'platform_shell', p.code)
+    await requireRecord(r, 'platform.view', p.id, 'platform_shell', p.code)
     const c = (model, extra) => db()[model].count({ where: { platformId: p.id, ...extra } })
     const [work, cases, docs, approvals] = await Promise.all([
       c('workItem', { status: { in: ['OPEN', 'IN_PROGRESS', 'BLOCKED'] } }), c('supportCase', { status: { in: ['OPEN', 'PENDING_INTERNAL'] } }),
@@ -76,7 +76,7 @@ export function registerConfig(router) {
   router.patch('/platforms/:code', async (r) => {
     const p = await db().platform.findUnique({ where: { code: r.params.code } })
     if (!p) throw notFoundError('Platform not found.')
-    await requireRecord(r, 'platform.registry.manage', p.id, 'platform', p.code)
+    await requireRecord(r, 'platform.manage', p.id, 'platform', p.code)
     const b = await r.body()
     const status = validateEnum(String(b?.status ?? ''), PLATFORM_STATUSES, 'status')
     const reason = cleanText(b?.reason, { min: 8, max: 300, name: 'Reason' })
@@ -89,7 +89,7 @@ export function registerConfig(router) {
   })
 
   router.get('/health', async (r) => {
-    await r.requireAnywhere('platform.health.read')
+    await r.requireAnywhere('platform_health.view')
     const t0 = Date.now()
     let database = { status: 'UP' }
     try { await db().$queryRaw`SELECT 1` ; database.latencyMs = Date.now() - t0 } catch { database = { status: 'DOWN' } }
@@ -106,7 +106,7 @@ export function registerConfig(router) {
 
   // ---- Configuration + feature flags -----------------------------------------------------------------
   router.get('/config/settings', async (r) => {
-    await requireRecord(r, 'cfg.settings.read', null, 'setting')
+    await requireRecord(r, 'config.view', null, 'setting')
     const rows = await db().adminSetting.findMany({ orderBy: [{ category: 'asc' }, { key: 'asc' }] })
     r.ok({ categories: SETTING_CATEGORIES, settings: rows.map((s) => ({ category: s.category, key: s.key, value: s.value, version: s.version, updatedAt: s.updatedAt, updatedById: s.updatedById })) })
   })
@@ -115,7 +115,7 @@ export function registerConfig(router) {
     const { category, key } = r.params
     if (!SETTING_CATEGORIES.includes(category)) throw badRequest('Unknown category.', 'CATEGORY_UNKNOWN')
     if (!/^[a-z][a-z0-9_.]{1,60}$/.test(key)) throw badRequest('Invalid key.', 'KEY_INVALID')
-    await requireRecord(r, category === 'security' ? 'sec.settings.manage' : 'cfg.settings.write', null, 'setting', `${category}.${key}`)
+    await requireRecord(r, category === 'security' ? 'security.manage' : 'config.manage', null, 'setting', `${category}.${key}`)
     const b = await r.body()
     const reason = cleanText(b?.reason, { min: 8, max: 300, name: 'Reason' })
     if (b?.value === undefined) throw badRequest('A value is required.', 'VALUE_REQUIRED')
@@ -133,14 +133,14 @@ export function registerConfig(router) {
   })
 
   router.get('/config/feature-flags', async (r) => {
-    await requireRecord(r, 'cfg.settings.read', null, 'feature_flag')
+    await requireRecord(r, 'config.view', null, 'feature_flag')
     const flags = await db().featureFlag.findMany({ orderBy: [{ key: 'asc' }, { scopeKind: 'asc' }] })
     // Flags control visibility/rollout only. They are never consulted for authorization decisions.
     r.ok({ note: 'Feature flags never grant access.', flags: flags.map((f) => ({ key: f.key, scopeKind: f.scopeKind, scopeRef: f.scopeRef, enabled: f.enabled, description: f.description, updatedAt: f.updatedAt })) })
   })
 
   router.put('/config/feature-flags', async (r) => {
-    await requireRecord(r, 'cfg.settings.write', null, 'feature_flag')
+    await requireRecord(r, 'config.manage', null, 'feature_flag')
     const b = await r.body()
     const key = String(b?.key ?? ''); if (!/^[a-z][a-z0-9_.]{1,60}$/.test(key)) throw badRequest('Invalid key.', 'KEY_INVALID')
     const scopeKind = validateEnum(String(b?.scopeKind ?? 'ORGANIZATION'), ['ORGANIZATION', 'LEGAL_ENTITY', 'PLATFORM'], 'scopeKind')
@@ -159,23 +159,23 @@ export function registerConfig(router) {
 
   // ---- Global search (every section is filtered by the SAME authorization as its own module) ---------
   router.get('/search', async (r) => {
-    await r.requireAnywhere('search.global.use')
+    await r.requireAnywhere('search.use')
     const q = String(r.query.q ?? '').trim().slice(0, 80)
     if (q.length < 2) throw badRequest('Type at least 2 characters.', 'QUERY_TOO_SHORT')
     const section = async (code, run) => { try { return await run(await visibleScope(r, code)) } catch (e) { if (e.statusCode === 403) return undefined; throw e } }
     const ci = (field) => ({ [field]: { contains: q, mode: 'insensitive' } })
     const out = {}
-    out.parties = await section('party.party.read', async (s) => {
+    out.parties = await section('party.view', async (s) => {
       const rows = await db().party.findMany({ where: { AND: [s.orgLevel ? {} : { roles: { some: { platformId: { in: s.platformIds } } } }, { OR: [ci('displayName'), ci('legalName')] }] }, take: 5, select: { id: true, displayName: true, kind: true } })
       return rows.map((x) => ({ id: x.id, title: x.displayName, subtitle: x.kind, route: `/admin/parties?open=${x.id}` }))
     })
-    out.documents = await section('doc.document.read', async (s) => (await db().adminDocument.findMany({ where: { AND: [s.where, ci('title')] }, take: 5, select: { id: true, title: true, status: true } })).map((x) => ({ id: x.id, title: x.title, subtitle: x.status, route: `/admin/documents?open=${x.id}` })))
-    out.supportCases = await section('support.case.read', async (s) => (await db().supportCase.findMany({ where: { AND: [s.where, ci('summary')] }, take: 5, select: { id: true, caseNumber: true, summary: true } })).map((x) => ({ id: x.id, title: `#${x.caseNumber} ${x.summary}`, subtitle: 'Support case', route: `/admin/support?open=${x.id}` })))
-    out.workItems = await section('work.item.read', async (s) => (await db().workItem.findMany({ where: { AND: [s.where, ci('title')] }, take: 5, select: { id: true, title: true, status: true } })).map((x) => ({ id: x.id, title: x.title, subtitle: x.status, route: `/admin/work?open=${x.id}` })))
+    out.documents = await section('document.view', async (s) => (await db().adminDocument.findMany({ where: { AND: [s.where, ci('title')] }, take: 5, select: { id: true, title: true, status: true } })).map((x) => ({ id: x.id, title: x.title, subtitle: x.status, route: `/admin/documents?open=${x.id}` })))
+    out.supportCases = await section('support.view', async (s) => (await db().supportCase.findMany({ where: { AND: [s.where, ci('summary')] }, take: 5, select: { id: true, caseNumber: true, summary: true } })).map((x) => ({ id: x.id, title: `#${x.caseNumber} ${x.summary}`, subtitle: 'Support case', route: `/admin/support?open=${x.id}` })))
+    out.workItems = await section('work.view', async (s) => (await db().workItem.findMany({ where: { AND: [s.where, ci('title')] }, take: 5, select: { id: true, title: true, status: true } })).map((x) => ({ id: x.id, title: x.title, subtitle: x.status, route: `/admin/work?open=${x.id}` })))
     const snap = await loadSnapshot(r.auth)
     const held = await heldCodes(snap, { id: r.auth.user.id, status: r.auth.user.status })
-    if (held.has('iam.user.read')) {
-      await requireRecord(r, 'iam.user.read', null, 'admin_user')
+    if (held.has('user.view')) {
+      await requireRecord(r, 'user.view', null, 'admin_user')
         .then(async () => { out.users = (await db().user.findMany({ where: { AND: [{ OR: [{ roleAssignments: { some: {} } }, { roles: { some: { role: { in: ['ADMIN', 'SUPPORT'] } } } }] }, { OR: [ci('displayName'), ci('email')] }] }, take: 5, select: { id: true, displayName: true, email: true } })).map((x) => ({ id: x.id, title: x.displayName, subtitle: x.email, route: `/admin/users?open=${x.id}` })) })
         .catch((e) => { if (e.statusCode !== 403) throw e })
     }
@@ -184,14 +184,14 @@ export function registerConfig(router) {
 
   // ---- Shells: Reports, AI Controller, Finance, Tax, Accountant ------------------------------------------
   router.get('/reports', async (r) => {
-    await r.requireAnywhere('report.directory.read')
+    await r.requireAnywhere('report.view')
     r.ok({ status: 'COMING_LATER', message: 'Reports are not available yet. This directory shows what is planned.', reports: REPORT_DIRECTORY.map((x) => ({ ...x, status: 'COMING_LATER' })) })
   })
   router.get('/ai', async (r) => {
-    await r.requireAnywhere('ai.controller.read')
+    await r.requireAnywhere('ai.view')
     r.ok({ status: 'NOT_CONFIGURED', label: 'AI SUGGESTION / HUMAN REVIEW REQUIRED', message: 'No AI suggestions exist yet. Anything the AI Controller proposes later will be labelled as a suggestion and needs a person to approve it. It cannot change money, access or documents on its own.', suggestions: [] })
   })
-  router.get('/finance', async (r) => { await r.requireAnywhere('fin.shell.read'); r.ok(shellBody('Finance', ['Overview', 'Receivables', 'Payables', 'Payouts', 'Reconciliation'])) })
-  router.get('/tax', async (r) => { await r.requireAnywhere('tax.shell.read'); r.ok(shellBody('Tax', ['GST / QST', 'Lodging tax', 'Filings', 'Rates'])) })
-  router.get('/accountant', async (r) => { await r.requireAnywhere('acct.center.read'); r.ok(shellBody('Accountant Center', ['Documents for review', 'Period close', 'Exports', 'Questions'])) })
+  router.get('/finance', async (r) => { await r.requireAnywhere('finance.view'); r.ok(shellBody('Finance', ['Overview', 'Receivables', 'Payables', 'Payouts', 'Reconciliation'])) })
+  router.get('/tax', async (r) => { await r.requireAnywhere('tax.view'); r.ok(shellBody('Tax', ['GST / QST', 'Lodging tax', 'Filings', 'Rates'])) })
+  router.get('/accountant', async (r) => { await r.requireAnywhere('accountant.view'); r.ok(shellBody('Accountant Center', ['Documents for review', 'Period close', 'Exports', 'Questions'])) })
 }

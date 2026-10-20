@@ -45,11 +45,11 @@ const APPROVAL_KIND_FOR = { role_assignment: 'ACCESS', admin_document: 'DOCUMENT
 
 // Which entity types may carry comments/timeline, and which permission reads them.
 const ENTITY_ACCESS = {
-  party: { read: 'party.party.read', load: (id) => db().party.findUnique({ where: { id } }).then((x) => x && { platformId: null }) },
-  admin_document: { read: 'doc.document.read', load: (id) => db().adminDocument.findUnique({ where: { id } }).then((x) => x && { platformId: x.platformId }) },
-  support_case: { read: 'support.note.internal', load: (id) => db().supportCase.findUnique({ where: { id } }).then((x) => x && { platformId: x.platformId }) },
-  work_item: { read: 'work.item.read', load: (id) => db().workItem.findUnique({ where: { id } }).then((x) => x && { platformId: x.platformId }) },
-  approval_request: { read: 'approval.request.read', load: (id) => db().approvalRequest.findUnique({ where: { id } }).then((x) => x && { platformId: x.platformId }) },
+  party: { read: 'party.view', load: (id) => db().party.findUnique({ where: { id } }).then((x) => x && { platformId: null }) },
+  admin_document: { read: 'document.view', load: (id) => db().adminDocument.findUnique({ where: { id } }).then((x) => x && { platformId: x.platformId }) },
+  support_case: { read: 'support.note_internal', load: (id) => db().supportCase.findUnique({ where: { id } }).then((x) => x && { platformId: x.platformId }) },
+  work_item: { read: 'work.view', load: (id) => db().workItem.findUnique({ where: { id } }).then((x) => x && { platformId: x.platformId }) },
+  approval_request: { read: 'approval.view', load: (id) => db().approvalRequest.findUnique({ where: { id } }).then((x) => x && { platformId: x.platformId }) },
 }
 async function entityAccess(type, id) {
   const spec = ENTITY_ACCESS[type]
@@ -62,7 +62,7 @@ async function entityAccess(type, id) {
 export function registerWork(router) {
   // ---- My Work ---------------------------------------------------------------------------------
   router.get('/work/items', async (r) => {
-    const scope = await visibleScope(r, 'work.item.read')
+    const scope = await visibleScope(r, 'work.view')
     const p = pageParams(r.query)
     const me = r.auth.user.id
     const view = String(r.query.view ?? 'mine')
@@ -87,7 +87,7 @@ export function registerWork(router) {
   })
 
   router.get('/work/summary', async (r) => {
-    const scope = await visibleScope(r, 'work.item.read')
+    const scope = await visibleScope(r, 'work.view')
     const me = r.auth.user.id; const now = new Date()
     const open = { status: { in: ['OPEN', 'IN_PROGRESS', 'BLOCKED'] } }
     const c = (extra) => db().workItem.count({ where: { AND: [scope.where, open, extra] } })
@@ -102,7 +102,7 @@ export function registerWork(router) {
     const risk = b?.risk ? validateEnum(b.risk, RISKS, 'risk') : 'NONE'
     const platformId = b?.platformId ? String(b.platformId) : null
     if (platformId && !(await db().platform.findUnique({ where: { id: platformId } }).catch(() => null))) throw badRequest('Unknown platform.', 'PLATFORM_UNKNOWN')
-    await requireRecord(r, 'work.item.manage', platformId, 'work_item')
+    await requireRecord(r, 'work.manage', platformId, 'work_item')
     let dueAt = null
     if (b?.dueAt) { dueAt = new Date(b.dueAt); if (Number.isNaN(dueAt.getTime())) throw badRequest('dueAt is not a valid date.', 'DATE_INVALID') }
     const item = await db().$transaction(async (tx) => {
@@ -117,7 +117,7 @@ export function registerWork(router) {
   router.patch('/work/items/:id', async (r) => {
     const w = await db().workItem.findUnique({ where: { id: r.params.id } }).catch(() => null)
     if (!w) throw notFoundError('Work item not found.')
-    await requireRecord(r, 'work.item.manage', w.platformId, 'work_item', w.id)
+    await requireRecord(r, 'work.manage', w.platformId, 'work_item', w.id)
     const b = await r.body()
     const data = {}
     if (b?.status) { data.status = validateEnum(b.status, WORK_STATUSES, 'status'); data.completedAt = data.status === 'DONE' ? new Date() : null }
@@ -137,11 +137,11 @@ export function registerWork(router) {
   })
 
   router.get('/work/views', async (r) => {
-    await r.requireAnywhere('work.item.read')
+    await r.requireAnywhere('work.view')
     r.ok({ views: await db().adminSavedView.findMany({ where: { userId: r.auth.user.id, viewKey: 'work' }, orderBy: { createdAt: 'asc' } }) })
   })
   router.post('/work/views', async (r) => {
-    await r.requireAnywhere('work.item.read')
+    await r.requireAnywhere('work.view')
     const b = await r.body()
     const filters = {}
     for (const k of ['view', 'type', 'priority', 'status', 'risk', 'platformId']) if (b?.filters?.[k]) filters[k] = String(b.filters[k]).slice(0, 60)
@@ -151,26 +151,26 @@ export function registerWork(router) {
 
   // ---- Notifications (own only) ----------------------------------------------------------------
   router.get('/notifications', async (r) => {
-    await r.requireAnywhere('notification.own.read')
+    await r.requireAnywhere('notification.view_own')
     const p = pageParams(r.query, { defaultPageSize: 20 })
     const where = { userId: r.auth.user.id, ...(r.query.unread === 'true' ? { readAt: null } : {}) }
     const [total, unread, rows] = await Promise.all([db().adminNotification.count({ where }), db().adminNotification.count({ where: { userId: r.auth.user.id, readAt: null } }), db().adminNotification.findMany({ where, orderBy: { createdAt: 'desc' }, skip: p.skip, take: p.take })])
     r.ok({ ...pageResult(rows, total, p), unread })
   })
   router.post('/notifications/:id/read', async (r) => {
-    await r.requireAnywhere('notification.own.read')
+    await r.requireAnywhere('notification.view_own')
     const n = await db().adminNotification.updateMany({ where: { id: r.params.id, userId: r.auth.user.id, readAt: null }, data: { readAt: new Date() } })
     r.ok({ updated: n.count })
   })
   router.post('/notifications/read-all', async (r) => {
-    await r.requireAnywhere('notification.own.read')
+    await r.requireAnywhere('notification.view_own')
     const n = await db().adminNotification.updateMany({ where: { userId: r.auth.user.id, readAt: null }, data: { readAt: new Date() } })
     r.ok({ updated: n.count })
   })
 
   // ---- Approval Center (non-financial) -----------------------------------------------------------
   router.get('/approvals', async (r) => {
-    const scope = await visibleScope(r, 'approval.request.read')
+    const scope = await visibleScope(r, 'approval.view')
     const p = pageParams(r.query)
     const me = r.auth.user.id
     const view = String(r.query.view ?? 'pending')
@@ -184,7 +184,7 @@ export function registerWork(router) {
   router.get('/approvals/:id', async (r) => {
     const a = await db().approvalRequest.findUnique({ where: { id: r.params.id }, include: { steps: { orderBy: { createdAt: 'asc' } } } }).catch(() => null)
     if (!a) throw notFoundError('Approval not found.')
-    await requireRecord(r, 'approval.request.read', a.platformId, 'approval_request', a.id)
+    await requireRecord(r, 'approval.view', a.platformId, 'approval_request', a.id)
     const live = await snapshotSubject(a.subjectType, a.subjectId)
     const currentHash = live ? hashSnapshot(live.snapshot) : null
     r.ok({
@@ -201,7 +201,7 @@ export function registerWork(router) {
     if (b?.kind === 'FINANCIAL' || !APPROVAL_KIND_FOR[subjectType]) throw badRequest('This subject cannot be approved here. Financial approvals are not available in this release.', 'APPROVAL_SUBJECT_UNSUPPORTED')
     const subject = await snapshotSubject(subjectType, String(b?.subjectId ?? ''))
     if (!subject) throw notFoundError('Subject not found.')
-    await requireRecord(r, 'work.item.manage', subject.platformId, 'approval_request')
+    await requireRecord(r, 'work.manage', subject.platformId, 'approval_request')
     const dup = await db().approvalRequest.findFirst({ where: { subjectType, subjectId: String(b.subjectId), status: 'PENDING' } })
     if (dup) throw conflict('An approval is already pending for this subject.', 'APPROVAL_ALREADY_PENDING')
     const created = await db().$transaction(async (tx) => {
@@ -219,7 +219,7 @@ export function registerWork(router) {
     if (a.status !== 'PENDING') throw conflict('This approval is already decided.', 'ALREADY_DECIDED')
     if (a.requesterUserId === r.auth.user.id) throw badRequest('You cannot decide a request you made.', 'SELF_APPROVAL_FORBIDDEN')
     if (a.steps.some((s) => s.approverUserId === r.auth.user.id)) throw conflict('You have already decided this request.', 'ALREADY_DECIDED')
-    await requireRecord(r, 'approval.request.decide', a.platformId, 'approval_request', a.id, { facts: { relations: [{ relation: 'SELF_USER', userId: a.requesterUserId }] } })
+    await requireRecord(r, 'approval.decide', a.platformId, 'approval_request', a.id, { facts: { subjectUserId: a.requesterUserId } })
     const b = await r.body()
     const decision = validateEnum(String(b?.decision ?? ''), ['APPROVE', 'REJECT'], 'decision')
     const reason = cleanText(b?.reason, { min: 5, max: 500, name: 'Reason' })
@@ -253,7 +253,7 @@ export function registerWork(router) {
     if (!a) throw notFoundError('Approval not found.')
     if (a.requesterUserId !== r.auth.user.id) throw notFoundError('Approval not found.')
     if (a.status !== 'PENDING') throw conflict('Only a pending request can be withdrawn.', 'NOT_PENDING')
-    await requireRecord(r, 'approval.request.read', a.platformId, 'approval_request', a.id)
+    await requireRecord(r, 'approval.view', a.platformId, 'approval_request', a.id)
     await db().$transaction(async (tx) => {
       await tx.approvalRequest.update({ where: { id: a.id }, data: { status: 'WITHDRAWN', decidedAt: new Date() } })
       await addTimeline(tx, { entityType: 'approval_request', entityId: a.id, eventType: 'withdrawn', actorUserId: r.auth.user.id, summary: 'Withdrawn by requester' })
@@ -277,7 +277,7 @@ export function registerWork(router) {
     const entityType = String(b?.entityType ?? ''); const entityId = String(b?.entityId ?? '')
     const { spec, platformId } = await entityAccess(entityType, entityId)
     await requireRecord(r, spec.read, platformId, entityType, entityId)
-    await requireRecord(r, 'comment.internal.write', platformId, entityType, entityId)
+    await requireRecord(r, 'comment.write', platformId, entityType, entityId)
     const body = cleanText(b?.body, { max: 4000, name: 'Comment' })
     const c = await db().$transaction(async (tx) => {
       const x = await tx.adminComment.create({ data: { entityType, entityId, authorId: r.auth.user.id, body } })

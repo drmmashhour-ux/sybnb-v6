@@ -26,7 +26,7 @@ export async function authorizedPlatformsFor(snap, ctx, requestId) {
   const platforms = await db().platform.findMany({ orderBy: { sortOrder: 'asc' } })
   const out = []
   for (const p of platforms) {
-    const r = await decide(snap, ctx, 'platform.shell.read', { type: 'platform_shell', id: p.code, platform: p.code, facts: { platformCode: p.code } }, { requestId })
+    const r = await decide(snap, ctx, 'platform.view', { type: 'platform_shell', id: p.code, platform: p.code, facts: { platformCode: p.code } }, { requestId })
     out.push({ ...p, authorized: r.decision === 'ALLOW' })
   }
   return out
@@ -34,7 +34,7 @@ export async function authorizedPlatformsFor(snap, ctx, requestId) {
 
 export function registerCore(router) {
   router.get('/me', async (r) => {
-    await r.requireAnywhere('admin.console.access')
+    await r.requireAnywhere('console.access')
     const user = r.auth.user
     const snap = await loadSnapshot(r.auth)
     const held = await heldCodes(snap, { id: user.id, status: user.status })
@@ -57,7 +57,7 @@ export function registerCore(router) {
   // organization/legal-entity/business-unit levels appear only as ancestors of a platform the user
   // may open, or because an assignment is scoped to them. Names come from the database.
   router.get('/context', async (r) => {
-    await r.requireAnywhere('admin.console.access')
+    await r.requireAnywhere('console.access')
     const snap = await loadSnapshot(r.auth)
     const platforms = (await authorizedPlatformsFor(snap, r.auth, r.requestId)).filter((p) => p.authorized)
     const { orgIndex } = snap
@@ -89,7 +89,7 @@ export function registerCore(router) {
   // Step-up (foundation): re-enter the account password. Fail-closed windows are enforced by the
   // evaluator; this only refreshes the session's step_up_at. Rate limited per user and per IP.
   router.post('/step-up', async (r) => {
-    await r.requireAnywhere('admin.console.access')
+    await r.requireAnywhere('console.access')
     const user = r.auth.user
     if (await isRateLimited(`admin2-step-up:${user.id}`, 15 * 60_000, 8) || await isRateLimited(`admin2-step-up-ip:${clientIp(r.req)}`, 15 * 60_000, 30)) {
       const error = new Error('Too many attempts. Wait a few minutes.')
@@ -115,14 +115,14 @@ export function registerCore(router) {
 
   // Own sessions (never exposes tokens).
   router.get('/sessions', async (r) => {
-    await r.requireAnywhere('iam.session.read_own')
+    await r.requireAnywhere('session.view_own')
     r.ok({ sessions: await listSessions(r.auth.user.id, r.auth.sessionId) })
   })
 
   router.post('/sessions/:id/revoke', async (r) => {
     const target = await db().userSession.findUnique({ where: { id: r.params.id } })
     if (!target || target.userId !== r.auth.user.id) throw notFoundError('Session not found.')
-    await r.requireAnywhere('iam.session.revoke_own')
+    await r.requireAnywhere('session.revoke_own')
     if (target.id === r.auth.sessionId) throw badRequest('Use sign out to end the session you are using.', 'CANNOT_REVOKE_CURRENT')
     await db().$transaction(async (tx) => {
       await tx.userSession.updateMany({ where: { id: target.id, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: 'admin2_self_revoke' } })

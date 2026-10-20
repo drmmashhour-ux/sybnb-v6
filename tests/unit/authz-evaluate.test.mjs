@@ -178,8 +178,8 @@ test('assignments are evaluated independently: role A permission + role B scope 
 })
 
 test('segregation of duties: noSelf permissions are refused on a record about the actor', () => {
-  const p = perm('approval.request.decide', { noSelf: true })
-  const a = assignment({ roleVersion: version({ permissionCodes: ['approval.request.decide'] }) })
+  const p = perm('approval.decide', { noSelf: true })
+  const a = assignment({ roleVersion: version({ permissionCodes: ['approval.decide'] }) })
   const mine = { type: 'approval', facts: { organizationId: 'org1', subjectUserId: 'u1' } }
   const theirs = { type: 'approval', facts: { organizationId: 'org1', subjectUserId: 'u2' } }
   assert.equal(run({ permission: p, assignments: [a], resource: mine }).reason, DENY.SOD_SELF_ACTION)

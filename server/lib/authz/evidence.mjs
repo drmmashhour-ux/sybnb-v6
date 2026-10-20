@@ -11,6 +11,9 @@ const FIELDS = [
 ]
 // Added in STEP 5B. Included in the hash ONLY when present, so rows written before 5B still verify unchanged.
 const OPTIONAL_FIELDS = ['rulesetVersion']
+// Evidence written before rule-set versioning existed carries this explicit marker (migration 082). It is NOT a
+// rule-set version: it is excluded from the hash (so historical hashes still verify) and can never be written anew.
+export const LEGACY_RULESET_VERSION = 'LEGACY_PRE_VERSIONED'
 
 export function canonicalEvidence(record, prevHash, decidedAt) {
   const body = {}
@@ -18,7 +21,7 @@ export function canonicalEvidence(record, prevHash, decidedAt) {
     const v = record[f]
     body[f] = v instanceof Date ? v.toISOString() : v ?? null
   }
-  for (const f of OPTIONAL_FIELDS) if (record[f] != null) body[f] = record[f]
+  for (const f of OPTIONAL_FIELDS) if (record[f] != null && !(f === 'rulesetVersion' && record[f] === LEGACY_RULESET_VERSION)) body[f] = record[f]
   return JSON.stringify({ prev: prevHash ?? null, decidedAt: decidedAt.toISOString(), body })
 }
 
@@ -28,6 +31,10 @@ export function hashEvidence(record, prevHash, decidedAt) {
 
 /** Insert one evidence row. `tx` MUST be a transaction client so the chain tail is read under lock. */
 export async function writeEvidence(tx, record) {
+  // 5D: new evidence must say which rule set decided it; the legacy marker is reserved for pre-versioning rows.
+  if (typeof record.rulesetVersion !== 'string' || !record.rulesetVersion.trim() || record.rulesetVersion === LEGACY_RULESET_VERSION) {
+    throw Object.assign(new Error('authorization evidence requires a real rulesetVersion'), { code: 'EVIDENCE_RULESET_REQUIRED' })
+  }
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('authorization_evidence_chain'))`
   const last = await tx.authorizationEvidence.findFirst({ orderBy: { sequence: 'desc' }, select: { hash: true } })
   const decidedAt = await dbClock(tx) // database clock, read under the chain lock => monotonic along the chain

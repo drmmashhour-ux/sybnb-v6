@@ -6,7 +6,7 @@ import { isRateLimited } from './lib/rateLimit.mjs'
 import { loadEnv, validateEnv } from './lib/env.mjs'
 import { checkDatabase, disconnectDb, db } from './lib/prisma.mjs'
 import { startActivationScheduler, resolveActivationMode } from './lib/authz/activation-worker.mjs'
-import { startClockSync } from './lib/authz/clock.mjs'
+import { startClockSync, securityTimeStatus } from './lib/authz/clock.mjs'
 import { bootstrapSecretDiagnostics } from './lib/authz/bootstrap.mjs'
 import { pruneExpiredOtps } from './lib/otp-retention.mjs'
 import { expireUnpaidBookings } from './lib/booking-lifecycle.mjs'
@@ -218,6 +218,9 @@ const server = createServer(async (req, res) => {
         service: 'sybnb-v6-api',
         status: db.ok ? 'ready' : 'not-ready',
         database: db,
+        // STEP 5D: false until the first database clock sample (and again if the sample goes stale). Time-sensitive
+        // privileged authorization fails closed (SECURITY_TIME_NOT_READY) while false; harmless reads keep working.
+        securityTimeReady: securityTimeStatus().ready,
       })
     }
 
@@ -456,7 +459,9 @@ async function runDispatchHeartbeat() {
 const dispatchTickTimer = setInterval(runDispatchHeartbeat, DISPATCH_TICK_INTERVAL_MS)
 dispatchTickTimer.unref()
 
-// STEP 5C: trusted time. The database clock is authoritative for security state; trustedNow() follows it.
+// STEP 5C/5D: trusted time. The database clock is authoritative for security state. The security-time subsystem is
+// NOT READY until the first database clock sample succeeds (retried every 2 s); until then time-sensitive privileged
+// authorization fails closed with SECURITY_TIME_NOT_READY. /api/health reports securityTimeReady.
 startClockSync(db(), { log })
 
 // STEP 5B/5C: activation worker for approved high-risk grants (state maintenance only -- the authorization evaluator

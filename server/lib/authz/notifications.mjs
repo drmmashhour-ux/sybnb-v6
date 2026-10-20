@@ -1,4 +1,4 @@
-import { trustedNow } from './clock.mjs'
+import { approxNow } from './clock.mjs'
 // STEP 5B -- notification policy and transport interface for security alerts.
 //
 // This is NOTIFICATION policy, not authorization. Being named here (for example as an active Owner) lets a
@@ -14,7 +14,7 @@ export const SECURITY_REVIEW_PERMISSION = 'security_event.review'
 export const CRITICAL_SECURITY_RECIPIENTS = Object.freeze({
   name: 'CRITICAL_SECURITY_RECIPIENTS',
   description: 'Active holders of an Owner role plus active holders of security_event.review. Notification only; grants nothing.',
-  async resolve(client, { excludeUserId = null, now = trustedNow() } = {}) {
+  async resolve(client, { excludeUserId = null, now = approxNow() } = {}) {
     const rows = await client.roleAssignment.findMany({
       where: {
         status: 'ACTIVE', user: { status: 'ACTIVE' }, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
@@ -109,10 +109,10 @@ export async function retryFailedDeliveries(client, { limit = 25 } = {}) {
             await tx.$executeRawUnsafe(`SAVEPOINT ${sp}`)
             const res = await t.deliver({ tx, event: ev, recipients })
             await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${sp}`)
-            delivery[name] = { delivered: res?.delivered ?? 0, attempts, recoveredAt: trustedNow().toISOString() }
+            delivery[name] = { delivered: res?.delivered ?? 0, attempts, recoveredAt: approxNow().toISOString() }
           } catch (e) {
             try { await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${sp}`) } catch { /* ignore */ }
-            delivery[name] = { error: String(e.message || e).slice(0, 200), attempts, lastAttemptAt: trustedNow().toISOString() }
+            delivery[name] = { error: String(e.message || e).slice(0, 200), attempts, lastAttemptAt: approxNow().toISOString() }
             failing += 1
           }
           changed = true

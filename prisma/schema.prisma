@@ -158,6 +158,8 @@ enum MessageSenderRole {
 }
 
 model User {
+  bootstrapsCompleted SecurityBootstrap[] @relation("SecurityBootstrapCompletedBy")
+  bootstrapsTargeted SecurityBootstrap[] @relation("SecurityBootstrapTarget")
   id           String @db.Uuid        @id @default(dbgenerated("gen_random_uuid()"))
   email        String?       @unique
   phoneHash    String?       @unique @map("phone_hash")
@@ -1770,6 +1772,7 @@ model BusinessAccountMember {
 }
 
 model AdminAuditLog {
+  bootstraps SecurityBootstrap[] @relation("SecurityBootstrapAudit")
   id          String @db.Uuid   @id @default(dbgenerated("gen_random_uuid()"))
   actorUserId String? @db.Uuid  @map("actor_user_id")
   action      String
@@ -2473,6 +2476,8 @@ model Role {
 }
 
 model RoleVersion {
+  bootstrapOld SecurityBootstrap[] @relation("SecurityBootstrapOldRoleVersion")
+  bootstrapNew SecurityBootstrap[] @relation("SecurityBootstrapNewRoleVersion")
   id               String @db.Uuid                    @id @default(uuid())
   roleId           String @db.Uuid                    @map("role_id")
   versionNumber    Int                       @map("version_number")
@@ -2516,6 +2521,8 @@ model RoleVersionPermission {
 }
 
 model RoleAssignment {
+  bootstrapOld SecurityBootstrap[] @relation("SecurityBootstrapOldAssignment")
+  bootstrapNew SecurityBootstrap[] @relation("SecurityBootstrapNewAssignment")
   id                     String @db.Uuid               @id @default(uuid())
   userId                 String @db.Uuid               @map("user_id")
   roleVersionId          String @db.Uuid               @map("role_version_id")
@@ -2623,6 +2630,7 @@ model SecurityPolicyVersion {
 // Append-only, hash-chained proof of WHY a request was allowed or denied (Step 3A.3). Written in
 // the same transaction as the action. Denormalised on purpose so it stays readable after renames.
 model AuthorizationEvidence {
+  bootstraps SecurityBootstrap[]
   id                 String @db.Uuid        @id @default(uuid())
   sequence           BigInt        @unique @default(autoincrement())
   userId             String? @db.Uuid       @map("user_id")
@@ -2650,7 +2658,7 @@ model AuthorizationEvidence {
   decision           AuthzDecision
   denyReason         String?       @map("deny_reason")
   policyVersionId    String? @db.Uuid       @map("policy_version_id")
-  rulesetVersion     String?       @map("ruleset_version")
+  rulesetVersion     String        @map("ruleset_version")
   delegationId       String? @db.Uuid       @map("delegation_id")
   auditEventId       String? @db.Uuid       @map("audit_event_id")
   approvalSnapshotId String? @db.Uuid       @map("approval_snapshot_id")
@@ -3214,6 +3222,7 @@ model RetentionPolicy {
 
 // A security event is NOT an audit event: both are written for privileged actions.
 model SecurityEvent {
+  bootstraps SecurityBootstrap[]
   id                String @db.Uuid                @id @default(uuid())
   severity          SecurityEventSeverity
   eventType         String                @map("event_type")
@@ -3287,7 +3296,17 @@ model SecurityBootstrap {
   retentionCategory        String    @default("PRIVILEGED_ACCESS") @map("retention_category")
   retainUntil              DateTime  @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  completedBy    User?                @relation("SecurityBootstrapCompletedBy", fields: [completedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  targetUser     User?                @relation("SecurityBootstrapTarget", fields: [targetUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  oldAssignment  RoleAssignment?      @relation("SecurityBootstrapOldAssignment", fields: [oldAssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  newAssignment  RoleAssignment?      @relation("SecurityBootstrapNewAssignment", fields: [newAssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  oldRoleVersion RoleVersion?         @relation("SecurityBootstrapOldRoleVersion", fields: [oldRoleVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  newRoleVersion RoleVersion?         @relation("SecurityBootstrapNewRoleVersion", fields: [newRoleVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  securityEvent  SecurityEvent?       @relation(fields: [securityEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditEvent     AdminAuditLog?       @relation("SecurityBootstrapAudit", fields: [auditEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  evidence       AuthorizationEvidence? @relation(fields: [evidenceId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
+  @@index([completedById])
   @@map("security_bootstrap")
 }

@@ -11,6 +11,7 @@ import { evaluateAccess } from '../../server/lib/authz/evaluate.mjs'
 import { loadAssignmentsAsOf, loadOrgIndex, loadPermission, loadSuspensions } from '../../server/lib/authz/loader.mjs'
 import { verifyEvidenceChain } from '../../server/lib/authz/evidence.mjs'
 import { writeAdminAudit } from '../../server/lib/authz/audit.mjs'
+import { syncClock } from '../../server/lib/authz/clock.mjs'
 
 if (/production/i.test(process.env.DATABASE_URL || '') || !process.env.DATABASE_URL) {
   console.error('Refusing to run: DATABASE_URL missing or looks like production.')
@@ -118,6 +119,7 @@ await t('expired and revoked assignments are denied; suspended user is denied', 
   assert.equal((await can(ctxOf(suspended), 'user.view', { type: 'u', facts: { organizationId: org.id } })).reason, 'USER_NOT_ACTIVE')
 })
 
+await syncClock(db()) // STEP 5D: this in-process test plays the role of a started server -- it takes the first database clock sample
 await t('T3/T4: step-up is required (fail closed) and every decision writes hash-chained evidence', async () => {
   const u = await mkUser('tier')
   await assign(u, 'OWNER', [{ kind: 'ORGANIZATION', organizationId: org.id }])

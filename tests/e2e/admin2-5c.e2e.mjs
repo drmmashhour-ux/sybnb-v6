@@ -4,7 +4,8 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { db } from '../../server/lib/prisma.mjs'
 import { startApi, createStaffUser, assignRoleVersion, makeRunner, randomUUID } from './helpers/admin2-harness.mjs'
-import { completeOwnerBootstrap, __completeBootstrapForRoleTestOnly as bootForRole, bootstrapSecretDiagnostics, BOOTSTRAP_REQUIRED, BOOTSTRAP_COMPLETED, SECRET_LEFT_CONFIGURED_WARNING } from '../../server/lib/authz/bootstrap.mjs'
+import { completeBootstrapForRole as bootForRole } from '../support/bootstrap-test-adapter.mjs'
+import { completeOwnerBootstrap, bootstrapSecretDiagnostics, BOOTSTRAP_REQUIRED, BOOTSTRAP_COMPLETED, SECRET_LEFT_CONFIGURED_WARNING } from '../../server/lib/authz/bootstrap.mjs'
 import { createAssignment, reviewAssignment, approveAssignment } from '../../server/lib/authz/assignment-workflow.mjs'
 import { permissionSummary } from '../../server/lib/authz/index.mjs'
 import { verifyEvidenceChain } from '../../server/lib/authz/evidence.mjs'
@@ -19,7 +20,6 @@ const STRONG = 'PASSWORD_PLUS_EMAIL_CODE'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const mkOrg = async (tag) => {
   const org = await p.organization.create({ data: { code: `T5D${tag}${run}`.slice(0, 30), name: `t5c ${tag} ${run}` } })
-  await p.$executeRaw`INSERT INTO security_bootstrap (organization_id) VALUES (${org.id}::uuid)`
   return org
 }
 const scope = (org) => [{ kind: 'ORGANIZATION', organizationId: org.id }]

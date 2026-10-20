@@ -1,4 +1,4 @@
-import { trustedNow } from './clock.mjs'
+import { approxNow } from './clock.mjs'
 // STEP 5 -- database loaders for the authorization evaluator. Read-only. Every function takes a
 // Prisma client or transaction so callers control the transaction boundary.
 import { DEFAULT_POLICY } from './evaluate.mjs'
@@ -82,7 +82,7 @@ export async function loadSuspensions(client) {
   }))
 }
 
-export async function loadPolicy(client, at = trustedNow()) {
+export async function loadPolicy(client, at = approxNow()) {
   const row = await client.securityPolicyVersion.findFirst({ where: { effectiveFrom: { lte: at } }, orderBy: { versionNumber: 'desc' } })
   if (!row) return { ...DEFAULT_POLICY, id: null }
   const cfg = row.config || {}

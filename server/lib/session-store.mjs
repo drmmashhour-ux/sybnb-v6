@@ -20,7 +20,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { db } from './prisma.mjs'
-import { trustedNow } from './authz/clock.mjs'
+import { approxNow } from './authz/clock.mjs'
 import { createSessionToken } from './security.mjs'
 import { sessionTtlSecondsForRoles, requiresAdminLoginCode } from './admin-login.mjs'
 import { runBoundedRevocation } from './revocation-contention.mjs'
@@ -61,7 +61,7 @@ export async function issueUserSession(user, req = null) {
     ? user.roles
     : await db().userRole.findMany({ where: { userId: user.id }, select: { role: true } })
   const ttlSeconds = sessionTtlSecondsForRoles(roles)
-  const expiresAt = new Date(trustedNow().getTime() + ttlSeconds * 1000)
+  const expiresAt = new Date(approxNow().getTime() + ttlSeconds * 1000)
 
   const epoch = await db().$transaction(async (tx) => {
     const current = await tx.user.findUnique({ where: { id: user.id }, select: { sessionEpoch: true } })
@@ -92,7 +92,7 @@ export async function revokeSession(sessionId, reason = REVOCATION_REASONS.LOGOU
   if (!sessionId) return { revoked: false }
   const result = await db().userSession.updateMany({
     where: { id: sessionId, revokedAt: null },
-    data: { revokedAt: trustedNow(), revokedReason: reason },
+    data: { revokedAt: approxNow(), revokedReason: reason },
   })
   return { revoked: result.count > 0 }
 }
@@ -106,7 +106,7 @@ export async function revokeUserAccess(userId, reason, options = {}) {
   const run = async (client) => {
     await client.userSession.updateMany({
       where: { userId, revokedAt: null, ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}) },
-      data: { revokedAt: trustedNow(), revokedReason: reason },
+      data: { revokedAt: approxNow(), revokedReason: reason },
     })
     // Bumping the epoch invalidates EVERY outstanding token including any session being kept in
     // user_sessions, so a keep-this-session logout-all must re-issue that session under the new
@@ -209,7 +209,7 @@ export async function revokeAfterCredentialReset(userId, tx = null) {
 
 export async function listActiveSessions(userId) {
   return db().userSession.findMany({
-    where: { userId, revokedAt: null, expiresAt: { gt: trustedNow() } },
+    where: { userId, revokedAt: null, expiresAt: { gt: approxNow() } },
     orderBy: { issuedAt: 'desc' },
     select: { id: true, issuedAt: true, expiresAt: true, lastUsedAt: true, userAgent: true },
   })

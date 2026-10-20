@@ -2,7 +2,7 @@
 // in this file can create, edit or delete an audit row except the explicit "export" / "break-glass
 // request" events, which append new rows.
 import { db } from '../../lib/prisma.mjs'
-import { trustedNow } from '../../lib/authz/clock.mjs'
+import { approxNow } from '../../lib/authz/clock.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { verifyEvidenceChain } from '../../lib/authz/evidence.mjs'
 import { recordSecurityEvent, SEVERITIES } from '../../lib/authz/security-events.mjs'
@@ -72,11 +72,11 @@ export function registerSecurity(router) {
     const day = new Date(Date.now() - 24 * 3600_000); const week = new Date(Date.now() - 7 * 24 * 3600_000)
     const [privileged, activeSessions, stepUpFailed, pending, critical, sessionsMfa] = await Promise.all([
       db().user.count({ where: { status: 'ACTIVE', roleAssignments: { some: { status: { in: ['ACTIVE', 'PENDING_ACTIVATION'] }, roleVersion: { permissions: { some: { permission: { OR: [{ tier: { gte: 3 } }, { highRisk: true }] } } } } } } } }),
-      db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: trustedNow() }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
+      db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: approxNow() }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
       db().adminAuditLog.count({ where: { action: 'security.step_up_failed', createdAt: { gte: day } } }),
       db().roleAssignment.count({ where: { status: { in: ['PENDING_APPROVAL', 'UNDER_REVIEW'] } } }),
       db().securityEvent.count({ where: { severity: 'CRITICAL', createdAt: { gte: week } } }),
-      db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: trustedNow() }, mfaMethod: { not: null }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
+      db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: approxNow() }, mfaMethod: { not: null }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
     ])
     r.ok({ metrics: { privilegedUsers: privileged, activeStaffSessions: activeSessions, activeStaffSessionsWithMfa: sessionsMfa, failedStepUps24h: stepUpFailed, pendingAccessApprovals: pending, criticalEvents7d: critical } })
   })
@@ -117,17 +117,26 @@ export function registerSecurity(router) {
     r.ok({ reviewed: true })
   })
 
-  // ---- One-time Owner bootstrap (STEP 5B). See server/lib/authz/bootstrap.mjs for the replay-prevention design. ----
+  // ---- One-time Owner bootstrap (STEP 5B). See the bootstrap module in server/lib/authz for the replay-prevention design. ----
+  // The organization is the oldest one unless an explicit ?organizationId=<uuid> is given (STEP 5D: needed for the
+  // multi-organization HTTP closed-first test and for operators with several organizations). It is a query
+  // parameter, not a body field, so resolving it never parses the body before the closed-first check.
+  const bootstrapOrg = async (r) => {
+    const id = r.query?.organizationId
+    if (id == null || id === '') return db().organization.findFirst({ orderBy: { createdAt: 'asc' } })
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id))) throw badRequest('organizationId must be a UUID.', 'ORGANIZATION_ID_INVALID')
+    return db().organization.findUnique({ where: { id: String(id) } })
+  }
   router.get('/security/bootstrap', async (r) => {
     await r.requireAnywhere('console.access')
-    const org = await db().organization.findFirst({ orderBy: { createdAt: 'asc' } })
+    const org = await bootstrapOrg(r)
     r.ok({ organizationId: org?.id ?? null, ...(org ? (await getBootstrapState(db(), org.id)) ?? { state: null } : { state: null }), secret: await bootstrapSecretDiagnostics(db()) })
   })
   router.post('/security/bootstrap/owner', async (r) => {
     if (await isRateLimited(`admin2-bootstrap:${r.auth.user.id}`, 15 * 60_000, 5) || await isRateLimited(`admin2-bootstrap-ip:${clientIp(r.req)}`, 15 * 60_000, 10)) {
       const error = new Error('Too many attempts. Wait a few minutes.'); error.statusCode = 429; error.code = 'RATE_LIMITED'; error.expose = true; throw error
     }
-    const org = await db().organization.findFirst({ orderBy: { createdAt: 'asc' } })
+    const org = await bootstrapOrg(r)
     if (!org) throw notFoundError('Organization not found.')
     // STEP 5C: a completed bootstrap is closed before authorization, the body or the operator secret are processed.
     if ((await getBootstrapState(db(), org.id))?.state === BOOTSTRAP_COMPLETED) {

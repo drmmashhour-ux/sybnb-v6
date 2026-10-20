@@ -1,4 +1,4 @@
-import { trustedNow } from './clock.mjs'
+import { approxNow } from './clock.mjs'
 // STEP 5A (3A-6) -- retention metadata. Floor: 7 years (also a database CHECK and trigger). Longer is
 // supported by raising retention_policies.years. There is NO purge job and no delete endpoint: retention
 // here only stamps `retain_until` so that a future, separately approved disposal process has the facts.
@@ -19,7 +19,7 @@ export async function loadRetentionPolicies(client) {
 }
 
 /** { retentionCategory, retainUntil } for a record created at `from`. Never shorter than 7 years. */
-export async function retentionFor(client, category, from = trustedNow()) {
+export async function retentionFor(client, category, from = approxNow()) {
   const p = await client.retentionPolicy.findUnique({ where: { category } })
   const years = Math.max(RETENTION_FLOOR_YEARS, p?.years ?? RETENTION_FLOOR_YEARS)
   return { retentionCategory: category, retainUntil: addYears(from, years) }

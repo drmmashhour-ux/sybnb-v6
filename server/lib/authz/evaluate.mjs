@@ -18,6 +18,7 @@ export const DENY = Object.freeze({
   SOD_SELF_ACTION: 'SOD_SELF_ACTION',
   STEP_UP_REQUIRED: 'STEP_UP_REQUIRED',
   ACTIVATION_PENDING: 'ACTIVATION_PENDING',
+  SECURITY_TIME_NOT_READY: 'SECURITY_TIME_NOT_READY',
 })
 
 // Candidate failures are ranked; the furthest-reached reason is reported (all of them are a DENY).
@@ -43,6 +44,17 @@ export function isAssignmentPendingActivationAt(a, nowMs) {
   if (!a) return false
   if (a.status === 'PENDING_ACTIVATION') return true
   return a.status === 'ACTIVE' && a.activationAt != null && T(a.activationAt) > nowMs
+}
+
+/** 5D: the only assignments honored while trusted time is unavailable: ACTIVE, no activation/expiry window, not revoked. */
+export function isPlainAssignment(a) {
+  return !!a && a.status === 'ACTIVE' && a.activationAt == null && a.effectiveTo == null && a.revokedAt == null
+}
+
+/** 5D: permissions whose decision depends on a trustworthy clock (tier 3+, high-risk, or any step-up window). */
+export function isTimeSensitivePermission(permission, policy = DEFAULT_POLICY) {
+  if (!permission) return false
+  return permission.tier >= 3 || permission.highRisk === true || policy?.stepUpWindowMs?.[permission.tier] != null
 }
 
 export function isAssignmentActiveAt(a, nowMs) {
@@ -166,11 +178,18 @@ export function evaluateAccess(input) {
   if (permission.deprecated) return deny(DENY.PERMISSION_DEPRECATED)
   if (!user || user.status !== 'ACTIVE') return deny(DENY.USER_NOT_ACTIVE)
 
+  // STEP 5D: when trusted time is not available (no first DB sample, or a stale one) every time-sensitive
+  // permission fails CLOSED; harmless reads continue on plain open-ended ACTIVE assignments only.
+  const timeTrusted = context.timeTrusted !== false
+  if (!timeTrusted && isTimeSensitivePermission(permission, policy)) return deny(DENY.SECURITY_TIME_NOT_READY)
+
   let bestRank = 0
   let bestReason = DENY.NO_ACTIVE_ASSIGNMENT
   const fail = (reason) => { if (RANK[reason] > bestRank) { bestRank = RANK[reason]; bestReason = reason } }
 
-  const active = assignments.filter((a) => a.userId == null || a.userId === user.id).filter((a) => isAssignmentActiveAt(a, nowMs))
+  const plainOnly = (a) => timeTrusted || isPlainAssignment(a)
+  const suspensionsInForce = timeTrusted ? suspensions : suspensions.filter((s) => s.liftedAt == null) // untrusted: ignore windows, fail closed
+  const active = assignments.filter((a) => a.userId == null || a.userId === user.id).filter((a) => plainOnly(a) && isAssignmentActiveAt(a, nowMs))
   active.sort((a, b) => String(a.id).localeCompare(String(b.id)))
   if (!active.length) {
     const waiting = assignments.some((a) => (a.userId == null || a.userId === user.id) && isAssignmentPendingActivationAt(a, nowMs) && a.revokedAt == null)
@@ -183,7 +202,8 @@ export function evaluateAccess(input) {
     const codes = rv.permissionCodes instanceof Set ? rv.permissionCodes : new Set(rv.permissionCodes || [])
     if (!codes.has(permission.code)) { fail(DENY.PERMISSION_NOT_IN_ROLE_VERSION); continue }
 
-    const suspended = suspensions.some((s) => {
+    const suspended = suspensionsInForce.some((s) => {
+      if (!timeTrusted) return (s.permissionCode != null && s.permissionCode === permission.code) || (s.roleVersionId != null && s.roleVersionId === rv.id)
       if (s.liftedAt != null && T(s.liftedAt) <= nowMs) return false
       if (T(s.effectiveFrom) > nowMs) return false
       if (s.effectiveTo != null && nowMs >= T(s.effectiveTo)) return false

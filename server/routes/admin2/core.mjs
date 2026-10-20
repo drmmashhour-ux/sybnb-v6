@@ -1,6 +1,6 @@
 // STEP 5 -- /api/admin2 core: who am I, what may I see, context registry, step-up, own sessions.
 import { db } from '../../lib/prisma.mjs'
-import { dbNow, trustedNow } from '../../lib/authz/clock.mjs'
+import { dbNow, approxNow } from '../../lib/authz/clock.mjs'
 import { verifyPassword } from '../../lib/security.mjs'
 import { isRateLimited, clientIp } from '../../lib/rateLimit.mjs'
 import { loadSnapshot, decide } from '../../lib/authz/index.mjs'
@@ -127,7 +127,7 @@ export function registerCore(router) {
     await r.requireAnywhere('session.revoke_own')
     if (target.id === r.auth.sessionId) throw badRequest('Use sign out to end the session you are using.', 'CANNOT_REVOKE_CURRENT')
     await db().$transaction(async (tx) => {
-      await tx.userSession.updateMany({ where: { id: target.id, revokedAt: null }, data: { revokedAt: trustedNow(), revokedReason: 'admin2_self_revoke' } })
+      await tx.userSession.updateMany({ where: { id: target.id, revokedAt: null }, data: { revokedAt: approxNow(), revokedReason: 'admin2_self_revoke' } })
       await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'security.session_revoked', entityType: 'user_session', entityId: target.id, correlationId: r.requestId, reason: 'own session' })
     })
     r.ok({ revoked: true })
@@ -135,7 +135,7 @@ export function registerCore(router) {
 }
 
 export async function listSessions(userId, currentSessionId) {
-  const rows = await db().userSession.findMany({ where: { userId, revokedAt: null, expiresAt: { gt: trustedNow() } }, orderBy: { issuedAt: 'desc' }, take: 50 })
+  const rows = await db().userSession.findMany({ where: { userId, revokedAt: null, expiresAt: { gt: approxNow() } }, orderBy: { issuedAt: 'desc' }, take: 50 })
   return rows.map((s) => ({
     id: s.id, current: s.id === currentSessionId, createdAt: s.createdAt, issuedAt: s.issuedAt, expiresAt: s.expiresAt, lastUsedAt: s.lastUsedAt,
     device: summarizeUserAgent(s.userAgent), stepUpAt: s.stepUpAt,

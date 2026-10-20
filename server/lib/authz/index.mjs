@@ -1,4 +1,4 @@
-import { trustedNow } from './clock.mjs'
+import { approxNow, securityTimeStatus } from './clock.mjs'
 // STEP 5 -- the ONE authorization entry point for admin code (Step 5 spec section 8):
 //   can(ctx, permission, resource, options)       -> result (never throws on deny)
 //   authorize(ctx, permission, resource, options) -> result, or throws 401/403 (deny by default)
@@ -44,7 +44,11 @@ export function sessionAuthFacts(ctx, sessionRow) {
 /** Load everything the evaluator needs ONCE, so many decisions in one request cost one round of queries. */
 export async function loadSnapshot(ctx, options = {}) {
   const client = options.tx || db()
-  const now = options.now ?? trustedNow()
+  // 5D: an injected `now` comes from the caller's own DB transaction clock (trusted). Otherwise the corrected
+  // application clock is trusted ONLY while a fresh database sample exists; if not, privileged time-sensitive
+  // permissions are denied by the evaluator (SECURITY_TIME_NOT_READY) and `now` is only a best-effort value.
+  const timeTrusted = options.now != null ? true : securityTimeStatus().ready
+  const now = options.now ?? approxNow()
   const [assignments, suspensions, orgIndex, policy, sessionRow] = await Promise.all([
     loadAssignmentsForUser(client, ctx.user.id),
     loadSuspensions(client),
@@ -52,7 +56,7 @@ export async function loadSnapshot(ctx, options = {}) {
     loadPolicy(client, now),
     ctx.sessionId ? client.userSession.findUnique({ where: { id: ctx.sessionId }, select: { issuedAt: true, stepUpAt: true, mfaMethod: true } }) : null,
   ])
-  return { client, now, assignments, suspensions, orgIndex, policy, auth: sessionAuthFacts(ctx, sessionRow) }
+  return { client, now, timeTrusted, assignments, suspensions, orgIndex, policy, auth: sessionAuthFacts(ctx, sessionRow) }
 }
 
 function evidenceRecord(ctx, code, permission, resource, result, snap, options) {
@@ -80,7 +84,7 @@ export async function decide(snap, ctx, code, resource = {}, options = {}) {
   if (permission === undefined) { permission = await loadPermission(snap.client, code); snap.permissionCache.set(code, permission) }
   const result = evaluateAccess({
     user: { id: ctx.user.id, status: ctx.user.status }, permission, assignments: snap.assignments, suspensions: snap.suspensions,
-    resource, orgIndex: snap.orgIndex, policy: snap.policy, context: { now: snap.now, session: { recentAuthAt: snap.auth.recentAuthAt } },
+    resource, orgIndex: snap.orgIndex, policy: snap.policy, context: { now: snap.now, timeTrusted: snap.timeTrusted, session: { recentAuthAt: snap.auth.recentAuthAt } },
   })
   if (options.evidence === true || (permission && permission.tier >= 3)) {
     const record = evidenceRecord(ctx, code, permission, resource, result, snap, options)
@@ -135,7 +139,7 @@ export async function permissionSummary(ctx, codes, options = {}) {
   ])
   const byCode = new Map(defs.map((d) => [d.code, { code: d.code, deprecated: d.deprecated }]))
   for (const code of codes) {
-    out[code] = holdsPermissionAnywhere({ user: { id: ctx.user.id, status: ctx.user.status }, permission: byCode.get(code) ?? null, assignments, suspensions, now: options.now ?? trustedNow() })
+    out[code] = holdsPermissionAnywhere({ user: { id: ctx.user.id, status: ctx.user.status }, permission: byCode.get(code) ?? null, assignments, suspensions, now: options.now ?? approxNow() })
   }
   return out
 }

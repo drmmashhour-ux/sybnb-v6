@@ -18,7 +18,6 @@ const SECRET = process.env.ADMIN_BOOTSTRAP_SECRET
 const STRONG = 'PASSWORD_PLUS_EMAIL_CODE'
 const mkOrg = async (tag) => {
   const org = await p.organization.create({ data: { code: `T5B${tag}${run}`.slice(0, 30), name: `t5b ${tag} ${run}` } })
-  await p.$executeRaw`INSERT INTO security_bootstrap (organization_id) VALUES (${org.id}::uuid)`
   return org
 }
 const scope = (org) => [{ kind: 'ORGANIZATION', organizationId: org.id }]

@@ -11,6 +11,7 @@ import { recordSecurityEvent } from './security-events.mjs'
 import { retentionFor } from './retention.mjs'
 import { privilegeDelta } from './risk.mjs'
 import { loadPolicy } from './loader.mjs'
+import { assertContinuity, assertCapabilitiesRetained } from './continuity.mjs'
 import { badReq, notFound, conflictErr } from './errors.mjs'
 
 // Interactive transactions run several statements; give them room (default 5s is too tight over a WAN link).
@@ -61,6 +62,7 @@ export async function createAssignment(client, { actorUserId, targetUserId, role
 async function supersede(tx, oldId, newId, actorUserId, requestId) {
   const old = await tx.roleAssignment.findUnique({ where: { id: oldId } })
   if (!old || !['ACTIVE', 'PENDING_ACTIVATION'].includes(old.status)) return
+  await assertContinuity(tx, { assignmentIds: [oldId] }) // the replacement is already ACTIVE, so a clean transition passes
   await tx.roleAssignment.update({ where: { id: oldId }, data: { status: 'SUPERSEDED' } })
   await event(tx, old, 'SUPERSEDED', actorUserId, { supersededBy: newId }, requestId)
 }
@@ -117,33 +119,13 @@ export async function revokeAssignment(client, { actorUserId, assignmentId, reas
     if (!a) throw notFound('Assignment not found.')
     if (!['ACTIVE', 'PENDING_APPROVAL', 'UNDER_REVIEW', 'PENDING_ACTIVATION', 'SUSPENDED'].includes(a.status)) throw conflictErr('This assignment is already closed.', 'NOT_REVOCABLE')
     const wasLive = ['ACTIVE', 'PENDING_ACTIVATION'].includes(a.status)
+    if (wasLive) await assertContinuity(tx, { assignmentIds: [a.id] })
     await tx.roleAssignment.update({ where: { id: a.id }, data: { status: 'REVOKED', revokedAt: new Date(), revokedById: actorUserId, revokeReason: why } })
     await event(tx, a, 'REVOKED', actorUserId, { reason: why, from: a.status }, requestId)
     const audit = await writeAdminAudit(tx, { actorUserId, action: 'iam.role_assignment.revoked', entityType: 'role_assignment', entityId: a.id, before: { status: a.status }, after: { status: 'REVOKED' }, reason: why, correlationId: requestId })
     if (wasLive) await recordSecurityEvent(tx, { severity: 'WARNING', eventType: 'ACCESS_REVOKED', actorUserId, subjectUserId: a.userId, entityType: 'role_assignment', entityId: a.id, summary: `Access revoked: ${a.roleVersion.role.code}`, detail: { from: a.status }, correlationId: requestId, auditEventId: audit.id })
     return { status: 'REVOKED' }
   }, TX)
-}
-
-/**
- * Sweeper: flips PENDING_ACTIVATION -> ACTIVE once activation_at has passed. Safe to call from anywhere and
- * idempotent. (Authorization does not depend on it: the evaluator checks activation_at itself.)
- */
-export async function activateDueAssignments(client, now = new Date()) {
-  const due = await client.roleAssignment.findMany({ where: { status: 'PENDING_ACTIVATION', activationAt: { lte: now }, revokedAt: null }, include: INCLUDE })
-  let n = 0
-  for (const a of due) {
-    await client.$transaction(async (tx) => {
-      const res = await tx.roleAssignment.updateMany({ where: { id: a.id, status: 'PENDING_ACTIVATION' }, data: { status: 'ACTIVE' } })
-      if (res.count !== 1) return
-      await event(tx, a, 'ACTIVATED', null, { activationAt: a.activationAt.toISOString() }, null)
-      const audit = await writeAdminAudit(tx, { actorUserId: null, action: 'iam.role_assignment.activated', entityType: 'role_assignment', entityId: a.id, after: { status: 'ACTIVE' }, reason: 'High-risk activation delay elapsed', correlationId: null })
-      await recordSecurityEvent(tx, { severity: 'HIGH', eventType: 'HIGH_RISK_ACCESS_ACTIVATED', subjectUserId: a.userId, entityType: 'role_assignment', entityId: a.id, summary: `High-risk access active: ${a.roleVersion.role.code}`, detail: { activationAt: a.activationAt.toISOString() }, auditEventId: audit.id })
-      if (a.supersedesAssignmentId) await supersede(tx, a.supersedesAssignmentId, a.id, null, null)
-      n += 1
-    }, TX)
-  }
-  return n
 }
 
 /**
@@ -182,5 +164,8 @@ export async function autoMigrateIfReducing(tx, { oldVersionId, newVersionId, ac
     await event(tx, h, 'SUPERSEDED', actorUserId, { supersededBy: n.id, removed: d.removed }, requestId)
     await event(tx, n, 'GRANTED', actorUserId, { migratedFrom: h.id, removed: d.removed }, requestId)
   }
+  // A reducing version must not strip the last holder of a continuity capability the old version carried.
+  const orgIds = [...new Set(holders.flatMap((h) => h.scopes.filter((x) => x.kind === 'ORGANIZATION' && x.organizationId).map((x) => x.organizationId)))]
+  await assertCapabilitiesRetained(tx, { organizationIds: orgIds, permissions: d.removed })
   return { migrated: holders.length, removed: d.removed }
 }

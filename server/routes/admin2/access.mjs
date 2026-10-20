@@ -8,7 +8,7 @@ import { roleVersionContentHash } from '../../lib/authz/catalogue.mjs'
 import { badRequest, notFoundError, conflict, pageParams, sortParam, pageResult } from './router.mjs'
 import { heldCodes } from './core.mjs'
 import { suspendUser, reactivateUser } from '../../lib/authz/emergency.mjs'
-import { createAssignment, reviewAssignment, approveAssignment, revokeAssignment, migrateAssignment, activateDueAssignments, autoMigrateIfReducing, TX } from '../../lib/authz/assignment-workflow.mjs'
+import { createAssignment, reviewAssignment, approveAssignment, revokeAssignment, migrateAssignment, autoMigrateIfReducing, TX } from '../../lib/authz/assignment-workflow.mjs'
 
 const REASON_MIN = 8
 
@@ -182,7 +182,6 @@ export function registerAccess(router) {
   // ---- Assignments ----------------------------------------------------------------------------
   router.get('/access/assignments', async (r) => {
     await r.require('access.view', await orgResource('role_assignment'))
-    await activateDueAssignments(db())
     const p = pageParams(r.query)
     const where = {
       ...(['PENDING_APPROVAL', 'UNDER_REVIEW', 'PENDING_ACTIVATION', 'REJECTED', 'ACTIVE', 'SUSPENDED', 'EXPIRED', 'REVOKED', 'SUPERSEDED'].includes(r.query.status) ? { status: r.query.status } : {}),

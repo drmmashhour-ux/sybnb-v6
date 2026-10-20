@@ -8,6 +8,8 @@ const FIELDS = [
   'authStrength', 'mfaMethod', 'mfaResult', 'recentAuthAt', 'requestId', 'correlationId', 'decision', 'denyReason',
   'policyVersionId', 'delegationId', 'auditEventId', 'approvalSnapshotId',
 ]
+// Added in STEP 5B. Included in the hash ONLY when present, so rows written before 5B still verify unchanged.
+const OPTIONAL_FIELDS = ['rulesetVersion']
 
 export function canonicalEvidence(record, prevHash, decidedAt) {
   const body = {}
@@ -15,6 +17,7 @@ export function canonicalEvidence(record, prevHash, decidedAt) {
     const v = record[f]
     body[f] = v instanceof Date ? v.toISOString() : v ?? null
   }
+  for (const f of OPTIONAL_FIELDS) if (record[f] != null) body[f] = record[f]
   return JSON.stringify({ prev: prevHash ?? null, decidedAt: decidedAt.toISOString(), body })
 }
 
@@ -34,7 +37,7 @@ export async function writeEvidence(tx, record) {
 
 function pick(record) {
   const out = {}
-  for (const f of FIELDS) if (record[f] !== undefined) out[f] = record[f]
+  for (const f of [...FIELDS, ...OPTIONAL_FIELDS]) if (record[f] !== undefined) out[f] = record[f]
   return out
 }
 

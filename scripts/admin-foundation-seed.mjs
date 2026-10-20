@@ -36,6 +36,10 @@ async function main() {
   }
   const permByCode = new Map((await db.permissionDefinition.findMany()).map((p) => [p.code, p]))
 
+  // Owner bootstrap state (STEP 5B): every organization has exactly one row, created REQUIRED. Insert-only; the database
+  // makes COMPLETED terminal.
+  await db.securityBootstrap.createMany({ data: (await db.organization.findMany({ select: { id: true } })).map((o) => ({ organizationId: o.id })), skipDuplicates: true })
+
   // Legacy (first-cut) names stay resolvable for historical evidence. Insert-only.
   for (const [legacy, canonical] of Object.entries(LEGACY_PERMISSION_ALIASES)) {
     const perm = permByCode.get(canonical)

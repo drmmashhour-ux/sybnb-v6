@@ -4,7 +4,8 @@ import { isAccessGateBypassed, isPublicAccessOpen } from './lib/access-gate.mjs'
 import { getAuthContext } from './lib/auth-context.mjs'
 import { isRateLimited } from './lib/rateLimit.mjs'
 import { loadEnv, validateEnv } from './lib/env.mjs'
-import { checkDatabase, disconnectDb } from './lib/prisma.mjs'
+import { checkDatabase, disconnectDb, db } from './lib/prisma.mjs'
+import { startActivationScheduler } from './lib/authz/activation-worker.mjs'
 import { pruneExpiredOtps } from './lib/otp-retention.mjs'
 import { expireUnpaidBookings } from './lib/booking-lifecycle.mjs'
 import { sweepIntervalMinutes } from './lib/booking-policy.mjs'
@@ -452,6 +453,13 @@ async function runDispatchHeartbeat() {
 }
 const dispatchTickTimer = setInterval(runDispatchHeartbeat, DISPATCH_TICK_INTERVAL_MS)
 dispatchTickTimer.unref()
+
+// STEP 5B: activation worker for approved high-risk grants (state maintenance only -- the authorization evaluator
+// independently enforces activation_at). Overlap-safe, multi-replica safe (row locks), unref'd.
+if (process.env.ADMIN_ACTIVATION_JOB !== 'off') {
+  const activationIntervalMs = Number(process.env.ADMIN_ACTIVATION_INTERVAL_MS)
+  startActivationScheduler(db(), { intervalMs: Number.isFinite(activationIntervalMs) && activationIntervalMs >= 5_000 ? activationIntervalMs : 60_000, log })
+}
 
 let shuttingDown = false
 // Top-level safety net: a stray floating rejection would otherwise terminate the single replica.

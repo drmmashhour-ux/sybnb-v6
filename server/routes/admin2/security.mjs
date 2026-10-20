@@ -5,6 +5,9 @@ import { db } from '../../lib/prisma.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { verifyEvidenceChain } from '../../lib/authz/evidence.mjs'
 import { recordSecurityEvent, SEVERITIES } from '../../lib/authz/security-events.mjs'
+import { completeOwnerBootstrap, getBootstrapState } from '../../lib/authz/bootstrap.mjs'
+import { sessionAuthFacts } from '../../lib/authz/index.mjs'
+import { isRateLimited, clientIp } from '../../lib/rateLimit.mjs'
 import { badRequest, notFoundError, pageParams, pageResult } from './router.mjs'
 
 let orgCache = null
@@ -111,6 +114,30 @@ export function registerSecurity(router) {
       await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'security.event_reviewed', entityType: 'security_event', entityId: e.id, reason: note, correlationId: r.requestId })
     })
     r.ok({ reviewed: true })
+  })
+
+  // ---- One-time Owner bootstrap (STEP 5B). See server/lib/authz/bootstrap.mjs for the replay-prevention design. ----
+  router.get('/security/bootstrap', async (r) => {
+    await r.requireAnywhere('console.access')
+    const org = await db().organization.findFirst({ orderBy: { createdAt: 'asc' } })
+    r.ok({ organizationId: org?.id ?? null, ...(org ? (await getBootstrapState(db(), org.id)) ?? { state: null } : { state: null }) })
+  })
+  router.post('/security/bootstrap/owner', async (r) => {
+    if (await isRateLimited(`admin2-bootstrap:${r.auth.user.id}`, 15 * 60_000, 5) || await isRateLimited(`admin2-bootstrap-ip:${clientIp(r.req)}`, 15 * 60_000, 10)) {
+      const error = new Error('Too many attempts. Wait a few minutes.'); error.statusCode = 429; error.code = 'RATE_LIMITED'; error.expose = true; throw error
+    }
+    const org = await db().organization.findFirst({ orderBy: { createdAt: 'asc' } })
+    if (!org) throw notFoundError('Organization not found.')
+    // The caller is still on the OLD Owner version, so authorization uses a permission that version holds:
+    // access.assign (tier 4: fresh step-up + evidence), ORGANIZATION-scoped.
+    await r.require('access.assign', await orgResource('security_bootstrap', org.id), { evidence: true })
+    const body = await r.body()
+    const sessionRow = r.auth.sessionId ? await db().userSession.findUnique({ where: { id: r.auth.sessionId }, select: { issuedAt: true, stepUpAt: true, mfaMethod: true } }) : null
+    const out = await completeOwnerBootstrap(db(), {
+      actorUserId: r.auth.user.id, organizationId: org.id, reason: body?.reason, operatorSecret: r.req.headers['x-bootstrap-secret'],
+      authStrength: sessionAuthFacts(r.auth, sessionRow).authStrength, requestId: r.requestId,
+    })
+    r.ok(out, 201)
   })
 
   router.get('/security/privileged-users', async (r) => {

@@ -9,6 +9,7 @@
 import { writeAdminAudit } from './audit.mjs'
 import { recordSecurityEvent } from './security-events.mjs'
 import { retentionFor } from './retention.mjs'
+import { assertContinuity } from './continuity.mjs'
 import { badReq, notFound, conflictErr } from './errors.mjs'
 
 // Interactive transactions run several statements; give them room (default 5s is too tight over a WAN link).
@@ -20,16 +21,6 @@ function needReason(reason, what = 'A reason') {
   return r
 }
 
-async function lastApprovalAuthority(tx, userId) {
-  const others = await tx.roleAssignment.count({
-    where: {
-      userId: { not: userId }, status: 'ACTIVE', user: { status: 'ACTIVE' },
-      roleVersion: { permissions: { some: { permission: { code: 'access.approve' } } } },
-    },
-  })
-  return others === 0
-}
-
 export async function suspendUser(client, { actorUserId, targetUserId, reason, kind = 'STANDARD', requestId = null }) {
   const why = needReason(reason)
   if (!['STANDARD', 'EMERGENCY'].includes(kind)) throw badReq('Unknown suspension kind.', 'KIND_INVALID')
@@ -38,10 +29,8 @@ export async function suspendUser(client, { actorUserId, targetUserId, reason, k
     const target = await tx.user.findUnique({ where: { id: targetUserId } })
     if (!target) throw notFound('User not found.')
     if (target.status === 'SUSPENDED') throw conflictErr('This user is already suspended.', 'ALREADY_SUSPENDED')
-    const holdsApproval = await tx.roleAssignment.count({ where: { userId: target.id, status: 'ACTIVE', roleVersion: { permissions: { some: { permission: { code: 'access.approve' } } } } } })
-    if (holdsApproval && await lastApprovalAuthority(tx, target.id)) {
-      throw conflictErr('This is the last active approval authority (Owner); suspending them would lock everyone out.', 'LAST_OWNER')
-    }
+    // Continuity: never remove the last valid holder of an authority the organization currently has.
+    await assertContinuity(tx, { userId: target.id })
     const assignments = await tx.roleAssignment.findMany({
       where: { userId: target.id }, select: { id: true, status: true, roleVersionId: true, effectiveFrom: true, effectiveTo: true, activationAt: true },
     })

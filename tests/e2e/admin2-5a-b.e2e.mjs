@@ -1,6 +1,7 @@
 // STEP 5A (part 2) -- role versions (25), retention (26), security events; real HTTP, test DB only.
 import assert from 'node:assert/strict'
 import { db } from '../../server/lib/prisma.mjs'
+import { runActivationCycle } from '../../server/lib/authz/activation-worker.mjs'
 import { startApi, createStaffUser, loginAsStaff, assignRole, assignRoleVersion, makeRunner, randomUUID, client, PASSWORD } from './helpers/admin2-harness.mjs'
 
 const run = randomUUID().slice(0, 8)
@@ -34,7 +35,7 @@ await t('25: holders stay pinned to v1; v2 expansion never migrates silently; mi
   assert.equal((await o2.http.post(`${A}/assignments/${nid}/review`, { reason: 'migration reviewed' })).status, 200)
   assert.equal((await o3.http.post(`${A}/assignments/${nid}/approve`, { reason: 'migration approved' })).status, 200)
   await p.$executeRaw`UPDATE role_assignments SET activation_at = now() - interval '1 minute' WHERE id = ${nid}::uuid`
-  await o1.http.get(`${A}/assignments`)
+  await runActivationCycle(p)
   assert.equal((await p.roleAssignment.findUnique({ where: { id: nid } })).status, 'ACTIVE')
   assert.equal((await p.roleAssignment.findUnique({ where: { id: pinned.id } })).status, 'SUPERSEDED')
 })

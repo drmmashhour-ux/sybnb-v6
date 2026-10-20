@@ -204,3 +204,23 @@ export const POLICY_V2_CONFIG = Object.freeze({
   highRiskActivationDelayHours: 48,
   note: 'STEP 5A: 48-hour high-risk activation delay (3A-4); retention minimums live in retention_policies (3A-6).',
 })
+
+// ---------------------------------------------------------------------------------------------
+// STEP 5B -- permission rule-set policy reference.
+// Decision: noSelf / tier / high-risk / reserved stay in THIS catalogue (one place, versioned, testable),
+// not in a database column. They are mirrored into permission_definitions only where the database must
+// enforce them (tier, high_risk). Every authorization evidence row records which rule-set version applied.
+// Changing any rule means changing PERMISSIONS, which changes the fingerprint, which fails the unit test
+// until PERMISSION_RULESET_VERSION is bumped and its new fingerprint is registered below.
+// ---------------------------------------------------------------------------------------------
+export const PERMISSION_RULESET_VERSION = '2026.10.5B-1'
+
+export function permissionRulesetFingerprint() {
+  const rows = PERMISSIONS.map((p) => [p.code, p.tier, Boolean(p.highRisk), Boolean(p.noSelf), Boolean(p.reserved)]).sort((a, b) => a[0].localeCompare(b[0]))
+  return createHash('sha256').update(JSON.stringify(rows)).digest('hex')
+}
+
+// version -> fingerprint of the rule set that version denotes (append-only list; never edit an entry).
+export const PERMISSION_RULESET_REGISTRY = Object.freeze({
+  '2026.10.5B-1': '368921e9ff983034d7b1657dd03933d05c7f62b413325e1cedd6fcaa29ae0726',
+})

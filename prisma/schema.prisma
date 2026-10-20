@@ -1770,8 +1770,8 @@ model BusinessAccountMember {
 }
 
 model AdminAuditLog {
-  id          String   @id @default(uuid())
-  actorUserId String?  @map("actor_user_id")
+  id          String @db.Uuid   @id @default(dbgenerated("gen_random_uuid()"))
+  actorUserId String? @db.Uuid  @map("actor_user_id")
   action      String
   entityType  String   @map("entity_type")
   entityId    String   @map("entity_id")
@@ -1782,15 +1782,15 @@ model AdminAuditLog {
   correlationId String? @map("correlation_id")
   platformCode  String? @map("platform_code")
   reason        String?
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   retentionCategory String @default("AUDIT") @map("retention_category")
   retainUntil DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
 
-  @@index([entityType, entityId, createdAt])
-  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId, createdAt], map: "admin_audit_logs_entity_idx")
+  @@index([actorUserId, createdAt], map: "admin_audit_logs_actor_idx")
   @@index([correlationId])
   @@index([action, createdAt])
   @@map("admin_audit_logs")
@@ -2363,7 +2363,7 @@ enum AuthzDecision {
 }
 
 model Organization {
-  id        String            @id @default(uuid())
+  id        String @db.Uuid            @id @default(uuid())
   code      String            @unique
   name      String
   status    AdminEntityStatus @default(ACTIVE)
@@ -2371,13 +2371,14 @@ model Organization {
 
   legalEntities LegalEntity[]
   departments   Department[]
+  bootstrap     SecurityBootstrap?
 
   @@map("organizations")
 }
 
 model LegalEntity {
-  id             String            @id @default(uuid())
-  organizationId String            @map("organization_id")
+  id             String @db.Uuid            @id @default(uuid())
+  organizationId String @db.Uuid            @map("organization_id")
   code           String            @unique
   legalName      String            @map("legal_name")
   status         AdminEntityStatus @default(ACTIVE)
@@ -2391,8 +2392,8 @@ model LegalEntity {
 }
 
 model BusinessUnit {
-  id            String            @id @default(uuid())
-  legalEntityId String            @map("legal_entity_id")
+  id            String @db.Uuid            @id @default(uuid())
+  legalEntityId String @db.Uuid            @map("legal_entity_id")
   code          String            @unique
   name          String
   status        AdminEntityStatus @default(ACTIVE)
@@ -2406,10 +2407,10 @@ model BusinessUnit {
 }
 
 model Platform {
-  id             String         @id @default(uuid())
+  id             String @db.Uuid         @id @default(uuid())
   code           String         @unique
   displayName    String         @map("display_name")
-  businessUnitId String?        @map("business_unit_id")
+  businessUnitId String? @db.Uuid        @map("business_unit_id")
   status         PlatformStatus @default(SETUP)
   iconRef        String?        @map("icon_ref")
   route          String
@@ -2425,8 +2426,8 @@ model Platform {
 }
 
 model Department {
-  id             String            @id @default(uuid())
-  organizationId String            @map("organization_id")
+  id             String @db.Uuid            @id @default(uuid())
+  organizationId String @db.Uuid            @map("organization_id")
   code           String
   name           String
   status         AdminEntityStatus @default(ACTIVE)
@@ -2439,7 +2440,7 @@ model Department {
 }
 
 model PermissionDefinition {
-  id          String   @id @default(uuid())
+  id          String @db.Uuid   @id @default(uuid())
   code        String   @unique
   area        String
   resource    String
@@ -2458,12 +2459,12 @@ model PermissionDefinition {
 }
 
 model Role {
-  id          String     @id @default(uuid())
+  id          String @db.Uuid     @id @default(uuid())
   code        String     @unique
   name        String
   description String
   status      RoleStatus @default(ACTIVE)
-  ownerUserId String?    @map("owner_user_id")
+  ownerUserId String? @db.Uuid    @map("owner_user_id")
   createdAt   DateTime   @default(now()) @map("created_at")
 
   versions RoleVersion[]
@@ -2472,8 +2473,8 @@ model Role {
 }
 
 model RoleVersion {
-  id               String                    @id @default(uuid())
-  roleId           String                    @map("role_id")
+  id               String @db.Uuid                    @id @default(uuid())
+  roleId           String @db.Uuid                    @map("role_id")
   versionNumber    Int                       @map("version_number")
   status           RoleVersionStatus         @default(DRAFT)
   effectiveFrom    DateTime?                 @map("effective_from")
@@ -2484,9 +2485,9 @@ model RoleVersion {
   contentHash      String                    @map("content_hash")
   changeReason     String                    @map("change_reason")
   changeReference  String?                   @map("change_reference")
-  createdById      String?                   @map("created_by_id")
-  reviewedById     String?                   @map("reviewed_by_id")
-  approvedById     String?                   @map("approved_by_id")
+  createdById      String? @db.Uuid                   @map("created_by_id")
+  reviewedById     String? @db.Uuid                   @map("reviewed_by_id")
+  approvedById     String? @db.Uuid                   @map("approved_by_id")
   createdAt        DateTime                  @default(now()) @map("created_at")
 
   role        Role                    @relation(fields: [roleId], references: [id], onDelete: Restrict)
@@ -2503,8 +2504,8 @@ model RoleVersion {
 }
 
 model RoleVersionPermission {
-  roleVersionId String @map("role_version_id")
-  permissionId  String @map("permission_id")
+  roleVersionId String @db.Uuid @map("role_version_id")
+  permissionId  String @db.Uuid @map("permission_id")
 
   roleVersion RoleVersion          @relation(fields: [roleVersionId], references: [id], onDelete: Restrict)
   permission  PermissionDefinition @relation(fields: [permissionId], references: [id], onDelete: Restrict)
@@ -2515,25 +2516,25 @@ model RoleVersionPermission {
 }
 
 model RoleAssignment {
-  id                     String               @id @default(uuid())
-  userId                 String               @map("user_id")
-  roleVersionId          String               @map("role_version_id")
+  id                     String @db.Uuid               @id @default(uuid())
+  userId                 String @db.Uuid               @map("user_id")
+  roleVersionId          String @db.Uuid               @map("role_version_id")
   status                 RoleAssignmentStatus @default(ACTIVE)
   effectiveFrom          DateTime             @default(now()) @map("effective_from")
   effectiveTo            DateTime?            @map("effective_to")
   grantReason            String               @map("grant_reason")
-  grantedById            String?              @map("granted_by_id")
-  approvedById           String?              @map("approved_by_id")
+  grantedById            String? @db.Uuid              @map("granted_by_id")
+  approvedById           String? @db.Uuid              @map("approved_by_id")
   revokedAt              DateTime?            @map("revoked_at")
-  revokedById            String?              @map("revoked_by_id")
+  revokedById            String? @db.Uuid              @map("revoked_by_id")
   revokeReason           String?              @map("revoke_reason")
-  supersedesAssignmentId String?              @map("supersedes_assignment_id")
+  supersedesAssignmentId String? @db.Uuid              @map("supersedes_assignment_id")
   // Optional narrowing qualifier (platform codes). Can only reduce the role version's coverage.
   platformQualifier      String[]             @default([]) @map("platform_qualifier")
   isTemporary            Boolean              @default(false) @map("is_temporary")
   // STEP 5A (3A-4): high-risk grants are usable only from activationAt (approval + 48h policy delay).
   activationAt           DateTime?            @map("activation_at")
-  reviewedById           String?              @map("reviewed_by_id")
+  reviewedById           String? @db.Uuid              @map("reviewed_by_id")
   reviewedAt             DateTime?            @map("reviewed_at")
   approvedAt             DateTime?            @map("approved_at")
   retentionCategory      String               @default("PRIVILEGED_ACCESS") @map("retention_category")
@@ -2551,14 +2552,14 @@ model RoleAssignment {
 }
 
 model AssignmentScope {
-  id             String    @id @default(uuid())
-  assignmentId   String    @map("assignment_id")
+  id             String @db.Uuid    @id @default(uuid())
+  assignmentId   String @db.Uuid    @map("assignment_id")
   kind           ScopeKind
-  organizationId String?   @map("organization_id")
-  legalEntityId  String?   @map("legal_entity_id")
-  businessUnitId String?   @map("business_unit_id")
-  platformId     String?   @map("platform_id")
-  departmentId   String?   @map("department_id")
+  organizationId String? @db.Uuid   @map("organization_id")
+  legalEntityId  String? @db.Uuid   @map("legal_entity_id")
+  businessUnitId String? @db.Uuid   @map("business_unit_id")
+  platformId     String? @db.Uuid   @map("platform_id")
+  departmentId   String? @db.Uuid   @map("department_id")
   // PROPERTY / VEHICLE / PROJECT targets are opaque references until those modules exist (no FK).
   propertyRef    String?   @map("property_ref")
   vehicleRef     String?   @map("vehicle_ref")
@@ -2572,10 +2573,10 @@ model AssignmentScope {
 }
 
 model RoleAssignmentEvent {
-  id            String   @id @default(uuid())
-  assignmentId  String   @map("assignment_id")
+  id            String @db.Uuid   @id @default(uuid())
+  assignmentId  String @db.Uuid   @map("assignment_id")
   eventType     String   @map("event_type")
-  actorUserId   String?  @map("actor_user_id")
+  actorUserId   String? @db.Uuid  @map("actor_user_id")
   detail        Json     @default("{}")
   correlationId String?  @map("correlation_id")
   createdAt     DateTime @default(now()) @map("created_at")
@@ -2590,16 +2591,16 @@ model RoleAssignmentEvent {
 }
 
 model PermissionSuspension {
-  id            String    @id @default(uuid())
-  permissionId  String?   @map("permission_id")
-  roleVersionId String?   @map("role_version_id")
+  id            String @db.Uuid    @id @default(uuid())
+  permissionId  String? @db.Uuid   @map("permission_id")
+  roleVersionId String? @db.Uuid   @map("role_version_id")
   reason        String
   effectiveFrom DateTime  @default(now()) @map("effective_from")
   effectiveTo   DateTime? @map("effective_to")
-  createdById   String?   @map("created_by_id")
-  approvedById  String?   @map("approved_by_id")
+  createdById   String? @db.Uuid   @map("created_by_id")
+  approvedById  String? @db.Uuid   @map("approved_by_id")
   liftedAt      DateTime? @map("lifted_at")
-  liftedById    String?   @map("lifted_by_id")
+  liftedById    String? @db.Uuid   @map("lifted_by_id")
   createdAt     DateTime  @default(now()) @map("created_at")
 
   permission  PermissionDefinition? @relation(fields: [permissionId], references: [id], onDelete: Restrict)
@@ -2609,11 +2610,11 @@ model PermissionSuspension {
 }
 
 model SecurityPolicyVersion {
-  id            String    @id @default(uuid())
+  id            String @db.Uuid    @id @default(uuid())
   versionNumber Int       @unique @map("version_number")
   config        Json
   effectiveFrom DateTime  @default(now()) @map("effective_from")
-  createdById   String?   @map("created_by_id")
+  createdById   String? @db.Uuid   @map("created_by_id")
   createdAt     DateTime  @default(now()) @map("created_at")
 
   @@map("security_policy_versions")
@@ -2622,17 +2623,17 @@ model SecurityPolicyVersion {
 // Append-only, hash-chained proof of WHY a request was allowed or denied (Step 3A.3). Written in
 // the same transaction as the action. Denormalised on purpose so it stays readable after renames.
 model AuthorizationEvidence {
-  id                 String        @id @default(uuid())
+  id                 String @db.Uuid        @id @default(uuid())
   sequence           BigInt        @unique @default(autoincrement())
-  userId             String?       @map("user_id")
-  sessionId          String?       @map("session_id")
-  roleAssignmentId   String?       @map("role_assignment_id")
-  roleVersionId      String?       @map("role_version_id")
+  userId             String? @db.Uuid       @map("user_id")
+  sessionId          String? @db.Uuid       @map("session_id")
+  roleAssignmentId   String? @db.Uuid       @map("role_assignment_id")
+  roleVersionId      String? @db.Uuid       @map("role_version_id")
   roleCode           String?       @map("role_code")
   roleVersionNumber  Int?          @map("role_version_number")
-  permissionId       String?       @map("permission_id")
+  permissionId       String? @db.Uuid       @map("permission_id")
   permissionCode     String        @map("permission_code")
-  scopeId            String?       @map("scope_id")
+  scopeId            String? @db.Uuid       @map("scope_id")
   scopeKind          ScopeKind?    @map("scope_kind")
   scopeTarget        String?       @map("scope_target")
   scopeDescription   String?       @map("scope_description")
@@ -2648,10 +2649,11 @@ model AuthorizationEvidence {
   correlationId      String?       @map("correlation_id")
   decision           AuthzDecision
   denyReason         String?       @map("deny_reason")
-  policyVersionId    String?       @map("policy_version_id")
-  delegationId       String?       @map("delegation_id")
-  auditEventId       String?       @map("audit_event_id")
-  approvalSnapshotId String?       @map("approval_snapshot_id")
+  policyVersionId    String? @db.Uuid       @map("policy_version_id")
+  rulesetVersion     String?       @map("ruleset_version")
+  delegationId       String? @db.Uuid       @map("delegation_id")
+  auditEventId       String? @db.Uuid       @map("audit_event_id")
+  approvalSnapshotId String? @db.Uuid       @map("approval_snapshot_id")
   prevHash           String?       @map("prev_hash")
   hash               String
   decidedAt          DateTime      @default(now()) @map("decided_at")
@@ -2792,19 +2794,19 @@ enum FeatureFlagScope {
 }
 
 model WorkItem {
-  id               String         @id @default(uuid())
+  id               String @db.Uuid         @id @default(uuid())
   type             WorkItemType
   title            String
-  platformId       String?        @map("platform_id")
+  platformId       String? @db.Uuid        @map("platform_id")
   priority         AdminPriority  @default(NORMAL)
   status           WorkItemStatus @default(OPEN)
-  assignedUserId   String?        @map("assigned_user_id")
+  assignedUserId   String? @db.Uuid        @map("assigned_user_id")
   assignedTeam     String?        @map("assigned_team")
   dueAt            DateTime?      @map("due_at")
   linkedEntityType String?        @map("linked_entity_type")
   linkedEntityId   String?        @map("linked_entity_id")
   risk             AdminRisk      @default(NONE)
-  createdById      String?        @map("created_by_id")
+  createdById      String? @db.Uuid        @map("created_by_id")
   createdAt        DateTime       @default(now()) @map("created_at")
   completedAt      DateTime?      @map("completed_at")
 
@@ -2815,8 +2817,8 @@ model WorkItem {
 }
 
 model AdminNotification {
-  id        String           @id @default(uuid())
-  userId    String           @map("user_id")
+  id        String @db.Uuid           @id @default(uuid())
+  userId    String @db.Uuid           @map("user_id")
   type      NotificationType
   title     String
   body      String?
@@ -2830,14 +2832,14 @@ model AdminNotification {
 }
 
 model Party {
-  id          String      @id @default(uuid())
+  id          String @db.Uuid      @id @default(uuid())
   kind        PartyKind
   displayName String      @map("display_name")
   legalName   String?     @map("legal_name")
   email       String?
   phone       String?
   status      PartyStatus @default(ACTIVE)
-  createdById String?     @map("created_by_id")
+  createdById String? @db.Uuid     @map("created_by_id")
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @updatedAt @map("updated_at")
 
@@ -2853,10 +2855,10 @@ model Party {
 // One party, many roles (restaurant owner AND courier AND seller). History is kept: a role ends by
 // setting effective_to / status, never by deleting the row.
 model PartyRole {
-  id            String    @id @default(uuid())
-  partyId       String    @map("party_id")
+  id            String @db.Uuid    @id @default(uuid())
+  partyId       String @db.Uuid    @map("party_id")
   roleType      String    @map("role_type")
-  platformId    String?   @map("platform_id")
+  platformId    String? @db.Uuid   @map("platform_id")
   status        String    @default("ACTIVE")
   effectiveFrom DateTime  @default(now()) @map("effective_from")
   effectiveTo   DateTime? @map("effective_to")
@@ -2871,8 +2873,8 @@ model PartyRole {
 }
 
 model PartyAddress {
-  id         String   @id @default(uuid())
-  partyId    String   @map("party_id")
+  id         String @db.Uuid   @id @default(uuid())
+  partyId    String @db.Uuid   @map("party_id")
   label      String?
   line1      String
   line2      String?
@@ -2889,11 +2891,11 @@ model PartyAddress {
 }
 
 model UserPartyLink {
-  id            String    @id @default(uuid())
-  userId        String    @map("user_id")
-  partyId       String    @map("party_id")
+  id            String @db.Uuid    @id @default(uuid())
+  userId        String @db.Uuid    @map("user_id")
+  partyId       String @db.Uuid    @map("party_id")
   verifiedAt    DateTime? @map("verified_at")
-  verifiedById  String?   @map("verified_by_id")
+  verifiedById  String? @db.Uuid   @map("verified_by_id")
   effectiveFrom DateTime  @default(now()) @map("effective_from")
   effectiveTo   DateTime? @map("effective_to")
   createdAt     DateTime  @default(now()) @map("created_at")
@@ -2906,14 +2908,14 @@ model UserPartyLink {
 }
 
 model AdminDocument {
-  id               String              @id @default(uuid())
+  id               String @db.Uuid              @id @default(uuid())
   documentType     String              @map("document_type")
   title            String
   status           AdminDocumentStatus @default(UPLOADED)
-  platformId       String?             @map("platform_id")
-  partyId          String?             @map("party_id")
-  uploadedById     String?             @map("uploaded_by_id")
-  currentVersionId String?             @map("current_version_id")
+  platformId       String? @db.Uuid             @map("platform_id")
+  partyId          String? @db.Uuid             @map("party_id")
+  uploadedById     String? @db.Uuid             @map("uploaded_by_id")
+  currentVersionId String? @db.Uuid             @map("current_version_id")
   createdAt        DateTime            @default(now()) @map("created_at")
   updatedAt        DateTime            @updatedAt @map("updated_at")
 
@@ -2929,16 +2931,16 @@ model AdminDocument {
 
 // Every upload is a new immutable version; the original is never replaced (Step 5 section 18).
 model DocumentVersion {
-  id                  String   @id @default(uuid())
-  documentId          String   @map("document_id")
+  id                  String @db.Uuid   @id @default(uuid())
+  documentId          String @db.Uuid   @map("document_id")
   versionNumber       Int      @map("version_number")
   storageKey          String   @map("storage_key")
   sha256              String
   filename            String
   mimeType            String   @map("mime_type")
   sizeBytes           Int      @map("size_bytes")
-  uploadedById        String?  @map("uploaded_by_id")
-  supersedesVersionId String?  @map("supersedes_version_id")
+  uploadedById        String? @db.Uuid  @map("uploaded_by_id")
+  supersedesVersionId String? @db.Uuid  @map("supersedes_version_id")
   retentionUntil      DateTime? @map("retention_until")
   createdAt           DateTime @default(now()) @map("created_at")
 
@@ -2949,8 +2951,8 @@ model DocumentVersion {
 }
 
 model DocumentLink {
-  id         String   @id @default(uuid())
-  documentId String   @map("document_id")
+  id         String @db.Uuid   @id @default(uuid())
+  documentId String @db.Uuid   @map("document_id")
   entityType String   @map("entity_type")
   entityId   String   @map("entity_id")
   createdAt  DateTime @default(now()) @map("created_at")
@@ -2963,10 +2965,10 @@ model DocumentLink {
 }
 
 model DocumentReview {
-  id         String   @id @default(uuid())
-  documentId String   @map("document_id")
-  versionId  String   @map("version_id")
-  reviewerId String   @map("reviewer_id")
+  id         String @db.Uuid   @id @default(uuid())
+  documentId String @db.Uuid   @map("document_id")
+  versionId  String @db.Uuid   @map("version_id")
+  reviewerId String @db.Uuid   @map("reviewer_id")
   decision   String
   reason     String?
   createdAt  DateTime @default(now()) @map("created_at")
@@ -2978,18 +2980,18 @@ model DocumentReview {
 }
 
 model SupportCase {
-  id               String            @id @default(uuid())
+  id               String @db.Uuid            @id @default(uuid())
   caseNumber       Int               @unique @default(autoincrement()) @map("case_number")
-  platformId       String?           @map("platform_id")
+  platformId       String? @db.Uuid           @map("platform_id")
   type             String
   priority         AdminPriority     @default(NORMAL)
   status           SupportCaseStatus @default(OPEN)
-  partyId          String?           @map("party_id")
+  partyId          String? @db.Uuid           @map("party_id")
   linkedEntityType String?           @map("linked_entity_type")
   linkedEntityId   String?           @map("linked_entity_id")
-  assignedUserId   String?           @map("assigned_user_id")
+  assignedUserId   String? @db.Uuid           @map("assigned_user_id")
   summary          String
-  createdById      String?           @map("created_by_id")
+  createdById      String? @db.Uuid           @map("created_by_id")
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @updatedAt @map("updated_at")
   closedAt         DateTime?         @map("closed_at")
@@ -3005,10 +3007,10 @@ model SupportCase {
 // Customer-facing messages live here and ONLY here. Internal notes are admin_comments with
 // visibility INTERNAL, so a note can never be sent to a customer by a mistaken flag.
 model SupportMessage {
-  id         String                  @id @default(uuid())
-  caseId     String                  @map("case_id")
+  id         String @db.Uuid                  @id @default(uuid())
+  caseId     String @db.Uuid                  @map("case_id")
   direction  SupportMessageDirection
-  authorId   String?                 @map("author_id")
+  authorId   String? @db.Uuid                 @map("author_id")
   body       String
   createdAt  DateTime                @default(now()) @map("created_at")
 
@@ -3019,15 +3021,15 @@ model SupportMessage {
 }
 
 model AdminComment {
-  id             String    @id @default(uuid())
+  id             String @db.Uuid    @id @default(uuid())
   entityType     String    @map("entity_type")
   entityId       String    @map("entity_id")
-  authorId       String    @map("author_id")
+  authorId       String @db.Uuid    @map("author_id")
   body           String
   mentions       Json      @default("[]")
   attachmentRefs Json      @default("[]") @map("attachment_refs")
   resolvedAt     DateTime? @map("resolved_at")
-  resolvedById   String?   @map("resolved_by_id")
+  resolvedById   String? @db.Uuid   @map("resolved_by_id")
   createdAt      DateTime  @default(now()) @map("created_at")
 
   @@index([entityType, entityId, createdAt])
@@ -3036,11 +3038,11 @@ model AdminComment {
 
 // User-facing operational history. NOT the audit trail: audit (admin_audit_logs) is authoritative.
 model TimelineEvent {
-  id          String   @id @default(uuid())
+  id          String @db.Uuid   @id @default(uuid())
   entityType  String   @map("entity_type")
   entityId    String   @map("entity_id")
   eventType   String   @map("event_type")
-  actorUserId String?  @map("actor_user_id")
+  actorUserId String? @db.Uuid  @map("actor_user_id")
   summary     String
   detail      Json     @default("{}")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -3050,14 +3052,14 @@ model TimelineEvent {
 }
 
 model ApprovalRequest {
-  id              String         @id @default(uuid())
+  id              String @db.Uuid         @id @default(uuid())
   kind            ApprovalKind
   subjectType     String         @map("subject_type")
   subjectId       String         @map("subject_id")
   title           String
-  requesterUserId String         @map("requester_user_id")
+  requesterUserId String @db.Uuid         @map("requester_user_id")
   status          ApprovalStatus @default(PENDING)
-  platformId      String?        @map("platform_id")
+  platformId      String? @db.Uuid        @map("platform_id")
   // The exact subject content that was put up for approval, and its hash. If the live subject no
   // longer hashes to this, the approval shows a material-change warning (Step 5 section 15).
   subjectSnapshot Json           @map("subject_snapshot")
@@ -3074,9 +3076,9 @@ model ApprovalRequest {
 }
 
 model ApprovalStep {
-  id             String    @id @default(uuid())
-  requestId      String    @map("request_id")
-  approverUserId String?   @map("approver_user_id")
+  id             String @db.Uuid    @id @default(uuid())
+  requestId      String @db.Uuid    @map("request_id")
+  approverUserId String? @db.Uuid   @map("approver_user_id")
   decision       String?
   reason         String?
   decidedAt      DateTime? @map("decided_at")
@@ -3089,12 +3091,12 @@ model ApprovalStep {
 }
 
 model AdminSetting {
-  id          String   @id @default(uuid())
+  id          String @db.Uuid   @id @default(uuid())
   category    String
   key         String
   value       Json
   version     Int      @default(1)
-  updatedById String?  @map("updated_by_id")
+  updatedById String? @db.Uuid  @map("updated_by_id")
   updatedAt   DateTime @default(now()) @map("updated_at")
 
   @@unique([category, key])
@@ -3102,13 +3104,13 @@ model AdminSetting {
 }
 
 model FeatureFlag {
-  id          String           @id @default(uuid())
+  id          String @db.Uuid           @id @default(uuid())
   key         String
   scopeKind   FeatureFlagScope @map("scope_kind")
   scopeRef    String           @default("") @map("scope_ref")
   enabled     Boolean          @default(false)
   description String?
-  updatedById String?          @map("updated_by_id")
+  updatedById String? @db.Uuid          @map("updated_by_id")
   updatedAt   DateTime         @default(now()) @map("updated_at")
 
   @@unique([key, scopeKind, scopeRef])
@@ -3116,27 +3118,27 @@ model FeatureFlag {
 }
 
 model ServiceAccount {
-  id              String   @id @default(uuid())
+  id              String @db.Uuid   @id @default(uuid())
   name            String
   description     String?
   integrationCode String?  @map("integration_code")
-  platformId      String?  @map("platform_id")
-  organizationId  String   @map("organization_id")
+  platformId      String? @db.Uuid  @map("platform_id")
+  organizationId  String @db.Uuid   @map("organization_id")
   status          String   @default("ACTIVE")
   // Reference into the secret manager. The secret itself is never stored or shown here.
   secretRef       String?  @map("secret_ref")
   permissionCodes String[] @default([]) @map("permission_codes")
   createdAt       DateTime @default(now()) @map("created_at")
   disabledAt      DateTime? @map("disabled_at")
-  disabledById    String?  @map("disabled_by_id")
+  disabledById    String? @db.Uuid  @map("disabled_by_id")
 
   @@map("service_accounts")
 }
 
 model AdminDelegation {
-  id              String    @id @default(uuid())
-  delegatorUserId String    @map("delegator_user_id")
-  delegateUserId  String    @map("delegate_user_id")
+  id              String @db.Uuid    @id @default(uuid())
+  delegatorUserId String @db.Uuid    @map("delegator_user_id")
+  delegateUserId  String @db.Uuid    @map("delegate_user_id")
   permissionCodes String[]  @default([]) @map("permission_codes")
   reason          String
   effectiveFrom   DateTime  @default(now()) @map("effective_from")
@@ -3149,8 +3151,8 @@ model AdminDelegation {
 }
 
 model AdminSavedView {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
+  id        String @db.Uuid   @id @default(uuid())
+  userId    String @db.Uuid   @map("user_id")
   viewKey   String   @map("view_key")
   name      String
   filters   Json
@@ -3190,7 +3192,7 @@ enum UserSuspensionKind {
 // Old (first-cut) permission names, kept so historical evidence written under them stays queryable.
 model PermissionCodeAlias {
   legacyCode   String   @id @map("legacy_code")
-  permissionId String   @map("permission_id")
+  permissionId String @db.Uuid   @map("permission_id")
   createdAt    DateTime @default(now()) @map("created_at")
 
   permission PermissionDefinition @relation(fields: [permissionId], references: [id], onDelete: Restrict)
@@ -3212,20 +3214,21 @@ model RetentionPolicy {
 
 // A security event is NOT an audit event: both are written for privileged actions.
 model SecurityEvent {
-  id                String                @id @default(uuid())
+  id                String @db.Uuid                @id @default(uuid())
   severity          SecurityEventSeverity
   eventType         String                @map("event_type")
-  actorUserId       String?               @map("actor_user_id")
-  subjectUserId     String?               @map("subject_user_id")
+  actorUserId       String? @db.Uuid               @map("actor_user_id")
+  subjectUserId     String? @db.Uuid               @map("subject_user_id")
   entityType        String?               @map("entity_type")
   entityId          String?               @map("entity_id")
   summary           String
   detail            Json                  @default("{}")
   correlationId     String?               @map("correlation_id")
-  auditEventId      String?               @map("audit_event_id")
+  auditEventId      String? @db.Uuid               @map("audit_event_id")
   notifiedCount     Int                   @default(0) @map("notified_count")
+  delivery          Json                  @default("{}")
   status            SecurityEventStatus   @default(OPEN)
-  reviewedById      String?               @map("reviewed_by_id")
+  reviewedById      String? @db.Uuid               @map("reviewed_by_id")
   reviewedAt        DateTime?             @map("reviewed_at")
   reviewNote        String?               @map("review_note")
   retentionCategory String                @default("SECURITY_EVENT") @map("retention_category")
@@ -3240,21 +3243,21 @@ model SecurityEvent {
 }
 
 model UserSuspension {
-  id                           String             @id @default(uuid())
-  userId                       String             @map("user_id")
+  id                           String @db.Uuid             @id @default(uuid())
+  userId                       String @db.Uuid             @map("user_id")
   kind                         UserSuspensionKind
   reason                       String
-  suspendedById                String             @map("suspended_by_id")
+  suspendedById                String @db.Uuid             @map("suspended_by_id")
   suspendedAt                  DateTime           @default(now()) @map("suspended_at")
   priorStatus                  String             @map("prior_status")
   sessionsRevoked              Int                @default(0) @map("sessions_revoked")
   assignmentsSnapshot          Json               @default("[]") @map("assignments_snapshot")
-  securityEventId              String?            @map("security_event_id")
+  securityEventId              String? @db.Uuid            @map("security_event_id")
   correlationId                String?            @map("correlation_id")
   reactivatedAt                DateTime?          @map("reactivated_at")
-  reactivatedById              String?            @map("reactivated_by_id")
+  reactivatedById              String? @db.Uuid            @map("reactivated_by_id")
   reactivationReason           String?            @map("reactivation_reason")
-  reactivationSecurityEventId  String?            @map("reactivation_security_event_id")
+  reactivationSecurityEventId  String? @db.Uuid            @map("reactivation_security_event_id")
   retentionCategory            String             @default("USER_SUSPENSION") @map("retention_category")
   retainUntil                  DateTime           @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
 
@@ -3262,4 +3265,29 @@ model UserSuspension {
 
   @@index([userId, suspendedAt])
   @@map("user_suspensions")
+}
+
+// STEP 5B (migration 082): explicit one-time Owner bootstrap state, one row per organization.
+model SecurityBootstrap {
+  organizationId           String    @id @map("organization_id") @db.Uuid
+  state                    String    @default("SECURITY_BOOTSTRAP_REQUIRED")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  completedAt              DateTime? @map("completed_at")
+  completedById            String?   @map("completed_by_id") @db.Uuid
+  targetUserId             String?   @map("target_user_id") @db.Uuid
+  oldAssignmentId          String?   @map("old_assignment_id") @db.Uuid
+  newAssignmentId          String?   @map("new_assignment_id") @db.Uuid
+  oldRoleVersionId         String?   @map("old_role_version_id") @db.Uuid
+  newRoleVersionId         String?   @map("new_role_version_id") @db.Uuid
+  reason                   String?
+  workflowUnavailableReason String?  @map("workflow_unavailable_reason")
+  securityEventId          String?   @map("security_event_id") @db.Uuid
+  auditEventId             String?   @map("audit_event_id") @db.Uuid
+  evidenceId               String?   @map("evidence_id") @db.Uuid
+  retentionCategory        String    @default("PRIVILEGED_ACCESS") @map("retention_category")
+  retainUntil              DateTime  @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@map("security_bootstrap")
 }

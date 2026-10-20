@@ -9,6 +9,7 @@ import { log } from '../logger.mjs'
 import { evaluateAccess, holdsPermissionAnywhere, DENY } from './evaluate.mjs'
 import { loadAssignmentsForUser, loadOrgIndex, loadPermission, loadPolicy, loadSuspensions } from './loader.mjs'
 import { writeEvidence } from './evidence.mjs'
+import { PERMISSION_RULESET_VERSION } from './catalogue.mjs'
 
 export { DENY } from './evaluate.mjs'
 
@@ -65,7 +66,7 @@ function evidenceRecord(ctx, code, permission, resource, result, snap, options) 
     action: options.action ?? code.split('.').pop(),
     authStrength: snap.auth.authStrength, mfaMethod: snap.auth.mfaMethod, mfaResult: snap.auth.mfaResult, recentAuthAt: snap.auth.recentAuthAt,
     requestId: options.requestId ?? null, correlationId: options.correlationId ?? options.requestId ?? null,
-    decision: result.decision, denyReason: result.reason, policyVersionId: snap.policy.id ?? null,
+    decision: result.decision, denyReason: result.reason, policyVersionId: snap.policy.id ?? null, rulesetVersion: PERMISSION_RULESET_VERSION,
     auditEventId: options.auditEventId ?? null, approvalSnapshotId: options.approvalSnapshotId ?? null,
   }
 }

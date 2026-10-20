@@ -2,6 +2,7 @@
 // suspension (23), reactivation (24), role versions (25), retention (26), activation sweeper (21).
 import assert from 'node:assert/strict'
 import { db } from '../../server/lib/prisma.mjs'
+import { runActivationCycle } from '../../server/lib/authz/activation-worker.mjs'
 import { startApi, createStaffUser, loginAsStaff, assignRole, assignRoleVersion, makeRunner, randomUUID, client, PASSWORD } from './helpers/admin2-harness.mjs'
 
 const run = randomUUID().slice(0, 8)
@@ -126,7 +127,7 @@ await t('21: sweeper activates due high-risk grants; a grant revoked while waiti
   const a = await mkPending('sw1'); const b = await mkPending('sw2')
   await p.$executeRaw`UPDATE role_assignments SET activation_at = now() - interval '1 minute' WHERE id IN (${a.id}::uuid, ${b.id}::uuid)`
   assert.equal((await o1.http.post(`${A}/assignments/${b.id}/revoke`, { reason: 'changed our mind in the wait' })).status, 200, 'revocation needs no delay')
-  await o1.http.get(`${A}/assignments`) // listing runs the sweeper
+  await runActivationCycle(p) // the activation worker (page views no longer activate anything)
   assert.equal((await p.roleAssignment.findUnique({ where: { id: a.id } })).status, 'ACTIVE')
   assert.equal((await p.roleAssignment.findUnique({ where: { id: b.id } })).status, 'REVOKED', 'revoked grant never activates')
   assert.ok(await p.securityEvent.findFirst({ where: { entityId: a.id, eventType: 'HIGH_RISK_ACCESS_ACTIVATED' } }))

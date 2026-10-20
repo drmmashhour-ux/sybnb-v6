@@ -6,7 +6,7 @@ import { approxNow } from '../../lib/authz/clock.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { verifyEvidenceChain } from '../../lib/authz/evidence.mjs'
 import { recordSecurityEvent, SEVERITIES } from '../../lib/authz/security-events.mjs'
-import { completeOwnerBootstrap, getBootstrapState, bootstrapSecretDiagnostics, BOOTSTRAP_COMPLETED } from '../../lib/authz/bootstrap.mjs'
+import { completeOwnerBootstrap, resolveBootstrapOrganization, getBootstrapState, bootstrapSecretDiagnostics, BOOTSTRAP_COMPLETED } from '../../lib/authz/bootstrap.mjs'
 import { sessionAuthFacts } from '../../lib/authz/index.mjs'
 import { isRateLimited, clientIp } from '../../lib/rateLimit.mjs'
 import { badRequest, notFoundError, pageParams, pageResult } from './router.mjs'
@@ -118,14 +118,15 @@ export function registerSecurity(router) {
   })
 
   // ---- One-time Owner bootstrap (STEP 5B). See the bootstrap module in server/lib/authz for the replay-prevention design. ----
-  // The organization is the oldest one unless an explicit ?organizationId=<uuid> is given (STEP 5D: needed for the
-  // multi-organization HTTP closed-first test and for operators with several organizations). It is a query
-  // parameter, not a body field, so resolving it never parses the body before the closed-first check.
+  // STEP 5E: the organization is NEVER taken from the request (no query, body, header or route parameter). It is
+  // resolved from the caller's own Owner assignments (see bootstrap-context.mjs); the bootstrap-specific override
+  // added in 5D was removed.
   const bootstrapOrg = async (r) => {
-    const id = r.query?.organizationId
-    if (id == null || id === '') return db().organization.findFirst({ orderBy: { createdAt: 'asc' } })
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(id))) throw badRequest('organizationId must be a UUID.', 'ORGANIZATION_ID_INVALID')
-    return db().organization.findUnique({ where: { id: String(id) } })
+    const ctx = await resolveBootstrapOrganization(db(), r.auth.user.id)
+    if (ctx.reason === 'ORGANIZATION_CONTEXT_REQUIRED') {
+      const e = new Error('Several organizations apply; the Owner bootstrap cannot choose between them.'); e.statusCode = 409; e.code = 'ORGANIZATION_CONTEXT_REQUIRED'; e.expose = true; throw e
+    }
+    return ctx.organizationId ? db().organization.findUnique({ where: { id: ctx.organizationId } }) : null
   }
   router.get('/security/bootstrap', async (r) => {
     await r.requireAnywhere('console.access')
@@ -137,14 +138,15 @@ export function registerSecurity(router) {
       const error = new Error('Too many attempts. Wait a few minutes.'); error.statusCode = 429; error.code = 'RATE_LIMITED'; error.expose = true; throw error
     }
     const org = await bootstrapOrg(r)
-    if (!org) throw notFoundError('Organization not found.')
+    if (!org) { const e = new Error('You do not have permission to do this.'); e.statusCode = 403; e.code = 'PERMISSION_DENIED'; e.expose = true; throw e } // no Owner organization: indistinguishable from any denial
     // STEP 5C: a completed bootstrap is closed before authorization, the body or the operator secret are processed.
     if ((await getBootstrapState(db(), org.id))?.state === BOOTSTRAP_COMPLETED) {
       await completeOwnerBootstrap(db(), { actorUserId: r.auth.user.id, organizationId: org.id, requestId: r.requestId }) // throws 409 BOOTSTRAP_CLOSED and records the attempt
     }
     // The caller is still on the OLD Owner version, so authorization uses a permission that version holds:
     // access.assign (tier 4: fresh step-up + evidence), ORGANIZATION-scoped.
-    await r.require('access.assign', await orgResource('security_bootstrap', org.id), { evidence: true })
+    // the resource carries the RESOLVED organization (not the shared oldest-organization default), so authorization is evaluated at that organization
+    await r.require('access.assign', { type: 'security_bootstrap', id: org.id, facts: { organizationId: org.id } }, { evidence: true })
     const body = await r.body()
     const sessionRow = r.auth.sessionId ? await db().userSession.findUnique({ where: { id: r.auth.sessionId }, select: { issuedAt: true, stepUpAt: true, mfaMethod: true } }) : null
     const out = await completeOwnerBootstrap(db(), {

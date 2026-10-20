@@ -38,7 +38,7 @@ Column is `NOT NULL`, no default, CHECK non-blank. Every row existing at migrati
 Removed from production. `bootstrap.mjs` re-exports only the OWNER entry point, constants and diagnostics. The generic runner lives in `bootstrap-core.mjs`, imported only by `bootstrap.mjs` and by `tests/support/bootstrap-test-adapter.mjs`. Static test `authz-bootstrap-surface` enforces: exact export list, no other importer, no `TestOnly` symbol, no dynamic import, route cannot choose a role.
 
 ## 7. HTTP closed-first
-`POST /api/admin2/security/bootstrap/owner?organizationId=<uuid>` (optional; default oldest org). With a COMPLETED org: wrong secret, correct secret, missing reason, no header, and a role-less user all get 409 `BOOTSTRAP_CLOSED`; the record is unchanged and each attempt is recorded.
+`POST /api/admin2/security/bootstrap/owner`. For an Owner of a COMPLETED org: wrong secret, correct secret, missing reason and no header all get 409 `BOOTSTRAP_CLOSED`; the record is unchanged and each attempt is recorded. (5D briefly added an `?organizationId=` override for this test; STEP 5E REMOVED it -- see STEP5E_PRE_MERGE_GATE.md.)
 
 ## 8. Dry-run results (Neon scratch DBs in the test project, never production)
 - Fresh DB (`migration_fresh_5d`): all 82 migrations apply; 10 RESTRICT FKs, checks, 4 triggers present; new org -> REQUIRED row; partial REQUIRED updates, COMPLETED insert, row delete, retention shortening, duplicate row, evidence without/blank ruleset all rejected; org delete removes REQUIRED row.
@@ -48,7 +48,7 @@ Removed from production. `bootstrap.mjs` re-exports only the OWNER entry point, 
 - Persistent test DB received an equivalent delta (the test DB had the old 082); its 290 NULL evidence rows were back-filled with the legacy marker with the append-only trigger suspended for that one statement (test DB only).
 
 ## 9. Unresolved production blockers
-1. `start:render` = `prisma migrate deploy && node server/index.mjs`: merging to main and deploying WILL apply 082 automatically. Apply deliberately (runbook) before/with the first deploy, with a backup.
+1. Deploying this branch applies migrations 078-082 automatically (`start:render` and the Render pre-deploy command run `prisma migrate deploy`). 5E added an approval gate (see STEP5E_PRE_MERGE_GATE.md).
 2. `ADMIN_BOOTSTRAP_SECRET` must be provisioned by an operator and removed/rotated after bootstrap.
 3. Production should run `ADMIN_ACTIVATION_MODE=EXTERNAL` with a scheduled `scripts/admin-activation-run.mjs`.
 4. Legacy Prisma drift (55 product tables) remains documented, not security-relevant.

@@ -1,3 +1,5 @@
+> **WARNING (branch `step5-admin-foundation`): deploying this code to a production-connected Render service WILL apply migrations 078-082 (admin security foundation). A migration approval gate stops the deploy unless `APPROVED_MIGRATIONS=082_security_foundation_closure` is set. Read `docs/admin/MIGRATION_082_RUNBOOK.md` first.**
+
 # SYBNB V6 Clean Build
 
 Clean, GitHub-ready package for the SYBNB V6 rebuild.

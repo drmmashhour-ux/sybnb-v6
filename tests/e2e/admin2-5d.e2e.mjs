@@ -157,7 +157,8 @@ await t('D: ruleset_version is mandatory for new evidence; historical rows carry
   assert.match(await rejected(p.$executeRaw`UPDATE authorization_evidence SET ruleset_version = 'CHANGED' WHERE ruleset_version = 'LEGACY_PRE_VERSIONED'`) ?? 'ALLOWED', /append-only/)
 })
 
-await t('E: HTTP -- COMPLETED bootstrap answers BOOTSTRAP_CLOSED before any privileged validation (wrong secret, missing reason, no permission); health reports securityTimeReady', async () => {
+await t('E: HTTP -- COMPLETED bootstrap answers BOOTSTRAP_CLOSED before any privileged validation (wrong secret, missing reason, no secret); a role-less user is simply denied; health reports securityTimeReady', async () => {
+  await p.rateLimitBucket.deleteMany({ where: { bucketKey: { contains: 'admin2-bootstrap' } } }) // test hygiene: per-IP counters persist across runs
   const api = await startApi({ ADMIN_ACTIVATION_JOB: 'off' })
   try {
     // health: public, boolean only
@@ -170,7 +171,7 @@ await t('E: HTTP -- COMPLETED bootstrap answers BOOTSTRAP_CLOSED before any priv
 
     const owner = completed.u
     const s = await loginAsStaff(api, owner)
-    const url = `/api/admin2/security/bootstrap/owner?organizationId=${completed.org.id}`
+    const url = '/api/admin2/security/bootstrap/owner' // STEP 5E: no organization override; the Owner's own organization is resolved server-side
     const before = await p.securityBootstrap.findUnique({ where: { organizationId: completed.org.id } })
     const cases = [
       ['wrong secret', { reason: 'attempt with the wrong operator secret', }, { 'x-bootstrap-secret': 'definitely-not-the-secret-0123456789abcd' }],
@@ -183,12 +184,11 @@ await t('E: HTTP -- COMPLETED bootstrap answers BOOTSTRAP_CLOSED before any priv
       assert.equal(r.status, 409, `${label}: ${r.text.slice(0, 160)}`)
       assert.equal(r.json?.error?.code ?? r.json?.code, 'BOOTSTRAP_CLOSED', label)
     }
-    // a weakly-privileged user (valid session, no roles at all) gets the same closed answer, not a permission or strength error
+    // a user with no Owner assignment has no bootstrap organization: a plain denial (it is not told the bootstrap state)
     const weak = await createStaffUser('weakhttp', run)
     const w = await loginAsStaff(api, weak)
     const rw = await w.http.call('POST', url, { reason: 'a user without any role tries to bootstrap' }, { 'x-bootstrap-secret': SECRET })
-    assert.ok([409, 403].includes(rw.status), `weak user: ${rw.status}`)
-    if (rw.status === 409) assert.equal(rw.json?.error?.code ?? rw.json?.code, 'BOOTSTRAP_CLOSED')
+    assert.equal(rw.status, 403); assert.equal(rw.json?.error?.code ?? rw.json?.code, 'PERMISSION_DENIED')
     const after = await p.securityBootstrap.findUnique({ where: { organizationId: completed.org.id } })
     assert.deepEqual(after, before, 'the completed bootstrap record is untouched')
     assert.ok(await p.securityEvent.count({ where: { eventType: 'OWNER_BOOTSTRAP_DENIED', entityId: completed.org.id } }) >= 4, 'each closed attempt was recorded')

@@ -8,3 +8,4 @@ export {
   SECRET_LEFT_CONFIGURED_WARNING, SECRET_LIFECYCLE_INSTRUCTION,
   bootstrapSecretDiagnostics, getBootstrapState, completeOwnerBootstrap,
 } from './bootstrap-core.mjs'
+export { resolveBootstrapOrganization } from './bootstrap-context.mjs'

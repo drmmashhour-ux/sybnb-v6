@@ -28,8 +28,8 @@ const mkOwner = async (label, organizationId) => {
   await assignRole(u, 'OWNER', [{ kind: 'ORGANIZATION', organizationId }])
   return u
 }
-const ownerA = await mkOwner('ownerA', A)
-const ownerB = await mkOwner('ownerB', B)
+const ownerA = await mkOwner('ownera', A)
+const ownerB = await mkOwner('ownerb', B)
 const nobody = await createStaffUser('nobody', run) // no assignment at all
 
 const tag = (kind) => `e2e.org.${run}.${kind}`

@@ -19,14 +19,26 @@ export const GATED_MIGRATIONS = Object.freeze({
 })
 
 /**
- * Approval is "through": APPROVED_MIGRATIONS=082_security_foundation_closure approves 082 AND every earlier gated
+ * Approval is "through" (and limited to the reviewed chain: any other pending migration stops the deploy): APPROVED_MIGRATIONS=082_security_foundation_closure approves 082 AND every earlier gated
  * migration that is still pending (they are applied together, in order, by one `migrate deploy`).
  */
 export function pendingGatedMigrations({ dirNames, appliedNames, approved = '', gated = GATED_MIGRATIONS }) {
   const applied = new Set(appliedNames)
   const approvals = String(approved).split(',').map((s) => s.trim()).filter(Boolean)
   const pending = dirNames.filter((n) => !applied.has(n) && Object.hasOwn(gated, n))
-  return { pending, blocked: pending.filter((n) => !approvals.some((a) => Object.hasOwn(gated, a) && n <= a)) }
+  // Reviewed-chain rule: the approval covers EXACTLY the reviewed chain. If a gated migration is pending, any OTHER
+  // pending migration (e.g. a future 083 nobody reviewed here) is "unreviewed" and stops the deploy even when the
+  // approval variable is set, so an approval meant for 078-082 can never authorize an unrelated migration.
+  const unreviewed = pending.length ? dirNames.filter((n) => !applied.has(n) && !Object.hasOwn(gated, n)) : []
+  return { pending, blocked: pending.filter((n) => !approvals.some((a) => Object.hasOwn(gated, a) && n <= a)), unreviewed }
+}
+
+export function unreviewedBanner(unreviewed) {
+  return ['', '==================== UNREVIEWED MIGRATIONS PENDING ====================',
+    'The approval covers only the reviewed Step 5 chain (078-082). These other migrations are also pending:',
+    ...unreviewed.map((n) => `  - ${n}`),
+    'Nothing has been changed. Review and add them to GATED_MIGRATIONS (or apply them separately first), then deploy again.',
+    '=======================================================================', ''].join('\n')
 }
 
 export function bannerFor(blocked, gated = GATED_MIGRATIONS) {
@@ -50,8 +62,9 @@ export async function runGate({ env = process.env, migrationsDir = join(fileURLT
     prisma = prismaFactory ? prismaFactory() : new (await import('@prisma/client')).PrismaClient()
     const [{ t }] = await prisma.$queryRaw`SELECT to_regclass('_prisma_migrations')::text AS t`
     const appliedNames = t ? (await prisma.$queryRaw`SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`).map((r) => r.migration_name) : []
-    const { pending, blocked } = pendingGatedMigrations({ dirNames, appliedNames, approved: env.APPROVED_MIGRATIONS })
-    if (blocked.length) { log.error(bannerFor(blocked)); return { ok: false, pending, blocked } }
+    const { pending, blocked, unreviewed } = pendingGatedMigrations({ dirNames, appliedNames, approved: env.APPROVED_MIGRATIONS })
+    if (blocked.length) { log.error(bannerFor(blocked)); return { ok: false, pending, blocked, unreviewed } }
+    if (unreviewed.length) { log.error(unreviewedBanner(unreviewed)); return { ok: false, pending, blocked, unreviewed } }
     if (pending.length) log.log(`migration gate: approved gated migration(s) will be applied: ${pending.join(', ')}`)
     return { ok: true, pending, blocked }
   } catch (e) {

@@ -37,7 +37,7 @@ test('pending gated migration without approval is blocked; with approval, or alr
   assert.deepEqual(pendingGatedMigrations({ dirNames: names, appliedNames: ['081_security_reconciliation'], approved: 'something-else' }).blocked, [G])
   const ok = pendingGatedMigrations({ dirNames: names, appliedNames: ['081_security_reconciliation'], approved: ` ${G} ` })
   assert.deepEqual(ok.blocked, []); assert.deepEqual(ok.pending, [G])
-  assert.deepEqual(pendingGatedMigrations({ dirNames: names, appliedNames: names, approved: '' }), { pending: [], blocked: [] })
+  assert.deepEqual(pendingGatedMigrations({ dirNames: names, appliedNames: names, approved: '' }), { pending: [], blocked: [], unreviewed: [] })
   assert.deepEqual(pendingGatedMigrations({ dirNames: ['001_x', '002_y'], appliedNames: [], approved: '' }).blocked, [], 'ungated migrations never block')
 })
 
@@ -70,4 +70,18 @@ test('the gate is wired into BOTH deploy paths and the Docker image can run it',
   assert.match(readFileSync(join(root, 'render.yaml'), 'utf8'), /preDeployCommand: "node server\/lib\/migration-gate\.mjs && npx prisma migrate deploy"/)
   assert.match(JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts['start:render'], /^node server\/lib\/migration-gate\.mjs && prisma migrate deploy/)
   assert.match(readFileSync(join(root, 'Dockerfile'), 'utf8'), /COPY --from=build \/app\/server \.\/server/, 'the gate lives under server/, which the image copies')
+})
+
+test('an approval for the reviewed chain never authorizes an unrelated pending migration', async () => {
+  const chain = ['077_driver_base', '078_admin_foundation', '079_admin_modules', '080_session_mfa_method', '081_security_reconciliation', G]
+  const withFuture = [...chain, '083_something_new']
+  const r = pendingGatedMigrations({ dirNames: withFuture, appliedNames: ['077_driver_base'], approved: G })
+  assert.deepEqual(r.blocked, []); assert.deepEqual(r.unreviewed, ['083_something_new'])
+  const q = quiet()
+  const gate = await runGate({ env: { APPROVED_MIGRATIONS: G }, migrationsDir: dir(withFuture), prismaFactory: fakePrisma({ applied: ['077_driver_base'] }), log: q.log })
+  assert.equal(gate.ok, false); assert.match(q.out.join('\n'), /UNREVIEWED MIGRATIONS PENDING/); assert.match(q.out.join('\n'), /083_something_new/)
+  // once the chain is applied, a later migration is not the gate's business
+  assert.equal((await runGate({ env: {}, migrationsDir: dir(withFuture), prismaFactory: fakePrisma({ applied: chain }), log: quiet().log })).ok, true)
+  // exactly the reviewed chain pending + approval => allowed
+  assert.equal((await runGate({ env: { APPROVED_MIGRATIONS: G }, migrationsDir: dir(chain), prismaFactory: fakePrisma({ applied: ['077_driver_base'] }), log: quiet().log })).ok, true)
 })

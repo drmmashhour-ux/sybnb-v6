@@ -277,6 +277,7 @@ a.adm-metric:hover{border-color:var(--adm-border-strong);box-shadow:0 1px 4px rg
 .adm-tabs-wrap::before,.adm-tabs-wrap::after{content:"";position:absolute;top:0;bottom:1px;width:44px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:1;background-repeat:no-repeat}
 .adm-tabs-wrap::before{left:0;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%235b6472' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 3 5 8l5 5'/%3E%3C/svg%3E"),linear-gradient(90deg,var(--adm-bg) 0,var(--adm-bg) 55%,rgba(245,246,248,0));background-position:4px center,0 0}
 .adm-tabs-wrap::after{right:0;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%235b6472' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3l5 5-5 5'/%3E%3C/svg%3E"),linear-gradient(270deg,var(--adm-bg) 0,var(--adm-bg) 55%,rgba(245,246,248,0));background-position:right 4px center,0 0}
+.adm-tabs-wrap .adm-tab[data-edge="true"]{opacity:0;pointer-events:none}
 .adm-tabs-wrap[data-more-left="true"]::before,.adm-tabs-wrap[data-more-right="true"]::after{opacity:1}
 @media (prefers-reduced-motion:reduce){.adm-tabs-wrap::before,.adm-tabs-wrap::after{transition:none}}
 /* task cards: title, platform, priority/status, quiet metadata */

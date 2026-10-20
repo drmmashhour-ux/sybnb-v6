@@ -172,23 +172,45 @@ export function Tabs({ tabs, value, onChange, label, idPrefix }: { tabs: TabDef[
   const refs = useRef<Record<string, HTMLButtonElement | null>>({})
   const strip = useRef<HTMLDivElement>(null)
   const [edges, setEdges] = useState({ left: false, right: false })
+  // Width of the chevron gutter at each overflowing edge. A tab that would only be partly visible inside it is hidden
+  // (opacity, not display) so the strip never shows half a word; the chevron says that more tabs exist.
+  const GUTTER = 40
   const measure = useCallback(() => {
     const el = strip.current
-    if (el) setEdges({ left: el.scrollLeft > 2, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 2 })
+    if (!el) return
+    const left = el.scrollLeft > 2
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+    setEdges({ left, right })
+    const b = el.getBoundingClientRect()
+    for (const btn of Object.values(refs.current)) {
+      if (!btn) continue
+      const a = btn.getBoundingClientRect()
+      const partial = (left && a.left < b.left + GUTTER) || (right && a.right > b.right - GUTTER)
+      if (partial) btn.setAttribute('data-edge', 'true'); else btn.removeAttribute('data-edge')
+    }
   }, [])
-  useEffect(() => { measure(); window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure) }, [measure, list.length])
-  // The selected tab is always brought fully into view, so it can never sit clipped off-screen.
-  // Keep the selected tab fully inside the strip by moving the strip's own scroll position. scrollIntoView is avoided on
-  // purpose: it moves the browser's keyboard starting point, so the first Tab press would skip past the skip link.
+  // Counts arrive after first paint and change tab widths, so re-measure whenever the strip's content size changes.
+  const sig = list.map((t) => `${t.key}:${t.count ?? ''}`).join('|')
   useEffect(() => {
-    const el = refs.current[value]; const box = strip.current
+    measure()
+    window.addEventListener('resize', measure)
+    const ro = typeof ResizeObserver !== 'undefined' && strip.current ? new ResizeObserver(measure) : null
+    if (ro && strip.current) { ro.observe(strip.current); for (const b of Object.values(refs.current)) if (b) ro.observe(b) }
+    return () => { window.removeEventListener('resize', measure); ro?.disconnect() }
+  }, [measure, sig])
+  // Keep a tab fully inside the strip, clear of the chevron gutters, by moving the strip's own scroll position.
+  // scrollIntoView is avoided on purpose: it moves the browser's keyboard starting point, so the first Tab press would
+  // skip past the skip link.
+  const reveal = useCallback((key: string) => {
+    const el = refs.current[key]; const box = strip.current
     if (el && box) {
       const a = el.getBoundingClientRect(); const b = box.getBoundingClientRect()
-      if (a.left < b.left) box.scrollLeft -= b.left - a.left + 8
-      else if (a.right > b.right) box.scrollLeft += a.right - b.right + 8
+      if (a.left < b.left + GUTTER) box.scrollLeft -= b.left + GUTTER - a.left
+      else if (a.right > b.right - GUTTER) box.scrollLeft += a.right - (b.right - GUTTER)
     }
     measure()
-  }, [value, measure])
+  }, [measure])
+  useEffect(() => { reveal(value) }, [value, reveal, sig])
   const onKey = (e: React.KeyboardEvent) => {
     const i = list.findIndex((t) => t.key === value)
     let n = -1
@@ -202,7 +224,7 @@ export function Tabs({ tabs, value, onChange, label, idPrefix }: { tabs: TabDef[
     <div className="adm-tabs-wrap" data-more-left={edges.left} data-more-right={edges.right}>
       <div className="adm-tabs" role="tablist" aria-label={label} onKeyDown={onKey} ref={strip} onScroll={measure}>
         {list.map((t) => (
-          <button key={t.key} ref={(el) => { refs.current[t.key] = el }} type="button" role="tab" id={`${idPrefix}-tab-${t.key}`} aria-controls={`${idPrefix}-panel`} aria-selected={t.key === value} tabIndex={t.key === value ? 0 : -1} className="adm-tab" onClick={() => onChange(t.key)}>
+          <button key={t.key} ref={(el) => { refs.current[t.key] = el }} type="button" role="tab" id={`${idPrefix}-tab-${t.key}`} aria-controls={`${idPrefix}-panel`} aria-selected={t.key === value} tabIndex={t.key === value ? 0 : -1} className="adm-tab" onClick={() => onChange(t.key)} onFocus={() => reveal(t.key)} onBlur={measure}>
             {t.label}{t.count !== undefined && t.count !== null ? <span className="adm-tab-n">{t.count}</span> : null}
           </button>
         ))}

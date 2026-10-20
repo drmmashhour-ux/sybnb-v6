@@ -72,7 +72,10 @@ function evidenceRecord(ctx, code, permission, resource, result, snap, options) 
 
 /** Decide against an already-loaded snapshot. Writes evidence for T3/T4 (or when forced). */
 export async function decide(snap, ctx, code, resource = {}, options = {}) {
-  const permission = await loadPermission(snap.client, code)
+  // Permission definitions are read once per snapshot (a list endpoint decides many times).
+  snap.permissionCache ??= new Map()
+  let permission = snap.permissionCache.get(code)
+  if (permission === undefined) { permission = await loadPermission(snap.client, code); snap.permissionCache.set(code, permission) }
   const result = evaluateAccess({
     user: { id: ctx.user.id, status: ctx.user.status }, permission, assignments: snap.assignments, suspensions: snap.suspensions,
     resource, orgIndex: snap.orgIndex, policy: snap.policy, context: { now: snap.now, session: { recentAuthAt: snap.auth.recentAuthAt } },

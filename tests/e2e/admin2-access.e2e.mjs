@@ -11,10 +11,8 @@ const org = await p.organization.findFirst()
 const ORG = [{ kind: 'ORGANIZATION', organizationId: org.id }]
 const mk = async (label, role) => { const u = await createStaffUser(label, run); if (role) await assignRole(u, role, ORG); return u }
 
-const owner1 = await mk('o1', 'OWNER'); const owner2 = await mk('o2', 'OWNER'); const owner3 = await mk('o3', 'OWNER')
-const o1 = await loginAsStaff(api, owner1); const o2 = await loginAsStaff(api, owner2); const o3 = await loginAsStaff(api, owner3)
-const secUser = await mk('sec', 'SECURITY_ADMIN'); const sec = await loginAsStaff(api, secUser)
-const supUser = await mk('sup', 'SUPPORT_AGENT'); const sup = await loginAsStaff(api, supUser)
+const [owner1, owner2, owner3, secUser, supUser] = await Promise.all([mk('o1', 'OWNER'), mk('o2', 'OWNER'), mk('o3', 'OWNER'), mk('sec', 'SECURITY_ADMIN'), mk('sup', 'SUPPORT_AGENT')])
+const [o1, o2, o3, sec, sup] = await Promise.all([owner1, owner2, owner3, secUser, supUser].map((u) => loginAsStaff(api, u)))
 
 await t('support agent cannot list users, assignments, roles or sessions (deny by default)', async () => {
   for (const path of ['/users', '/assignments', '/roles', '/sessions', '/permissions', '/scopes']) {

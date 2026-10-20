@@ -57,7 +57,7 @@ export function createRouter() {
     routes.push({ method, re, keys, handler })
   }
   return {
-    get: add('GET'), post: add('POST'), patch: add('PATCH'),
+    get: add('GET'), post: add('POST'), patch: add('PATCH'), put: add('PUT'),
     async handle(req, res, url, auth) {
       if (!(url.pathname === PREFIX || url.pathname.startsWith(`${PREFIX}/`))) return false
       const allowed = []

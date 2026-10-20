@@ -73,7 +73,9 @@ export async function verifyEvidenceChain(client, { limit = 10_000 } = {}) {
  */
 export async function verifyEvidenceChainForOrganization(client, organizationId, { limit = 50_000 } = {}) {
   if (!organizationId) return { ok: false, checked: 0, scope: 'ORGANIZATION', reason: 'ORGANIZATION_REQUIRED' }
-  const rows = await client.authorizationEvidence.findMany({ where: { organizationId }, orderBy: { sequence: 'asc' }, take: limit })
+  const fetched = await client.authorizationEvidence.findMany({ where: { organizationId }, orderBy: { sequence: 'asc' }, take: limit + 1 })
+  const truncated = fetched.length > limit // more rows exist than this call may verify: never report a partial chain as fully verified
+  const rows = truncated ? fetched.slice(0, limit) : fetched
   const known = new Map()
   const wanted = [...new Set(rows.map((r) => r.prevHash).filter(Boolean))]
   for (let i = 0; i < wanted.length; i += 500) {
@@ -90,5 +92,6 @@ export async function verifyEvidenceChainForOrganization(client, organizationId,
       return broken(r, i, 'PREV_HASH_MISMATCH') // a null prevHash is only valid for the first row of the whole chain
     }
   }
-  return { ok: true, checked: rows.length, scope: 'ORGANIZATION' }
+  if (truncated) return { ok: false, checked: rows.length, scope: 'ORGANIZATION', truncated: true, reason: 'VERIFICATION_LIMIT_REACHED' }
+  return { ok: true, checked: rows.length, scope: 'ORGANIZATION', truncated: false }
 }

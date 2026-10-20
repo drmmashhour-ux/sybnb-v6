@@ -8,6 +8,8 @@ import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { roleVersionContentHash } from '../../lib/authz/catalogue.mjs'
 import { badRequest, notFoundError, conflict, pageParams, sortParam, pageResult } from './router.mjs'
 import { heldCodes } from './core.mjs'
+import { authorizedOrganizationIds, inOrganizations } from '../../lib/authz/org-boundary.mjs'
+import { decide } from '../../lib/authz/index.mjs'
 import { suspendUser, reactivateUser } from '../../lib/authz/emergency.mjs'
 import { createAssignment, reviewAssignment, approveAssignment, revokeAssignment, migrateAssignment, autoMigrateIfReducing, TX } from '../../lib/authz/assignment-workflow.mjs'
 
@@ -146,7 +148,11 @@ export function registerAccess(router) {
     const snap = await loadSnapshot({ user: u, sessionId: null })
     const held = [...(await heldCodes(snap, { id: u.id, status: u.status }))].sort()
     const sessions = await db().userSession.findMany({ where: { userId: u.id, revokedAt: null, expiresAt: { gt: approxNow() } }, select: { id: true, issuedAt: true, expiresAt: true, mfaMethod: true } })
-    const audit = await db().adminAuditLog.findMany({ where: { OR: [{ entityType: 'user', entityId: u.id }, { actorUserId: u.id }] }, orderBy: { createdAt: 'desc' }, take: 20, select: { id: true, action: true, entityType: true, entityId: true, createdAt: true, reason: true } })
+    // Audit history is organization-bound: only rows attributed to an organization where the CALLER holds user.view
+    // (centrally decided). Unattributed rows, other organizations' rows, and callers with no organization-level grant: nothing.
+    let auditOrgIds = []
+    try { auditOrgIds = await authorizedOrganizationIds(r, { loadSnapshot, decide }, 'user.view', 'admin_user') } catch (e) { if (e.statusCode !== 403) throw e }
+    const audit = !auditOrgIds.length ? [] : await db().adminAuditLog.findMany({ where: { AND: [inOrganizations(auditOrgIds), { OR: [{ entityType: 'user', entityId: u.id }, { actorUserId: u.id }] }] }, orderBy: { createdAt: 'desc' }, take: 20, select: { id: true, action: true, entityType: true, entityId: true, createdAt: true, reason: true } })
     r.ok({
       user: { ...(await userRow(u)), legacyRoles: u.roles.map((x) => x.role) },
       assignments: assignments.map(assignmentView),

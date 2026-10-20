@@ -523,7 +523,7 @@ test('verifyEvidenceChainForOrganization: org-only rows, linkage by hash and seq
   const reads = []
   const client = { authorizationEvidence: { ...evidenceTable(), findMany: async (args) => { reads.push(args); return evidenceTable().findMany(args) } } }
   const ok = await verifyEvidenceChainForOrganization(client, A)
-  assert.deepEqual(ok, { ok: true, checked: 3, scope: 'ORGANIZATION' })
+  assert.deepEqual(ok, { ok: true, checked: 3, scope: 'ORGANIZATION', truncated: false })
   for (const args of reads) assert.ok(args.where.organizationId === A || (args.where.hash && args.select && Object.keys(args.select).join() === 'hash,sequence'), 'only A\'s rows, or hash/sequence lookups for linkage')
   assert.equal((await verifyEvidenceChainForOrganization(client, null)).reason, 'ORGANIZATION_REQUIRED')
   // a row pointing to a predecessor that does not exist is a broken link
@@ -579,4 +579,35 @@ test('every writeAdminAudit / recordSecurityEvent call in server/routes/admin2 a
   }
   assert.ok(calls >= 40, `expected to inspect the writers (found ${calls})`)
   assert.deepEqual(missing, [])
+})
+
+test('verifyEvidenceChainForOrganization: a chain longer than the limit is never reported as fully verified', async () => {
+  resetWorld()
+  const client = { authorizationEvidence: evidenceTable() }
+  const capped = await verifyEvidenceChainForOrganization(client, A, { limit: 2 })
+  assert.equal(capped.ok, false); assert.equal(capped.truncated, true); assert.equal(capped.reason, 'VERIFICATION_LIMIT_REACHED'); assert.equal(capped.checked, 2)
+  const exact = await verifyEvidenceChainForOrganization(client, A, { limit: 3 })
+  assert.equal(exact.ok, true); assert.equal(exact.truncated, false)
+})
+
+test('static guard: every read of admin_audit_logs / security_events / authorization_evidence in server/routes/admin2 is organization-restricted', () => {
+  const root = join(import.meta.dirname, '..', '..')
+  const files = readdirSync(join(root, 'server/routes/admin2')).filter((f) => f.endsWith('.mjs'))
+  const readOps = ['findMany', 'findFirst', 'findUnique', 'count', 'groupBy', 'aggregate']
+  let reads = 0; const unscoped = []
+  for (const f of files) {
+    const src = readFileSync(join(root, 'server/routes/admin2', f), 'utf8').replace(/^import .*$/gm, '')
+    for (const model of ['adminAuditLog', 'securityEvent', 'authorizationEvidence']) {
+      for (const op of readOps) {
+        for (const c of callBodies(src, `${model}.${op}`)) {
+          reads += 1
+          // a `{ where }` shorthand is accepted only when the `where` built just above it carries the restriction
+          const context = /\{\s*where\s*[,}]/.test(c.text) ? src.slice(Math.max(0, c.at - 700), c.at) + c.text : c.text
+          if (!/inOrganizations|auditWhere/.test(context)) unscoped.push(`${f}: ${model}.${op}`)
+        }
+      }
+    }
+  }
+  assert.ok(reads >= 8, `expected to inspect the readers (found ${reads})`)
+  assert.deepEqual(unscoped, [])
 })

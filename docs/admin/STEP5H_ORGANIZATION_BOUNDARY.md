@@ -26,6 +26,15 @@ organization for every authorization decision while the security-event, audit an
   global verifier from a script.
 * Break-glass requests and other actions whose organization is ambiguous (several candidate organizations) are refused (409) or left unattributed.
 
+## Round 2 (independent re-review)
+
+* `GET /access/users/:id`: the recent-audit list is restricted to organizations where the caller holds `user.view` (centrally decided); no such organization means an empty list.
+* Command Center `securityEvents7d` tile: counted audit rows globally; now organization-bound like `/security/overview`, and omitted when the caller has no organization-level grant.
+* `verifyEvidenceChainForOrganization`: a chain longer than the limit returns `ok:false, truncated:true, reason:VERIFICATION_LIMIT_REACHED` instead of a false "verified".
+* New static guard: every read of the three tables in `server/routes/admin2` must be organization-restricted.
+* Deploy ordering: both deploy paths (`start:render`, Render `preDeployCommand`) run `migration-gate.mjs` and `prisma migrate deploy` before the server starts, so 083 is applied (once approved) before code that writes `organization_id` runs. Any other host that starts the server without that step must apply 083 first.
+* Not changed: the legacy `server/routes/admin.mjs` audit reads (global ADMIN console), outside the admin2 organization model.
+
 ## Known limits / follow-ups (not part of this fix)
 
 * ~60 audit writers outside `admin2`/`authz` (legacy `server/routes/admin.mjs`, host, bookings, SR rides, ...) still write

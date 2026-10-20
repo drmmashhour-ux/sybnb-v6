@@ -9,7 +9,8 @@ import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { badRequest, notFoundError, conflict } from './router.mjs'
 import { visibleScope, requireRecord, registryContext, validateEnum, cleanText, auditOrganizationId } from './scope.mjs'
 import { authorizedPlatformsFor, heldCodes } from './core.mjs'
-import { loadSnapshot } from '../../lib/authz/index.mjs'
+import { loadSnapshot, decide } from '../../lib/authz/index.mjs'
+import { authorizedOrganizationIds, inOrganizations } from '../../lib/authz/org-boundary.mjs'
 
 const PLATFORM_STATUSES = ['ACTIVE', 'SETUP', 'DEGRADED', 'DISABLED', 'NO_DATA']
 // Setting categories are a closed list. Security-category writes need the higher-tier security permission.
@@ -46,7 +47,13 @@ export function registerConfig(router) {
     const snap = await loadSnapshot(r.auth)
     const held = await heldCodes(snap, { id: r.auth.user.id, status: r.auth.user.status })
     if (held.has('access.view')) tiles.pendingAccessApprovals = await db().roleAssignment.count({ where: { status: 'PENDING_APPROVAL' } })
-    if (held.has('security_event.view')) tiles.securityEvents7d = await db().adminAuditLog.count({ where: { action: { startsWith: 'security.' }, createdAt: { gte: new Date(Date.now() - 7 * 86400_000) } } })
+    if (held.has('security_event.view')) {
+      // Organization-bound like /security/overview: only organizations where the caller is centrally allowed; else no tile.
+      try {
+        const orgIds = await authorizedOrganizationIds(r, { loadSnapshot, decide }, 'security_event.view', 'security_event')
+        tiles.securityEvents7d = await db().adminAuditLog.count({ where: { ...inOrganizations(orgIds), action: { startsWith: 'security.' }, createdAt: { gte: new Date(Date.now() - 7 * 86400_000) } } })
+      } catch (e) { if (e.statusCode !== 403) throw e }
+    }
     const platforms = (await authorizedPlatformsFor(snap, r.auth, r.requestId)).filter((p) => p.authorized)
     r.ok({
       tiles: Object.fromEntries(Object.entries(tiles).filter(([, v]) => v !== undefined)),

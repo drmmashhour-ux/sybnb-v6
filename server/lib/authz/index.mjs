@@ -1,3 +1,4 @@
+import { trustedNow } from './clock.mjs'
 // STEP 5 -- the ONE authorization entry point for admin code (Step 5 spec section 8):
 //   can(ctx, permission, resource, options)       -> result (never throws on deny)
 //   authorize(ctx, permission, resource, options) -> result, or throws 401/403 (deny by default)
@@ -43,7 +44,7 @@ export function sessionAuthFacts(ctx, sessionRow) {
 /** Load everything the evaluator needs ONCE, so many decisions in one request cost one round of queries. */
 export async function loadSnapshot(ctx, options = {}) {
   const client = options.tx || db()
-  const now = options.now ?? new Date()
+  const now = options.now ?? trustedNow()
   const [assignments, suspensions, orgIndex, policy, sessionRow] = await Promise.all([
     loadAssignmentsForUser(client, ctx.user.id),
     loadSuspensions(client),
@@ -134,7 +135,7 @@ export async function permissionSummary(ctx, codes, options = {}) {
   ])
   const byCode = new Map(defs.map((d) => [d.code, { code: d.code, deprecated: d.deprecated }]))
   for (const code of codes) {
-    out[code] = holdsPermissionAnywhere({ user: { id: ctx.user.id, status: ctx.user.status }, permission: byCode.get(code) ?? null, assignments, suspensions, now: options.now ?? new Date() })
+    out[code] = holdsPermissionAnywhere({ user: { id: ctx.user.id, status: ctx.user.status }, permission: byCode.get(code) ?? null, assignments, suspensions, now: options.now ?? trustedNow() })
   }
   return out
 }

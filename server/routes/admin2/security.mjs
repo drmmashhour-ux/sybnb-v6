@@ -2,10 +2,11 @@
 // in this file can create, edit or delete an audit row except the explicit "export" / "break-glass
 // request" events, which append new rows.
 import { db } from '../../lib/prisma.mjs'
+import { trustedNow } from '../../lib/authz/clock.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { verifyEvidenceChain } from '../../lib/authz/evidence.mjs'
 import { recordSecurityEvent, SEVERITIES } from '../../lib/authz/security-events.mjs'
-import { completeOwnerBootstrap, getBootstrapState } from '../../lib/authz/bootstrap.mjs'
+import { completeOwnerBootstrap, getBootstrapState, bootstrapSecretDiagnostics, BOOTSTRAP_COMPLETED } from '../../lib/authz/bootstrap.mjs'
 import { sessionAuthFacts } from '../../lib/authz/index.mjs'
 import { isRateLimited, clientIp } from '../../lib/rateLimit.mjs'
 import { badRequest, notFoundError, pageParams, pageResult } from './router.mjs'
@@ -71,11 +72,11 @@ export function registerSecurity(router) {
     const day = new Date(Date.now() - 24 * 3600_000); const week = new Date(Date.now() - 7 * 24 * 3600_000)
     const [privileged, activeSessions, stepUpFailed, pending, critical, sessionsMfa] = await Promise.all([
       db().user.count({ where: { status: 'ACTIVE', roleAssignments: { some: { status: { in: ['ACTIVE', 'PENDING_ACTIVATION'] }, roleVersion: { permissions: { some: { permission: { OR: [{ tier: { gte: 3 } }, { highRisk: true }] } } } } } } } }),
-      db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: new Date() }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
+      db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: trustedNow() }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
       db().adminAuditLog.count({ where: { action: 'security.step_up_failed', createdAt: { gte: day } } }),
       db().roleAssignment.count({ where: { status: { in: ['PENDING_APPROVAL', 'UNDER_REVIEW'] } } }),
       db().securityEvent.count({ where: { severity: 'CRITICAL', createdAt: { gte: week } } }),
-      db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: new Date() }, mfaMethod: { not: null }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
+      db().userSession.count({ where: { revokedAt: null, expiresAt: { gt: trustedNow() }, mfaMethod: { not: null }, user: { roleAssignments: { some: { status: 'ACTIVE' } } } } }),
     ])
     r.ok({ metrics: { privilegedUsers: privileged, activeStaffSessions: activeSessions, activeStaffSessionsWithMfa: sessionsMfa, failedStepUps24h: stepUpFailed, pendingAccessApprovals: pending, criticalEvents7d: critical } })
   })
@@ -120,7 +121,7 @@ export function registerSecurity(router) {
   router.get('/security/bootstrap', async (r) => {
     await r.requireAnywhere('console.access')
     const org = await db().organization.findFirst({ orderBy: { createdAt: 'asc' } })
-    r.ok({ organizationId: org?.id ?? null, ...(org ? (await getBootstrapState(db(), org.id)) ?? { state: null } : { state: null }) })
+    r.ok({ organizationId: org?.id ?? null, ...(org ? (await getBootstrapState(db(), org.id)) ?? { state: null } : { state: null }), secret: await bootstrapSecretDiagnostics(db()) })
   })
   router.post('/security/bootstrap/owner', async (r) => {
     if (await isRateLimited(`admin2-bootstrap:${r.auth.user.id}`, 15 * 60_000, 5) || await isRateLimited(`admin2-bootstrap-ip:${clientIp(r.req)}`, 15 * 60_000, 10)) {
@@ -128,6 +129,10 @@ export function registerSecurity(router) {
     }
     const org = await db().organization.findFirst({ orderBy: { createdAt: 'asc' } })
     if (!org) throw notFoundError('Organization not found.')
+    // STEP 5C: a completed bootstrap is closed before authorization, the body or the operator secret are processed.
+    if ((await getBootstrapState(db(), org.id))?.state === BOOTSTRAP_COMPLETED) {
+      await completeOwnerBootstrap(db(), { actorUserId: r.auth.user.id, organizationId: org.id, requestId: r.requestId }) // throws 409 BOOTSTRAP_CLOSED and records the attempt
+    }
     // The caller is still on the OLD Owner version, so authorization uses a permission that version holds:
     // access.assign (tier 4: fresh step-up + evidence), ORGANIZATION-scoped.
     await r.require('access.assign', await orgResource('security_bootstrap', org.id), { evidence: true })

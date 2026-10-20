@@ -14,6 +14,8 @@ import { writeAdminAudit } from './audit.mjs'
 import { recordSecurityEvent } from './security-events.mjs'
 import { retentionFor } from './retention.mjs'
 import { assertContinuity } from './continuity.mjs'
+import { dbNow } from './clock.mjs'
+import { retryFailedDeliveries } from './notifications.mjs'
 
 const TX = { maxWait: 10_000, timeout: 30_000 }
 
@@ -45,8 +47,9 @@ export async function activationBlocker(tx, a, now) {
   return null
 }
 
-async function activateOne(client, id, now) {
+async function activateOne(client, id, injectedNow) {
   return client.$transaction(async (tx) => {
+    const now = injectedNow ?? await dbNow(tx) // database clock: the same one that stamped activation_at
     const claimed = await tx.$queryRaw`SELECT id::text FROM role_assignments WHERE id = ${id}::uuid AND status = 'PENDING_ACTIVATION' AND activation_at <= ${now} FOR UPDATE SKIP LOCKED`
     if (!claimed.length) return 'SKIPPED'
     const a = await tx.roleAssignment.findUnique({ where: { id }, include: { scopes: true, roleVersion: { include: { role: true } } } })
@@ -80,9 +83,10 @@ async function activateOne(client, id, now) {
 }
 
 /** One pass. Returns { scanned, activated, blocked, skipped }. Never throws for a single bad row. */
-export async function runActivationCycle(client, { now = new Date(), batch = 100 } = {}) {
+export async function runActivationCycle(client, { now = null, batch = 100 } = {}) {
+  const scanAt = now ?? await dbNow(client)
   const due = await client.roleAssignment.findMany({
-    where: { status: 'PENDING_ACTIVATION', activationAt: { lte: now }, revokedAt: null }, orderBy: { activationAt: 'asc' }, take: batch, select: { id: true },
+    where: { status: 'PENDING_ACTIVATION', activationAt: { lte: scanAt }, revokedAt: null }, orderBy: { activationAt: 'asc' }, take: batch, select: { id: true },
   })
   const out = { scanned: due.length, activated: 0, blocked: 0, skipped: 0, errors: 0 }
   for (const { id } of due) {
@@ -100,8 +104,24 @@ export async function runActivationCycle(client, { now = new Date(), batch = 100
 }
 
 /** Back-compat name used by 5A callers/tests: number of assignments activated. */
-export async function activateDueAssignments(client, now = new Date()) {
+export async function activateDueAssignments(client, now = null) {
   return (await runActivationCycle(client, { now })).activated
+}
+
+// Deployment mode (STEP 5C). Row locking keeps every mode correct; the mode only decides WHO runs the schedule.
+//   IN_PROCESS  -- this API process runs the interval (single instance / development)
+//   EXTERNAL    -- the API starts NOTHING; an external cron runs `node scripts/admin-activation-run.mjs` (multi-replica production)
+//   DISABLED    -- nothing runs; the evaluator still enforces activation_at, grants just are not normalized to ACTIVE
+export const ACTIVATION_MODES = Object.freeze(['IN_PROCESS', 'EXTERNAL', 'DISABLED'])
+export function resolveActivationMode(env = process.env) {
+  const raw = String(env.ADMIN_ACTIVATION_MODE ?? '').trim().toUpperCase()
+  if (raw) {
+    if (!ACTIVATION_MODES.includes(raw)) return { mode: 'DISABLED', source: 'ADMIN_ACTIVATION_MODE', warning: `Unknown ADMIN_ACTIVATION_MODE "${raw.slice(0, 20)}"; activation scheduling is DISABLED until it is IN_PROCESS, EXTERNAL or DISABLED.` }
+    return { mode: raw, source: 'ADMIN_ACTIVATION_MODE', warning: null }
+  }
+  if (String(env.ADMIN_ACTIVATION_JOB ?? '').toLowerCase() === 'off') return { mode: 'DISABLED', source: 'ADMIN_ACTIVATION_JOB(legacy)', warning: null }
+  const prod = env.NODE_ENV === 'production'
+  return { mode: 'IN_PROCESS', source: 'default', warning: prod ? 'ADMIN_ACTIVATION_MODE is not set in production: running IN_PROCESS on every replica. Set ADMIN_ACTIVATION_MODE=EXTERNAL and schedule scripts/admin-activation-run.mjs for multi-replica deployments.' : null }
 }
 
 let running = false
@@ -114,6 +134,8 @@ export function startActivationScheduler(client, { intervalMs = 60_000, log = co
     try {
       const r = await runActivationCycle(client)
       if (r.activated || r.blocked || r.errors) log.info('activation_cycle', r)
+      const d = await retryFailedDeliveries(client)
+      if (d.recovered || d.stillFailing) log.info('security_notification_retry', d)
     } catch (e) {
       log.error('activation_cycle_failed', { message: String(e.message || e).slice(0, 200) })
     } finally { running = false }

@@ -29,7 +29,8 @@ import { writeAdminAudit } from './audit.mjs'
 import { writeEvidence } from './evidence.mjs'
 import { recordSecurityEvent } from './security-events.mjs'
 import { retentionFor } from './retention.mjs'
-import { validHolders, assertContinuity, CONTINUITY_PERMISSIONS } from './continuity.mjs'
+import { validHolders, assertContinuity, lockContinuity, CONTINUITY_PERMISSIONS } from './continuity.mjs'
+import { dbNow } from './clock.mjs'
 import { PERMISSION_RULESET_VERSION } from './catalogue.mjs'
 import { loadPolicy } from './loader.mjs'
 import { svcError, badReq, conflictErr } from './errors.mjs'
@@ -39,6 +40,23 @@ export const BOOTSTRAP_COMPLETED = 'SECURITY_BOOTSTRAP_COMPLETED'
 export const BOOTSTRAP_ROLE_CODE = 'OWNER'
 const TX = { maxWait: 10_000, timeout: 30_000 }
 const WORKFLOW_UNAVAILABLE = 'Initial Owner security bootstrap: no second independently authorized person existed, so the ordinary request/review/approve workflow and its 48-hour delay could not be applied. One-time exception, now closed.'
+
+export const SECRET_LEFT_CONFIGURED_WARNING = 'BOOTSTRAP SECRET STILL CONFIGURED AFTER COMPLETION'
+export const SECRET_LIFECYCLE_INSTRUCTION = 'REMOVE OR ROTATE ADMIN_BOOTSTRAP_SECRET AFTER SUCCESSFUL BOOTSTRAP.'
+
+/**
+ * Secret lifecycle diagnostics (STEP 5C). Never exposes the value, only whether one is configured. A completed
+ * bootstrap ignores the secret entirely (completeOwnerBootstrap answers BOOTSTRAP_CLOSED before reading it), so a
+ * secret left in the environment is inert, but it is still reported so operators remove or rotate it.
+ */
+export async function bootstrapSecretDiagnostics(client) {
+  const configured = (process.env.ADMIN_BOOTSTRAP_SECRET || '').length > 0
+  const rows = await client.securityBootstrap.findMany({ select: { state: true } })
+  const completed = rows.filter((r) => r.state === BOOTSTRAP_COMPLETED).length
+  const required = rows.length - completed
+  const stale = configured && completed > 0 && required === 0
+  return { secretConfigured: configured, organizationsCompleted: completed, organizationsRequired: required, warning: configured && completed > 0 ? SECRET_LEFT_CONFIGURED_WARNING : null, instruction: configured && completed > 0 ? SECRET_LIFECYCLE_INSTRUCTION : null, secretNoLongerNeeded: stale }
+}
 
 export async function getBootstrapState(client, organizationId) {
   const row = await client.securityBootstrap.findUnique({ where: { organizationId } })
@@ -63,7 +81,11 @@ async function deny(client, { actorUserId, organizationId, code, status, message
   return svcError(status, code, message)
 }
 
-export async function completeOwnerBootstrap(client, { actorUserId, organizationId, reason, operatorSecret, authStrength, requestId = null, now = new Date() }) {
+async function runBootstrap(client, roleCode, { actorUserId, organizationId, reason, operatorSecret, authStrength, requestId = null, now: injectedNow = null }) {
+  // 1. A completed bootstrap is closed BEFORE anything privileged happens: the reason, the operator secret and the
+  //    session strength are not even evaluated, so a secret left in the environment cannot do anything.
+  const pre = await client.securityBootstrap.findUnique({ where: { organizationId }, select: { state: true } })
+  if (pre?.state === BOOTSTRAP_COMPLETED) throw await deny(client, { actorUserId, organizationId, code: 'BOOTSTRAP_CLOSED', status: 409, message: 'Owner bootstrap has already been completed and is permanently closed.', requestId })
   const why = String(reason ?? '').trim()
   if (why.length < 20) throw badReq('Explain the bootstrap in at least 20 characters.', 'REASON_REQUIRED')
   const secretGood = secretOk(operatorSecret) // throws 503 when the deployment has not enabled bootstrap
@@ -73,11 +95,13 @@ export async function completeOwnerBootstrap(client, { actorUserId, organization
   let outcome
   try {
     outcome = await client.$transaction(async (tx) => {
+      const now = injectedNow ?? await dbNow(tx) // database time for every comparison and write below
       const locked = await tx.$queryRaw`SELECT state FROM security_bootstrap WHERE organization_id = ${organizationId}::uuid FOR UPDATE`
       if (!locked.length) throw svcError(404, 'BOOTSTRAP_NOT_FOUND', 'No bootstrap record for this organization.')
       if (locked[0].state !== BOOTSTRAP_REQUIRED) throw conflictErr('Owner bootstrap has already been completed and is permanently closed.', 'BOOTSTRAP_CLOSED')
 
-      const role = await tx.role.findUnique({ where: { code: BOOTSTRAP_ROLE_CODE } })
+      await lockContinuity(tx, [organizationId]) // serialize against any concurrent authority removal in this organization
+      const role = await tx.role.findUnique({ where: { code: roleCode } })
       const latest = role && await tx.roleVersion.findFirst({ where: { roleId: role.id, status: 'EFFECTIVE' }, include: { permissions: { include: { permission: true } } } })
       if (!latest) throw conflictErr('There is no current approved Owner role version.', 'NO_LATEST_VERSION')
       const latestCodes = new Set(latest.permissions.map((p) => p.permission.code))
@@ -127,7 +151,7 @@ export async function completeOwnerBootstrap(client, { actorUserId, organization
       })
       const perm = await tx.permissionDefinition.findUnique({ where: { code: 'access.assign' } })
       const evidence = await writeEvidence(tx, {
-        userId: actorUserId, roleAssignmentId: fresh.id, roleVersionId: latest.id, roleCode: BOOTSTRAP_ROLE_CODE, roleVersionNumber: latest.versionNumber,
+        userId: actorUserId, roleAssignmentId: fresh.id, roleVersionId: latest.id, roleCode, roleVersionNumber: latest.versionNumber,
         permissionId: perm?.id ?? null, permissionCode: 'access.assign', scopeKind: 'ORGANIZATION', scopeTarget: organizationId, scopeDescription: 'Initial Owner security bootstrap',
         resourceType: 'security_bootstrap', resourceId: organizationId, action: 'owner_bootstrap', authStrength, mfaMethod: 'EMAIL_OTP', mfaResult: 'VERIFIED_AT_LOGIN',
         requestId, correlationId: requestId, decision: 'ALLOW', policyVersionId: policy.id ?? null, auditEventId: audit.id, rulesetVersion: PERMISSION_RULESET_VERSION,
@@ -153,3 +177,9 @@ export async function completeOwnerBootstrap(client, { actorUserId, organization
   }
   return outcome
 }
+
+/** The ONLY production entry point: the role is fixed to OWNER and cannot be chosen by a caller. */
+export function completeOwnerBootstrap(client, args) { return runBootstrap(client, BOOTSTRAP_ROLE_CODE, args) }
+
+/** TEST ONLY: runs the same guards against a throwaway role so guard failures can be provoked without touching the shared OWNER role. No route or service imports this. */
+export function __completeBootstrapForRoleTestOnly(client, roleCode, args) { return runBootstrap(client, roleCode, args) }

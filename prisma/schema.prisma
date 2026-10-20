@@ -158,7 +158,7 @@ enum MessageSenderRole {
 }
 
 model User {
-  id           String        @id @default(uuid())
+  id           String @db.Uuid        @id @default(dbgenerated("gen_random_uuid()"))
   email        String?       @unique
   phoneHash    String?       @unique @map("phone_hash")
   passwordHash String?       @map("password_hash")
@@ -170,23 +170,23 @@ model User {
   // suspension, deletion, role change). See prisma/migrations/046_session_revocation.
   sessionEpoch Int           @default(0) @map("session_epoch")
   idDocumentRef String?      @map("id_document_ref")
-  idDocumentSubmittedAt DateTime? @map("id_document_submitted_at")
+  idDocumentSubmittedAt DateTime? @db.Timestamptz(6) @map("id_document_submitted_at")
   idDocumentMimeType String? @map("id_document_mime_type")
   idDocumentStatus IdDocumentStatus? @map("id_document_status")
   // Personal profile photo (migration 051). Stored like the ID document (object storage key + mime);
   // applies to any account (guest or host) for the profile section.
   avatarRef String? @map("avatar_ref")
   avatarMimeType String? @map("avatar_mime_type")
-  idDocumentReviewedById String? @map("id_document_reviewed_by_id")
-  idDocumentReviewedAt DateTime? @map("id_document_reviewed_at")
+  idDocumentReviewedById String? @db.Uuid @map("id_document_reviewed_by_id")
+  idDocumentReviewedAt DateTime? @db.Timestamptz(6) @map("id_document_reviewed_at")
   // Host verification (migration 049): set when the host redeems an admin-issued activation code.
   // Stays owned by an account with this NULL are hidden from public listing endpoints and refused
   // by POST /api/bookings (server/lib/host-verification.mjs).
-  hostVerifiedAt   DateTime? @map("host_verified_at")
+  hostVerifiedAt   DateTime? @db.Timestamptz(6) @map("host_verified_at")
   // SR in-ride audio recording preference (migration 063): OFF | ON_DEMAND | NIGHT_ONLY | EVERY_RIDE.
   // Lyft-parity safety feature; actual capture is additionally gated by SR_AUDIO_RECORDING_ENABLED.
   srRecordingMode  String?   @default("OFF") @map("sr_recording_mode")
-  hostVerifiedById String?   @map("host_verified_by_id")
+  hostVerifiedById String? @db.Uuid   @map("host_verified_by_id")
   // Stripe-for-SR Option B (saved-card auto-charge). The rider's Stripe Customer and their one saved
   // default card, captured once via a Checkout session in setup mode. Only non-sensitive descriptors
   // (brand + last4) are stored; the card itself lives at Stripe, referenced by the payment-method id.
@@ -202,8 +202,8 @@ model User {
   // never proven). Payment proof upload, online card checkout and host messaging are refused until the
   // owner verifies the email; a later verified email code from the real owner also clears the flag.
   emailUnverified   Boolean @default(false) @map("email_unverified")
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
+  createdAt    DateTime @db.Timestamptz(6)      @default(now()) @map("created_at")
+  updatedAt    DateTime @db.Timestamptz(6)      @default(now()) @updatedAt @map("updated_at")
 
   roles             UserRole[]
   roleAssignments   RoleAssignment[]  @relation("UserRoleAssignments")
@@ -249,7 +249,7 @@ model User {
   payoutMethod                 HostPayoutMethod?
   payoutRequests               PayoutRequest[] @relation("PayoutRequestHost")
   payoutRequestsDecided        PayoutRequest[] @relation("PayoutRequestDecidedBy")
-  hostVerifiedBy               User?           @relation("HostVerifiedBy", fields: [hostVerifiedById], references: [id], onDelete: SetNull)
+  hostVerifiedBy               User?           @relation("HostVerifiedBy", fields: [hostVerifiedById], references: [id], onDelete: SetNull, onUpdate: NoAction)
   hostsVerified                User[]          @relation("HostVerifiedBy")
   hostActivationCodes          HostActivationCode[] @relation("HostActivationCodeHost")
   hostActivationCodesIssued    HostActivationCode[] @relation("HostActivationCodeIssuedBy")
@@ -517,20 +517,20 @@ model LoyaltyEntry {
 // as its `sid` claim and every authenticated request re-reads the row. Revoking one row logs out
 // exactly one session without disturbing that account's other devices.
 model UserSession {
-  id            String    @id @default(uuid())
-  userId        String    @map("user_id")
-  issuedAt      DateTime  @default(now()) @map("issued_at")
-  expiresAt     DateTime  @map("expires_at")
-  revokedAt     DateTime? @map("revoked_at")
+  id            String @db.Uuid    @id @default(uuid())
+  userId        String @db.Uuid    @map("user_id")
+  issuedAt      DateTime @db.Timestamptz(6)  @default(now()) @map("issued_at")
+  expiresAt     DateTime @db.Timestamptz(6)  @map("expires_at")
+  revokedAt     DateTime? @db.Timestamptz(6) @map("revoked_at")
   revokedReason String?   @map("revoked_reason")
-  lastUsedAt    DateTime? @map("last_used_at")
+  lastUsedAt    DateTime? @db.Timestamptz(6) @map("last_used_at")
   userAgent     String?   @map("user_agent")
   // Step 5 (migration 079): last time the user re-proved identity for a T3/T4 action.
   stepUpAt      DateTime? @map("step_up_at")
   mfaMethod     String?   @map("mfa_method")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  createdAt     DateTime @db.Timestamptz(6)  @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([userId])
   @@index([expiresAt])
@@ -538,12 +538,12 @@ model UserSession {
 }
 
 model UserRole {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
+  id        String @db.Uuid   @id @default(dbgenerated("gen_random_uuid()"))
+  userId    String @db.Uuid   @map("user_id")
   role      RoleName
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @db.Timestamptz(6) @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([userId, role])
   @@index([role])
@@ -639,17 +639,17 @@ model PayoutRequest {
 // one retires the previous unused ones by moving their expires_at to the re-issue time. `attempts`
 // counts wrong guesses; at HOST_ACTIVATION_MAX_ATTEMPTS the code is locked until re-issued.
 model HostActivationCode {
-  id         String    @id @default(uuid())
-  hostId     String    @map("host_id")
+  id         String @db.Uuid    @id @default(dbgenerated("gen_random_uuid()"))
+  hostId     String @db.Uuid    @map("host_id")
   codeHash   String    @map("code_hash")
-  issuedById String?   @map("issued_by_id")
-  issuedAt   DateTime  @default(now()) @map("issued_at")
-  expiresAt  DateTime  @map("expires_at")
-  usedAt     DateTime? @map("used_at")
+  issuedById String? @db.Uuid   @map("issued_by_id")
+  issuedAt   DateTime @db.Timestamptz(6)  @default(now()) @map("issued_at")
+  expiresAt  DateTime @db.Timestamptz(6)  @map("expires_at")
+  usedAt     DateTime? @db.Timestamptz(6) @map("used_at")
   attempts   Int       @default(0)
 
-  host     User  @relation("HostActivationCodeHost", fields: [hostId], references: [id], onDelete: Cascade)
-  issuedBy User? @relation("HostActivationCodeIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
+  host     User  @relation("HostActivationCodeHost", fields: [hostId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  issuedBy User? @relation("HostActivationCodeIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([hostId])
   @@map("host_activation_codes")
@@ -1479,14 +1479,14 @@ enum PaymentEventProcessingStatus {
 // owner/legal-supplied (see server/lib/legal.mjs manifest) — this only binds consent to a version
 // so re-consent can be required when a document is republished.
 model LegalConsent {
-  id          String   @id @default(uuid())
-  userId      String   @map("user_id")
+  id          String @db.Uuid   @id @default(dbgenerated("gen_random_uuid()"))
+  userId      String @db.Uuid   @map("user_id")
   documentKey String   @map("document_key")
   version     String
-  acceptedAt  DateTime @default(now()) @map("accepted_at")
+  acceptedAt  DateTime @db.Timestamptz(6) @default(now()) @map("accepted_at")
 
-  @@unique([userId, documentKey, version])
-  @@index([userId])
+  @@unique([userId, documentKey, version], map: "legal_consents_user_doc_version_key")
+  @@index([userId], map: "legal_consents_user_idx")
   @@map("legal_consents")
 }
 
@@ -1504,58 +1504,58 @@ enum VerificationStatus {
 // verified entirely on the backend. The plaintext code is never stored or returned to production
 // clients. (Table + enum already existed in the DB ahead of the schema; this models them.)
 model VerificationCode {
-  id                String             @id @default(uuid())
+  id                String @db.Uuid             @id @default(dbgenerated("gen_random_uuid()"))
   identifierHash    String             @map("identifier_hash")
   purpose           String
   codeHash          String             @map("code_hash")
   status            VerificationStatus @default(PENDING)
   attempts          Int                @default(0)
   maxAttempts       Int                @default(5) @map("max_attempts")
-  expiresAt         DateTime           @map("expires_at")
+  expiresAt         DateTime @db.Timestamptz(6)           @map("expires_at")
   sentProvider      String?            @map("sent_provider")
   providerMessageId String?            @map("provider_message_id")
-  verifiedAt        DateTime?          @map("verified_at")
-  createdAt         DateTime           @default(now()) @map("created_at")
-  updatedAt         DateTime           @updatedAt @map("updated_at")
+  verifiedAt        DateTime? @db.Timestamptz(6)          @map("verified_at")
+  createdAt         DateTime @db.Timestamptz(6)           @default(now()) @map("created_at")
+  updatedAt         DateTime @db.Timestamptz(6)           @default(now()) @updatedAt @map("updated_at")
   channel           String             @default("sms")
 
-  @@index([identifierHash, purpose, status])
-  @@index([expiresAt])
+  @@index([identifierHash, purpose, status], map: "verification_codes_identifier_purpose_status_idx")
+  @@index([expiresAt], map: "verification_codes_expires_idx")
   @@index([channel])
   @@map("verification_codes")
 }
 
 model OtpAttemptLock {
-  id             String   @id @default(uuid())
+  id             String @db.Uuid   @id @default(dbgenerated("gen_random_uuid()"))
   purpose        String
   subjectHash    String   @map("subject_hash")
   attemptCount   Int      @default(0) @map("attempt_count")
-  lockedUntil    DateTime? @map("locked_until")
-  lastAttemptAt  DateTime? @map("last_attempt_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  lockedUntil    DateTime? @db.Timestamptz(6) @map("locked_until")
+  lastAttemptAt  DateTime? @db.Timestamptz(6) @map("last_attempt_at")
+  createdAt      DateTime @db.Timestamptz(6) @default(now()) @map("created_at")
+  updatedAt      DateTime @db.Timestamptz(6) @default(now()) @updatedAt @map("updated_at")
 
   @@unique([purpose, subjectHash])
   @@map("otp_attempt_locks")
 }
 
 model RateLimitBucket {
-  id          String   @id @default(uuid())
+  id          String @db.Uuid   @id @default(dbgenerated("gen_random_uuid()"))
   bucketKey   String   @unique @map("bucket_key")
-  windowStart DateTime @default(now()) @map("window_start")
+  windowStart DateTime @db.Timestamptz(6) @default(now()) @map("window_start")
   count       Int      @default(1)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime @db.Timestamptz(6) @default(now()) @map("created_at")
+  updatedAt   DateTime @db.Timestamptz(6) @default(now()) @updatedAt @map("updated_at")
 
   @@map("rate_limit_buckets")
 }
 
 model SuppressedEmail {
-  id        String   @id @default(uuid())
+  id        String @db.Uuid   @id @default(dbgenerated("gen_random_uuid()"))
   email     String   @unique
   reason    String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(6) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(6) @default(now()) @updatedAt @map("updated_at")
 
   @@map("suppressed_emails")
 }

@@ -11,6 +11,7 @@ import { recordSecurityEvent } from './security-events.mjs'
 import { retentionFor } from './retention.mjs'
 import { assertContinuity } from './continuity.mjs'
 import { badReq, notFound, conflictErr } from './errors.mjs'
+import { dbNow } from './clock.mjs'
 
 // Interactive transactions run several statements; give them room (default 5s is too tight over a WAN link).
 export const TX = Object.freeze({ maxWait: 10_000, timeout: 30_000 })
@@ -26,17 +27,18 @@ export async function suspendUser(client, { actorUserId, targetUserId, reason, k
   if (!['STANDARD', 'EMERGENCY'].includes(kind)) throw badReq('Unknown suspension kind.', 'KIND_INVALID')
   if (actorUserId === targetUserId) throw badReq('You cannot suspend your own account.', 'SELF_ACTION_FORBIDDEN')
   return client.$transaction(async (tx) => {
+    const now = await dbNow(tx)
     const target = await tx.user.findUnique({ where: { id: targetUserId } })
     if (!target) throw notFound('User not found.')
     if (target.status === 'SUSPENDED') throw conflictErr('This user is already suspended.', 'ALREADY_SUSPENDED')
     // Continuity: never remove the last valid holder of an authority the organization currently has.
-    await assertContinuity(tx, { userId: target.id })
+    await assertContinuity(tx, { userId: target.id, now })
     const assignments = await tx.roleAssignment.findMany({
       where: { userId: target.id }, select: { id: true, status: true, roleVersionId: true, effectiveFrom: true, effectiveTo: true, activationAt: true },
     })
     await tx.user.update({ where: { id: target.id }, data: { status: 'SUSPENDED', sessionEpoch: { increment: 1 } } })
     const revoked = await tx.userSession.updateMany({
-      where: { userId: target.id, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: kind === 'EMERGENCY' ? 'emergency_suspension' : 'admin2_user_suspended' },
+      where: { userId: target.id, revokedAt: null }, data: { revokedAt: now, revokedReason: kind === 'EMERGENCY' ? 'emergency_suspension' : 'admin2_user_suspended' },
     })
     const audit = await writeAdminAudit(tx, {
       actorUserId, action: kind === 'EMERGENCY' ? 'iam.user.emergency_suspended' : 'iam.user.suspended', entityType: 'user', entityId: target.id,
@@ -64,6 +66,7 @@ export async function reactivateUser(client, { actorUserId, targetUserId, reason
   if (actorUserId === targetUserId) throw badReq('You cannot reactivate your own account.', 'SELF_ACTION_FORBIDDEN')
   if (acknowledgeAssignmentReview !== true) throw badReq('Reactivation requires confirming that the current assignments were reviewed.', 'REVIEW_ACK_REQUIRED')
   return client.$transaction(async (tx) => {
+    const now = await dbNow(tx)
     const target = await tx.user.findUnique({ where: { id: targetUserId } })
     if (!target) throw notFound('User not found.')
     if (target.status !== 'SUSPENDED') throw conflictErr('This user is not suspended.', 'NOT_SUSPENDED')
@@ -85,7 +88,7 @@ export async function reactivateUser(client, { actorUserId, targetUserId, reason
       detail: { reason: why, assignmentsReviewed: live.map((a) => ({ id: a.id, role: a.roleVersion.role.code, status: a.status })) }, correlationId: requestId, auditEventId: audit.id,
     })
     if (open) {
-      await tx.userSuspension.update({ where: { id: open.id }, data: { reactivatedAt: new Date(), reactivatedById: actorUserId, reactivationReason: why, reactivationSecurityEventId: ev.id } })
+      await tx.userSuspension.update({ where: { id: open.id }, data: { reactivatedAt: now, reactivatedById: actorUserId, reactivationReason: why, reactivationSecurityEventId: ev.id } })
     }
     return { status: 'ACTIVE', sessionsRestored: 0, assignmentsToReview: live.map((a) => ({ id: a.id, role: a.roleVersion.role.code, status: a.status })), securityEvent: ev }
   }, TX)

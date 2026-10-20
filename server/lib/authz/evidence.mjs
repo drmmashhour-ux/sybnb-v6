@@ -1,3 +1,4 @@
+import { dbClock } from './clock.mjs'
 // STEP 5 -- authorization evidence writer (Step 3A.3). Append-only, hash-chained, written inside the
 // caller's transaction so the evidence and the action commit or roll back together.
 import { createHash } from 'node:crypto'
@@ -29,7 +30,7 @@ export function hashEvidence(record, prevHash, decidedAt) {
 export async function writeEvidence(tx, record) {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('authorization_evidence_chain'))`
   const last = await tx.authorizationEvidence.findFirst({ orderBy: { sequence: 'desc' }, select: { hash: true } })
-  const decidedAt = new Date()
+  const decidedAt = await dbClock(tx) // database clock, read under the chain lock => monotonic along the chain
   const hash = hashEvidence(record, last?.hash ?? null, decidedAt)
   const data = { ...pick(record), prevHash: last?.hash ?? null, hash, decidedAt }
   return tx.authorizationEvidence.create({ data })

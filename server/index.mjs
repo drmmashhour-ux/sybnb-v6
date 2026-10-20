@@ -5,7 +5,9 @@ import { getAuthContext } from './lib/auth-context.mjs'
 import { isRateLimited } from './lib/rateLimit.mjs'
 import { loadEnv, validateEnv } from './lib/env.mjs'
 import { checkDatabase, disconnectDb, db } from './lib/prisma.mjs'
-import { startActivationScheduler } from './lib/authz/activation-worker.mjs'
+import { startActivationScheduler, resolveActivationMode } from './lib/authz/activation-worker.mjs'
+import { startClockSync } from './lib/authz/clock.mjs'
+import { bootstrapSecretDiagnostics } from './lib/authz/bootstrap.mjs'
 import { pruneExpiredOtps } from './lib/otp-retention.mjs'
 import { expireUnpaidBookings } from './lib/booking-lifecycle.mjs'
 import { sweepIntervalMinutes } from './lib/booking-policy.mjs'
@@ -454,12 +456,23 @@ async function runDispatchHeartbeat() {
 const dispatchTickTimer = setInterval(runDispatchHeartbeat, DISPATCH_TICK_INTERVAL_MS)
 dispatchTickTimer.unref()
 
-// STEP 5B: activation worker for approved high-risk grants (state maintenance only -- the authorization evaluator
-// independently enforces activation_at). Overlap-safe, multi-replica safe (row locks), unref'd.
-if (process.env.ADMIN_ACTIVATION_JOB !== 'off') {
-  const activationIntervalMs = Number(process.env.ADMIN_ACTIVATION_INTERVAL_MS)
-  startActivationScheduler(db(), { intervalMs: Number.isFinite(activationIntervalMs) && activationIntervalMs >= 5_000 ? activationIntervalMs : 60_000, log })
+// STEP 5C: trusted time. The database clock is authoritative for security state; trustedNow() follows it.
+startClockSync(db(), { log })
+
+// STEP 5B/5C: activation worker for approved high-risk grants (state maintenance only -- the authorization evaluator
+// independently enforces activation_at). ADMIN_ACTIVATION_MODE = IN_PROCESS | EXTERNAL | DISABLED (see activation-worker.mjs).
+{
+  const { mode, warning, source } = resolveActivationMode(process.env)
+  if (warning) log.error('activation_mode_warning', { mode, message: warning })
+  if (mode === 'IN_PROCESS') {
+    const activationIntervalMs = Number(process.env.ADMIN_ACTIVATION_INTERVAL_MS)
+    startActivationScheduler(db(), { intervalMs: Number.isFinite(activationIntervalMs) && activationIntervalMs >= 5_000 ? activationIntervalMs : 60_000, log })
+  }
+  log.info('activation_mode', { mode, source })
 }
+
+// STEP 5C: report a bootstrap secret that is still configured after the bootstrap completed (never the value).
+bootstrapSecretDiagnostics(db()).then((d) => { if (d.warning) log.error('security_config_warning', { warning: d.warning, instruction: d.instruction }) }).catch(() => {})
 
 let shuttingDown = false
 // Top-level safety net: a stray floating rejection would otherwise terminate the single replica.

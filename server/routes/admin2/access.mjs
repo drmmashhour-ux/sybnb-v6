@@ -1,6 +1,7 @@
 // STEP 5 -- Users & Access API (/api/admin2/access/*). Every handler authorizes through the central
 // can()/authorize(); nothing here decides access by role name. Tier 3/4 actions write evidence.
 import { db } from '../../lib/prisma.mjs'
+import { dbNow, trustedNow } from '../../lib/authz/clock.mjs'
 import { loadSnapshot } from '../../lib/authz/index.mjs'
 import { holdsPermissionAnywhere } from '../../lib/authz/evaluate.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
@@ -144,7 +145,7 @@ export function registerAccess(router) {
     const assignments = await db().roleAssignment.findMany({ where: { userId: u.id }, orderBy: { createdAt: 'desc' }, include: ASSIGNMENT_INCLUDE })
     const snap = await loadSnapshot({ user: u, sessionId: null })
     const held = [...(await heldCodes(snap, { id: u.id, status: u.status }))].sort()
-    const sessions = await db().userSession.findMany({ where: { userId: u.id, revokedAt: null, expiresAt: { gt: new Date() } }, select: { id: true, issuedAt: true, expiresAt: true, mfaMethod: true } })
+    const sessions = await db().userSession.findMany({ where: { userId: u.id, revokedAt: null, expiresAt: { gt: trustedNow() } }, select: { id: true, issuedAt: true, expiresAt: true, mfaMethod: true } })
     const audit = await db().adminAuditLog.findMany({ where: { OR: [{ entityType: 'user', entityId: u.id }, { actorUserId: u.id }] }, orderBy: { createdAt: 'desc' }, take: 20, select: { id: true, action: true, entityType: true, entityId: true, createdAt: true, reason: true } })
     r.ok({
       user: { ...(await userRow(u)), legacyRoles: u.roles.map((x) => x.role) },
@@ -216,7 +217,7 @@ export function registerAccess(router) {
     let effectiveTo = null
     if (body?.effectiveTo) {
       effectiveTo = new Date(body.effectiveTo)
-      if (Number.isNaN(effectiveTo.getTime()) || effectiveTo <= new Date()) throw badRequest('effectiveTo must be a future date.', 'EFFECTIVE_TO_INVALID')
+      if (Number.isNaN(effectiveTo.getTime()) || effectiveTo <= trustedNow()) throw badRequest('effectiveTo must be a future date.', 'EFFECTIVE_TO_INVALID')
     }
     // 1) The grantor must be authorized to assign at EVERY scope being granted (tier 4: step-up + evidence).
     await authorizeScopes(r, 'access.assign', scopes.map((s) => factsForScope(s.facts)), target)
@@ -367,16 +368,17 @@ export function registerAccess(router) {
     let prior = null
     let migrated = null
     await db().$transaction(async (tx) => {
+      const now = await dbNow(tx) // database clock: one timestamp for the whole version switch
       const data = { status: to, ...(field ? { [field]: me } : {}) }
       if (to === 'EFFECTIVE') {
-        data.effectiveFrom = new Date()
+        data.effectiveFrom = now
         prior = await tx.roleVersion.findFirst({ where: { roleId: v.roleId, status: 'EFFECTIVE' } })
-        await tx.roleVersion.updateMany({ where: { roleId: v.roleId, status: 'EFFECTIVE' }, data: { status: 'SUPERSEDED', effectiveTo: new Date() } })
+        await tx.roleVersion.updateMany({ where: { roleId: v.roleId, status: 'EFFECTIVE' }, data: { status: 'SUPERSEDED', effectiveTo: now } })
       }
       await tx.roleVersion.update({ where: { id: v.id }, data })
       if (prior) migrated = await autoMigrateIfReducing(tx, { oldVersionId: prior.id, newVersionId: v.id, actorUserId: me, requestId: r.requestId })
       await writeAdminAudit(tx, { actorUserId: me, action, entityType: 'role_version', entityId: v.id, after: { roleCode: v.role.code, versionNumber: v.versionNumber, status: to, autoMigrated: migrated }, reason, correlationId: r.requestId })
-    }, TX)
+    }, to === 'EFFECTIVE' ? { maxWait: 10_000, timeout: 120_000 } : TX) // activation may auto-migrate every holder of a reduced version, one round of statements each
     r.ok({ status: to, autoMigrated: migrated })
   }
   router.post('/access/role-versions/:id/submit', (r) => transition(r, { from: 'DRAFT', to: 'IN_SECURITY_REVIEW', needDifferentFrom: [], action: 'iam.role_version.submitted' }))
@@ -411,7 +413,7 @@ export function registerAccess(router) {
     await r.require('session.view', await orgResource('session'), { evidence: true })
     const p = pageParams(r.query)
     const staffIds = (await db().roleAssignment.findMany({ where: { status: 'ACTIVE' }, select: { userId: true }, distinct: ['userId'] })).map((x) => x.userId)
-    const where = { userId: { in: staffIds }, revokedAt: null, expiresAt: { gt: new Date() } }
+    const where = { userId: { in: staffIds }, revokedAt: null, expiresAt: { gt: trustedNow() } }
     const [total, rows] = await Promise.all([db().userSession.count({ where }), db().userSession.findMany({ where, orderBy: { issuedAt: 'desc' }, skip: p.skip, take: p.take, include: { user: { select: { id: true, displayName: true, email: true } } } })])
     r.ok(pageResult(rows.map((s) => ({ id: s.id, user: s.user, issuedAt: s.issuedAt, expiresAt: s.expiresAt, lastUsedAt: s.lastUsedAt, mfaMethod: s.mfaMethod, stepUpAt: s.stepUpAt, device: (s.userAgent ?? '').slice(0, 80) })), total, p))
   })
@@ -422,7 +424,7 @@ export function registerAccess(router) {
     if (!s) throw notFoundError('Session not found.')
     await r.require('session.revoke', await orgResource('session', s.id))
     await db().$transaction(async (tx) => {
-      await tx.userSession.updateMany({ where: { id: s.id, revokedAt: null }, data: { revokedAt: new Date(), revokedReason: 'admin2_security_revoke' } })
+      await tx.userSession.updateMany({ where: { id: s.id, revokedAt: null }, data: { revokedAt: trustedNow(), revokedReason: 'admin2_security_revoke' } })
       await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'security.session_revoked_by_admin', entityType: 'user_session', entityId: s.id, reason, correlationId: r.requestId })
     })
     r.ok({ revoked: true })

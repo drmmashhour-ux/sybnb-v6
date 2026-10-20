@@ -23,7 +23,7 @@ export async function recordSecurityEvent(tx, e) {
   if (e.severity === 'CRITICAL') {
     const { recipients, results } = await deliverSecurityNotifications(tx, ev, { excludeUserId: e.subjectUserId ?? null })
     const inApp = results.in_app?.delivered ?? 0
-    await tx.securityEvent.update({ where: { id: ev.id }, data: { notifiedCount: inApp, delivery: { recipients: recipients.length, ...results } } })
+    await tx.securityEvent.update({ where: { id: ev.id }, data: { notifiedCount: inApp, delivery: { recipients: recipients.length, ...Object.fromEntries(Object.entries(results).map(([k, v]) => [k, v?.error ? { ...v, attempts: 1 } : v])) } } })
     ev.notifiedCount = inApp
     ev.delivery = results
   }

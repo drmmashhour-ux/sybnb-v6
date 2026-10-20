@@ -1,6 +1,9 @@
 // STEP 5 -- Command Center, platform registry + health, configuration, feature flags, global search,
 // and the Reports / AI / Finance / Tax / Accountant SHELLS. Real counts only; no invented numbers.
 import { db } from '../../lib/prisma.mjs'
+import { bootstrapSecretDiagnostics } from '../../lib/authz/bootstrap.mjs'
+import { resolveActivationMode } from '../../lib/authz/activation-worker.mjs'
+import { clockStatus } from '../../lib/authz/clock.mjs'
 import { storageStatus } from '../../lib/storage.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { badRequest, notFoundError, conflict } from './router.mjs'
@@ -101,6 +104,8 @@ export function registerConfig(router) {
       // No platform reports health to this console yet: say so instead of showing a fake green light.
       platforms: platforms.map((p) => ({ code: p.code, displayName: p.displayName, registryStatus: p.status, health: 'NOT_CONFIGURED', dataSource: null })),
       integrations: { status: 'NOT_CONFIGURED', message: 'No integration health feeds are connected yet.' },
+      // STEP 5C diagnostics (never values): bootstrap secret lifecycle, activation scheduler mode, trusted-time corrector.
+      securityFoundation: { bootstrap: await bootstrapSecretDiagnostics(db()), activation: { mode: resolveActivationMode(process.env).mode }, clock: clockStatus() },
     })
   })
 

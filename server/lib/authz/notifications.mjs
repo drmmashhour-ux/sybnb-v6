@@ -1,3 +1,4 @@
+import { trustedNow } from './clock.mjs'
 // STEP 5B -- notification policy and transport interface for security alerts.
 //
 // This is NOTIFICATION policy, not authorization. Being named here (for example as an active Owner) lets a
@@ -13,7 +14,7 @@ export const SECURITY_REVIEW_PERMISSION = 'security_event.review'
 export const CRITICAL_SECURITY_RECIPIENTS = Object.freeze({
   name: 'CRITICAL_SECURITY_RECIPIENTS',
   description: 'Active holders of an Owner role plus active holders of security_event.review. Notification only; grants nothing.',
-  async resolve(client, { excludeUserId = null, now = new Date() } = {}) {
+  async resolve(client, { excludeUserId = null, now = trustedNow() } = {}) {
     const rows = await client.roleAssignment.findMany({
       where: {
         status: 'ACTIVE', user: { status: 'ACTIVE' }, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
@@ -72,4 +73,55 @@ export async function deliverSecurityNotifications(tx, event, { policy = CRITICA
     }
   }
   return { recipients, results }
+}
+
+export const MAX_DELIVERY_ATTEMPTS = 10
+
+/**
+ * STEP 5C -- retry transports that failed for CRITICAL events. Delivery failure never rolled anything back; the
+ * failure is recorded in security_events.delivery[transport] = { error, attempts, lastAttemptAt }. This function
+ * (called from the activation worker cycle, or by an operator via scripts/admin-activation-run.mjs) re-sends ONLY
+ * the failed transports, to the recipients the policy resolves now, and records success or the next failure.
+ * Each event is claimed with FOR UPDATE SKIP LOCKED, so concurrent retriers never double-send.
+ */
+export async function retryFailedDeliveries(client, { limit = 25 } = {}) {
+  const candidates = await client.$queryRaw`
+    SELECT id::text AS id FROM security_events
+    WHERE severity = 'CRITICAL' AND EXISTS (SELECT 1 FROM jsonb_each(delivery) e WHERE jsonb_typeof(e.value) = 'object' AND jsonb_exists(e.value, 'error') AND NOT jsonb_exists(e.value, 'abandoned') AND COALESCE((e.value->>'attempts')::int, 1) < ${MAX_DELIVERY_ATTEMPTS})
+    ORDER BY created_at LIMIT ${limit}`
+  const out = { examined: candidates.length, recovered: 0, stillFailing: 0, skipped: 0 }
+  for (const { id } of candidates) {
+    try {
+      const r = await client.$transaction(async (tx) => {
+        const claimed = await tx.$queryRaw`SELECT id::text FROM security_events WHERE id = ${id}::uuid FOR UPDATE SKIP LOCKED`
+        if (!claimed.length) return 'SKIPPED'
+        const ev = await tx.securityEvent.findUnique({ where: { id } })
+        const delivery = { ...(ev.delivery || {}) }
+        const recipients = await CRITICAL_SECURITY_RECIPIENTS.resolve(tx, { excludeUserId: ev.subjectUserId ?? null })
+        let changed = false; let failing = 0
+        for (const [name, st] of Object.entries(delivery)) {
+          if (!st || typeof st !== 'object' || !st.error || name.startsWith('_') || (st.attempts ?? 1) >= MAX_DELIVERY_ATTEMPTS) { if (st?.error) failing += 1; continue }
+          const t = transports.find((x) => x.name === name)
+          if (!t) { delivery[name] = { ...st, abandoned: 'TRANSPORT_NOT_REGISTERED' }; changed = true; continue } // not configured on this deployment: stop re-examining it
+          const sp = `sec_retry_${++spCounter}`
+          const attempts = (st.attempts ?? 1) + 1
+          try {
+            await tx.$executeRawUnsafe(`SAVEPOINT ${sp}`)
+            const res = await t.deliver({ tx, event: ev, recipients })
+            await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${sp}`)
+            delivery[name] = { delivered: res?.delivered ?? 0, attempts, recoveredAt: trustedNow().toISOString() }
+          } catch (e) {
+            try { await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${sp}`) } catch { /* ignore */ }
+            delivery[name] = { error: String(e.message || e).slice(0, 200), attempts, lastAttemptAt: trustedNow().toISOString() }
+            failing += 1
+          }
+          changed = true
+        }
+        if (changed) await tx.securityEvent.update({ where: { id }, data: { delivery } })
+        return failing ? 'STILL_FAILING' : 'RECOVERED'
+      }, { maxWait: 10_000, timeout: 30_000 })
+      if (r === 'RECOVERED') out.recovered += 1; else if (r === 'STILL_FAILING') out.stillFailing += 1; else out.skipped += 1
+    } catch { out.skipped += 1 }
+  }
+  return out
 }

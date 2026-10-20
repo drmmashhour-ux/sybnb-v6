@@ -11,8 +11,23 @@
 // or the one-time Owner bootstrap), then remove the old holder. A migration (supersede) counts the new
 // assignment as a holder before the old one is closed, so version transitions are never blocked.
 import { conflictErr } from './errors.mjs'
+import { dbNow } from './clock.mjs'
 
 export const CONTINUITY_PERMISSIONS = Object.freeze(['access.assign', 'access.approve', 'user.reactivate'])
+
+/**
+ * Serialize every authority-removing decision for an organization (STEP 5C). Without this, two administrators
+ * removing two DIFFERENT "last remaining" holders at the same time would each see the other still standing and
+ * both succeed. The transaction-scoped advisory lock is taken BEFORE the holder counts are read and is held
+ * until the transaction ends, so the second transaction waits, then (READ COMMITTED) sees the first one's
+ * committed removal and is refused. Locks are taken in sorted order, so two transactions cannot deadlock.
+ * `client` MUST be a transaction client.
+ */
+export async function lockContinuity(client, organizationIds) {
+  for (const id of [...new Set(organizationIds)].filter(Boolean).sort()) {
+    await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'authz-continuity:' + id}, 0))`
+  }
+}
 
 function validNow(now) {
   return {
@@ -23,7 +38,8 @@ function validNow(now) {
 }
 
 /** Distinct valid holders of `permission` in the organization. */
-export async function validHolders(client, { organizationId, permission, excludeUserIds = [], excludeAssignmentIds = [], roleVersionId = null, now = new Date() }) {
+export async function validHolders(client, { organizationId, permission, excludeUserIds = [], excludeAssignmentIds = [], roleVersionId = null, now = null }) {
+  now = now ?? await dbNow(client)
   const rows = await client.roleAssignment.findMany({
     where: {
       ...validNow(now),
@@ -54,8 +70,10 @@ async function orgsOf(client, { userId, assignmentIds }) {
  * Throws 409 LAST_AUTHORITY if removing the user (all their assignments) or the given assignments would leave an
  * organization with zero valid holders of a capability it currently has.
  */
-export async function assertContinuity(client, { userId = null, assignmentIds = null, now = new Date() }) {
+export async function assertContinuity(client, { userId = null, assignmentIds = null, now = null }) {
   const orgs = await orgsOf(client, { userId, assignmentIds })
+  await lockContinuity(client, orgs)
+  now = now ?? await dbNow(client)
   for (const organizationId of orgs) {
     for (const permission of CONTINUITY_PERMISSIONS) {
       const before = await validHolders(client, { organizationId, permission, now })
@@ -69,7 +87,9 @@ export async function assertContinuity(client, { userId = null, assignmentIds = 
 }
 
 /** After a transition: every listed capability must still have a valid holder in each organization. */
-export async function assertCapabilitiesRetained(client, { organizationIds, permissions, now = new Date() }) {
+export async function assertCapabilitiesRetained(client, { organizationIds, permissions, now = null }) {
+  await lockContinuity(client, organizationIds)
+  now = now ?? await dbNow(client)
   for (const organizationId of organizationIds) {
     for (const permission of permissions.filter((p) => CONTINUITY_PERMISSIONS.includes(p))) {
       if (await validHolders(client, { organizationId, permission, now }) === 0) {

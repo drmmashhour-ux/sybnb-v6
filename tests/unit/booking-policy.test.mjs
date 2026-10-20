@@ -1,8 +1,9 @@
 // Unit tests for the pure booking money policy (server/lib/booking-policy.mjs) -- owner decisions of
-// 2026-10-08. No database, no server: `node --test tests/unit/`.
+// 2026-10-08, with the 15% STR commission confirmed 2026-10-11. No database, no server: `node --test tests/unit/`.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  STR_COMMISSION_RATE,
   cancellationLedgerDeltas,
   checkInStartMs,
   computeCancellation,
@@ -65,9 +66,9 @@ test('regular price, cancelled < 72h before check-in -> 50% refund', () => {
   assert.equal(c.rule, 'HALF')
   assert.equal(c.refundMinor, 58_850)
   assert.equal(c.retainedMinor, 58_850)
-  // Retained part split like a normal booking: 12% SYBNB / 88% host.
-  assert.equal(c.retainedCommissionMinor, Math.round(58_850 * 0.12))
-  assert.equal(c.retainedHostShareMinor, 58_850 - Math.round(58_850 * 0.12))
+  // Retained part split like a normal booking: 15% SYBNB / 85% host.
+  assert.equal(c.retainedCommissionMinor, Math.round(58_850 * 0.15))
+  assert.equal(c.retainedHostShareMinor, 58_850 - Math.round(58_850 * 0.15))
   assertConserved(c, paid)
 })
 
@@ -105,7 +106,7 @@ test('protected price, cancelled from check-in 00:00 on -> 50% of (paid minus pr
   assert.equal(c.retainedProtectionMinor, fee)
   const retainedStay = paid - fee - c.refundMinor
   assert.equal(c.retainedStayMinor, retainedStay)
-  assert.equal(c.retainedCommissionMinor, Math.round(retainedStay * 0.12))
+  assert.equal(c.retainedCommissionMinor, Math.round(retainedStay * 0.15))
   assertConserved(c, paid)
 })
 
@@ -142,12 +143,14 @@ test('protection fee = 3% of the FULL stay (all nights, before cleaning/taxes)',
   assert.equal(computeGuestTotals({ stayMinor: stay, protection: true, protectionFeeOverrideMinor: 1_234 }).protectionMinor, 1_234)
 })
 
-test('commission = 12% of total minus protection; host share is the exact remainder', () => {
+test('commission = 15% of total minus protection; host share is the exact remainder', () => {
+  // Pin the owner-confirmed rate independently of the implementation's arithmetic.
+  assert.equal(STR_COMMISSION_RATE, 0.15)
   const t = computeGuestTotals({ stayMinor: 250_000, fees: { cleaningFeeMinor: 20_000, taxesMinor: 5_000, serviceFeeMinor: 3_000, parkingFeeMinor: 1_000 }, extraFeesMinor: 500, protection: true })
   assert.equal(t.otherFeesMinor, 4_500)
   assert.equal(t.totalMinor, 250_000 + 20_000 + 5_000 + 4_500 + 7_500)
   const base = t.totalMinor - t.protectionMinor
-  assert.equal(t.commissionMinor, Math.round(base * 0.12))
+  assert.equal(t.commissionMinor, Math.round(base * 0.15))
   assert.equal(t.commissionMinor + t.hostShareMinor, base)
   // Fallback percentages for a STAYS listing with no explicit fees (pre-existing behaviour).
   const f = computeGuestTotals({ stayMinor: 100_000 })
@@ -167,7 +170,7 @@ test('rounding never creates or loses money (integer minor units)', () => {
           const c = computeCancellation({ paidMinor: paid, protectionPurchased, protectionMinor: fee, checkIn: CHECK_IN, now: at(now), cancelledBy, policy: SYRIA })
           assertConserved(c, paid)
           // Ledger deltas against the split posted at approval conserve the original split too.
-          const A = Math.round((paid - fee) * 0.12)
+          const A = Math.round((paid - fee) * 0.15)
           const Hg = paid - fee - A
           const d = cancellationLedgerDeltas({ originalAdminShareMinor: A, originalHostGrossMinor: Hg, originalProtectionMinor: fee, cancellation: c })
           assert.equal(d.commissionReversalMinor + c.retainedCommissionMinor, A)

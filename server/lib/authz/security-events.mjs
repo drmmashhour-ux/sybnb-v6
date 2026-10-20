@@ -10,14 +10,18 @@ export const SEVERITIES = Object.freeze(['INFO', 'WARNING', 'HIGH', 'CRITICAL'])
 /** Kept for callers of the 5A name; the policy itself lives in notifications.mjs. */
 export const securityRecipients = (client, opts = {}) => CRITICAL_SECURITY_RECIPIENTS.resolve(client, opts)
 
-/** Record a security event inside the caller's transaction. CRITICAL events notify. Returns the stored event. */
+/**
+ * Record a security event inside the caller's transaction. CRITICAL events notify. Returns the stored event.
+ * STEP 5H: `e.organizationId` is the owning organization (trusted server state only); omitted / null = UNATTRIBUTED, which no
+ * organization-scoped route will show (fail closed).
+ */
 export async function recordSecurityEvent(tx, e) {
   const ret = await retentionFor(tx, 'SECURITY_EVENT')
   const ev = await tx.securityEvent.create({
     data: {
       severity: e.severity, eventType: e.eventType, actorUserId: e.actorUserId ?? null, subjectUserId: e.subjectUserId ?? null,
       entityType: e.entityType ?? null, entityId: e.entityId == null ? null : String(e.entityId), summary: e.summary,
-      detail: e.detail ?? {}, correlationId: e.correlationId ?? null, auditEventId: e.auditEventId ?? null, ...ret,
+      detail: e.detail ?? {}, correlationId: e.correlationId ?? null, auditEventId: e.auditEventId ?? null, organizationId: e.organizationId ?? null, ...ret,
     },
   })
   if (e.severity === 'CRITICAL') {

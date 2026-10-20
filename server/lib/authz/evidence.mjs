@@ -10,7 +10,8 @@ const FIELDS = [
   'policyVersionId', 'delegationId', 'auditEventId', 'approvalSnapshotId',
 ]
 // Added in STEP 5B. Included in the hash ONLY when present, so rows written before 5B still verify unchanged.
-const OPTIONAL_FIELDS = ['rulesetVersion']
+// Added in STEP 5H (migration 083): organizationId, likewise hashed ONLY when present (rows written before 083 are NULL and verify unchanged).
+const OPTIONAL_FIELDS = ['rulesetVersion', 'organizationId']
 // Evidence written before rule-set versioning existed carries this explicit marker (migration 082). It is NOT a
 // rule-set version: it is excluded from the hash (so historical hashes still verify) and can never be written anew.
 export const LEGACY_RULESET_VERSION = 'LEGACY_PRE_VERSIONED'
@@ -60,4 +61,34 @@ export async function verifyEvidenceChain(client, { limit = 10_000 } = {}) {
     prev = r.hash
   }
   return { ok: true, checked: rows.length }
+}
+
+/**
+ * STEP 5H: verify only ONE organization's evidence, without reading any other organization's rows. Two checks per row:
+ *   1. self-consistency: the stored hash equals the hash recomputed from the row's own content and its own prevHash;
+ *   2. linkage: prevHash is null (and the row is the very first in the chain) or equals the hash of an existing row with a
+ *      LOWER sequence. Only hashes and sequence numbers of other rows are looked up; their content is never read or returned.
+ * Rows of other organizations are verified by those organizations; legacy rows written before migration 083 carry no
+ * organization and cannot be verified through this route. Read-only. Returns { ok, checked, scope, brokenAtSequence?, reason? }.
+ */
+export async function verifyEvidenceChainForOrganization(client, organizationId, { limit = 50_000 } = {}) {
+  if (!organizationId) return { ok: false, checked: 0, scope: 'ORGANIZATION', reason: 'ORGANIZATION_REQUIRED' }
+  const rows = await client.authorizationEvidence.findMany({ where: { organizationId }, orderBy: { sequence: 'asc' }, take: limit })
+  const known = new Map()
+  const wanted = [...new Set(rows.map((r) => r.prevHash).filter(Boolean))]
+  for (let i = 0; i < wanted.length; i += 500) {
+    const found = await client.authorizationEvidence.findMany({ where: { hash: { in: wanted.slice(i, i + 500) } }, select: { hash: true, sequence: true } })
+    for (const f of found) known.set(f.hash, f.sequence)
+  }
+  const broken = (r, i, reason) => ({ ok: false, checked: i, scope: 'ORGANIZATION', brokenAtSequence: String(r.sequence), reason })
+  for (const [i, r] of rows.entries()) {
+    if (hashEvidence(r, r.prevHash ?? null, r.decidedAt) !== r.hash) return broken(r, i, 'HASH_MISMATCH')
+    if (r.prevHash != null) {
+      const seq = known.get(r.prevHash)
+      if (seq == null || BigInt(seq) >= BigInt(r.sequence)) return broken(r, i, 'PREV_HASH_MISMATCH')
+    } else if (await client.authorizationEvidence.findFirst({ where: { sequence: { lt: r.sequence } }, select: { sequence: true } })) {
+      return broken(r, i, 'PREV_HASH_MISMATCH') // a null prevHash is only valid for the first row of the whole chain
+    }
+  }
+  return { ok: true, checked: rows.length, scope: 'ORGANIZATION' }
 }

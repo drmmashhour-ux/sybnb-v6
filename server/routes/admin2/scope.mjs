@@ -14,6 +14,14 @@ export async function registryContext() {
   return ctxCache
 }
 
+/**
+ * STEP 5H: the organization an admin2 module's audit rows belong to. These modules authorize against the registry organization
+ * (recordFacts above), so a record they write belongs to that same organization: the attribution and the authorization agree.
+ */
+export async function auditOrganizationId() {
+  return (await registryContext()).org?.id ?? null
+}
+
 /** Facts for a record that belongs to a platform (or to the organization when platformId is null). */
 export async function recordFacts(platformId, extra = {}) {
   const { org, platforms } = await registryContext()

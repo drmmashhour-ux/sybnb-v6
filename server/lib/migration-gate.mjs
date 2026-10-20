@@ -16,6 +16,7 @@ export const GATED_MIGRATIONS = Object.freeze({
   '080_session_mfa_method': STEP5,
   '081_security_reconciliation': STEP5,
   '082_security_foundation_closure': STEP5 + ' 082 adds security_bootstrap, evidence ruleset_version NOT NULL and the organization triggers.',
+  '083_security_record_organization_boundary': STEP5 + ' 083 adds a nullable organization_id to admin_audit_logs, security_events and authorization_evidence (legacy rows stay unattributed and invisible to organization-scoped routes) and makes it write-once in the audit/security guards.',
 })
 
 /**

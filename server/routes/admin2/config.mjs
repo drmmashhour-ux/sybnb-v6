@@ -7,7 +7,7 @@ import { clockStatus } from '../../lib/authz/clock.mjs'
 import { storageStatus } from '../../lib/storage.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { badRequest, notFoundError, conflict } from './router.mjs'
-import { visibleScope, requireRecord, registryContext, validateEnum, cleanText } from './scope.mjs'
+import { visibleScope, requireRecord, registryContext, validateEnum, cleanText, auditOrganizationId } from './scope.mjs'
 import { authorizedPlatformsFor, heldCodes } from './core.mjs'
 import { loadSnapshot } from '../../lib/authz/index.mjs'
 
@@ -86,7 +86,7 @@ export function registerConfig(router) {
     if (status === p.status) throw badRequest('No change.', 'NO_CHANGE')
     await db().$transaction(async (tx) => {
       await tx.platform.update({ where: { id: p.id }, data: { status } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'platform.status_changed', entityType: 'platform', entityId: p.id, before: { status: p.status }, after: { status }, reason, platformCode: p.code, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'platform.status_changed', entityType: 'platform', entityId: p.id, before: { status: p.status }, after: { status }, reason, platformCode: p.code, correlationId: r.requestId })
     })
     r.ok({ status })
   })
@@ -131,7 +131,7 @@ export function registerConfig(router) {
       const s = existing
         ? await tx.adminSetting.update({ where: { id: existing.id }, data: { value: b.value, version: { increment: 1 }, updatedById: r.auth.user.id, updatedAt: new Date() } })
         : await tx.adminSetting.create({ data: { category, key, value: b.value, updatedById: r.auth.user.id } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'config.setting_changed', entityType: 'admin_setting', entityId: s.id, before: existing ? { value: existing.value, version: existing.version } : null, after: { category, key, value: b.value, version: s.version }, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'config.setting_changed', entityType: 'admin_setting', entityId: s.id, before: existing ? { value: existing.value, version: existing.version } : null, after: { category, key, value: b.value, version: s.version }, reason, correlationId: r.requestId })
       return s
     })
     r.ok({ version: saved.version })
@@ -156,7 +156,7 @@ export function registerConfig(router) {
     const prev = await db().featureFlag.findUnique({ where })
     const saved = await db().$transaction(async (tx) => {
       const f = prev ? await tx.featureFlag.update({ where, data: { enabled: b.enabled, updatedById: r.auth.user.id, updatedAt: new Date() } }) : await tx.featureFlag.create({ data: { key, scopeKind, scopeRef, enabled: b.enabled, description: b?.description ? String(b.description).slice(0, 200) : null, updatedById: r.auth.user.id } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'config.feature_flag_changed', entityType: 'feature_flag', entityId: f.id, before: prev ? { enabled: prev.enabled } : null, after: { key, scopeKind, scopeRef, enabled: b.enabled }, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'config.feature_flag_changed', entityType: 'feature_flag', entityId: f.id, before: prev ? { enabled: prev.enabled } : null, after: { key, scopeKind, scopeRef, enabled: b.enabled }, reason, correlationId: r.requestId })
       return f
     })
     r.ok({ enabled: saved.enabled })

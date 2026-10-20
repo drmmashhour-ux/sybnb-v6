@@ -8,6 +8,7 @@ import { holdsPermissionAnywhere } from '../../lib/authz/evaluate.mjs'
 import { loadPermission } from '../../lib/authz/loader.mjs'
 import { computeLanding } from '../../lib/authz/landing.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
+import { resolveActorOrganizationId } from '../../lib/authz/org-boundary.mjs'
 import { badRequest, notFoundError } from './router.mjs'
 
 
@@ -101,7 +102,7 @@ export function registerCore(router) {
     const full = await db().user.findUnique({ where: { id: user.id }, select: { passwordHash: true } })
     const good = body?.password && full?.passwordHash && verifyPassword(String(body.password), full.passwordHash)
     if (!good) {
-      await writeAdminAudit(db(), { actorUserId: user.id, action: 'security.step_up_failed', entityType: 'user_session', entityId: r.auth.sessionId, correlationId: r.requestId })
+      await writeAdminAudit(db(), { actorUserId: user.id, action: 'security.step_up_failed', entityType: 'user_session', entityId: r.auth.sessionId, correlationId: r.requestId, organizationId: await resolveActorOrganizationId(db(), user.id) })
       const error = new Error('That password is not correct.')
       error.statusCode = 401; error.code = 'STEP_UP_FAILED'; error.expose = true
       throw error
@@ -110,7 +111,7 @@ export function registerCore(router) {
     await db().$transaction(async (tx) => {
       now = await dbNow(tx) // database clock stamps the step-up
       await tx.userSession.update({ where: { id: r.auth.sessionId }, data: { stepUpAt: now } })
-      await writeAdminAudit(tx, { actorUserId: user.id, action: 'security.step_up_succeeded', entityType: 'user_session', entityId: r.auth.sessionId, correlationId: r.requestId })
+      await writeAdminAudit(tx, { actorUserId: user.id, action: 'security.step_up_succeeded', entityType: 'user_session', entityId: r.auth.sessionId, correlationId: r.requestId, organizationId: await resolveActorOrganizationId(tx, user.id) })
     })
     r.ok({ stepUpAt: now })
   })
@@ -128,7 +129,7 @@ export function registerCore(router) {
     if (target.id === r.auth.sessionId) throw badRequest('Use sign out to end the session you are using.', 'CANNOT_REVOKE_CURRENT')
     await db().$transaction(async (tx) => {
       await tx.userSession.updateMany({ where: { id: target.id, revokedAt: null }, data: { revokedAt: approxNow(), revokedReason: 'admin2_self_revoke' } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'security.session_revoked', entityType: 'user_session', entityId: target.id, correlationId: r.requestId, reason: 'own session' })
+      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'security.session_revoked', entityType: 'user_session', entityId: target.id, correlationId: r.requestId, reason: 'own session', organizationId: await resolveActorOrganizationId(tx, r.auth.user.id) })
     })
     r.ok({ revoked: true })
   })

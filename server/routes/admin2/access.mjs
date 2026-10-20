@@ -166,7 +166,7 @@ export function registerAccess(router) {
     if (!target) throw notFoundError('User not found.')
     if (target.id === r.auth.user.id) throw badRequest('You cannot change your own account status.', 'SELF_ACTION_FORBIDDEN')
     await r.require(kind === 'EMERGENCY' ? 'user.suspend_emergency' : 'user.suspend', await orgResource('admin_user', target.id, { subjectUserId: target.id }), { evidence: true })
-    const out = await suspendUser(db(), { actorUserId: r.auth.user.id, targetUserId: target.id, reason, kind, requestId: r.requestId })
+    const out = await suspendUser(db(), { actorUserId: r.auth.user.id, targetUserId: target.id, reason, kind, requestId: r.requestId, organizationId: (await theOrg())?.id ?? null })
     r.ok({ status: 'SUSPENDED', kind, sessionsRevoked: out.sessionsRevoked, securityEventId: out.securityEvent.id, severity: out.securityEvent.severity })
   }
   router.post('/access/users/:id/suspend', (r) => suspendRoute(r, 'STANDARD'))
@@ -177,7 +177,7 @@ export function registerAccess(router) {
     const target = await db().user.findUnique({ where: { id: r.params.id } })
     if (!target) throw notFoundError('User not found.')
     await r.require('user.reactivate', await orgResource('admin_user', target.id, { subjectUserId: target.id }), { evidence: true })
-    r.ok(await reactivateUser(db(), { actorUserId: r.auth.user.id, targetUserId: target.id, reason, acknowledgeAssignmentReview: body?.acknowledgeAssignmentReview === true, requestId: r.requestId }))
+    r.ok(await reactivateUser(db(), { actorUserId: r.auth.user.id, targetUserId: target.id, reason, acknowledgeAssignmentReview: body?.acknowledgeAssignmentReview === true, requestId: r.requestId, organizationId: (await theOrg())?.id ?? null }))
   })
 
   // ---- Assignments ----------------------------------------------------------------------------
@@ -349,7 +349,7 @@ export function registerAccess(router) {
     const created = await db().$transaction(async (tx) => {
       const v = await tx.roleVersion.create({ data: { roleId: role.id, versionNumber: Math.max(...role.versions.map((x) => x.versionNumber)) + 1, status: 'DRAFT', classification, platformCoverage: coverage, contentHash: roleVersionContentHash({ roleCode: role.code, versionNumber: Math.max(...role.versions.map((x) => x.versionNumber)) + 1, coverage, permissions: codes }), changeReason: reason, createdById: r.auth.user.id } })
       await tx.roleVersionPermission.createMany({ data: defs.map((d) => ({ roleVersionId: v.id, permissionId: d.id })) })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'iam.role_version.drafted', entityType: 'role_version', entityId: v.id, after: { roleCode: role.code, versionNumber: v.versionNumber, classification, added: added.map((d) => d.code), removed }, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: (await theOrg())?.id ?? null, actorUserId: r.auth.user.id, action: 'iam.role_version.drafted', entityType: 'role_version', entityId: v.id, after: { roleCode: role.code, versionNumber: v.versionNumber, classification, added: added.map((d) => d.code), removed }, reason, correlationId: r.requestId })
       return v
     })
     r.ok({ version: { id: created.id, versionNumber: created.versionNumber, status: created.status, classification } }, 201)
@@ -377,7 +377,7 @@ export function registerAccess(router) {
       }
       await tx.roleVersion.update({ where: { id: v.id }, data })
       if (prior) migrated = await autoMigrateIfReducing(tx, { oldVersionId: prior.id, newVersionId: v.id, actorUserId: me, requestId: r.requestId })
-      await writeAdminAudit(tx, { actorUserId: me, action, entityType: 'role_version', entityId: v.id, after: { roleCode: v.role.code, versionNumber: v.versionNumber, status: to, autoMigrated: migrated }, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: (await theOrg())?.id ?? null, actorUserId: me, action, entityType: 'role_version', entityId: v.id, after: { roleCode: v.role.code, versionNumber: v.versionNumber, status: to, autoMigrated: migrated }, reason, correlationId: r.requestId })
     }, to === 'EFFECTIVE' ? { maxWait: 10_000, timeout: 120_000 } : TX) // activation may auto-migrate every holder of a reduced version, one round of statements each
     r.ok({ status: to, autoMigrated: migrated })
   }
@@ -425,7 +425,7 @@ export function registerAccess(router) {
     await r.require('session.revoke', await orgResource('session', s.id))
     await db().$transaction(async (tx) => {
       await tx.userSession.updateMany({ where: { id: s.id, revokedAt: null }, data: { revokedAt: approxNow(), revokedReason: 'admin2_security_revoke' } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'security.session_revoked_by_admin', entityType: 'user_session', entityId: s.id, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: (await theOrg())?.id ?? null, actorUserId: r.auth.user.id, action: 'security.session_revoked_by_admin', entityType: 'user_session', entityId: s.id, reason, correlationId: r.requestId })
     })
     r.ok({ revoked: true })
   })
@@ -464,7 +464,7 @@ export function registerAccess(router) {
     const org = await theOrg()
     const sa = await db().$transaction(async (tx) => {
       const x = await tx.serviceAccount.create({ data: { name, description: b?.description ? String(b.description).slice(0, 300) : null, organizationId: org.id, secretRef, permissionCodes: codes, integrationCode: b?.integrationCode ? String(b.integrationCode).slice(0, 60) : null } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'iam.service_account.created', entityType: 'service_account', entityId: x.id, after: { name, permissionCodes: codes, hasSecretRef: Boolean(secretRef) }, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: (await theOrg())?.id ?? null, actorUserId: r.auth.user.id, action: 'iam.service_account.created', entityType: 'service_account', entityId: x.id, after: { name, permissionCodes: codes, hasSecretRef: Boolean(secretRef) }, reason, correlationId: r.requestId })
       return x
     })
     r.ok({ id: sa.id }, 201)
@@ -477,7 +477,7 @@ export function registerAccess(router) {
     await r.require('service_account.disable', await orgResource('service_account', sa.id))
     await db().$transaction(async (tx) => {
       await tx.serviceAccount.update({ where: { id: sa.id }, data: { status: 'DISABLED', disabledAt: new Date(), disabledById: r.auth.user.id } })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'iam.service_account.disabled', entityType: 'service_account', entityId: sa.id, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: (await theOrg())?.id ?? null, actorUserId: r.auth.user.id, action: 'iam.service_account.disabled', entityType: 'service_account', entityId: sa.id, reason, correlationId: r.requestId })
     })
     r.ok({ status: 'DISABLED' })
   })

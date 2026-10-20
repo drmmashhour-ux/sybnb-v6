@@ -22,7 +22,8 @@ function needReason(reason, what = 'A reason') {
   return r
 }
 
-export async function suspendUser(client, { actorUserId, targetUserId, reason, kind = 'STANDARD', requestId = null }) {
+// STEP 5H: `organizationId` is the organization at which the caller was authorized (passed by the route, never from request input); null = unattributed.
+export async function suspendUser(client, { actorUserId, targetUserId, reason, kind = 'STANDARD', requestId = null, organizationId = null }) {
   const why = needReason(reason)
   if (!['STANDARD', 'EMERGENCY'].includes(kind)) throw badReq('Unknown suspension kind.', 'KIND_INVALID')
   if (actorUserId === targetUserId) throw badReq('You cannot suspend your own account.', 'SELF_ACTION_FORBIDDEN')
@@ -42,13 +43,13 @@ export async function suspendUser(client, { actorUserId, targetUserId, reason, k
     })
     const audit = await writeAdminAudit(tx, {
       actorUserId, action: kind === 'EMERGENCY' ? 'iam.user.emergency_suspended' : 'iam.user.suspended', entityType: 'user', entityId: target.id,
-      before: { status: target.status }, after: { status: 'SUSPENDED', kind, sessionsRevoked: revoked.count }, reason: why, correlationId: requestId,
+      before: { status: target.status }, after: { status: 'SUSPENDED', kind, sessionsRevoked: revoked.count }, reason: why, correlationId: requestId, organizationId,
     })
     const ev = await recordSecurityEvent(tx, {
       severity: kind === 'EMERGENCY' ? 'CRITICAL' : 'HIGH', eventType: kind === 'EMERGENCY' ? 'USER_EMERGENCY_SUSPENDED' : 'USER_SUSPENDED',
       actorUserId, subjectUserId: target.id, entityType: 'user', entityId: target.id,
       summary: `${kind === 'EMERGENCY' ? 'Emergency suspension' : 'Suspension'} of ${target.displayName || target.email || target.id}`,
-      detail: { reason: why, sessionsRevoked: revoked.count, assignmentsPreserved: assignments.length }, correlationId: requestId, auditEventId: audit.id,
+      detail: { reason: why, sessionsRevoked: revoked.count, assignmentsPreserved: assignments.length }, correlationId: requestId, auditEventId: audit.id, organizationId,
     })
     const ret = await retentionFor(tx, 'USER_SUSPENSION')
     const row = await tx.userSuspension.create({
@@ -61,7 +62,7 @@ export async function suspendUser(client, { actorUserId, targetUserId, reason, k
   }, TX)
 }
 
-export async function reactivateUser(client, { actorUserId, targetUserId, reason, acknowledgeAssignmentReview, requestId = null }) {
+export async function reactivateUser(client, { actorUserId, targetUserId, reason, acknowledgeAssignmentReview, requestId = null, organizationId = null }) {
   const why = needReason(reason)
   if (actorUserId === targetUserId) throw badReq('You cannot reactivate your own account.', 'SELF_ACTION_FORBIDDEN')
   if (acknowledgeAssignmentReview !== true) throw badReq('Reactivation requires confirming that the current assignments were reviewed.', 'REVIEW_ACK_REQUIRED')
@@ -80,12 +81,12 @@ export async function reactivateUser(client, { actorUserId, targetUserId, reason
     })
     const audit = await writeAdminAudit(tx, {
       actorUserId, action: 'iam.user.reactivated', entityType: 'user', entityId: target.id,
-      before: { status: 'SUSPENDED' }, after: { status: 'ACTIVE', sessionsRestored: 0, assignmentsReviewed: live.length }, reason: why, correlationId: requestId,
+      before: { status: 'SUSPENDED' }, after: { status: 'ACTIVE', sessionsRestored: 0, assignmentsReviewed: live.length }, reason: why, correlationId: requestId, organizationId,
     })
     const ev = await recordSecurityEvent(tx, {
       severity: 'HIGH', eventType: 'USER_REACTIVATED', actorUserId, subjectUserId: target.id, entityType: 'user', entityId: target.id,
       summary: `Reactivation of ${target.displayName || target.email || target.id}`,
-      detail: { reason: why, assignmentsReviewed: live.map((a) => ({ id: a.id, role: a.roleVersion.role.code, status: a.status })) }, correlationId: requestId, auditEventId: audit.id,
+      detail: { reason: why, assignmentsReviewed: live.map((a) => ({ id: a.id, role: a.roleVersion.role.code, status: a.status })) }, correlationId: requestId, auditEventId: audit.id, organizationId,
     })
     if (open) {
       await tx.userSuspension.update({ where: { id: open.id }, data: { reactivatedAt: now, reactivatedById: actorUserId, reactivationReason: why, reactivationSecurityEventId: ev.id } })

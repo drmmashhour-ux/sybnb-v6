@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { db } from '../../lib/prisma.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { badRequest, notFoundError, conflict, pageParams, sortParam, pageResult } from './router.mjs'
-import { visibleScope, requireRecord, canRecord, addTimeline, validateEnum, cleanText, recordFacts } from './scope.mjs'
+import { visibleScope, requireRecord, canRecord, addTimeline, validateEnum, cleanText, recordFacts, auditOrganizationId } from './scope.mjs'
 
 const PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT']
 const WORK_TYPES = ['DOCUMENT_REVIEW', 'ACCESS_REQUEST', 'SECURITY_REVIEW', 'APPROVAL', 'SUPPORT_ESCALATION', 'PLATFORM_SETUP']
@@ -130,7 +130,7 @@ export function registerWork(router) {
     const item = await db().$transaction(async (tx) => {
       const w = await tx.workItem.create({ data: { type, title: cleanText(b?.title, { max: 200, name: 'Title' }), platformId, priority, risk, dueAt, assignedUserId: b?.assignedUserId ? String(b.assignedUserId) : null, assignedTeam: b?.assignedTeam ? String(b.assignedTeam).slice(0, 60) : null, linkedEntityType: b?.linkedEntityType ? String(b.linkedEntityType).slice(0, 60) : null, linkedEntityId: b?.linkedEntityId ? String(b.linkedEntityId).slice(0, 80) : null, createdById: r.auth.user.id } })
       await addTimeline(tx, { entityType: 'work_item', entityId: w.id, eventType: 'created', actorUserId: r.auth.user.id, summary: 'Work item created' })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'work.item.created', entityType: 'work_item', entityId: w.id, after: { type, priority, platformId }, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'work.item.created', entityType: 'work_item', entityId: w.id, after: { type, priority, platformId }, correlationId: r.requestId })
       return w
     })
     r.ok({ item: workView(item) }, 201)
@@ -229,7 +229,7 @@ export function registerWork(router) {
     const created = await db().$transaction(async (tx) => {
       const a = await tx.approvalRequest.create({ data: { kind: APPROVAL_KIND_FOR[subjectType], subjectType, subjectId: String(b.subjectId), title: cleanText(b?.title, { max: 200, name: 'Title' }), requesterUserId: r.auth.user.id, platformId: subject.platformId, subjectSnapshot: subject.snapshot, snapshotHash: hashSnapshot(subject.snapshot), requiredApprovals: 1 } })
       await addTimeline(tx, { entityType: 'approval_request', entityId: a.id, eventType: 'requested', actorUserId: r.auth.user.id, summary: 'Approval requested' })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'approval.requested', entityType: 'approval_request', entityId: a.id, after: { subjectType, subjectId: b.subjectId }, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'approval.requested', entityType: 'approval_request', entityId: a.id, after: { subjectType, subjectId: b.subjectId }, correlationId: r.requestId })
       return a
     })
     r.ok({ id: created.id }, 201)
@@ -253,7 +253,7 @@ export function registerWork(router) {
       await db().$transaction(async (tx) => {
         await tx.approvalRequest.update({ where: { id: a.id }, data: { status: 'INVALIDATED', decidedAt: new Date() } })
         await addTimeline(tx, { entityType: 'approval_request', entityId: a.id, eventType: 'invalidated', actorUserId: r.auth.user.id, summary: 'Invalidated: the subject changed after approval was requested' })
-        await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'approval.invalidated', entityType: 'approval_request', entityId: a.id, reason, correlationId: r.requestId })
+        await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'approval.invalidated', entityType: 'approval_request', entityId: a.id, reason, correlationId: r.requestId })
       })
       throw conflict('The subject changed after this approval was requested. The request was invalidated; ask for a new one.', 'MATERIAL_CHANGE')
     }
@@ -263,7 +263,7 @@ export function registerWork(router) {
       const next = decision === 'REJECT' ? 'REJECTED' : approvals >= a.requiredApprovals ? 'APPROVED' : 'PENDING'
       if (next !== 'PENDING') await tx.approvalRequest.update({ where: { id: a.id }, data: { status: next, decidedAt: new Date() } })
       await addTimeline(tx, { entityType: 'approval_request', entityId: a.id, eventType: decision === 'APPROVE' ? 'approved' : 'rejected', actorUserId: r.auth.user.id, summary: `${decision === 'APPROVE' ? 'Approved' : 'Rejected'}: ${reason.slice(0, 120)}` })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: decision === 'APPROVE' ? 'approval.approved' : 'approval.rejected', entityType: 'approval_request', entityId: a.id, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: decision === 'APPROVE' ? 'approval.approved' : 'approval.rejected', entityType: 'approval_request', entityId: a.id, reason, correlationId: r.requestId })
       await tx.adminNotification.create({ data: { userId: a.requesterUserId, type: 'APPROVAL', title: `Your approval request was ${decision === 'APPROVE' ? 'approved' : 'rejected'}`, body: a.title.slice(0, 200), link: '/admin/approvals' } })
       return next
     })
@@ -279,7 +279,7 @@ export function registerWork(router) {
     await db().$transaction(async (tx) => {
       await tx.approvalRequest.update({ where: { id: a.id }, data: { status: 'WITHDRAWN', decidedAt: new Date() } })
       await addTimeline(tx, { entityType: 'approval_request', entityId: a.id, eventType: 'withdrawn', actorUserId: r.auth.user.id, summary: 'Withdrawn by requester' })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'approval.withdrawn', entityType: 'approval_request', entityId: a.id, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'approval.withdrawn', entityType: 'approval_request', entityId: a.id, correlationId: r.requestId })
     })
     r.ok({ status: 'WITHDRAWN' })
   })

@@ -14,10 +14,14 @@ export const SECURITY_REVIEW_PERMISSION = 'security_event.review'
 export const CRITICAL_SECURITY_RECIPIENTS = Object.freeze({
   name: 'CRITICAL_SECURITY_RECIPIENTS',
   description: 'Active holders of an Owner role plus active holders of security_event.review. Notification only; grants nothing.',
-  async resolve(client, { excludeUserId = null, now = approxNow() } = {}) {
+  // STEP 5H: for an event that belongs to an organization, only holders whose assignment is ORGANIZATION-scoped to THAT
+  // organization are notified (an alert's title carries the event summary, so it must not reach another organization's staff).
+  // An unattributed event (organizationId null) keeps the previous, unscoped recipient list; see the 5H notes.
+  async resolve(client, { excludeUserId = null, now = approxNow(), organizationId = null } = {}) {
     const rows = await client.roleAssignment.findMany({
       where: {
         status: 'ACTIVE', user: { status: 'ACTIVE' }, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
+        ...(organizationId ? { scopes: { some: { kind: 'ORGANIZATION', organizationId } } } : {}),
         roleVersion: { OR: [
           { permissions: { some: { permission: { code: SECURITY_REVIEW_PERMISSION } } } },
           { role: { code: { in: [...OWNER_NOTIFICATION_ROLE_CODES] } } },
@@ -59,7 +63,7 @@ let spCounter = 0
 export async function deliverSecurityNotifications(tx, event, { policy = CRITICAL_SECURITY_RECIPIENTS, excludeUserId = null } = {}) {
   const results = {}
   let recipients = []
-  try { recipients = await policy.resolve(tx, { excludeUserId }) } catch (e) { results._recipients = { error: String(e.message || e).slice(0, 200) } }
+  try { recipients = await policy.resolve(tx, { excludeUserId, organizationId: event.organizationId ?? null }) } catch (e) { results._recipients = { error: String(e.message || e).slice(0, 200) } }
   for (const t of [...transports]) {
     const sp = `sec_notify_${++spCounter}`
     try {
@@ -97,7 +101,7 @@ export async function retryFailedDeliveries(client, { limit = 25 } = {}) {
         if (!claimed.length) return 'SKIPPED'
         const ev = await tx.securityEvent.findUnique({ where: { id } })
         const delivery = { ...(ev.delivery || {}) }
-        const recipients = await CRITICAL_SECURITY_RECIPIENTS.resolve(tx, { excludeUserId: ev.subjectUserId ?? null })
+        const recipients = await CRITICAL_SECURITY_RECIPIENTS.resolve(tx, { excludeUserId: ev.subjectUserId ?? null, organizationId: ev.organizationId ?? null })
         let changed = false; let failing = 0
         for (const [name, st] of Object.entries(delivery)) {
           if (!st || typeof st !== 'object' || !st.error || name.startsWith('_') || (st.attempts ?? 1) >= MAX_DELIVERY_ATTEMPTS) { if (st?.error) failing += 1; continue }

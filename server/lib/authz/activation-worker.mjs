@@ -16,6 +16,7 @@ import { retentionFor } from './retention.mjs'
 import { assertContinuity } from './continuity.mjs'
 import { dbNow } from './clock.mjs'
 import { retryFailedDeliveries } from './notifications.mjs'
+import { organizationOfScopes } from './org-boundary.mjs'
 
 const TX = { maxWait: 10_000, timeout: 30_000 }
 
@@ -53,6 +54,7 @@ async function activateOne(client, id, injectedNow) {
     const claimed = await tx.$queryRaw`SELECT id::text FROM role_assignments WHERE id = ${id}::uuid AND status = 'PENDING_ACTIVATION' AND activation_at <= ${now} FOR UPDATE SKIP LOCKED`
     if (!claimed.length) return 'SKIPPED'
     const a = await tx.roleAssignment.findUnique({ where: { id }, include: { scopes: true, roleVersion: { include: { role: true } } } })
+    const organizationId = await organizationOfScopes(tx, a.scopes) // STEP 5H: the assignment's own organization (null when its scopes span several / cannot be placed)
     const blocker = await activationBlocker(tx, a, now)
     if (blocker) {
       // Record a block once per reason; the grant stays PENDING_ACTIVATION (and the evaluator still denies a suspended user).
@@ -60,7 +62,7 @@ async function activateOne(client, id, injectedNow) {
       if (!seen) {
         const ret = await retentionFor(tx, 'PRIVILEGED_ACCESS')
         await tx.roleAssignmentEvent.create({ data: { assignmentId: id, eventType: 'ACTIVATION_BLOCKED', actorUserId: null, detail: { reason: blocker }, ...ret } })
-        await recordSecurityEvent(tx, { severity: 'WARNING', eventType: 'HIGH_RISK_ACTIVATION_BLOCKED', subjectUserId: a.userId, entityType: 'role_assignment', entityId: id, summary: `High-risk activation blocked (${blocker}): ${a.roleVersion.role.code}`, detail: { reason: blocker } })
+        await recordSecurityEvent(tx, { organizationId, severity: 'WARNING', eventType: 'HIGH_RISK_ACTIVATION_BLOCKED', subjectUserId: a.userId, entityType: 'role_assignment', entityId: id, summary: `High-risk activation blocked (${blocker}): ${a.roleVersion.role.code}`, detail: { reason: blocker } })
       }
       return `BLOCKED:${blocker}`
     }
@@ -68,8 +70,8 @@ async function activateOne(client, id, injectedNow) {
     if (res.count !== 1) return 'SKIPPED'
     const ret = await retentionFor(tx, 'PRIVILEGED_ACCESS')
     await tx.roleAssignmentEvent.create({ data: { assignmentId: id, eventType: 'ACTIVATED', actorUserId: null, detail: { activationAt: a.activationAt.toISOString(), by: 'activation_worker' }, ...ret } })
-    const audit = await writeAdminAudit(tx, { actorUserId: null, action: 'iam.role_assignment.activated', entityType: 'role_assignment', entityId: id, before: { status: 'PENDING_ACTIVATION' }, after: { status: 'ACTIVE' }, reason: 'High-risk activation delay elapsed' })
-    await recordSecurityEvent(tx, { severity: 'HIGH', eventType: 'HIGH_RISK_ACCESS_ACTIVATED', subjectUserId: a.userId, entityType: 'role_assignment', entityId: id, summary: `High-risk access active: ${a.roleVersion.role.code}`, detail: { activationAt: a.activationAt.toISOString() }, auditEventId: audit.id })
+    const audit = await writeAdminAudit(tx, { organizationId, actorUserId: null, action: 'iam.role_assignment.activated', entityType: 'role_assignment', entityId: id, before: { status: 'PENDING_ACTIVATION' }, after: { status: 'ACTIVE' }, reason: 'High-risk activation delay elapsed' })
+    await recordSecurityEvent(tx, { organizationId, severity: 'HIGH', eventType: 'HIGH_RISK_ACCESS_ACTIVATED', subjectUserId: a.userId, entityType: 'role_assignment', entityId: id, summary: `High-risk access active: ${a.roleVersion.role.code}`, detail: { activationAt: a.activationAt.toISOString() }, auditEventId: audit.id })
     if (a.supersedesAssignmentId) {
       const old = await tx.roleAssignment.findUnique({ where: { id: a.supersedesAssignmentId } })
       if (old && ['ACTIVE', 'PENDING_ACTIVATION'].includes(old.status)) {

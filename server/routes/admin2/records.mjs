@@ -4,7 +4,7 @@ import { db } from '../../lib/prisma.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { putObject, getObjectBytes } from '../../lib/storage.mjs'
 import { badRequest, notFoundError, conflict, pageParams, sortParam, pageResult } from './router.mjs'
-import { visibleScope, requireRecord, canRecord, addTimeline, validateEnum, cleanText } from './scope.mjs'
+import { visibleScope, requireRecord, canRecord, addTimeline, validateEnum, cleanText, auditOrganizationId } from './scope.mjs'
 
 const PARTY_KINDS = ['PERSON', 'ORGANIZATION']
 const PARTY_STATUSES = ['ACTIVE', 'INACTIVE', 'BLOCKED']
@@ -80,7 +80,7 @@ export function registerRecords(router) {
     const party = await db().$transaction(async (tx) => {
       const x = await tx.party.create({ data: { kind, displayName: cleanText(b?.displayName, { max: 160, name: 'Display name' }), legalName: b?.legalName ? String(b.legalName).slice(0, 200) : null, email: b?.email ? String(b.email).trim().toLowerCase().slice(0, 200) : null, phone: b?.phone ? String(b.phone).trim().slice(0, 40) : null, createdById: r.auth.user.id, roles: { create: roleTypes.map((roleType) => ({ roleType })) } } })
       await addTimeline(tx, { entityType: 'party', entityId: x.id, eventType: 'created', actorUserId: r.auth.user.id, summary: 'Party created' })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'party.created', entityType: 'party', entityId: x.id, after: { kind, roles: roleTypes }, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'party.created', entityType: 'party', entityId: x.id, after: { kind, roles: roleTypes }, correlationId: r.requestId })
       return x
     })
     r.ok({ id: party.id }, 201)
@@ -98,7 +98,7 @@ export function registerRecords(router) {
     await db().$transaction(async (tx) => {
       await tx.party.update({ where: { id: x.id }, data })
       await addTimeline(tx, { entityType: 'party', entityId: x.id, eventType: 'updated', actorUserId: r.auth.user.id, summary: `Updated: ${Object.keys(data).join(', ')}` })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'party.updated', entityType: 'party', entityId: x.id, before: { displayName: x.displayName, status: x.status }, after: data, reason: b?.reason ? String(b.reason).slice(0, 300) : null, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'party.updated', entityType: 'party', entityId: x.id, before: { displayName: x.displayName, status: x.status }, after: data, reason: b?.reason ? String(b.reason).slice(0, 300) : null, correlationId: r.requestId })
     })
     r.ok({ updated: true })
   })
@@ -115,7 +115,7 @@ export function registerRecords(router) {
     await db().$transaction(async (tx) => {
       await tx.partyRole.create({ data: { partyId: x.id, roleType, platformId } })
       await addTimeline(tx, { entityType: 'party', entityId: x.id, eventType: 'role_added', actorUserId: r.auth.user.id, summary: `Role added: ${roleType}` })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'party.role_added', entityType: 'party', entityId: x.id, after: { roleType, platformId }, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'party.role_added', entityType: 'party', entityId: x.id, after: { roleType, platformId }, correlationId: r.requestId })
     })
     r.ok({ added: true }, 201)
   })
@@ -168,7 +168,7 @@ export function registerRecords(router) {
       const v = await storeVersion(tx, { documentId: d.id, versionNumber: 1, file: b.file, userId: r.auth.user.id })
       await tx.adminDocument.update({ where: { id: d.id }, data: { currentVersionId: v.id } })
       await addTimeline(tx, { entityType: 'admin_document', entityId: d.id, eventType: 'uploaded', actorUserId: r.auth.user.id, summary: `Uploaded ${v.filename}` })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'document.uploaded', entityType: 'admin_document', entityId: d.id, after: { documentType, sha256: v.sha256, sizeBytes: v.sizeBytes }, platformCode: null, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'document.uploaded', entityType: 'admin_document', entityId: d.id, after: { documentType, sha256: v.sha256, sizeBytes: v.sizeBytes }, platformCode: null, correlationId: r.requestId })
       return { d, v }
     })
     r.ok({ id: out.d.id, versionId: out.v.id, sha256: out.v.sha256 }, 201)
@@ -188,7 +188,7 @@ export function registerRecords(router) {
       const nv = await storeVersion(tx, { documentId: d.id, versionNumber: (prev?.versionNumber ?? 0) + 1, file: b.file, userId: r.auth.user.id, supersedes: prev?.id })
       await tx.adminDocument.update({ where: { id: d.id }, data: { currentVersionId: nv.id, status: 'UPLOADED' } })
       await addTimeline(tx, { entityType: 'admin_document', entityId: d.id, eventType: 'new_version', actorUserId: r.auth.user.id, summary: `New version ${nv.versionNumber}: ${reason.slice(0, 100)}` })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'document.version_added', entityType: 'admin_document', entityId: d.id, after: { versionNumber: nv.versionNumber, sha256: nv.sha256 }, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'document.version_added', entityType: 'admin_document', entityId: d.id, after: { versionNumber: nv.versionNumber, sha256: nv.sha256 }, reason, correlationId: r.requestId })
       return nv
     })
     r.ok({ versionId: v.id, versionNumber: v.versionNumber }, 201)
@@ -205,7 +205,7 @@ export function registerRecords(router) {
     await db().$transaction(async (tx) => {
       await tx.adminDocument.update({ where: { id: d.id }, data: { status: to } })
       await addTimeline(tx, { entityType: 'admin_document', entityId: d.id, eventType: 'status', actorUserId: r.auth.user.id, summary: `${d.status} -> ${to}` })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'document.status_changed', entityType: 'admin_document', entityId: d.id, before: { status: d.status }, after: { status: to }, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'document.status_changed', entityType: 'admin_document', entityId: d.id, before: { status: d.status }, after: { status: to }, reason, correlationId: r.requestId })
     })
     r.ok({ status: to })
   })
@@ -226,7 +226,7 @@ export function registerRecords(router) {
       await tx.documentReview.create({ data: { documentId: d.id, versionId: cur.id, reviewerId: r.auth.user.id, decision, reason } })
       await tx.adminDocument.update({ where: { id: d.id }, data: { status: decision } })
       await addTimeline(tx, { entityType: 'admin_document', entityId: d.id, eventType: decision.toLowerCase(), actorUserId: r.auth.user.id, summary: `Document ${decision.toLowerCase()}` })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: `document.${decision.toLowerCase()}`, entityType: 'admin_document', entityId: d.id, before: { status: d.status }, after: { status: decision, versionId: cur.id }, reason, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: `document.${decision.toLowerCase()}`, entityType: 'admin_document', entityId: d.id, before: { status: d.status }, after: { status: decision, versionId: cur.id }, reason, correlationId: r.requestId })
     })
     r.ok({ status: decision })
   })
@@ -243,7 +243,7 @@ export function registerRecords(router) {
     const bytes = await getObjectBytes('admin-documents', v.storageKey)
     const actual = createHash('sha256').update(bytes).digest('hex')
     if (actual !== v.sha256) throw Object.assign(new Error('Stored file failed its integrity check.'), { statusCode: 500, code: 'INTEGRITY_CHECK_FAILED', expose: true })
-    await writeAdminAudit(db(), { actorUserId: r.auth.user.id, action: 'document.downloaded', entityType: 'admin_document', entityId: d.id, after: { versionId: v.id, sha256: v.sha256 }, correlationId: r.requestId })
+    await writeAdminAudit(db(), { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'document.downloaded', entityType: 'admin_document', entityId: d.id, after: { versionId: v.id, sha256: v.sha256 }, correlationId: r.requestId })
     r.res.writeHead(200, { 'content-type': v.mimeType, 'content-length': bytes.length, 'content-disposition': `attachment; filename="${v.filename.replace(/"/g, '')}"`, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' })
     r.res.end(bytes)
     return true
@@ -288,7 +288,7 @@ export function registerRecords(router) {
     const c = await db().$transaction(async (tx) => {
       const x = await tx.supportCase.create({ data: { platformId, partyId, type: cleanText(b?.type, { max: 60, name: 'Type' }), priority, summary: cleanText(b?.summary, { max: 300, name: 'Summary' }), createdById: r.auth.user.id, linkedEntityType: b?.linkedEntityType ? String(b.linkedEntityType).slice(0, 60) : null, linkedEntityId: b?.linkedEntityId ? String(b.linkedEntityId).slice(0, 80) : null } })
       await addTimeline(tx, { entityType: 'support_case', entityId: x.id, eventType: 'opened', actorUserId: r.auth.user.id, summary: 'Case opened' })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'support.case_opened', entityType: 'support_case', entityId: x.id, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'support.case_opened', entityType: 'support_case', entityId: x.id, correlationId: r.requestId })
       return x
     })
     r.ok({ id: c.id, caseNumber: c.caseNumber }, 201)
@@ -310,7 +310,7 @@ export function registerRecords(router) {
     await db().$transaction(async (tx) => {
       await tx.supportCase.update({ where: { id: c.id }, data })
       await addTimeline(tx, { entityType: 'support_case', entityId: c.id, eventType: 'updated', actorUserId: r.auth.user.id, summary: `Updated: ${Object.keys(data).filter((k) => k !== 'closedAt').join(', ')}` })
-      await writeAdminAudit(tx, { actorUserId: r.auth.user.id, action: 'support.case_updated', entityType: 'support_case', entityId: c.id, before: { status: c.status, priority: c.priority, assignedUserId: c.assignedUserId }, after: data, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'support.case_updated', entityType: 'support_case', entityId: c.id, before: { status: c.status, priority: c.priority, assignedUserId: c.assignedUserId }, after: data, correlationId: r.requestId })
     })
     r.ok({ updated: true })
   })

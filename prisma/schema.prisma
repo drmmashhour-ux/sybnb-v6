@@ -1785,9 +1785,13 @@ model AdminAuditLog {
   correlationId String? @map("correlation_id")
   platformCode  String? @map("platform_code")
   reason        String?
+  // STEP 5H (migration 083): the organization this record belongs to. NULL = unattributed (legacy rows, or an
+  // action whose organization cannot be determined): never visible through an organization-scoped route.
+  organizationId String? @db.Uuid @map("organization_id")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  organization Organization? @relation("OrganizationAuditLogs", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   retentionCategory String @default("AUDIT") @map("retention_category")
   retainUntil DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
@@ -1796,6 +1800,7 @@ model AdminAuditLog {
   @@index([actorUserId, createdAt], map: "admin_audit_logs_actor_idx")
   @@index([correlationId])
   @@index([action, createdAt])
+  @@index([organizationId, createdAt], map: "admin_audit_logs_org_idx")
   @@map("admin_audit_logs")
 }
 
@@ -2375,6 +2380,9 @@ model Organization {
   legalEntities LegalEntity[]
   departments   Department[]
   bootstrap     SecurityBootstrap?
+  auditLogs     AdminAuditLog[]          @relation("OrganizationAuditLogs")
+  securityEvents SecurityEvent[]         @relation("OrganizationSecurityEvents")
+  authorizationEvidence AuthorizationEvidence[] @relation("OrganizationAuthorizationEvidence")
 
   @@map("organizations")
 }
@@ -2665,10 +2673,16 @@ model AuthorizationEvidence {
   prevHash           String?       @map("prev_hash")
   hash               String
   decidedAt          DateTime      @default(now()) @map("decided_at")
+  // STEP 5H (migration 083): organization the decision was evaluated at (from the resource facts). NULL = unattributed
+  // (every row written before 083, and decisions about a resource with no organization). Part of the hash when present.
+  organizationId     String? @db.Uuid       @map("organization_id")
 
   retentionCategory String @default("AUTHORIZATION_EVIDENCE") @map("retention_category")
   retainUntil DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
 
+  organization Organization? @relation("OrganizationAuthorizationEvidence", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([organizationId, sequence], map: "authorization_evidence_org_idx")
   @@index([userId, decidedAt])
   @@index([permissionCode, decidedAt])
   @@index([correlationId])
@@ -3242,8 +3256,13 @@ model SecurityEvent {
   reviewNote        String?               @map("review_note")
   retentionCategory String                @default("SECURITY_EVENT") @map("retention_category")
   retainUntil       DateTime              @default(dbgenerated("(CURRENT_TIMESTAMP + '7 years'::interval)")) @map("retain_until")
+  // STEP 5H (migration 083): owning organization; NULL = unattributed (never visible through an organization-scoped route).
+  organizationId    String? @db.Uuid               @map("organization_id")
   createdAt         DateTime              @default(now()) @map("created_at")
 
+  organization Organization? @relation("OrganizationSecurityEvents", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([organizationId, createdAt], map: "security_events_org_idx")
   @@index([severity, createdAt])
   @@index([status, createdAt])
   @@index([subjectUserId])

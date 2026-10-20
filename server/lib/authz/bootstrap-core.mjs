@@ -74,8 +74,10 @@ function secretOk(provided) {
 async function deny(client, { actorUserId, organizationId, code, status, message, requestId }) {
   try {
     await client.$transaction(async (tx) => {
-      const audit = await writeAdminAudit(tx, { actorUserId, action: 'security.owner_bootstrap_denied', entityType: 'security_bootstrap', entityId: organizationId, after: { code }, reason: code, correlationId: requestId })
-      await recordSecurityEvent(tx, { severity: 'WARNING', eventType: 'OWNER_BOOTSTRAP_DENIED', actorUserId, entityType: 'security_bootstrap', entityId: organizationId, summary: `Owner bootstrap attempt denied (${code})`, detail: { code }, correlationId: requestId, auditEventId: audit.id })
+      // STEP 5H: attribute the denial to the organization only when it exists in the registry (the column is a foreign key; the denial itself is always recorded).
+      const known = organizationId ? await tx.organization.findUnique({ where: { id: organizationId }, select: { id: true } }) : null
+      const audit = await writeAdminAudit(tx, { actorUserId, action: 'security.owner_bootstrap_denied', entityType: 'security_bootstrap', entityId: organizationId, after: { code }, reason: code, correlationId: requestId, organizationId: known?.id ?? null })
+      await recordSecurityEvent(tx, { severity: 'WARNING', eventType: 'OWNER_BOOTSTRAP_DENIED', actorUserId, entityType: 'security_bootstrap', entityId: organizationId, summary: `Owner bootstrap attempt denied (${code})`, detail: { code }, correlationId: requestId, auditEventId: audit.id, organizationId: known?.id ?? null })
     }, TX)
   } catch { /* recording a denial must never mask the denial itself */ }
   return svcError(status, code, message)
@@ -147,18 +149,18 @@ export async function runBootstrap(client, roleCode, { actorUserId, organization
       const audit = await writeAdminAudit(tx, {
         actorUserId, action: 'security.owner_bootstrap_completed', entityType: 'security_bootstrap', entityId: organizationId,
         before: { state: BOOTSTRAP_REQUIRED, roleVersion: old.roleVersion.versionNumber }, after: { state: BOOTSTRAP_COMPLETED, roleVersion: latest.versionNumber, activationDelayWaived: true, policyDelayHours: policy.highRiskActivationDelayMs / 3_600_000 },
-        reason: why, correlationId: requestId,
+        reason: why, correlationId: requestId, organizationId,
       })
       const perm = await tx.permissionDefinition.findUnique({ where: { code: 'access.assign' } })
       const evidence = await writeEvidence(tx, {
         userId: actorUserId, roleAssignmentId: fresh.id, roleVersionId: latest.id, roleCode, roleVersionNumber: latest.versionNumber,
         permissionId: perm?.id ?? null, permissionCode: 'access.assign', scopeKind: 'ORGANIZATION', scopeTarget: organizationId, scopeDescription: 'Initial Owner security bootstrap',
         resourceType: 'security_bootstrap', resourceId: organizationId, action: 'owner_bootstrap', authStrength, mfaMethod: 'EMAIL_OTP', mfaResult: 'VERIFIED_AT_LOGIN',
-        requestId, correlationId: requestId, decision: 'ALLOW', policyVersionId: policy.id ?? null, auditEventId: audit.id, rulesetVersion: PERMISSION_RULESET_VERSION,
+        requestId, correlationId: requestId, decision: 'ALLOW', policyVersionId: policy.id ?? null, auditEventId: audit.id, rulesetVersion: PERMISSION_RULESET_VERSION, organizationId,
       })
       const ev = await recordSecurityEvent(tx, {
         severity: 'CRITICAL', eventType: 'OWNER_BOOTSTRAP_COMPLETED', actorUserId, entityType: 'security_bootstrap', entityId: organizationId,
-        summary: 'Initial Owner security bootstrap completed (one-time exception, now closed)', detail: { ...evDetail, workflowUnavailableReason: WORKFLOW_UNAVAILABLE }, correlationId: requestId, auditEventId: audit.id,
+        summary: 'Initial Owner security bootstrap completed (one-time exception, now closed)', detail: { ...evDetail, workflowUnavailableReason: WORKFLOW_UNAVAILABLE }, correlationId: requestId, auditEventId: audit.id, organizationId,
       })
       const closed = await tx.securityBootstrap.updateMany({
         where: { organizationId, state: BOOTSTRAP_REQUIRED },

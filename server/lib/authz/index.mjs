@@ -7,7 +7,7 @@ import { approxNow, securityTimeStatus } from './clock.mjs'
 // conditions. The frontend may display the result, but the server always re-decides.
 import { db } from '../prisma.mjs'
 import { log } from '../logger.mjs'
-import { evaluateAccess, holdsPermissionAnywhere, DENY } from './evaluate.mjs'
+import { evaluateAccess, holdsPermissionAnywhere, resolveChain, DENY } from './evaluate.mjs'
 import { loadAssignmentsForUser, loadOrgIndex, loadPermission, loadPolicy, loadSuspensions } from './loader.mjs'
 import { writeEvidence } from './evidence.mjs'
 import { PERMISSION_RULESET_VERSION } from './catalogue.mjs'
@@ -59,8 +59,16 @@ export async function loadSnapshot(ctx, options = {}) {
   return { client, now, timeTrusted, assignments, suspensions, orgIndex, policy, auth: sessionAuthFacts(ctx, sessionRow) }
 }
 
-function evidenceRecord(ctx, code, permission, resource, result, snap, options) {
+// STEP 5H: the organization the decision was evaluated at, from the resource facts through the organization tree. Only an
+// organization that exists in the registry is recorded (the column is a foreign key); anything else is left unattributed.
+function evidenceOrganizationId(resource, snap) {
+  const id = resolveChain(resource?.facts, snap.orgIndex).organizationId
+  return id && snap.orgIndex?.organizationsById?.has(id) ? id : null
+}
+
+export function evidenceRecord(ctx, code, permission, resource, result, snap, options) {
   return {
+    organizationId: evidenceOrganizationId(resource, snap),
     userId: ctx.user.id, sessionId: ctx.sessionId ?? null,
     roleAssignmentId: result.grant?.assignmentId ?? null, roleVersionId: result.grant?.roleVersionId ?? null,
     roleCode: result.grant?.roleCode ?? null, roleVersionNumber: result.grant?.roleVersionNumber ?? null,

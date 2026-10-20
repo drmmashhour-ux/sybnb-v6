@@ -14,6 +14,7 @@ import { loadPolicy } from './loader.mjs'
 import { assertContinuity, assertCapabilitiesRetained } from './continuity.mjs'
 import { badReq, notFound, conflictErr } from './errors.mjs'
 import { dbNow } from './clock.mjs'
+import { organizationOfScopes } from './org-boundary.mjs'
 
 // Interactive transactions run several statements; give them room (default 5s is too tight over a WAN link).
 export const TX = Object.freeze({ maxWait: 10_000, timeout: 30_000 })
@@ -48,12 +49,14 @@ export async function createAssignment(client, { actorUserId, targetUserId, role
       include: INCLUDE,
     })
     await event(tx, a, highRisk ? 'REQUESTED' : 'GRANTED', actorUserId, { roleCode: version.role.code, versionNumber: version.versionNumber, highRiskPermissions: delta.addedHighRisk, supersedes: supersedesAssignmentId }, requestId)
+    // STEP 5H: the records of an assignment belong to the one organization its scopes sit in; scopes spanning several organizations (or one that cannot be placed) leave them unattributed.
+    const organizationId = await organizationOfScopes(tx, a.scopes)
     const audit = await writeAdminAudit(tx, {
-      actorUserId, action: highRisk ? 'iam.role_assignment.requested' : 'iam.role_assignment.granted', entityType: 'role_assignment', entityId: a.id,
+      organizationId, actorUserId, action: highRisk ? 'iam.role_assignment.requested' : 'iam.role_assignment.granted', entityType: 'role_assignment', entityId: a.id,
       after: { userId: targetUserId, roleCode: version.role.code, versionNumber: version.versionNumber, status: a.status, highRiskPermissions: delta.addedHighRisk }, reason: why, correlationId: requestId,
     })
     if (highRisk) {
-      await recordSecurityEvent(tx, { severity: 'WARNING', eventType: 'HIGH_RISK_ACCESS_REQUESTED', actorUserId, subjectUserId: targetUserId, entityType: 'role_assignment', entityId: a.id, summary: `High-risk access requested: ${version.role.code}`, detail: { highRiskPermissions: delta.addedHighRisk }, correlationId: requestId, auditEventId: audit.id })
+      await recordSecurityEvent(tx, { organizationId, severity: 'WARNING', eventType: 'HIGH_RISK_ACCESS_REQUESTED', actorUserId, subjectUserId: targetUserId, entityType: 'role_assignment', entityId: a.id, summary: `High-risk access requested: ${version.role.code}`, detail: { highRiskPermissions: delta.addedHighRisk }, correlationId: requestId, auditEventId: audit.id })
     } else if (supersedesAssignmentId) {
       await supersede(tx, supersedesAssignmentId, a.id, actorUserId, requestId, t)
     }
@@ -82,7 +85,7 @@ export async function reviewAssignment(client, { actorUserId, assignmentId, deci
     const to = decision === 'APPROVE' ? 'UNDER_REVIEW' : 'REJECTED'
     await tx.roleAssignment.update({ where: { id: a.id }, data: { status: to, reviewedById: actorUserId, reviewedAt: await dbNow(tx), ...(to === 'REJECTED' ? { revokedAt: null, revokeReason: why } : {}) } })
     await event(tx, a, to === 'REJECTED' ? 'REJECTED' : 'REVIEWED', actorUserId, { reason: why }, requestId)
-    await writeAdminAudit(tx, { actorUserId, action: to === 'REJECTED' ? 'iam.role_assignment.rejected' : 'iam.role_assignment.reviewed', entityType: 'role_assignment', entityId: a.id, reason: why, correlationId: requestId })
+    await writeAdminAudit(tx, { organizationId: await organizationOfScopes(tx, a.scopes), actorUserId, action: to === 'REJECTED' ? 'iam.role_assignment.rejected' : 'iam.role_assignment.reviewed', entityType: 'role_assignment', entityId: a.id, reason: why, correlationId: requestId })
     return { status: to }
   }, TX)
 }
@@ -101,15 +104,16 @@ export async function approveAssignment(client, { actorUserId, assignmentId, dec
     if (decision === 'REJECT') {
       await tx.roleAssignment.update({ where: { id: a.id }, data: { status: 'REJECTED', revokeReason: why } })
       await event(tx, a, 'REJECTED', actorUserId, { reason: why, stage: 'APPROVAL' }, requestId)
-      await writeAdminAudit(tx, { actorUserId, action: 'iam.role_assignment.rejected', entityType: 'role_assignment', entityId: a.id, reason: why, correlationId: requestId })
+      await writeAdminAudit(tx, { organizationId: await organizationOfScopes(tx, a.scopes), actorUserId, action: 'iam.role_assignment.rejected', entityType: 'role_assignment', entityId: a.id, reason: why, correlationId: requestId })
       return { status: 'REJECTED' }
     }
     const policy = await loadPolicy(tx, now)
     const activationAt = new Date(now.getTime() + policy.highRiskActivationDelayMs)
     await tx.roleAssignment.update({ where: { id: a.id }, data: { status: 'PENDING_ACTIVATION', approvedById: actorUserId, approvedAt: now, activationAt } })
     await event(tx, a, 'APPROVED', actorUserId, { reason: why, activationAt: activationAt.toISOString(), policyVersion: policy.version }, requestId)
-    const audit = await writeAdminAudit(tx, { actorUserId, action: 'iam.role_assignment.approved', entityType: 'role_assignment', entityId: a.id, after: { status: 'PENDING_ACTIVATION', activationAt: activationAt.toISOString() }, reason: why, correlationId: requestId })
-    await recordSecurityEvent(tx, { severity: 'HIGH', eventType: 'HIGH_RISK_ACCESS_APPROVED', actorUserId, subjectUserId: a.userId, entityType: 'role_assignment', entityId: a.id, summary: `High-risk access approved, active from ${activationAt.toISOString()}`, detail: { roleCode: a.roleVersion.role.code, activationAt: activationAt.toISOString() }, correlationId: requestId, auditEventId: audit.id })
+    const organizationId = await organizationOfScopes(tx, a.scopes)
+    const audit = await writeAdminAudit(tx, { organizationId, actorUserId, action: 'iam.role_assignment.approved', entityType: 'role_assignment', entityId: a.id, after: { status: 'PENDING_ACTIVATION', activationAt: activationAt.toISOString() }, reason: why, correlationId: requestId })
+    await recordSecurityEvent(tx, { organizationId, severity: 'HIGH', eventType: 'HIGH_RISK_ACCESS_APPROVED', actorUserId, subjectUserId: a.userId, entityType: 'role_assignment', entityId: a.id, summary: `High-risk access approved, active from ${activationAt.toISOString()}`, detail: { roleCode: a.roleVersion.role.code, activationAt: activationAt.toISOString() }, correlationId: requestId, auditEventId: audit.id })
     return { status: 'PENDING_ACTIVATION', activationAt }
   }, TX)
 }
@@ -126,8 +130,9 @@ export async function revokeAssignment(client, { actorUserId, assignmentId, reas
     if (wasLive) await assertContinuity(tx, { assignmentIds: [a.id], now: t })
     await tx.roleAssignment.update({ where: { id: a.id }, data: { status: 'REVOKED', revokedAt: t, revokedById: actorUserId, revokeReason: why } })
     await event(tx, a, 'REVOKED', actorUserId, { reason: why, from: a.status }, requestId)
-    const audit = await writeAdminAudit(tx, { actorUserId, action: 'iam.role_assignment.revoked', entityType: 'role_assignment', entityId: a.id, before: { status: a.status }, after: { status: 'REVOKED' }, reason: why, correlationId: requestId })
-    if (wasLive) await recordSecurityEvent(tx, { severity: 'WARNING', eventType: 'ACCESS_REVOKED', actorUserId, subjectUserId: a.userId, entityType: 'role_assignment', entityId: a.id, summary: `Access revoked: ${a.roleVersion.role.code}`, detail: { from: a.status }, correlationId: requestId, auditEventId: audit.id })
+    const organizationId = await organizationOfScopes(tx, a.scopes)
+    const audit = await writeAdminAudit(tx, { organizationId, actorUserId, action: 'iam.role_assignment.revoked', entityType: 'role_assignment', entityId: a.id, before: { status: a.status }, after: { status: 'REVOKED' }, reason: why, correlationId: requestId })
+    if (wasLive) await recordSecurityEvent(tx, { organizationId, severity: 'WARNING', eventType: 'ACCESS_REVOKED', actorUserId, subjectUserId: a.userId, entityType: 'role_assignment', entityId: a.id, summary: `Access revoked: ${a.roleVersion.role.code}`, detail: { from: a.status }, correlationId: requestId, auditEventId: audit.id })
     return { status: 'REVOKED' }
   }, TX)
 }

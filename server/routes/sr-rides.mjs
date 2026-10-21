@@ -6,6 +6,9 @@ import { randomInt } from 'node:crypto'
 // Consume the country-neutral geocoding seam (resolves the active country's geocoder, fail-closed) —
 // the route does NOT depend on any country's geocoder module directly.
 import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
+import { refreshSrPricing, readStoredPricing, invalidateSrPricingCache, PRICING_CATEGORY, PRICING_KEY } from '../lib/sr-pricing-store.mjs'
+import { normalizePricing, storableConfig, recommendedConfig, legacyConfig, getActivePricing, SR_CATEGORIES, PRICING_LIMITS, CLASS_PROFILES } from '../../countries/syria/geo/sr-pricing.mjs'
+import { quoteSrRide as quoteSyriaRide } from '../../countries/syria/geo/geocoding.mjs'
 import { resolveTrafficDistance } from '../lib/traffic-distance.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
@@ -138,12 +141,35 @@ async function switchOpenRideCategory(existing, category) {
   return { category, fareMinor: newFare, currency: quote.currency }
 }
 
+// Sample fares so the admin sees what a config does: per class, a short city trip, a 15 km trip and
+// the Damascus airport run's distance, at noon on a weekday (no peak, night or weekend factor).
+const PRICING_SAMPLE_TRIPS = [
+  { key: 'short', km: 5, minutes: 15 },
+  { key: 'medium', km: 15, minutes: 35 },
+  { key: 'long', km: 32, minutes: 45 },
+  { key: 'homs', km: 162 },
+  { key: 'aleppo', km: 355 },
+]
+function pricingExamples(config) {
+  const noon = new Date('2026-10-21T09:00:00Z') // Wednesday 12:00 in Damascus
+  const out = {}
+  for (const category of SR_CATEGORIES) {
+    out[category] = {}
+    for (const trip of PRICING_SAMPLE_TRIPS) {
+      const q = quoteSyriaRide({ pickup: 'sample', dropoff: 'sample', category, lowDataMode: true, distanceKmOverride: trip.km, estimatedMinutesOverride: trip.minutes, now: noon, pricing: config })
+      out[category][trip.key] = q.fareMinor
+    }
+  }
+  return { trips: PRICING_SAMPLE_TRIPS, fares: out }
+}
+
 // Compute an SR quote, upgraded with live Google road distance + traffic when GOOGLE_MAPS_API_KEY is
 // set. Pure/sync engine first (resolves coords + a gazetteer estimate); then, if a key and valid
 // coords exist, re-quote with the live distance, traffic-aware minutes, and congestion multiplier.
 // Fail-open: any Google error leaves the gazetteer quote untouched. Used by BOTH /quote and /rides so
 // the price shown equals the price charged.
 async function computeSrQuoteWithTraffic(baseParams) {
+  await refreshSrPricing()
   let quote = quoteSrRideForActiveCountry(baseParams)
   if (!process.env.GOOGLE_MAPS_API_KEY) return quote
   if (!quote.pickupCoords || !quote.dropoffCoords) return quote
@@ -1919,6 +1945,70 @@ export async function handleSrRides(req, res, url, context) {
           : null,
       },
     })
+  }
+
+  // Admin pricing: view / preview / save the variable pricing config (cost formula, multipliers, fees).
+  // Stored in admin_settings (no schema change); audited and re-authorized at commit like promo codes.
+  if (url.pathname === '/api/admin/sr/pricing' || url.pathname === '/api/admin/sr/pricing/preview') {
+    requireAuth(context, ['ADMIN'])
+    const preview = url.pathname.endsWith('/preview')
+    if (req.method === 'GET' && !preview) {
+      const row = await readStoredPricing()
+      const config = row ? normalizePricing(row.value) : normalizePricing(null)
+      return json(res, 200, {
+        ok: true,
+        stored: Boolean(row),
+        version: row?.version ?? 0,
+        updatedAt: row?.updatedAt ?? null,
+        config,
+        recommended: normalizePricing(recommendedConfig()),
+        legacy: normalizePricing(null),
+        limits: PRICING_LIMITS,
+        categories: SR_CATEGORIES,
+        classProfiles: CLASS_PROFILES,
+        examples: pricingExamples(config),
+      })
+    }
+    if (req.method === 'POST' && preview) {
+      const body = await readJson(req)
+      const config = normalizePricing(body?.config)
+      return json(res, 200, { ok: true, config, examples: pricingExamples(config) })
+    }
+    if (req.method === 'PUT' && !preview) {
+      const body = await readJson(req)
+      const reason = String(body?.reason || '').trim()
+      if (reason.length < 8 || reason.length > 300) {
+        const error = new Error('Write a reason of 8 to 300 characters. It goes in the audit log.')
+        error.statusCode = 400
+        error.code = 'PRICING_REASON_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      const config = normalizePricing(body?.config)
+      const value = storableConfig(config)
+      const existing = await readStoredPricing()
+      if (existing && body?.expectedVersion != null && Number(body.expectedVersion) !== existing.version) {
+        const error = new Error('Pricing changed since you loaded it. Reload and try again.')
+        error.statusCode = 409
+        error.code = 'PRICING_VERSION_CONFLICT'
+        error.expose = true
+        throw error
+      }
+      const saved = await db().$transaction(async (tx) => {
+        await reauthorizeAtCommit(tx, context, { action: 'SR_PRICING_CHANGED', requiredRoles: ['ADMIN'] })
+        const row = existing
+          ? await tx.adminSetting.update({ where: { id: existing.id }, data: { value, version: { increment: 1 }, updatedById: context.user.id, updatedAt: new Date() } })
+          : await tx.adminSetting.create({ data: { category: PRICING_CATEGORY, key: PRICING_KEY, value, updatedById: context.user.id } })
+        await tx.adminAuditLog.create({
+          data: { actorUserId: context.user.id, action: 'SR_PRICING_CHANGED', entityType: 'admin_settings', entityId: row.id, before: existing ? { value: existing.value, version: existing.version } : null, after: { value, version: row.version }, reason },
+        })
+        return row
+      })
+      invalidateSrPricingCache()
+      await refreshSrPricing({ force: true })
+      return json(res, 200, { ok: true, version: saved.version, config: getActivePricing(), examples: pricingExamples(getActivePricing()) })
+    }
+    return methodNotAllowed(res, preview ? ['POST'] : ['GET', 'PUT'])
   }
 
   // SR Ride vs. Uber gap-closure (P2 #12): admin-managed promo codes. Owner-approved scope: simple

@@ -197,9 +197,9 @@ export function App() {
 const styles: Record<string, CSSProperties> = {
   shell: { minHeight: '100vh', background: '#fff', color: '#000' },
   bar: { position: 'sticky', top: 0, zIndex: 30, background: '#000', color: '#fff' },
-  barInner: { maxWidth: 520, margin: '0 auto', minHeight: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '0 16px' },
+  barInner: { maxWidth: 520, margin: '0 auto', minHeight: 52, display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '2px 8px', padding: '4px 16px' },
   wordmark: { color: '#fff', fontWeight: 800, fontSize: 20, letterSpacing: 1, textDecoration: 'none' },
-  barRight: { display: 'flex', alignItems: 'center', gap: 8 },
+  barRight: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 4 },
   langGroup: { display: 'flex', gap: 2 },
   langBtn: { minHeight: 32, minWidth: 32, border: 0, borderRadius: 999, background: 'transparent', color: '#bbb', fontSize: 12, fontWeight: 700, padding: '0 8px' },
   langBtnActive: { background: '#fff', color: '#000' },

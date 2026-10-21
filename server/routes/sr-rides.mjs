@@ -41,6 +41,9 @@ import { offerRideToNextDriver, runDispatchSweep } from '../lib/ride-dispatch.mj
 import { logRideEventSafe } from '../lib/ride-events.mjs'
 import { buildAlternatives, notifyRiderNoDriverOnce, categoryAvailabilityAt } from '../lib/ride-no-driver.mjs'
 import { analyzeRide } from '../lib/ai-ride-analyst.mjs'
+import { runRideAssistant, RIDE_ASSISTANT_ROLES } from '../lib/ai-ride-assistant.mjs'
+import { dutyBlockers } from './driver-base.mjs'
+import { driverPayoutBalances } from '../lib/finance-ledger.mjs'
 import { getOrCreateRideInvoice, renderInvoiceHtml } from '../lib/invoices.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
@@ -1361,6 +1364,60 @@ export async function handleSrRides(req, res, url, context) {
       .filter((e) => e.type !== 'LOCATION_PING')
       .map((e) => ({ type: e.type, at: e.createdAt.toISOString(), lat: e.lat, lng: e.lng }))
     return json(res, 200, { ok: true, rideId: ride.id, status: ride.status, points, milestones, gaps, distanceKm: Math.round(distanceKm * 10) / 10 })
+  }
+
+  // In-app AI helper for the rider and the driver (advisory only; see server/lib/ai-ride-assistant.mjs). It is given a small set of
+  // facts about THIS user (never anyone else's) and answers questions about their ride, wallet, documents and payouts.
+  if (url.pathname === '/api/sr/assistant') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    const body = await readJson(req).catch(() => ({}))
+    const role = String(body.role || '')
+    if (!RIDE_ASSISTANT_ROLES.includes(role)) {
+      const error = new Error('role must be rider or driver.')
+      error.statusCode = 400; error.code = 'ASSISTANT_ROLE_INVALID'; error.expose = true
+      throw error
+    }
+    requireAuth(context, [role === 'driver' ? 'DRIVER' : 'GUEST'])
+    const question = String(body.question || '').trim()
+    if (!question) {
+      const error = new Error('A question is required.')
+      error.statusCode = 400; error.code = 'ASSISTANT_QUESTION_REQUIRED'; error.expose = true
+      throw error
+    }
+    if (await isRateLimited(`ride-assistant:${context.user.id}`, 60 * 60_000, 20)) {
+      const error = new Error('Too many questions. Please try again later.')
+      error.statusCode = 429; error.code = 'ASSISTANT_RATE_LIMITED'; error.expose = true
+      throw error
+    }
+    const uid = context.user.id
+    const rideWhere = role === 'driver' ? { driverId: uid } : { riderId: uid }
+    const last = await db().rideRequest.findFirst({ where: rideWhere, orderBy: { requestedAt: 'desc' }, include: { driver: { select: { displayName: true, driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true } } } } } })
+    const meta = last?.metadata && typeof last.metadata === 'object' ? last.metadata : {}
+    const facts = {
+      lastRide: last ? {
+        status: last.status, fareMinor: last.fareMinor, currency: last.currency, prepaid: meta.prepaid === true, settled: meta.settled === true || undefined,
+        disputeOpen: last.status === 'DISPUTED' || undefined, disputeReason: meta.dispute?.reason ? String(meta.dispute.reason).slice(0, 200) : undefined,
+        driverName: role === 'rider' ? last.driver?.displayName ?? null : undefined,
+        vehicle: role === 'rider' && last.driver?.driverProfile ? `${last.driver.driverProfile.vehicleMake ?? ''} ${last.driver.driverProfile.vehicleModel ?? ''} ${last.driver.driverProfile.vehiclePlate ?? ''}`.trim() : undefined,
+        requestedAt: last.requestedAt,
+      } : null,
+    }
+    if (role === 'rider') {
+      const wallet = await db().wallet.findFirst({ where: { userId: uid, currency: 'USD' }, select: { cachedBalanceMinor: true } })
+      const proofs = await db().paymentProof.findMany({ where: { userId: uid }, orderBy: { createdAt: 'desc' }, take: 3, select: { status: true, amountMinor: true, currency: true, createdAt: true } }).catch(() => [])
+      facts.walletUsdMinor = wallet?.cachedBalanceMinor ?? 0
+      facts.recentTopUps = proofs
+    } else {
+      const profile = await db().driverProfile.findUnique({ where: { userId: uid } })
+      const { blockers } = await dutyBlockers(uid, profile)
+      const balances = await db().$transaction((tx) => driverPayoutBalances(tx, { userId: uid, currency: 'USD' }))
+      facts.onDuty = Boolean(profile?.onDutyAt)
+      facts.documentProblems = blockers
+      facts.payoutAvailableMinor = balances.availableMinor
+      facts.payoutPendingMinor = balances.pendingMinor
+    }
+    const out = await runRideAssistant({ role, question, facts })
+    return json(res, 200, { ok: true, ...out })
   }
 
   // Safety Phase 1 (2026-10-10): SOS / PANIC. Either party to an ACTIVE ride -- the rider (GUEST)

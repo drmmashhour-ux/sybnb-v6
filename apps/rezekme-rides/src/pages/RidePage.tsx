@@ -78,6 +78,7 @@ import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLo
 import { srFallbackFareMinor } from './srFareModel'
 import { RecordingControls } from './RecordingControls'
 import { PaymentPicker, type PayMethod } from './PaymentPicker'
+import { AssistantBox, ReportProblem } from './HelpTools'
 
 type Props = {
   lang: Lang
@@ -2195,6 +2196,10 @@ export function RidePage({ lang }: Props) {
             )}
           </div>
         )}
+
+        {ride.status === 'COMPLETED' && <ReportProblem lang={lang} role="rider" rideId={ride.id} />}
+        {ride.status === 'DISPUTED' && <div style={styles.hint}>{pick(lang, 'قيد مراجعة الإدارة.', 'Under admin review.', 'En cours d’examen par l’administrateur.')}</div>}
+        {(ACTIVE_RIDE_STATUSES.includes(ride.status) || ride.status === 'COMPLETED') && <AssistantBox lang={lang} role="rider" />}
 
         {chatAllowed && chatOpen && (
           <div style={styles.subCard}>

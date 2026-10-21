@@ -3018,6 +3018,7 @@ export async function resolveAdminIncident(incidentId: string, input: { status: 
 // wrongly-approved/duplicated fare on a completed ride — all from a screen instead of the API.
 export type PlatformAdminSrRide = {
   id: string
+  dispute?: { openedBy: string | null; reason: string; openedAt: string | null } | null
   status: string
   fareMinor: number | null
   currency: string

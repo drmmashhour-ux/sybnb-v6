@@ -1468,7 +1468,7 @@ export async function handleAdmin(req, res, url, context) {
     const rides = rows.map((row) => {
       const meta = row.metadata && typeof row.metadata === 'object' ? row.metadata : {}
       const { metadata: _omit, ...rest } = row
-      return { ...rest, matchConfirmed: Boolean(meta.pickupVerifiedAt), matchConfirmedAt: meta.pickupVerifiedAt || null, feeContest: meta.feeContest || null, noShow: meta.noShow === true }
+      return { ...rest, matchConfirmed: Boolean(meta.pickupVerifiedAt), matchConfirmedAt: meta.pickupVerifiedAt || null, feeContest: meta.feeContest || null, dispute: meta.dispute && typeof meta.dispute === 'object' ? { openedBy: meta.dispute.openedBy || null, reason: String(meta.dispute.reason || '').slice(0, 1000), openedAt: meta.dispute.openedAt || null } : null, noShow: meta.noShow === true }
     })
     return json(res, 200, { ok: true, rides, count: rides.length })
   }

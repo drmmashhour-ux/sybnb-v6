@@ -90,6 +90,19 @@ await t('admin daily report still works once a driver payout is PAID (method is 
   assert.equal(rep.status, 200, JSON.stringify(rep.j).slice(0, 200))
 })
 
+await t('AI helper: refuses the wrong role, answers configured:false without an AI key (no fake answer), and is rate limited', async () => {
+  const wrong = await call('POST', '/api/sr/assistant', driver.token, { role: 'rider', question: 'Where is my money?' })
+  assert.equal(wrong.status, 403, JSON.stringify(wrong.j).slice(0, 160))
+  const noKey = await call('POST', '/api/sr/assistant', rider.token, { role: 'rider', question: 'Why is my balance 0?' })
+  assert.equal(noKey.status, 200); assert.equal(noKey.j.configured, false); assert.equal(noKey.j.answer, undefined)
+  const d = await call('POST', '/api/sr/assistant', driver.token, { role: 'driver', question: 'When do I get paid?' })
+  assert.equal(d.status, 200); assert.equal(d.j.configured, false)
+  assert.equal((await call('POST', '/api/sr/assistant', rider.token, { role: 'rider', question: '' })).status, 400)
+  let limited = 0
+  for (let i = 0; i < 22; i += 1) { if ((await call('POST', '/api/sr/assistant', rider.token, { role: 'rider', question: 'q' + i })).status === 429) limited += 1 }
+  assert.ok(limited >= 1, 'rate limit kicks in after 20 questions per hour')
+})
+
 console.log(`\n${passed} passed, ${failures.length} failed`)
 await p.$disconnect()
 process.exit(failures.length ? 1 : 0)

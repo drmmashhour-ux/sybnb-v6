@@ -27,6 +27,7 @@ import {
   type PlatformRideRequest,
 } from '@platform/shared/api/platformApi'
 
+import { AssistantBox, ReportProblem } from './HelpTools'
 import { fetchDriverBase, fetchPayouts, requestPayout, verifyKeyCode, type DriverBase } from '../driverBaseApi'
 import { MapHero } from '../maps/MapHero'
 import { RecordingControls } from './RecordingControls'
@@ -913,9 +914,11 @@ function Earnings({ lang, overview, rate, currency }: { lang: Lang; overview: Pl
           </div>
           <button style={S.link} onClick={() => setOpenRoute(openRoute === r.id ? null : r.id)}>{t('المسار المسجّل', 'Recorded route', 'Trajet enregistré')}</button>
           {openRoute === r.id && <RouteViewer rideId={r.id} lang={lang} asDriver />}
+          <ReportProblem lang={lang} role="driver" rideId={r.id} />
         </div>
       ))}
       <PayoutBox lang={lang} currency={currency} />
+      <div style={{ marginTop: 10 }}><AssistantBox lang={lang} role="driver" /></div>
     </div>
   )
 }

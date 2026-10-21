@@ -9,6 +9,7 @@ import {
 } from '@platform/shared/api/platformApi'
 import { moneyText, statusText } from '@platform/shared/i18n/display'
 import { RouteViewer } from './RouteViewer'
+import { AssistantBox, ReportProblem } from './HelpTools'
 
 type Props = { lang: Lang }
 
@@ -22,6 +23,7 @@ export function TripsPage({ lang }: Props) {
   const [rides, setRides] = useState<PlatformRideRequest[] | null>(null)
   const [error, setError] = useState('')
   const [openRoute, setOpenRoute] = useState<string | null>(null)
+  const [reportFor, setReportFor] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -45,6 +47,7 @@ export function TripsPage({ lang }: Props) {
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <h1 style={styles.title}>{title}</h1>
+      <AssistantBox lang={lang} role="rider" onSuggestReport={() => setReportFor(rides?.find((r) => r.status === 'COMPLETED')?.id ?? null)} />
       {error && <div style={styles.error}>{error}</div>}
       {!error && rides === null && (
         <div style={styles.list} aria-busy="true">
@@ -85,6 +88,10 @@ export function TripsPage({ lang }: Props) {
                   )}
                 </div>
                 {openRoute === ride.id && <RouteViewer rideId={ride.id} lang={lang} />}
+                {ride.status === 'COMPLETED' && (reportFor === ride.id
+                  ? <ReportProblem lang={lang} role="rider" rideId={ride.id} startOpen onSent={() => setRides((list) => (list ?? []).map((r) => (r.id === ride.id ? { ...r, status: 'DISPUTED' } : r)))} />
+                  : <button type="button" style={{ ...styles.receiptBtn, background: '#fff', color: '#000', border: '1px solid #000' }} onClick={() => setReportFor(ride.id)}>⚠ {pick(lang, 'الإبلاغ عن مشكلة', 'Report a problem', 'Signaler un problème')}</button>)}
+                {ride.status === 'DISPUTED' && <div style={styles.hint}>{pick(lang, 'قيد مراجعة الإدارة.', 'Under admin review.', 'En cours d’examen par l’administrateur.')}</div>}
               </article>
             )
           })}

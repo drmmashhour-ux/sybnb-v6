@@ -1587,7 +1587,23 @@ export function RidePage({ lang }: Props) {
             ? walletSufficient // a submitted proof is not money: the ride unlocks only after an admin credits the wallet
             : false
   const requestDisabled = status === 'saving' || guestCheckoutStatus === 'redirecting' || (scheduleForLater && !scheduledFor) || !confirmedLocations || !payMethodReady
-  const requestLabel = status === 'saving' ? t.saving : scheduleForLater ? t.scheduleRide : `${ui.confirm} ${categoryLabel(category)}`
+  // Step guidance: after the ride class is chosen the rider must pick how to pay, then continue and confirm.
+  const payStepPrompt =
+    selectedPayMethod === null
+      ? pick(lang, 'الخطوة التالية: اختر طريقة الدفع', 'Next step: choose how you want to pay', 'Étape suivante : choisissez votre mode de paiement')
+      : selectedPayMethod === 'card'
+        ? pick(lang, 'اضغط «متابعة للدفع» لإتمام الدفع بالبطاقة ثم تأكيد الرحلة', 'Tap “Continue to pay” to pay by card, then your ride is confirmed', 'Appuyez sur « Continuer vers le paiement » puis la course est confirmée')
+        : null
+  const requestLabel =
+    status === 'saving'
+      ? t.saving
+      : scheduleForLater
+        ? t.scheduleRide
+        : selectedPayMethod === null
+          ? pick(lang, 'اختر طريقة الدفع', 'Choose a payment method', 'Choisissez un mode de paiement')
+          : selectedPayMethod === 'card'
+            ? pick(lang, 'متابعة للدفع وتأكيد الرحلة', 'Continue to pay & confirm ride', 'Continuer vers le paiement et confirmer')
+            : `${ui.confirm} ${categoryLabel(category)}`
 
   // ---------------------------------------------------------------- booking view (no ride yet)
   if (!ride) {
@@ -1958,6 +1974,7 @@ export function RidePage({ lang }: Props) {
 
         <div style={styles.stickyBar}>
           <div style={styles.stickyInner}>
+            {payStepPrompt && confirmedLocations && <div style={{ ...styles.hint, fontWeight: 700, color: '#1d4ed8', marginBottom: 4 }}>{payStepPrompt}</div>}
             <PaymentPicker
               mode={entryMode}
               lang={lang}

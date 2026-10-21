@@ -135,6 +135,58 @@ export async function offerRideToNextDriver(rideId) {
 // still-unoffered open ride under the round cap. Each ride is isolated in its own try/catch so one
 // bad ride never aborts the whole sweep, and the whole thing is best-effort (never throws into the
 // read path it runs on).
+// Unmatched requests used to stay open forever (matchTimedOut was only a UI flag), so a rider whose
+// request nobody took found the app reopening that old ride instead of the home page, with their
+// prepayment still held. After SR_MATCH_EXPIRE_MINUTES (default 30) a request that still has no driver
+// is cancelled with a full refund -- the same refund path as a rider cancel, idempotent by ride id.
+// The guarded write (driverId null + the status we read) means a driver claiming at the same moment
+// always wins and the expiry simply does not apply.
+const MATCH_EXPIRE_MINUTES = envInt('SR_MATCH_EXPIRE_MINUTES', 30, 5, 1440)
+
+export async function expireUnmatchedRides() {
+  let expired = 0
+  try {
+    const { refundPrepaidRide } = await import('./finance-ledger.mjs')
+    const { releaseCardHold } = await import('./ride-card-hold.mjs')
+    const cutoff = new Date(Date.now() - MATCH_EXPIRE_MINUTES * 60 * 1000)
+    const stale = await db().rideRequest.findMany({
+      where: {
+        driverId: null,
+        status: { in: ['REQUESTED', 'MATCHING'] },
+        requestedAt: { lt: cutoff },
+        OR: [{ scheduledFor: null }, { scheduledFor: { lt: cutoff } }],
+      },
+      take: 50,
+    })
+    for (const ride of stale) {
+      try {
+        const done = await db().$transaction(async (tx) => {
+          const result = await tx.rideRequest.updateMany({
+            where: { id: ride.id, status: ride.status, driverId: null },
+            data: { status: 'CANCELLED', cancellationFeeMinor: null, metadata: { ...(ride.metadata || {}), expiredNoDriver: { at: new Date().toISOString(), afterMinutes: MATCH_EXPIRE_MINUTES } } },
+          })
+          if (result.count === 1 && ride.metadata?.prepaid) await refundPrepaidRide(tx, { ride: { ...ride, cancellationFeeMinor: null } })
+          if (result.count === 1) {
+            await tx.adminAuditLog.create({
+              data: { actorUserId: null, action: 'SR_RIDE_EXPIRED_NO_DRIVER', entityType: 'ride_requests', entityId: ride.id, before: { status: ride.status }, after: { status: 'CANCELLED' }, reason: `No driver within ${MATCH_EXPIRE_MINUTES} minutes; prepayment refunded.` },
+            })
+          }
+          return result.count === 1
+        })
+        if (done) {
+          if (ride.metadata?.cardHoldIntentId) await releaseCardHold(ride.metadata.cardHoldIntentId).catch(() => false)
+          expired += 1
+        }
+      } catch {
+        // one ride failing must not stop the rest
+      }
+    }
+  } catch {
+    // best-effort, never breaks the read path the sweep runs on
+  }
+  return expired
+}
+
 export async function runDispatchSweep() {
   let expired = 0
   let opened = 0
@@ -168,6 +220,7 @@ export async function runDispatchSweep() {
         // one open ride failing to offer must not abort the sweep
       }
     }
+    await expireUnmatchedRides()
   } catch {
     // whole-sweep guard: dispatch is best-effort and never breaks the read path it runs on
   }

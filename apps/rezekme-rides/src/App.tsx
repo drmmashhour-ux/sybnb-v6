@@ -14,6 +14,7 @@ const LegalDocumentPage = lazy(() =>
 import { GuideOverlay } from './guide/GuideOverlay'
 import { HelpLauncher } from './guide/HelpLauncher'
 const WalletPage = lazy(() => import('./pages/WalletPage').then((m) => ({ default: m.WalletPage })))
+const MshDashboardPage = lazy(() => import('@platform/modules/msh/MshDashboardPage').then((m) => ({ default: m.MshDashboardPage })))
 const DriverScreen = lazy(() => import('./pages/DriverScreen').then((m) => ({ default: m.DriverScreen })))
 const DriverApplication = lazy(() => import('./pages/DriverApplication').then((m) => ({ default: m.DriverApplication })))
 const RidePage = lazy(() => import('./pages/RidePage').then((m) => ({ default: m.RidePage })))
@@ -59,10 +60,11 @@ export function App() {
   const isBusinessRoute = path === '/business/account'
   const isTripsRoute = path === '/trips'
   const isWalletRoute = path === '/wallet'
+  const isMshRoute = path === '/wallet/msh'
   const isProfileRoute = path === '/profile'
   const isAccountRoute = /^\/account\/open(?:\/[^/]+)?$/.test(path)
   // The ride form itself asks for the email (no code for a new email); only trips/business need a session.
-  const needsGate = (isBusinessRoute || isTripsRoute || isProfileRoute || isWalletRoute) && !hasGuestSession
+  const needsGate = (isBusinessRoute || isTripsRoute || isProfileRoute || isWalletRoute || isMshRoute) && !hasGuestSession
 
   if (needsGate) {
     try {
@@ -145,6 +147,8 @@ export function App() {
     content = <ProfilePage lang={lang} onSignOut={() => void handleSignOut()} />
   } else if (isTripsRoute) {
     content = <TripsPage lang={lang} />
+  } else if (isMshRoute) {
+    content = <MshDashboardPage lang={lang} />
   } else if (isWalletRoute) {
     content = <WalletPage lang={lang} />
   } else if (isBusinessRoute) {

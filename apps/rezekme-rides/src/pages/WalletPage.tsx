@@ -121,6 +121,12 @@ export function WalletPage({ lang }: { lang: Lang }) {
         {msg && <div style={msg.kind === 'ok' ? S.ok : S.err} role="status">{msg.text}</div>}
       </section>
 
+      <section style={S.card} data-guide="msh-card">
+        <strong>MSH {t('رمز المنصة', 'platform token', 'jeton de la plateforme')}</strong>
+        <span style={S.muted}>{t('رمز MSH يعمل حالياً على شبكة الاختبار (Sepolia) للعرض فقط: لا قيمة مالية له ولا يمكن شراؤه أو بيعه بعد. يمكنك مشاهدة رصيدك التجريبي.', 'MSH currently runs on the Sepolia test network, view-only: it has no money value and cannot be bought or sold yet. You can view your test balance.', 'MSH fonctionne pour l’instant sur le réseau de test Sepolia, en lecture seule : sans valeur monétaire, ni achat ni vente pour le moment. Vous pouvez voir votre solde de test.')}</span>
+        <a href="#/wallet/msh" style={S.link}>{t('عرض رصيد MSH التجريبي', 'View my MSH test balance', 'Voir mon solde MSH de test')} →</a>
+      </section>
+
       {wallet?.entries && wallet.entries.length > 0 && (
         <section style={S.card}>
           <strong>{t('آخر العمليات', 'Recent activity', 'Activité récente')}</strong>
@@ -158,5 +164,6 @@ const S: Record<string, CSSProperties> = {
   primaryOff: { minHeight: 52, borderRadius: 14, border: 0, background: '#bbb', color: '#fff', fontWeight: 800, fontSize: 17 },
   ok: { background: '#e6f6ec', color: '#0a5a2a', borderRadius: 10, padding: '10px 12px', fontSize: 15, fontWeight: 600 },
   err: { background: '#fde8e6', color: '#9b1c12', borderRadius: 10, padding: '10px 12px', fontSize: 15 },
+  link: { minHeight: 44, display: 'inline-flex', alignItems: 'center', fontWeight: 700, color: '#111' },
   row: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 15 },
 }

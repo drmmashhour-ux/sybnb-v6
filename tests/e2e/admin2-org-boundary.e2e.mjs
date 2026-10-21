@@ -16,7 +16,7 @@ const run = randomUUID().slice(0, 8)
 const p = db()
 const { t, summary } = makeRunner()
 
-// Organization A is the registry's oldest organization (what the rest of admin2 treats as "the" organization).
+// Organization A is simply the seeded organization; no admin2 module treats any organization as "the" organization any more (STEP 5I).
 const orgA = await p.organization.findFirst({ orderBy: { createdAt: 'asc' } })
 assert.ok(orgA, 'the test database must be seeded (node scripts/admin-foundation-seed.mjs)')
 // Organization B is created BEFORE the API starts so the API's registry sees it.

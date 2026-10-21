@@ -16,12 +16,14 @@ export const CRITICAL_SECURITY_RECIPIENTS = Object.freeze({
   description: 'Active holders of an Owner role plus active holders of security_event.review. Notification only; grants nothing.',
   // STEP 5H: for an event that belongs to an organization, only holders whose assignment is ORGANIZATION-scoped to THAT
   // organization are notified (an alert's title carries the event summary, so it must not reach another organization's staff).
-  // An unattributed event (organizationId null) keeps the previous, unscoped recipient list; see the 5H notes.
+  // STEP 5I: an UNATTRIBUTED event (organizationId null) has NO recipients. There is no global / unscoped fallback list: telling every
+  // tenant's Owners about an event that belongs to nobody would leak it across organizations. See UNATTRIBUTED_NOTIFICATION below.
   async resolve(client, { excludeUserId = null, now = approxNow(), organizationId = null } = {}) {
+    if (!organizationId) return []
     const rows = await client.roleAssignment.findMany({
       where: {
         status: 'ACTIVE', user: { status: 'ACTIVE' }, effectiveFrom: { lte: now }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: now } }],
-        ...(organizationId ? { scopes: { some: { kind: 'ORGANIZATION', organizationId } } } : {}),
+        scopes: { some: { kind: 'ORGANIZATION', organizationId } },
         roleVersion: { OR: [
           { permissions: { some: { permission: { code: SECURITY_REVIEW_PERMISSION } } } },
           { role: { code: { in: [...OWNER_NOTIFICATION_ROLE_CODES] } } },
@@ -32,6 +34,14 @@ export const CRITICAL_SECURITY_RECIPIENTS = Object.freeze({
     return [...new Set(rows.map((r) => r.userId))].filter((id) => id !== excludeUserId)
   },
 })
+
+/**
+ * What a CRITICAL event with no organization gets instead of a recipient list. The event itself IS persisted (the row is written first
+ * and never depends on delivery); it is flagged for a human operator and shown to nobody through an organization-scoped route.
+ * The operator channel is deliberately OUTSIDE admin2 / tenant scope (see docs/admin/STEP5I_MULTI_ORG_BOUNDARY.md): a database query
+ * by the platform operator, never a tenant notification.
+ */
+export const UNATTRIBUTED_NOTIFICATION = Object.freeze({ state: 'UNATTRIBUTED', action: 'MANUAL_OPERATOR_REVIEW', reason: 'NO_ORGANIZATION' })
 
 export const inAppTransport = {
   name: 'in_app',
@@ -63,6 +73,12 @@ let spCounter = 0
 export async function deliverSecurityNotifications(tx, event, { policy = CRITICAL_SECURITY_RECIPIENTS, excludeUserId = null } = {}) {
   const results = {}
   let recipients = []
+  if (!event.organizationId) {
+    results._notification = { ...UNATTRIBUTED_NOTIFICATION }
+    // Identifiers only: no summary or detail is written to a log that is not organization-scoped.
+    try { console.error(`[security] CRITICAL event ${event.id} (${event.eventType}) has no organization: manual operator review required`) } catch { /* logging must never fail the event */ }
+    return { recipients, results }
+  }
   try { recipients = await policy.resolve(tx, { excludeUserId, organizationId: event.organizationId ?? null }) } catch (e) { results._recipients = { error: String(e.message || e).slice(0, 200) } }
   for (const t of [...transports]) {
     const sp = `sec_notify_${++spCounter}`
@@ -100,6 +116,7 @@ export async function retryFailedDeliveries(client, { limit = 25 } = {}) {
         const claimed = await tx.$queryRaw`SELECT id::text FROM security_events WHERE id = ${id}::uuid FOR UPDATE SKIP LOCKED`
         if (!claimed.length) return 'SKIPPED'
         const ev = await tx.securityEvent.findUnique({ where: { id } })
+        if (!ev.organizationId) return 'SKIPPED' // unattributed: never re-sent, never given a recipient list
         const delivery = { ...(ev.delivery || {}) }
         const recipients = await CRITICAL_SECURITY_RECIPIENTS.resolve(tx, { excludeUserId: ev.subjectUserId ?? null, organizationId: ev.organizationId ?? null })
         let changed = false; let failing = 0

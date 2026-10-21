@@ -22,7 +22,7 @@ await t('G: transport failure never undoes a security action; it is recorded and
   let down = true; let sent = 0
   registerTransport({ name: 'sms_test', async deliver({ recipients }) { if (down) throw new Error('provider unavailable'); sent += 1; return { delivered: recipients.length } } })
   try {
-    const out = await suspendUser(p, { actorUserId: actor.id, targetUserId: target.id, reason: 'emergency during transport outage', kind: 'EMERGENCY' })
+    const out = await suspendUser(p, { actorUserId: actor.id, targetUserId: target.id, reason: 'emergency during transport outage', kind: 'EMERGENCY', organizationId: org.id })
     assert.equal((await p.user.findUnique({ where: { id: target.id } })).status, 'SUSPENDED', 'the action result is correct')
     const ev = await p.securityEvent.findUnique({ where: { id: out.securityEvent.id } })
     assert.equal(ev.severity, 'CRITICAL'); assert.ok(ev.delivery.sms_test.error.includes('provider unavailable')); assert.equal(ev.delivery.sms_test.attempts, 1)

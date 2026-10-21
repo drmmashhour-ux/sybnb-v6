@@ -11,9 +11,10 @@ services:
     plan: starter            # ~$7/mo; the free tier sleeps and is not suitable for an API.
     healthCheckPath: /api/health/ready
     # Migrations run as a pre-deploy step (never baked into the image). Requires DATABASE_URL.
-    # !! DEPLOYING THE step5-admin-foundation BRANCH (or any branch containing migration 082) TO A PRODUCTION-CONNECTED
-    # !! SERVICE WILL APPLY MIGRATION 082. The approval gate below stops the deploy BEFORE any schema change unless
-    # !! APPROVED_MIGRATIONS=082_security_foundation_closure is set on the service. See docs/admin/MIGRATION_082_RUNBOOK.md.
+    # !! DEPLOYING THE step5-admin-foundation BRANCH (or any branch containing migrations 078-083) TO A PRODUCTION-CONNECTED
+    # !! SERVICE WILL APPLY THEM. The approval gate below stops the deploy BEFORE any schema change unless
+    # !! APPROVED_MIGRATIONS=083_security_record_organization_boundary (the latest reviewed migration) is set on the service.
+    # !! See docs/admin/MIGRATION_082_RUNBOOK.md.
     preDeployCommand: "node server/lib/migration-gate.mjs && npx prisma migrate deploy"
     autoDeploy: false        # deploy on demand; flip to true to deploy on every push to the branch.
     envVars:

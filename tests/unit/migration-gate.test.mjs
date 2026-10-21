@@ -4,9 +4,10 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pendingGatedMigrations, bannerFor, runGate, GATED_MIGRATIONS } from '../../server/lib/migration-gate.mjs'
+import { pendingGatedMigrations, bannerFor, unreviewedBanner, reviewedChainLabel, runGate, GATED_MIGRATIONS } from '../../server/lib/migration-gate.mjs'
 
 const G = '082_security_foundation_closure'
+const L = '083_security_record_organization_boundary' // the latest reviewed migration
 const dir = (names) => { const d = mkdtempSync(join(tmpdir(), 'mig-')); for (const n of names) mkdirSync(join(d, n)); return d }
 const fakePrisma = ({ table = '_prisma_migrations', applied = [], fail = false } = {}) => () => {
   let calls = 0
@@ -17,8 +18,8 @@ const fakePrisma = ({ table = '_prisma_migrations', applied = [], fail = false }
 }
 const quiet = () => { const out = []; return { out, log: { log: (m) => out.push(m), error: (m) => out.push(m) } } }
 
-test('every Step 5 migration (078..082) is gated', () => {
-  for (const n of ['078_admin_foundation', '079_admin_modules', '080_session_mfa_method', '081_security_reconciliation', G]) assert.ok(Object.hasOwn(GATED_MIGRATIONS, n), n)
+test('every Step 5 migration (078..083) is gated', () => {
+  for (const n of ['078_admin_foundation', '079_admin_modules', '080_session_mfa_method', '081_security_reconciliation', G, L]) assert.ok(Object.hasOwn(GATED_MIGRATIONS, n), n)
   assert.equal(Object.hasOwn(GATED_MIGRATIONS, '077_driver_base'), false)
 })
 
@@ -44,6 +45,9 @@ test('pending gated migration without approval is blocked; with approval, or alr
 test('the banner names the migration, the consequence and the approval variable', () => {
   const b = bannerFor([G])
   assert.match(b, /WILL apply it/); assert.match(b, /every earlier gated/); assert.match(b, /APPROVED_MIGRATIONS=082_security_foundation_closure/); assert.match(b, /recovery point/)
+  // the banner for the whole pending chain names the LATEST reviewed migration (083), never the stale 082 example
+  const chain = bannerFor([G, L])
+  assert.match(chain, /APPROVED_MIGRATIONS=083_security_record_organization_boundary/); assert.doesNotMatch(chain, /APPROVED_MIGRATIONS=082/)
 })
 
 test('runGate: blocks (ok=false) when 082 is pending and unapproved, passes when approved or applied', async () => {
@@ -73,15 +77,41 @@ test('the gate is wired into BOTH deploy paths and the Docker image can run it',
 })
 
 test('an approval for the reviewed chain never authorizes an unrelated pending migration', async () => {
-  const chain = ['077_driver_base', '078_admin_foundation', '079_admin_modules', '080_session_mfa_method', '081_security_reconciliation', G]
-  const withFuture = [...chain, '083_something_new']
-  const r = pendingGatedMigrations({ dirNames: withFuture, appliedNames: ['077_driver_base'], approved: G })
-  assert.deepEqual(r.blocked, []); assert.deepEqual(r.unreviewed, ['083_something_new'])
+  const chain = ['077_driver_base', '078_admin_foundation', '079_admin_modules', '080_session_mfa_method', '081_security_reconciliation', G, L]
+  const withFuture = [...chain, '084_something_new']
+  const r = pendingGatedMigrations({ dirNames: withFuture, appliedNames: ['077_driver_base'], approved: L })
+  assert.deepEqual(r.blocked, []); assert.deepEqual(r.unreviewed, ['084_something_new'])
   const q = quiet()
-  const gate = await runGate({ env: { APPROVED_MIGRATIONS: G }, migrationsDir: dir(withFuture), prismaFactory: fakePrisma({ applied: ['077_driver_base'] }), log: q.log })
-  assert.equal(gate.ok, false); assert.match(q.out.join('\n'), /UNREVIEWED MIGRATIONS PENDING/); assert.match(q.out.join('\n'), /083_something_new/)
+  const gate = await runGate({ env: { APPROVED_MIGRATIONS: L }, migrationsDir: dir(withFuture), prismaFactory: fakePrisma({ applied: ['077_driver_base'] }), log: q.log })
+  assert.equal(gate.ok, false); assert.match(q.out.join('\n'), /UNREVIEWED MIGRATIONS PENDING/); assert.match(q.out.join('\n'), /084_something_new/)
+  assert.match(q.out.join('\n'), /reviewed Step 5 chain \(078-083\)/, 'the banner names the real reviewed chain')
   // once the chain is applied, a later migration is not the gate's business
   assert.equal((await runGate({ env: {}, migrationsDir: dir(withFuture), prismaFactory: fakePrisma({ applied: chain }), log: quiet().log })).ok, true)
-  // exactly the reviewed chain pending + approval => allowed
-  assert.equal((await runGate({ env: { APPROVED_MIGRATIONS: G }, migrationsDir: dir(chain), prismaFactory: fakePrisma({ applied: ['077_driver_base'] }), log: quiet().log })).ok, true)
+  // exactly the reviewed chain pending + approval of the LATEST migration => allowed
+  assert.equal((await runGate({ env: { APPROVED_MIGRATIONS: L }, migrationsDir: dir(chain), prismaFactory: fakePrisma({ applied: ['077_driver_base'] }), log: quiet().log })).ok, true)
+})
+
+test('APPROVED_MIGRATIONS=082 does NOT approve 083; =083 approves the reviewed 078-083 chain and nothing else', async () => {
+  const chain = ['077_driver_base', '078_admin_foundation', '079_admin_modules', '080_session_mfa_method', '081_security_reconciliation', G, L]
+  const stale = pendingGatedMigrations({ dirNames: chain, appliedNames: ['077_driver_base'], approved: G })
+  assert.deepEqual(stale.blocked, [L], '082 approves 078-082 only')
+  const q = quiet()
+  const blocked = await runGate({ env: { APPROVED_MIGRATIONS: G }, migrationsDir: dir(chain), prismaFactory: fakePrisma({ applied: ['077_driver_base'] }), log: q.log })
+  assert.equal(blocked.ok, false); assert.deepEqual(blocked.blocked, [L])
+  assert.match(q.out.join('\n'), /APPROVED_MIGRATIONS=083_security_record_organization_boundary/, 'the operator is told to approve 083')
+  const full = pendingGatedMigrations({ dirNames: chain, appliedNames: ['077_driver_base'], approved: L })
+  assert.deepEqual(full.blocked, []); assert.equal(full.pending.length, 6)
+  // 083 alone pending (078-082 already applied) is still gated
+  assert.deepEqual(pendingGatedMigrations({ dirNames: chain, appliedNames: chain.slice(0, 6), approved: '' }).blocked, [L])
+})
+
+test('operator-facing wording is derived from the gated list and carries no stale 082 chain', () => {
+  assert.equal(reviewedChainLabel(), '078-083')
+  assert.equal(reviewedChainLabel({ '078_a': 'x', '084_b': 'y' }), '078-084', 'grows with the list')
+  assert.match(unreviewedBanner(['084_x']), /\(078-083\)/)
+  const src = readFileSync(join(import.meta.dirname, '..', '..', 'server', 'lib', 'migration-gate.mjs'), 'utf8')
+  assert.doesNotMatch(src, /078.082|APPROVED_MIGRATIONS=082/, 'no stale chain or 082 approval example in the operator-facing text')
+  assert.match(src, /APPROVED_MIGRATIONS=083_security_record_organization_boundary/)
+  const render = readFileSync(join(import.meta.dirname, '..', '..', 'render.yaml'), 'utf8')
+  assert.doesNotMatch(render, /APPROVED_MIGRATIONS=082/)
 })

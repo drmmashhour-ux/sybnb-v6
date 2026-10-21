@@ -7,10 +7,10 @@ import { clockStatus } from '../../lib/authz/clock.mjs'
 import { storageStatus } from '../../lib/storage.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { badRequest, notFoundError, conflict } from './router.mjs'
-import { visibleScope, requireRecord, registryContext, validateEnum, cleanText, auditOrganizationId } from './scope.mjs'
+import { visibleScope, requireRecord, registryContext, validateEnum, cleanText, auditOrganizationId, requireGlobalView, requireGlobalWrite, auditGlobal } from './scope.mjs'
 import { authorizedPlatformsFor, heldCodes } from './core.mjs'
 import { loadSnapshot, decide } from '../../lib/authz/index.mjs'
-import { authorizedOrganizationIds, inOrganizations } from '../../lib/authz/org-boundary.mjs'
+import { authorizedOrganizationIds, inOrganizations, authorizedPlaces, scopesWithinPlaces } from '../../lib/authz/org-boundary.mjs'
 
 const PLATFORM_STATUSES = ['ACTIVE', 'SETUP', 'DEGRADED', 'DISABLED', 'NO_DATA']
 // Setting categories are a closed list. Security-category writes need the higher-tier security permission.
@@ -93,7 +93,7 @@ export function registerConfig(router) {
     if (status === p.status) throw badRequest('No change.', 'NO_CHANGE')
     await db().$transaction(async (tx) => {
       await tx.platform.update({ where: { id: p.id }, data: { status } })
-      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'platform.status_changed', entityType: 'platform', entityId: p.id, before: { status: p.status }, after: { status }, reason, platformCode: p.code, correlationId: r.requestId })
+      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(p.id), actorUserId: r.auth.user.id, action: 'platform.status_changed', entityType: 'platform', entityId: p.id, before: { status: p.status }, after: { status }, reason, platformCode: p.code, correlationId: r.requestId })
     })
     r.ok({ status })
   })
@@ -118,7 +118,7 @@ export function registerConfig(router) {
 
   // ---- Configuration + feature flags -----------------------------------------------------------------
   router.get('/config/settings', async (r) => {
-    await requireRecord(r, 'config.view', null, 'setting')
+    await requireGlobalView(r, 'config.view', 'setting')
     const rows = await db().adminSetting.findMany({ orderBy: [{ category: 'asc' }, { key: 'asc' }] })
     r.ok({ categories: SETTING_CATEGORIES, settings: rows.map((s) => ({ category: s.category, key: s.key, value: s.value, version: s.version, updatedAt: s.updatedAt, updatedById: s.updatedById })) })
   })
@@ -127,7 +127,7 @@ export function registerConfig(router) {
     const { category, key } = r.params
     if (!SETTING_CATEGORIES.includes(category)) throw badRequest('Unknown category.', 'CATEGORY_UNKNOWN')
     if (!/^[a-z][a-z0-9_.]{1,60}$/.test(key)) throw badRequest('Invalid key.', 'KEY_INVALID')
-    await requireRecord(r, category === 'security' ? 'security.manage' : 'config.manage', null, 'setting', `${category}.${key}`)
+    const orgIds = await requireGlobalWrite(r, category === 'security' ? 'security.manage' : 'config.manage', 'setting', `${category}.${key}`)
     const b = await r.body()
     const reason = cleanText(b?.reason, { min: 8, max: 300, name: 'Reason' })
     if (b?.value === undefined) throw badRequest('A value is required.', 'VALUE_REQUIRED')
@@ -138,21 +138,21 @@ export function registerConfig(router) {
       const s = existing
         ? await tx.adminSetting.update({ where: { id: existing.id }, data: { value: b.value, version: { increment: 1 }, updatedById: r.auth.user.id, updatedAt: new Date() } })
         : await tx.adminSetting.create({ data: { category, key, value: b.value, updatedById: r.auth.user.id } })
-      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'config.setting_changed', entityType: 'admin_setting', entityId: s.id, before: existing ? { value: existing.value, version: existing.version } : null, after: { category, key, value: b.value, version: s.version }, reason, correlationId: r.requestId })
+      await auditGlobal(tx, orgIds, { actorUserId: r.auth.user.id, action: 'config.setting_changed', entityType: 'admin_setting', entityId: s.id, before: existing ? { value: existing.value, version: existing.version } : null, after: { category, key, value: b.value, version: s.version }, reason, correlationId: r.requestId }, writeAdminAudit)
       return s
     })
     r.ok({ version: saved.version })
   })
 
   router.get('/config/feature-flags', async (r) => {
-    await requireRecord(r, 'config.view', null, 'feature_flag')
+    await requireGlobalView(r, 'config.view', 'feature_flag')
     const flags = await db().featureFlag.findMany({ orderBy: [{ key: 'asc' }, { scopeKind: 'asc' }] })
     // Flags control visibility/rollout only. They are never consulted for authorization decisions.
     r.ok({ note: 'Feature flags never grant access.', flags: flags.map((f) => ({ key: f.key, scopeKind: f.scopeKind, scopeRef: f.scopeRef, enabled: f.enabled, description: f.description, updatedAt: f.updatedAt })) })
   })
 
   router.put('/config/feature-flags', async (r) => {
-    await requireRecord(r, 'config.manage', null, 'feature_flag')
+    const orgIds = await requireGlobalWrite(r, 'config.manage', 'feature_flag')
     const b = await r.body()
     const key = String(b?.key ?? ''); if (!/^[a-z][a-z0-9_.]{1,60}$/.test(key)) throw badRequest('Invalid key.', 'KEY_INVALID')
     const scopeKind = validateEnum(String(b?.scopeKind ?? 'ORGANIZATION'), ['ORGANIZATION', 'LEGAL_ENTITY', 'PLATFORM'], 'scopeKind')
@@ -163,7 +163,7 @@ export function registerConfig(router) {
     const prev = await db().featureFlag.findUnique({ where })
     const saved = await db().$transaction(async (tx) => {
       const f = prev ? await tx.featureFlag.update({ where, data: { enabled: b.enabled, updatedById: r.auth.user.id, updatedAt: new Date() } }) : await tx.featureFlag.create({ data: { key, scopeKind, scopeRef, enabled: b.enabled, description: b?.description ? String(b.description).slice(0, 200) : null, updatedById: r.auth.user.id } })
-      await writeAdminAudit(tx, { organizationId: await auditOrganizationId(), actorUserId: r.auth.user.id, action: 'config.feature_flag_changed', entityType: 'feature_flag', entityId: f.id, before: prev ? { enabled: prev.enabled } : null, after: { key, scopeKind, scopeRef, enabled: b.enabled }, reason, correlationId: r.requestId })
+      await auditGlobal(tx, orgIds, { actorUserId: r.auth.user.id, action: 'config.feature_flag_changed', entityType: 'feature_flag', entityId: f.id, before: prev ? { enabled: prev.enabled } : null, after: { key, scopeKind, scopeRef, enabled: b.enabled }, reason, correlationId: r.requestId }, writeAdminAudit)
       return f
     })
     r.ok({ enabled: saved.enabled })
@@ -187,9 +187,11 @@ export function registerConfig(router) {
     const snap = await loadSnapshot(r.auth)
     const held = await heldCodes(snap, { id: r.auth.user.id, status: r.auth.user.status })
     if (held.has('user.view')) {
-      await requireRecord(r, 'user.view', null, 'admin_user')
-        .then(async () => { out.users = (await db().user.findMany({ where: { AND: [{ OR: [{ roleAssignments: { some: {} } }, { roles: { some: { role: { in: ['ADMIN', 'SUPPORT'] } } } }] }, { OR: [ci('displayName'), ci('email')] }] }, take: 5, select: { id: true, displayName: true, email: true } })).map((x) => ({ id: x.id, title: x.displayName, subtitle: x.email, route: `/admin/users?open=${x.id}` })) })
-        .catch((e) => { if (e.statusCode !== 403) throw e })
+      try {
+        const { places } = await authorizedPlaces(r, { loadSnapshot, decide }, 'user.view', 'admin_user')
+        const { orgIndex } = await registryContext()
+        out.users = (await db().user.findMany({ where: { AND: [{ roleAssignments: { some: { scopes: scopesWithinPlaces(orgIndex, places) } } }, { OR: [ci('displayName'), ci('email')] }] }, take: 5, select: { id: true, displayName: true, email: true } })).map((x) => ({ id: x.id, title: x.displayName, subtitle: x.email, route: `/admin/users?open=${x.id}` }))
+      } catch (e) { if (e.statusCode !== 403) throw e }
     }
     r.ok({ query: q, results: Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) })
   })

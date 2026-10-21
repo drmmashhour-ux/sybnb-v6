@@ -1,7 +1,9 @@
 // STEP 5E -- migration approval gate. Run BEFORE `prisma migrate deploy` (Render preDeployCommand and `npm run
 // start:render`). Migrations listed in GATED_MIGRATIONS change security-critical schema permanently, so they are
 // applied only when an operator has explicitly approved them for THIS environment:
-//     APPROVED_MIGRATIONS=082_security_foundation_closure   (approves it and every earlier pending gated one)
+//     APPROVED_MIGRATIONS=083_security_record_organization_boundary   (the LATEST reviewed migration: approves it and every earlier pending gated one)
+// The wording below is derived from GATED_MIGRATIONS, so it cannot go stale when the reviewed chain grows. An approval naming an EARLIER
+// migration (for example 082) does not approve a later one (083); a pending migration that is not in GATED_MIGRATIONS blocks the deploy.
 // If a gated migration is pending and not approved, the gate prints a banner and exits 1, so the deploy stops
 // BEFORE any schema change. When nothing gated is pending (or it is approved) the gate exits 0 and is invisible.
 // The gate only reads (_prisma_migrations); it never changes the database. No new infrastructure is involved.
@@ -20,7 +22,7 @@ export const GATED_MIGRATIONS = Object.freeze({
 })
 
 /**
- * Approval is "through" (and limited to the reviewed chain: any other pending migration stops the deploy): APPROVED_MIGRATIONS=082_security_foundation_closure approves 082 AND every earlier gated
+ * Approval is "through" (and limited to the reviewed chain: any other pending migration stops the deploy): APPROVED_MIGRATIONS=<latest reviewed migration> (today 083_security_record_organization_boundary) approves it AND every earlier gated
  * migration that is still pending (they are applied together, in order, by one `migrate deploy`).
  */
 export function pendingGatedMigrations({ dirNames, appliedNames, approved = '', gated = GATED_MIGRATIONS }) {
@@ -28,15 +30,22 @@ export function pendingGatedMigrations({ dirNames, appliedNames, approved = '', 
   const approvals = String(approved).split(',').map((s) => s.trim()).filter(Boolean)
   const pending = dirNames.filter((n) => !applied.has(n) && Object.hasOwn(gated, n))
   // Reviewed-chain rule: the approval covers EXACTLY the reviewed chain. If a gated migration is pending, any OTHER
-  // pending migration (e.g. a future 083 nobody reviewed here) is "unreviewed" and stops the deploy even when the
-  // approval variable is set, so an approval meant for 078-082 can never authorize an unrelated migration.
+  // pending migration (e.g. a future 084 nobody reviewed here) is "unreviewed" and stops the deploy even when the
+  // approval variable is set, so an approval meant for the reviewed chain can never authorize an unrelated migration.
   const unreviewed = pending.length ? dirNames.filter((n) => !applied.has(n) && !Object.hasOwn(gated, n)) : []
   return { pending, blocked: pending.filter((n) => !approvals.some((a) => Object.hasOwn(gated, a) && n <= a)), unreviewed }
 }
 
-export function unreviewedBanner(unreviewed) {
+/** "078-083": the reviewed chain, derived from the gated list (never hand-written). */
+export function reviewedChainLabel(gated = GATED_MIGRATIONS) {
+  const names = Object.keys(gated).sort()
+  const num = (n) => n.split('_')[0]
+  return names.length ? `${num(names[0])}-${num(names[names.length - 1])}` : 'none'
+}
+
+export function unreviewedBanner(unreviewed, gated = GATED_MIGRATIONS) {
   return ['', '==================== UNREVIEWED MIGRATIONS PENDING ====================',
-    'The approval covers only the reviewed Step 5 chain (078-082). These other migrations are also pending:',
+    `The approval covers only the reviewed Step 5 chain (${reviewedChainLabel(gated)}). These other migrations are also pending:`,
     ...unreviewed.map((n) => `  - ${n}`),
     'Nothing has been changed. Review and add them to GATED_MIGRATIONS (or apply them separately first), then deploy again.',
     '=======================================================================', ''].join('\n')

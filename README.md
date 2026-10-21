@@ -1,4 +1,4 @@
-> **WARNING (branch `step5-admin-foundation`): deploying this code to a production-connected Render service WILL apply migrations 078-082 (admin security foundation). A migration approval gate stops the deploy unless `APPROVED_MIGRATIONS=082_security_foundation_closure` is set. Read `docs/admin/MIGRATION_082_RUNBOOK.md` first.**
+> **WARNING (branch `step5-admin-foundation`): deploying this code to a production-connected Render service WILL apply migrations 078-083 (admin security foundation + organization boundary). A migration approval gate stops the deploy unless `APPROVED_MIGRATIONS=083_security_record_organization_boundary` is set. Read `docs/admin/MIGRATION_082_RUNBOOK.md` first.**
 
 # SYBNB V6 Clean Build
 

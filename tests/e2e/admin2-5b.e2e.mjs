@@ -116,7 +116,7 @@ await t('notifications: a failing transport never blocks or loses the security e
   registerTransport({ name: 'test_fail', async deliver() { throw new Error('smtp down') } })
   registerTransport({ name: 'test_record', async deliver({ event, recipients }) { seen.push([event.id, recipients.length]); return { delivered: recipients.length } } })
   try {
-    const ev = await p.$transaction((tx) => recordSecurityEvent(tx, { severity: 'CRITICAL', eventType: 'TEST_TRANSPORT', summary: 'transport failure test' }), { timeout: 30_000, maxWait: 10_000 })
+    const ev = await p.$transaction((tx) => recordSecurityEvent(tx, { severity: 'CRITICAL', eventType: 'TEST_TRANSPORT', summary: 'transport failure test', organizationId: orgA.id }), { timeout: 30_000, maxWait: 10_000 })
     const row = await p.securityEvent.findUnique({ where: { id: ev.id } })
     assert.ok(row, 'event persisted'); assert.ok(row.delivery.test_fail.error.includes('smtp down'))
     assert.ok(row.delivery.in_app.delivered >= 1, 'in-app unaffected by the failing transport')
@@ -129,7 +129,7 @@ await t('notifications: a failing transport never blocks or loses the security e
 
 await t('notification policy grants nothing: an Owner-role recipient still lacks security_event.review if the version lacks it', async () => {
   const v1owner = await mkUser('v1only'); await assignRoleVersion(v1owner, 'OWNER', 1, scope(orgA))
-  await p.$transaction((tx) => recordSecurityEvent(tx, { severity: 'CRITICAL', eventType: 'TEST_POLICY', summary: 'policy test' }))
+  await p.$transaction((tx) => recordSecurityEvent(tx, { severity: 'CRITICAL', eventType: 'TEST_POLICY', summary: 'policy test', organizationId: orgA.id }))
   assert.ok(await p.adminNotification.findFirst({ where: { userId: v1owner.id, type: 'SECURITY', title: { contains: 'policy test' } } }), 'v1 Owner is named by the policy and is notified')
   const held = await permissionSummary({ user: { id: v1owner.id, status: 'ACTIVE' } }, ['security_event.review'])
   assert.equal(held['security_event.review'], false, 'being notified does not confer permission')

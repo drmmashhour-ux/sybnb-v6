@@ -532,13 +532,14 @@ test('verifyEvidenceChainForOrganization: org-only rows, linkage by hash and seq
   assert.equal(bad.ok, false)
 })
 
-test('notifications: a CRITICAL event of an organization alerts only that organization\'s holders; an unattributed event keeps the previous list', async () => {
+test('notifications: a CRITICAL event of an organization alerts only that organization\'s holders; an unattributed event has NO recipients (5I: no global fallback)', async () => {
   const seen = []
   const client = { roleAssignment: { findMany: async (args) => { seen.push(args.where); return [{ userId: 'u1' }] } } }
-  await CRITICAL_SECURITY_RECIPIENTS.resolve(client, { organizationId: A })
-  await CRITICAL_SECURITY_RECIPIENTS.resolve(client, {})
+  assert.deepEqual(await CRITICAL_SECURITY_RECIPIENTS.resolve(client, { organizationId: A }), ['u1'])
+  assert.deepEqual(await CRITICAL_SECURITY_RECIPIENTS.resolve(client, {}), [], 'no organization -> nobody')
+  assert.deepEqual(await CRITICAL_SECURITY_RECIPIENTS.resolve(client, { organizationId: null }), [])
+  assert.equal(seen.length, 1, 'the unattributed resolve never even queries recipients')
   assert.deepEqual(seen[0].scopes, { some: { kind: 'ORGANIZATION', organizationId: A } })
-  assert.equal('scopes' in seen[1], false)
 })
 
 // ---------------------------------------------------------------------------------------------------------------------

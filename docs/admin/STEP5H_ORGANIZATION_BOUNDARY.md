@@ -14,7 +14,7 @@ organization for every authorization decision while the security-event, audit an
 | Routes (`security.mjs`) | Every endpoint asks the **central evaluator** at which organizations the caller holds the permission (`org-boundary.mjs`: the caller's own ORGANIZATION-scoped assignments, each re-decided by `decide()`), then restricts the query to `organizationId IN (...)`. Single records are looked up only inside those organizations (anything else: plain 404) and re-authorized at the record's own organization. The organization is never read from the request. |
 | Evidence verify | `verifyEvidenceChainForOrganization`: recomputes only the caller's rows and checks linkage by hash/sequence without reading other rows' content. `verifyEvidenceChain` (global) is unchanged for operators/tests. |
 | Overview / privileged users | Counts and lists are restricted to staff whose assignments sit inside the caller's organizations. |
-| Notifications | A CRITICAL event of an organization alerts only holders ORGANIZATION-scoped to it. |
+| Notifications | A CRITICAL event of an organization alerts only holders ORGANIZATION-scoped to it. An unattributed one alerts nobody (STEP 5I). |
 
 ## Fail-closed rules
 
@@ -35,13 +35,15 @@ organization for every authorization decision while the security-event, audit an
 * Deploy ordering: both deploy paths (`start:render`, Render `preDeployCommand`) run `migration-gate.mjs` and `prisma migrate deploy` before the server starts, so 083 is applied (once approved) before code that writes `organization_id` runs. Any other host that starts the server without that step must apply 083 first.
 * Not changed: the legacy `server/routes/admin.mjs` audit reads (global ADMIN console), outside the admin2 organization model.
 
-## Known limits / follow-ups (not part of this fix)
+## Known limits / follow-ups (status after STEP 5I)
 
 * ~60 audit writers outside `admin2`/`authz` (legacy `server/routes/admin.mjs`, host, bookings, SR rides, ...) still write
   unattributed rows, so those rows are not shown in the organization-scoped Audit Center until a decision is made which
-  organization they belong to.
-* `access.mjs`, `scope.mjs` (`recordFacts`) and the records/work/config modules still authorize against the oldest organization.
-  Their audit rows are attributed to that same organization, so attribution and authorization agree, but they are not yet multi-organization.
-* An unattributed CRITICAL event still notifies the previous (unscoped) recipient list.
+  organization they belong to. **Still open.**
+* ~~`access.mjs`, `scope.mjs` (`recordFacts`) and the records/work/config modules still authorize against the oldest organization.~~
+  **Fixed in STEP 5I** -- see `docs/admin/STEP5I_MULTI_ORG_BOUNDARY.md`.
+* ~~An unattributed CRITICAL event still notifies the previous (unscoped) recipient list.~~ **Fixed in STEP 5I**: no organization, no recipients; the event is kept and flagged `UNATTRIBUTED / MANUAL_OPERATOR_REVIEW`.
 * Tests: `tests/unit/security-org-boundary.test.mjs` runs the real route handlers and the real evaluator against an in-memory
-  Prisma fake. The DB-backed e2e suites (`tests/e2e/admin2-*.e2e.mjs`) need migration 083 on a TEST database and were not run.
+  Prisma fake. The DB-backed two-organization suite `tests/e2e/admin2-org-boundary.e2e.mjs` **was run against a throwaway database
+  migrated through 083 and passes 9/9** (re-run in STEP 5I: 9/9). STEP 5I adds `tests/e2e/admin2-org-boundary-p2.e2e.mjs` (12/12) and
+  `tests/e2e/migration-083-guards.e2e.mjs` (4/4).

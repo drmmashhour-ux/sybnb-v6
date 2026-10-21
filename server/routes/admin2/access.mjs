@@ -3,15 +3,14 @@
 import { db } from '../../lib/prisma.mjs'
 import { dbNow, approxNow } from '../../lib/authz/clock.mjs'
 import { loadSnapshot } from '../../lib/authz/index.mjs'
-import { holdsPermissionAnywhere } from '../../lib/authz/evaluate.mjs'
+import { loadPermission } from '../../lib/authz/loader.mjs'
 import { writeAdminAudit } from '../../lib/authz/audit.mjs'
 import { roleVersionContentHash } from '../../lib/authz/catalogue.mjs'
 import { badRequest, notFoundError, conflict, pageParams, sortParam, pageResult } from './router.mjs'
 import { heldCodes } from './core.mjs'
 import {
   authError, authorizedOrganizationIds, inOrganizations, authorizedPlaces, requireAtPlaces, requireAtOrganizations, placesOfSubject, placeOfScopeRow, placeWithin,
-  subjectTouches, scopesWithinPlaces, expandPlaces, factsOfPlace, organizationLevelIds, soleOrganizationId,
-} from '../../lib/authz/org-boundary.mjs'
+  subjectTouches, scopesWithinPlaces, expandPlaces, factsOfPlace, organizationLevelIds, soleOrganizationId, callerHoldsPermissionAt } from '../../lib/authz/org-boundary.mjs'
 import { registryContext } from './scope.mjs'
 import { decide } from '../../lib/authz/index.mjs'
 import { suspendUser, reactivateUser } from '../../lib/authz/emergency.mjs'
@@ -139,18 +138,32 @@ function assignmentView(a) {
 }
 const ASSIGNMENT_INCLUDE = { user: { select: { id: true, displayName: true, email: true } }, scopes: true, roleVersion: { include: { role: true } } }
 
-// Protects against locking the company out: the last ACTIVE assignment of a role that holds
-// iam.role_assignment.assign + iam.role.manage cannot be revoked/suspended away.
-async function isLastAccessAdmin(tx, assignmentId) {
-  const holders = await tx.roleAssignment.findMany({
-    where: { status: { in: ['ACTIVE', 'PENDING_ACTIVATION'] }, roleVersion: { permissions: { some: { permission: { code: 'access.assign' } } } }, user: { status: 'ACTIVE' } },
-    select: { id: true, userId: true },
-  })
-  return holders.length > 0 && holders.every((h) => h.id === assignmentId)
+// Protects against locking an ORGANIZATION out (STEP 5J): the assignment being revoked may not be the last ACTIVE access administrator
+// (a holder of access.assign) of any organization it sits in. Other organizations' administrators never count for this one.
+// Holders are counted with any scope inside the organization (organization, legal entity, business unit or platform).
+async function isLastAccessAdmin(tx, a) {
+  const holds = { roleVersion: { permissions: { some: { permission: { code: 'access.assign' } } } } }
+  if (await tx.roleAssignment.count({ where: { id: a.id, ...holds } }) === 0) return false // not an access administrator at all
+  const { orgIndex } = await registryContext()
+  const base = { id: { not: a.id }, status: { in: ['ACTIVE', 'PENDING_ACTIVATION'] }, ...holds, user: { status: 'ACTIVE' } }
+  const orgIds = organizationsOfPlaces(placesOfSubject(orgIndex, a.scopes ?? [], { hasAssignments: true }))
+  if (!orgIds.length) return (await tx.roleAssignment.count({ where: base })) === 0 // cannot be placed: fall back to the global rule
+  for (const organizationId of orgIds) {
+    if (await tx.roleAssignment.count({ where: { ...base, scopes: scopesWithinPlaces(orgIndex, [{ organizationId }]) } }) === 0) return true
+  }
+  return false
 }
 
 async function userRow(u) {
   return { id: u.id, displayName: u.displayName, email: u.email, status: u.status, createdAt: u.createdAt }
+}
+
+// The facts of one scope being granted (its own place from the registry tree; unplaceable scopes only inside a SOLE organization). null = refuse.
+function scopeAuthFacts(orgIndex, sole, sc) {
+  const place = placeOfScopeRow(orgIndex, sc.row)
+  const organizationId = place ? null : (sc.organizationId ?? sole)
+  if (!place && !organizationId) return null
+  return { ...factsForScope(sc.facts), ...(place ? factsOfPlace(place) : { organizationId }) }
 }
 
 export function registerAccess(router) {
@@ -174,13 +187,14 @@ export function registerAccess(router) {
     const orderBy = sortParam(r.query, ['displayName', 'email', 'createdAt', 'status'], { createdAt: 'desc' })
     const [total, rows] = await Promise.all([
       db().user.count({ where }),
-      db().user.findMany({ where, orderBy, skip: p.skip, take: p.take, include: { roleAssignments: { where: { status: { in: ['ACTIVE', 'PENDING_APPROVAL'] } }, include: { roleVersion: { include: { role: true } } } }, roles: true } }),
+      db().user.findMany({ where, orderBy, skip: p.skip, take: p.take, include: { roleAssignments: { where: { status: { in: ['ACTIVE', 'PENDING_APPROVAL'] } }, include: { roleVersion: { include: { role: true } }, scopes: true } }, roles: true } }),
     ])
     const lastSessions = await db().userSession.groupBy({ by: ['userId'], where: { userId: { in: rows.map((u) => u.id) } }, _max: { issuedAt: true } })
     const lastBy = new Map(lastSessions.map((s) => [s.userId, s._max.issuedAt]))
     r.ok(pageResult(rows.map((u) => ({
       ...(u && { id: u.id, displayName: u.displayName, email: u.email, status: u.status }),
-      roles: u.roleAssignments.map((a) => ({ assignmentId: a.id, code: a.roleVersion.role.code, name: a.roleVersion.role.name, status: a.status })),
+      // Only the grants inside the caller's places: another organization's role assignments stay private.
+      roles: u.roleAssignments.filter((a) => subjectTouches(placesOfSubject(orgIndex, a.scopes ?? [], { hasAssignments: true }), places)).map((a) => ({ assignmentId: a.id, code: a.roleVersion.role.code, name: a.roleVersion.role.name, status: a.status })),
       legacyRoles: u.roles.map((x) => x.role),
       lastSignInAt: lastBy.get(u.id) ?? null,
     })), total, p))
@@ -266,10 +280,9 @@ export function registerAccess(router) {
     const { orgIndex } = await registryContext()
     const sole = soleOrganizationId(orgIndex)
     for (const sc of scopes) {
-      const place = placeOfScopeRow(orgIndex, sc.row)
-      const organizationId = place ? null : (sc.organizationId ?? sole)
-      if (!place && !organizationId) throw authError(403, 'PERMISSION_DENIED', 'You do not have permission to do this.')
-      await r.require(permission, { type: 'role_assignment', ...extra, facts: { ...factsForScope(sc.facts), ...(place ? factsOfPlace(place) : { organizationId }), subjectUserId: target.id } }, options)
+      const facts = scopeAuthFacts(orgIndex, sole, sc)
+      if (!facts) throw authError(403, 'PERMISSION_DENIED', 'You do not have permission to do this.')
+      await r.require(permission, { type: 'role_assignment', ...extra, facts: { ...facts, subjectUserId: target.id } }, options)
     }
   }
 
@@ -291,11 +304,18 @@ export function registerAccess(router) {
     }
     // 1) The grantor must be authorized to assign at EVERY scope being granted (tier 4: step-up + evidence).
     await authorizeScopes(r, 'access.assign', scopes, target)
-    // 2) Anti-escalation: the grantor must themselves hold every permission in the version.
+    // 2) Anti-escalation (STEP 5J): the grantor must hold EVERY permission of the version AT EACH PLACE the grant lands (the same central
+    //    evaluator, read-only). Holding a permission in another organization (or another legal entity / platform) never justifies granting it here.
     const snap = await loadSnapshot(r.auth)
-    for (const rp of version.permissions) {
-      const ok = holdsPermissionAnywhere({ user: { id: r.auth.user.id, status: r.auth.user.status }, permission: { code: rp.permission.code, deprecated: rp.permission.deprecated }, assignments: snap.assignments, suspensions: snap.suspensions, now: snap.now })
-      if (!ok) throw badRequest('You cannot grant a role containing permissions you do not hold yourself.', 'ESCALATION_FORBIDDEN')
+    const { orgIndex: grantIndex } = await registryContext()
+    const sole = soleOrganizationId(grantIndex)
+    const needed = await Promise.all(version.permissions.map((rp) => loadPermission(db(), rp.permission.code)))
+    for (const sc of scopes) {
+      const facts = scopeAuthFacts(grantIndex, sole, sc)
+      if (!facts) throw authError(403, 'PERMISSION_DENIED', 'You do not have permission to do this.')
+      for (const permission of needed) {
+        if (!callerHoldsPermissionAt(snap, r.auth, permission, facts)) throw badRequest('You cannot grant a role containing permissions you do not hold yourself at this place.', 'ESCALATION_FORBIDDEN')
+      }
     }
     const out = await createAssignment(db(), { actorUserId: r.auth.user.id, targetUserId: target.id, roleVersionId: version.id, scopeRows: scopes.map((s) => s.row), effectiveTo, isTemporary: Boolean(body?.isTemporary), reason, requestId: r.requestId })
     r.ok({ assignment: assignmentView(out.assignment), needsSecondApproval: out.highRisk, highRiskPermissions: out.highRiskPermissions }, 201)
@@ -343,7 +363,7 @@ export function registerAccess(router) {
     needReason(body)
     if (a.userId === r.auth.user.id) throw badRequest('You cannot revoke your own access.', 'SELF_ACTION_FORBIDDEN')
     await requireOnAssignment(r, 'access.assign', a)
-    if (['ACTIVE', 'PENDING_ACTIVATION'].includes(a.status) && await isLastAccessAdmin(db(), a.id)) throw conflict('This is the last active access administrator assignment; it cannot be revoked.', 'LAST_ACCESS_ADMIN')
+    if (['ACTIVE', 'PENDING_ACTIVATION'].includes(a.status) && await isLastAccessAdmin(db(), a)) throw conflict('This is the last active access administrator assignment; it cannot be revoked.', 'LAST_ACCESS_ADMIN')
     r.ok(await revokeAssignment(db(), { actorUserId: r.auth.user.id, assignmentId: a.id, reason: body.reason, requestId: r.requestId }))
   })
 

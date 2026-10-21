@@ -47,3 +47,11 @@ organization for every authorization decision while the security-event, audit an
   Prisma fake. The DB-backed two-organization suite `tests/e2e/admin2-org-boundary.e2e.mjs` **was run against a throwaway database
   migrated through 083 and passes 9/9** (re-run in STEP 5I: 9/9). STEP 5I adds `tests/e2e/admin2-org-boundary-p2.e2e.mjs` (12/12) and
   `tests/e2e/migration-083-guards.e2e.mjs` (4/4).
+
+## STEP 5K — grant escalation, last access administrator, Command Center (follow-up to review of cb05a4f)
+
+- **Anti-escalation is evaluated at the destination place.** Granting a role requires the caller to hold every permission of that role at each scope being granted (central evaluator, `callerHoldsPermissionAt`); holding it in another organization no longer counts.
+- **Last access administrator is per organization.** Revoking an `access.assign` assignment is refused if any organization it sits in would be left without another active holder inside that organization.
+- **Command Center** tile `pendingAccessApprovals`, and the roles shown in the users list, are restricted to the caller's authorized places.
+- **Sole-organization precondition.** Legacy accounts and records that carry no platform/organization attribution are only authorizable while the registry has exactly ONE organization. Creating a second organization makes them unattributed (invisible, fail closed) until `scripts/admin-attribute-legacy-records.mjs` has attributed them. Do not create a second organization in production before that has been reviewed.
+- Tests: `tests/unit/org-boundary-grants.test.mjs`, `tests/e2e/admin2-org-boundary-p3.e2e.mjs` (throwaway database only; creates an organization that cannot be deleted).

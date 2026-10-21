@@ -10,7 +10,7 @@
 //   * the caller's own ORGANIZATION-scoped assignments (candidate organizations), each then re-decided centrally, or
 //   * the stored row itself (organizationId written at write time).
 
-import { resolveChain } from './evaluate.mjs'
+import { resolveChain, evaluateAccess } from './evaluate.mjs'
 
 export function authError(statusCode, code, message, extra = {}) {
   const error = new Error(message)
@@ -328,4 +328,20 @@ export async function requireAtPlaces(r, code, places, build, options = {}) {
   if (!places?.length) throw DENIED()
   for (const place of places) await r.require(code, build(factsOfPlace(place), place), options)
   return places
+}
+
+/**
+ * STEP 5J -- does the CALLER hold `permission` (a loaded definition: { code, tier, highRisk, deprecated, noSelf }) at the place described by
+ * `facts`? This is the central evaluator (evaluateAccess), evaluated read-only: no evidence is written and no request is decided.
+ * A stale session (STEP_UP_REQUIRED) still counts as HOLDING it: freshness is enforced where the grant itself is authorized.
+ * Used for anti-escalation: a grantor may hand out only what they hold AT THE PLACE the grant lands, never what they hold elsewhere.
+ */
+export function callerHoldsPermissionAt(snap, ctx, permission, facts) {
+  if (!permission) return false
+  const res = evaluateAccess({
+    user: { id: ctx.user.id, status: ctx.user.status }, permission, assignments: snap.assignments, suspensions: snap.suspensions,
+    resource: { type: 'role_assignment', facts }, orgIndex: snap.orgIndex, policy: snap.policy,
+    context: { now: snap.now, timeTrusted: snap.timeTrusted, session: { recentAuthAt: snap.auth?.recentAuthAt } },
+  })
+  return res.decision === 'ALLOW' || res.reason === 'STEP_UP_REQUIRED'
 }

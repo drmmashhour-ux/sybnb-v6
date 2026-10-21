@@ -46,7 +46,14 @@ export function registerConfig(router) {
     tiles.openSupportCases = await scoped('support.view', 'supportCase', { status: { in: ['OPEN', 'PENDING_INTERNAL'] } })
     const snap = await loadSnapshot(r.auth)
     const held = await heldCodes(snap, { id: r.auth.user.id, status: r.auth.user.status })
-    if (held.has('access.view')) tiles.pendingAccessApprovals = await db().roleAssignment.count({ where: { status: 'PENDING_APPROVAL' } })
+    if (held.has('access.view')) {
+      // Only assignments inside the places the central evaluator allows access.view at (never other organizations' pending approvals).
+      try {
+        const { places } = await authorizedPlaces(r, { loadSnapshot, decide }, 'access.view', 'role_assignment')
+        const { orgIndex } = await registryContext()
+        tiles.pendingAccessApprovals = await db().roleAssignment.count({ where: { status: 'PENDING_APPROVAL', scopes: scopesWithinPlaces(orgIndex, places) } })
+      } catch (e) { if (e.statusCode !== 403) throw e }
+    }
     if (held.has('security_event.view')) {
       // Organization-bound like /security/overview: only organizations where the caller is centrally allowed; else no tile.
       try {

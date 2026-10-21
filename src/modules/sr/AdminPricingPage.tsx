@@ -71,6 +71,9 @@ const copy = {
   fr: { title: 'Tarifs — SR Ride', subtitle: 'Tous les chiffres de tarification. Changez un chiffre, voyez les prix, puis enregistrez avec un motif.', mode: 'Mode de tarification', formula: 'Formule de coût', manual: 'Tarifs manuels', loadRec: 'Charger la formule recommandée', loadSaved: 'Revenir à l’enregistré', rates: 'Tarifs obtenus', cls: 'Classe', base: 'Prise en charge', perKm: 'Par km', perKmLong: 'Par km (long)', perMin: 'Par minute', min: 'Minimum', examples: 'Exemples (midi, jour normal)', reason: 'Motif du changement (journalisé)', save: 'Enregistrer', saving: 'Enregistrement...', saved: 'Enregistré. Les nouveaux prix sont actifs en quelques secondes.', notStored: 'Rien d’enregistré : les anciens prix fixes tournent.', stored: 'Version enregistrée', back: 'Retour', loading: 'Chargement...', cost: 'Coût du véhicule par km', paidKm: 'par km payé', driverMin: 'Chauffeur par minute' },
 }
 
+// Render-style variable name, e.g. COSTS_FUEL_PRICE_USD_PER_L.
+const varName = (f: Field) => `${f.group}_${f.key}`.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase()
+
 const usd = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
 
 export function AdminPricingPage({ lang }: Props) {
@@ -84,6 +87,7 @@ export function AdminPricingPage({ lang }: Props) {
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const seq = useRef(0)
+  const [filter, setFilter] = useState('')
 
   useEffect(() => {
     fetchSrPricing()
@@ -157,27 +161,38 @@ export function AdminPricingPage({ lang }: Props) {
         </div>
       </section>
 
-      {GROUPS.map((g) => (
-        <section key={g.id} style={S.card}>
-          <strong>{en(g.ar, g.en)}</strong>
-          <span style={S.hint}>{en(g.hintAr, g.hintEn)}</span>
-          <div style={S.fields}>
-            {FIELDS.filter((f) => f.group === g.id).map((f) => {
-              const range = limits?.[f.group]?.[f.key]
-              return (
-                <label key={f.key} style={S.field}>
-                  <span>{en(f.ar, f.en)}</span>
-                  <span style={S.inputWrap}>
-                    <input type="number" inputMode="decimal" step={f.step ?? 1} min={range?.[0]} max={range?.[1]} dir="ltr" style={S.input}
-                      value={draft[f.group][f.key] ?? ''} onChange={(e) => setValue(f.group, f.key, e.target.value)} />
-                    <small dir="ltr" style={S.unit}>{f.unit}</small>
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-        </section>
-      ))}
+      <input style={{ ...S.input, width: '100%', flex: 'none' }} dir="ltr" placeholder="Search variables… / ابحث…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+
+      {GROUPS.map((g) => {
+        const rows = FIELDS.filter((f) => f.group === g.id && (!filter.trim() || `${varName(f)} ${f.en} ${f.ar}`.toLowerCase().includes(filter.trim().toLowerCase())))
+        if (!rows.length) return null
+        return (
+          <section key={g.id} style={S.card}>
+            <strong>{en(g.ar, g.en)}</strong>
+            <span style={S.hint}>{en(g.hintAr, g.hintEn)}</span>
+            <div style={S.vars}>
+              {rows.map((f) => {
+                const range = limits?.[f.group]?.[f.key]
+                const saved = view.config[f.group][f.key]
+                const changed = draft[f.group][f.key] !== saved
+                return (
+                  <div key={f.key} style={{ ...S.varRow, ...(changed ? S.varChanged : null) }}>
+                    <div style={S.varName}>
+                      <code dir="ltr" style={S.code}>{varName(f)}</code>
+                      <small style={S.hint}>{en(f.ar, f.en)}{range ? ` · ${range[0]}–${range[1]}` : ''}</small>
+                    </div>
+                    <span style={S.inputWrap}>
+                      <input type="number" inputMode="decimal" step={f.step ?? 1} min={range?.[0]} max={range?.[1]} dir="ltr" style={S.input}
+                        value={draft[f.group][f.key] ?? ''} onChange={(e) => setValue(f.group, f.key, e.target.value)} />
+                      <small dir="ltr" style={S.unit}>{f.unit}</small>
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
 
       <section style={S.card}>
         <strong>{t.rates}</strong>
@@ -249,6 +264,11 @@ const S: Record<string, CSSProperties> = {
   row: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   btn: { minHeight: 40, border: '1px solid #263651', borderRadius: 8, background: '#131e2e', color: '#fff', fontWeight: 900, padding: '0 12px' },
   btnOn: { background: '#19d7ff', color: '#051014', border: '1px solid #19d7ff' },
+  vars: { display: 'grid', border: '1px solid #1e2a3c', borderRadius: 8, overflow: 'hidden' },
+  varRow: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(150px, 220px)', gap: 12, alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid #16202f', background: '#0b121c' },
+  varChanged: { background: 'rgba(25,215,255,.08)', boxShadow: 'inset 3px 0 0 #19d7ff' },
+  varName: { display: 'grid', gap: 2, minWidth: 0 },
+  code: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, color: '#e6edf7', overflowWrap: 'anywhere' },
   fields: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' },
   field: { display: 'grid', gap: 4, fontSize: 14 },
   inputWrap: { display: 'flex', alignItems: 'center', gap: 6 },

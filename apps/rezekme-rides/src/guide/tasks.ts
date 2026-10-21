@@ -24,9 +24,9 @@ export const GUIDE_TASKS: GuideTask[] = [
   {
     id: 'refill-wallet', role: 'rider',
     title: t('شحن المحفظة', 'Refill my wallet', 'Recharger mon portefeuille'),
-    keywords: ['wallet', 'refill', 'top up', 'topup', 'top-up', 'add money', 'add funds', 'balance', 'sham', 'card', 'recharge', 'portefeuille', 'solde', 'carte', 'رصيد', 'محفظ', 'شحن', 'اشحن', 'شام كاش', 'بطاق', 'ادفع', 'دفع'],
+    keywords: ['wallet', 'refill', 'top up', 'topup', 'top-up', 'add money', 'add funds', 'balance', 'sham', 'card', 'msh', 'token', 'points', 'jeton', 'رمز', 'نقاط', 'recharge', 'portefeuille', 'solde', 'carte', 'رصيد', 'محفظ', 'شحن', 'اشحن', 'شام كاش', 'بطاق', 'ادفع', 'دفع'],
     steps: [
-      { route: '/wallet', target: '[data-guide="wallet-balance"]', text: t('هذه محفظتك. منها تُدفع رحلاتك قبل أن تبدأ. سنضيف إليها رصيداً.', 'This is your wallet. Rides are paid from it before they start. Let us add money.', 'Voici votre portefeuille. Les courses en sont payées avant le départ. Ajoutons des fonds.') },
+      { route: '/wallet', target: '[data-guide="wallet-balance"]', text: t('هذه محفظتك بنقاط MSH (1 نقطة = 1 دولار). منها تُدفع رحلاتك. سنشتري نقاطاً.', 'This is your wallet in MSH points (1 point = $1). Rides are paid from it. Let us buy points.', 'Voici votre portefeuille en points MSH (1 point = 1 $). Les courses en sont payées. Achetons des points.') },
       { route: '/wallet', target: '[data-guide="topup-amount"]', text: t('اختر المبلغ (أو اكتب مبلغاً آخر).', 'Pick the amount (or type another).', 'Choisissez le montant (ou saisissez-en un autre).') },
       { route: '/wallet', target: '[data-guide="topup-card"]', open: '[data-guide="topup-tab-card"]', text: t('للدفع بالبطاقة اضغط هذا الزر: ستنتقل إلى Stripe للدفع الآمن، ثم يُضاف الرصيد فوراً.', 'To pay by card press this button: you go to Stripe to pay securely, then the balance is added right away.', 'Pour payer par carte, appuyez ici : vous payez sur Stripe puis le solde est ajouté aussitôt.') },
       { route: '/wallet', target: '[data-guide="topup-tab-sham"]', text: t('أو اختر «Sham Cash» لتحويل المبلغ من تطبيق Sham Cash (يؤكده المشرف).', 'Or choose “Sham Cash” to transfer from the Sham Cash app (an admin confirms it).', 'Ou choisissez « Sham Cash » pour virer depuis l’appli (confirmé par un administrateur).') },

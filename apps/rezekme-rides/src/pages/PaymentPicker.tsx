@@ -214,7 +214,8 @@ export function PaymentPicker({
       {/* ---- MSH token ---- */}
       {value === 'msh' && (
         <div style={s.body}>
-          <span style={s.hint}>{pick(lang, 'رمز MSH — قريباً', 'MSH token — coming soon', 'Jeton MSH — bientôt disponible')}</span>
+          <span style={s.hint}>{pick(lang, 'نقاط MSH هي رصيد محفظتك (1 نقطة = 1 دولار).', 'MSH points are your wallet balance (1 point = $1).', 'Les points MSH sont le solde de votre portefeuille (1 point = 1 $).')}{walletBalanceMinor !== null ? ` ${walletBalanceMinor} MSH` : ''}</span>
+          <a href="#/wallet" style={{ display: 'inline-block', marginTop: 6, fontWeight: 700 }}>{pick(lang, 'شراء نقاط MSH', 'Buy MSH points', 'Acheter des points MSH')} →</a>
         </div>
       )}
     </div>

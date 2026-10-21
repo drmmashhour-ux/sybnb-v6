@@ -48,7 +48,7 @@ export function WalletPage({ lang }: { lang: Lang }) {
     window.history.replaceState(null, '', window.location.pathname + window.location.hash)
     setBusy(true)
     call<{ creditedMinor: number }>('POST', '/api/wallet/stripe/confirm-topup', { sessionId })
-      .then((r) => { setMsg({ kind: 'ok', text: t(`تمت إضافة $${r.creditedMinor} إلى محفظتك.`, `$${r.creditedMinor} was added to your wallet.`, `${r.creditedMinor} $ ajoutés à votre portefeuille.`) }); load() })
+      .then((r) => { setMsg({ kind: 'ok', text: t(`تمت إضافة ${r.creditedMinor} نقطة MSH إلى محفظتك.`, `${r.creditedMinor} MSH points were added to your wallet.`, `${r.creditedMinor} points MSH ajoutés à votre portefeuille.`) }); load() })
       .catch((e) => setMsg({ kind: 'err', text: e instanceof Error ? e.message : String(e) }))
       .finally(() => setBusy(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -80,13 +80,14 @@ export function WalletPage({ lang }: { lang: Lang }) {
     <main dir={lang === 'ar' ? 'rtl' : 'ltr'} style={S.page}>
       <h1 style={S.h1}>{t('المحفظة', 'Wallet', 'Portefeuille')}</h1>
       <section style={S.balance} data-guide="wallet-balance">
-        <span style={S.muted}>{t('رصيدك المتاح', 'Your available balance', 'Votre solde disponible')}</span>
-        <strong style={S.big}>{wallet ? `$${wallet.availableMinor}` : '…'}</strong>
-        <span style={S.muted}>{t('تُدفع منه رحلاتك قبل أن تبدأ.', 'Your rides are paid from it before they start.', 'Vos courses sont payées avec ce solde avant le départ.')}</span>
+        <span style={S.muted}>{t('رصيد نقاط MSH المتاح', 'Your MSH points balance', 'Votre solde de points MSH')}</span>
+        <strong style={S.big}>{wallet ? `${wallet.availableMinor} MSH` : '…'}</strong>
+        <span style={S.muted}>{wallet ? `= $${wallet.availableMinor}` : ''} · {t('1 نقطة MSH = 1 دولار', '1 MSH point = $1', '1 point MSH = 1 $')}</span>
+        <span style={S.muted}>{t('نقاط MSH هي رصيد منصة Rezekme: تُدفع منها رحلاتك قبل أن تبدأ.', 'MSH points are your Rezekme platform credit: your rides are paid from them before they start.', 'Les points MSH sont votre crédit Rezekme : vos courses sont payées avec avant le départ.')}</span>
       </section>
 
       <section style={S.card}>
-        <strong>{t('إضافة رصيد', 'Add money', 'Ajouter des fonds')}</strong>
+        <strong>{t('شراء نقاط MSH', 'Buy MSH points', 'Acheter des points MSH')}</strong>
         <div style={S.chips} data-guide="topup-amount">
           {CHIPS.map((c) => (
             <button key={c} type="button" style={!custom.trim() && amount === c ? S.chipOn : S.chip} onClick={() => { setAmount(c); setCustom('') }}>${c}</button>
@@ -104,7 +105,7 @@ export function WalletPage({ lang }: { lang: Lang }) {
           <div style={S.body}>
             <span style={S.muted}>{t('ستنتقل إلى Stripe للدفع الآمن (3D Secure). يُضاف الرصيد فور تأكيد الدفع.', 'You will pay securely on Stripe (3-D Secure). The balance is added as soon as the payment is confirmed.', 'Paiement sécurisé sur Stripe (3-D Secure). Le solde est ajouté dès la confirmation.')}</span>
             <button type="button" data-guide="topup-card" style={valid && !busy ? S.primary : S.primaryOff} disabled={!valid || busy} onClick={() => void payCard()}>
-              {busy ? '…' : t(`ادفع $${valid ? value : ''} بالبطاقة`, `Pay $${valid ? value : ''} by card`, `Payer ${valid ? value : ''} $ par carte`)}
+              {busy ? '…' : t(`اشترِ ${valid ? value : ''} MSH بالبطاقة ($${valid ? value : ''})`, `Buy ${valid ? value : ''} MSH by card ($${valid ? value : ''})`, `Acheter ${valid ? value : ''} MSH par carte (${valid ? value : ''} $)`)}
             </button>
           </div>
         ) : (
@@ -122,8 +123,8 @@ export function WalletPage({ lang }: { lang: Lang }) {
       </section>
 
       <section style={S.card} data-guide="msh-card">
-        <strong>MSH {t('رمز المنصة', 'platform token', 'jeton de la plateforme')}</strong>
-        <span style={S.muted}>{t('رمز MSH يعمل حالياً على شبكة الاختبار (Sepolia) للعرض فقط: لا قيمة مالية له ولا يمكن شراؤه أو بيعه بعد. يمكنك مشاهدة رصيدك التجريبي.', 'MSH currently runs on the Sepolia test network, view-only: it has no money value and cannot be bought or sold yet. You can view your test balance.', 'MSH fonctionne pour l’instant sur le réseau de test Sepolia, en lecture seule : sans valeur monétaire, ni achat ni vente pour le moment. Vous pouvez voir votre solde de test.')}</span>
+        <strong>{t('عن MSH', 'About MSH', 'À propos de MSH')}</strong>
+        <span style={S.muted}>{t('نقاط MSH هنا رصيد داخل منصة Rezekme (ليست عملة رقمية على بلوك تشين). رمز MSH الحقيقي على الشبكة لم يُطلق بعد؛ وما يوجد حالياً رمز تجريبي على شبكة Sepolia بلا قيمة مالية، للعرض فقط.', 'MSH points here are credit inside the Rezekme platform (not a blockchain coin). The real on-chain MSH token is not launched; the only token that exists is a test token on Sepolia with no money value, view-only.', 'Les points MSH sont ici un crédit interne Rezekme (pas une cryptomonnaie). Le vrai jeton MSH n’est pas lancé ; il existe seulement un jeton de test Sepolia sans valeur, en lecture seule.')}</span>
         <a href="#/wallet/msh" style={S.link}>{t('عرض رصيد MSH التجريبي', 'View my MSH test balance', 'Voir mon solde MSH de test')} →</a>
       </section>
 

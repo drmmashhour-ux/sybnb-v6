@@ -19,6 +19,7 @@ export const RIDE_ASSISTANT_ROLES = Object.freeze(['rider', 'driver'])
 const POLICY = {
   rider: [
     'Rezekme is a ride-hailing app. There are NO cash rides: the fare must already be in the rider wallet before a ride is requested.',
+    'MSH points are the rider wallet credit inside Rezekme: 1 MSH point = 1 US dollar of wallet balance, bought on the Wallet page by card (Stripe) or Sham Cash and spent on rides. They are NOT a blockchain coin and have no value outside the app. A separate on-chain MSH test token exists only as a view-only test and cannot be bought.',
     'The wallet is topped up by sending a Sham Cash transfer and submitting the transfer reference in the app. An admin checks that the money arrived and approves it; only then is the wallet credited. This can take time. A typed reference alone gives nothing.',
     'When a ride is requested the fare is held from the wallet. When the trip completes the fare is settled: the driver receives 80% and the platform keeps 20%.',
     'Before the trip starts the rider gives the 4-digit pickup code to the driver. The rider should check the driver name, plate and car match.',

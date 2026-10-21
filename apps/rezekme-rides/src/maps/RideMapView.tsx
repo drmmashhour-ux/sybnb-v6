@@ -30,6 +30,8 @@ export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, 
   const [provider, setProvider] = useState<'google' | 'osm'>(hasGoogleMapsKey && !googleMapsFailed() ? 'google' : 'osm')
   const [command, setCommand] = useState<MapCommand | null>(null)
   const [user, setUser] = useState<LatLng | null>(null)
+  // True only when a Google key is configured but Google could not load (blocked script, rejected key).
+  const googleDown = hasGoogleMapsKey && provider === 'osm'
 
   useEffect(() => {
     if (provider !== 'google') return
@@ -68,6 +70,11 @@ export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, 
           <LeafletRideMap {...common} />
         )}
       </Suspense>
+      {googleDown && (
+        <div role="status" style={styles.notice}>
+          {lang === 'ar' ? 'تعذّر تحميل خريطة Google، تُعرض خريطة بسيطة بدلاً منها.' : lang === 'fr' ? 'La carte Google n’a pas pu se charger : carte de base affichée.' : 'Google map could not load; showing the basic map instead.'}
+        </div>
+      )}
       <button type="button" aria-label={recenterLabel} title={recenterLabel} style={styles.recenter} onClick={recenter}>
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
           <circle cx="12" cy="12" r="3.5" />
@@ -81,5 +88,6 @@ export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, 
 const styles: Record<string, CSSProperties> = {
   wrap: { position: 'absolute', inset: 0, background: '#e9e9e9' },
   loading: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#6b6b6b', fontSize: 13 },
+  notice: { position: 'absolute', insetInline: 12, top: 12, padding: '8px 12px', borderRadius: 10, background: '#fff7e6', border: '1px solid #f59e0b', color: '#7a4a00', fontSize: 12, fontWeight: 600, zIndex: 500 },
   recenter: { position: 'absolute', insetInlineEnd: 12, bottom: 44, width: 44, height: 44, minHeight: 44, borderRadius: '50%', border: 0, background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,.25)', display: 'grid', placeItems: 'center', padding: 0, zIndex: 500 },
 }

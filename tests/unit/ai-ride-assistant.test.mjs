@@ -20,7 +20,7 @@ test('returns the answer and the report suggestion from a JSON reply', async () 
 })
 
 test('a plain-text reply is shown but never turns into a report suggestion', () => {
-  assert.deepEqual(parseAssistantReply('Sorry, I do not know.'), { answer: 'Sorry, I do not know.', suggestReport: false })
+  assert.deepEqual(parseAssistantReply('Sorry, I do not know.'), { answer: 'Sorry, I do not know.', suggestReport: false, taskId: null })
   assert.equal(parseAssistantReply('   '), null)
 })
 
@@ -41,4 +41,12 @@ test('the prompt states the rules: advisory only, no refund promises, facts are 
 test('long questions are clipped before they reach the model', () => {
   const body = buildAssistantMessages({ role: 'rider', question: 'a'.repeat(5000), facts: {}, model: 'm' })
   assert.ok(body.messages[0].content.length < 900)
+})
+
+test('the AI may only pick a guided task from the allowlist for that role', () => {
+  const ok = parseAssistantReply('{"answer":"I will show you.","suggestReport":false,"taskId":"refill-wallet"}', 'rider')
+  assert.equal(ok.taskId, 'refill-wallet')
+  assert.equal(parseAssistantReply('{"answer":"x","taskId":"refill-wallet"}', 'driver').taskId, null)
+  assert.equal(parseAssistantReply('{"answer":"x","taskId":"delete-everything"}', 'rider').taskId, null)
+  assert.equal(parseAssistantReply('{"answer":"x","taskId":"driver-payout"}', 'driver').taskId, 'driver-payout')
 })

@@ -956,10 +956,10 @@ function PayoutBox({ lang, currency }: { lang: Lang; currency: string }) {
       {info.pendingMinor > 0 && <div style={S.muted}>{t('قيد الطلب', 'Pending request', 'En attente')}: {money(info.pendingMinor, currency)}</div>}
       {free > 0 && (
         <>
-          <input style={S.input} inputMode="numeric" placeholder={t('المبلغ', 'Amount', 'Montant')} value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <input data-guide="payout-amount" style={S.input} inputMode="numeric" placeholder={t('المبلغ', 'Amount', 'Montant')} value={amount} onChange={(e) => setAmount(e.target.value)} />
           <input style={S.input} placeholder={t('الاسم على المحفظة', 'Name on the wallet', 'Nom sur le portefeuille')} value={name} onChange={(e) => setName(e.target.value)} />
-          <input style={S.input} inputMode="tel" placeholder={t('رقم محفظة شام كاش', 'Sham Cash wallet number', 'Numéro Sham Cash')} value={wallet} onChange={(e) => setWallet(e.target.value)} />
-          <button style={S.primary} disabled={busy} onClick={submit}>{t('اطلب السحب', 'Request payout', 'Demander le retrait')}</button>
+          <input data-guide="payout-wallet" style={S.input} inputMode="tel" placeholder={t('رقم محفظة شام كاش', 'Sham Cash wallet number', 'Numéro Sham Cash')} value={wallet} onChange={(e) => setWallet(e.target.value)} />
+          <button data-guide="payout-submit" style={S.primary} disabled={busy} onClick={submit}>{t('اطلب السحب', 'Request payout', 'Demander le retrait')}</button>
         </>
       )}
       {msg && <div style={S.muted}>{msg}</div>}

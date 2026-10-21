@@ -11,6 +11,8 @@ const GuestAccountPage = lazy(() =>
 const LegalDocumentPage = lazy(() =>
   import('@platform/modules/legal/LegalDocumentPage').then((m) => ({ default: m.LegalDocumentPage })),
 )
+import { GuideOverlay } from './guide/GuideOverlay'
+import { HelpLauncher } from './guide/HelpLauncher'
 const DriverScreen = lazy(() => import('./pages/DriverScreen').then((m) => ({ default: m.DriverScreen })))
 const DriverApplication = lazy(() => import('./pages/DriverApplication').then((m) => ({ default: m.DriverApplication })))
 const RidePage = lazy(() => import('./pages/RidePage').then((m) => ({ default: m.RidePage })))
@@ -190,6 +192,8 @@ export function App() {
       <Suspense fallback={<div style={styles.loading}><span style={styles.skeleton} /><span style={{ ...styles.skeleton, width: '45%' }} /></div>}>
         {content}
       </Suspense>
+      <GuideOverlay lang={lang} />
+      <HelpLauncher lang={lang} path={path} />
     </div>
   )
 }

@@ -1,5 +1,7 @@
 import { useState, type CSSProperties } from 'react'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
+import { matchGuideTask } from '../guide/tasks'
+import { startGuide } from '../guide/GuideOverlay'
 import { getStoredGuestSession, getStoredStaffSession } from '@platform/shared/api/platformApi'
 
 /**
@@ -23,11 +25,11 @@ async function api<T>(role: HelpRole, method: string, path: string, body: unknow
   return payload
 }
 
-type AssistantReply = { configured: boolean; ok?: boolean; answer?: string; suggestReport?: boolean; error?: string }
+type AssistantReply = { configured: boolean; ok?: boolean; answer?: string; suggestReport?: boolean; taskId?: string | null; error?: string }
 
-export function AssistantBox({ lang, role, onSuggestReport }: { lang: Lang; role: HelpRole; onSuggestReport?: () => void }) {
+export function AssistantBox({ lang, role, onSuggestReport, startOpen = false, onGuide }: { lang: Lang; role: HelpRole; onSuggestReport?: () => void; startOpen?: boolean; onGuide?: () => void }) {
   const t = (ar: string, en: string, fr: string) => pick(lang, ar, en, fr)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(startOpen)
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
   const [reply, setReply] = useState<AssistantReply | null>(null)
@@ -38,7 +40,11 @@ export function AssistantBox({ lang, role, onSuggestReport }: { lang: Lang; role
     if (!q || busy) return
     setBusy(true); setError(''); setReply(null)
     try {
-      setReply(await api<AssistantReply>(role, 'POST', '/api/sr/assistant', { role, question: q }))
+      const out = await api<AssistantReply>(role, 'POST', '/api/sr/assistant', { role, question: q })
+      // The AI picks a guided task when it is on; otherwise a keyword match does (free, works with no AI key).
+      const taskId = out.taskId || matchGuideTask(q, role === 'driver' ? 'driver' : 'rider')?.id || null
+      if (taskId) { startGuide(taskId, role === 'driver' ? 'driver' : 'rider'); onGuide?.() }
+      setReply({ ...out, taskId })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -54,6 +60,7 @@ export function AssistantBox({ lang, role, onSuggestReport }: { lang: Lang; role
       {open && (
         <div style={S.body}>
           <textarea
+            data-guide="assistant-input"
             style={S.area}
             rows={2}
             maxLength={600}
@@ -67,11 +74,14 @@ export function AssistantBox({ lang, role, onSuggestReport }: { lang: Lang; role
             {busy ? '…' : t('إرسال', 'Ask', 'Envoyer')}
           </button>
           {error && <div style={S.err}>{error}</div>}
-          {reply && reply.configured === false && (
+          {reply && reply.configured === false && !reply.taskId && (
             <div style={S.note}>{t('المساعد الذكي غير متاح الآن. استخدم «الإبلاغ عن مشكلة» أو انتظر مراجعة الإدارة.', 'The AI helper is not available right now. Use “Report a problem” or wait for the admin.', 'L’assistant IA n’est pas disponible pour le moment. Utilisez « Signaler un problème » ou attendez l’administrateur.')}</div>
           )}
           {reply && reply.configured && reply.ok === false && (
             <div style={S.note}>{t('تعذر الحصول على إجابة الآن. حاول لاحقاً.', 'Could not get an answer right now. Please try again later.', 'Impossible d’obtenir une réponse pour le moment. Réessayez plus tard.')}</div>
+          )}
+          {reply?.taskId && !reply.answer && (
+            <div style={S.answer}>{t('سأريك الخطوات على الشاشة الآن.', 'I will show you the steps on screen now.', 'Je vous montre les étapes à l’écran.')}</div>
           )}
           {reply?.ok && reply.answer && (
             <div style={S.answer}>
@@ -97,7 +107,7 @@ export function ReportProblem({ lang, role, rideId, startOpen = false, onSent }:
   const [error, setError] = useState('')
 
   if (done) return <div style={S.ok}>{t('تم إرسال بلاغك. ستراجعه الإدارة وتتواصل معك.', 'Your report was sent. The admin will review it.', 'Votre signalement a été envoyé. L’administrateur va l’examiner.')}</div>
-  if (!open) return <button type="button" style={S.secondary} onClick={() => setOpen(true)}>⚠ {t('الإبلاغ عن مشكلة', 'Report a problem', 'Signaler un problème')}</button>
+  if (!open) return <button type="button" data-guide="report-problem" style={S.secondary} onClick={() => setOpen(true)}>⚠ {t('الإبلاغ عن مشكلة', 'Report a problem', 'Signaler un problème')}</button>
 
   const send = async () => {
     const text = reason.trim()
@@ -116,7 +126,7 @@ export function ReportProblem({ lang, role, rideId, startOpen = false, onSent }:
   return (
     <div style={S.body}>
       <strong>{t('الإبلاغ عن مشكلة في هذه الرحلة', 'Report a problem with this trip', 'Signaler un problème avec cette course')}</strong>
-      <textarea style={S.area} rows={3} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)}
+      <textarea data-guide="report-text" style={S.area} rows={3} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)}
         placeholder={t('ماذا حدث؟ (المسار، الأجرة، السلوك…)', 'What happened? (route, fare, behaviour…)', 'Que s’est-il passé ? (trajet, tarif, comportement…)')} />
       {error && <div style={S.err}>{error}</div>}
       <button type="button" style={S.primary} disabled={busy} onClick={() => void send()}>{busy ? '…' : t('إرسال البلاغ', 'Send report', 'Envoyer')}</button>

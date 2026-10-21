@@ -9,6 +9,11 @@ import { aiReviewConfigured, aiReviewModel, callAnthropic, extractJsonObject, re
 
 export const RIDE_ASSISTANT_MAX_TOKENS = 500
 export const RIDE_ASSISTANT_MAX_QUESTION = 600
+// Guided walkthroughs the app can run (ids must match apps/rezekme-rides/src/guide/tasks.ts). The AI may only pick one of these.
+export const RIDE_ASSISTANT_TASKS = Object.freeze({
+  rider: Object.freeze({ 'refill-wallet': 'the rider wants to add money / top up / refill the wallet or does not know how to pay', 'report-problem': 'the rider wants to report a problem or ask for a refund on a completed trip' }),
+  driver: Object.freeze({ 'driver-payout': 'the driver wants to withdraw / receive earnings', 'driver-report': 'the driver wants to report a problem with a completed trip' }),
+})
 export const RIDE_ASSISTANT_ROLES = Object.freeze(['rider', 'driver'])
 
 const POLICY = {
@@ -43,7 +48,10 @@ export function buildAssistantSystemPrompt(role) {
     'POLICY:',
     ...POLICY[r].map((l) => `- ${l}`),
     '',
-    'Reply with ONLY a JSON object: {"answer": string, "suggestReport": boolean}.',
+    'GUIDED TASKS: the app can walk the person through these screens step by step. If their question matches one, set taskId to its id and keep the answer to one short sentence saying you will show them. Otherwise taskId is null.',
+    ...Object.entries(RIDE_ASSISTANT_TASKS[r]).map(([id, when]) => `- ${id}: ${when}`),
+    '',
+    'Reply with ONLY a JSON object: {"answer": string, "suggestReport": boolean, "taskId": string|null}.',
   ].join('\n')
 }
 
@@ -62,16 +70,17 @@ export function buildAssistantMessages({ role, question, facts, model }) {
   }
 }
 
-export function parseAssistantReply(text) {
+export function parseAssistantReply(text, role = 'rider') {
   const raw = extractJsonObject(text)
   let obj = null
   if (raw) { try { obj = JSON.parse(raw) } catch { obj = null } }
   if (obj && typeof obj === 'object' && !Array.isArray(obj) && typeof obj.answer === 'string' && obj.answer.trim()) {
-    return { answer: obj.answer.trim().slice(0, 900), suggestReport: obj.suggestReport === true }
+    const taskId = typeof obj.taskId === 'string' && Object.hasOwn(RIDE_ASSISTANT_TASKS[role === 'driver' ? 'driver' : 'rider'], obj.taskId) ? obj.taskId : null
+    return { answer: obj.answer.trim().slice(0, 900), suggestReport: obj.suggestReport === true, taskId }
   }
   // The model ignored the format: show its plain text rather than nothing, never as a report suggestion.
   const plain = clip(text, 900)
-  return plain ? { answer: plain, suggestReport: false } : null
+  return plain ? { answer: plain, suggestReport: false, taskId: null } : null
 }
 
 // Never throws.
@@ -86,7 +95,7 @@ export async function runRideAssistant({ role, question, facts, env = process.en
     const body = buildAssistantMessages({ role, question, facts, model: aiReviewModel(env) })
     const response = await callAnthropic({ apiKey: String(env.ANTHROPIC_API_KEY).trim(), body, fetchImpl, timeoutMs })
     if (!response.ok) return { configured: true, ok: false, error: response.error || 'FAILED' }
-    const parsed = parseAssistantReply(replyText(response.data))
+    const parsed = parseAssistantReply(replyText(response.data), role)
     if (!parsed) return { configured: true, ok: false, error: 'EMPTY_REPLY' }
     return { configured: true, ok: true, ...parsed }
   } catch {

@@ -63,8 +63,8 @@ const s: Record<string, CSSProperties> = {
   notice: { color: '#16a34a', fontSize: 12, marginTop: 4 },
 }
 
-function Tab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return <button type="button" style={active ? s.tabActive : s.tab} onClick={onClick}>{label}</button>
+function Tab({ label, active, onClick, guide }: { label: string; active: boolean; onClick: () => void; guide?: string }) {
+  return <button type="button" data-guide={guide} style={active ? s.tabActive : s.tab} onClick={onClick}>{label}</button>
 }
 
 export function PaymentPicker({
@@ -80,7 +80,7 @@ export function PaymentPicker({
         <span style={s.label}>{pick(lang, 'طريقة الدفع', 'Payment method', 'Paiement')}</span>
         <div style={s.tabs}>
           <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />
-          <Tab label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
+          <Tab guide="pay-tab-shamcash" label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
         </div>
 
         {/* ---- Guest card ---- */}
@@ -103,11 +103,12 @@ export function PaymentPicker({
                 <div style={s.hint}>
                   {pick(lang, 'حوّل المبلغ إلى حساب Rezekme أدناه ثم أدخل رقم المرجع.', 'Transfer the amount to the Rezekme account below and enter the reference number.', 'Transférez le montant au compte Rezekme ci-dessous et entrez la référence.')}
                 </div>
-                <img src={LOCAL_WALLET_QR} alt="Sham Cash QR" style={s.qr} />
+                <img data-guide="shamcash-qr" src={LOCAL_WALLET_QR} alt="Sham Cash QR" style={s.qr} />
                 <div style={{ marginBottom: 6, fontSize: 12, color: '#333' }}>
                   {pick(lang, 'المبلغ المطلوب:', 'Amount due:', 'Montant dû:')} <strong>{moneyText(fareMinor, currency, lang)}</strong>
                 </div>
                 <input
+                  data-guide="shamcash-ref"
                   type="text"
                   dir={isAr ? 'rtl' : 'ltr'}
                   style={s.input}
@@ -116,6 +117,7 @@ export function PaymentPicker({
                   onChange={(e) => onShamCashRefChange(e.target.value)}
                 />
                 <button
+                  data-guide="shamcash-submit"
                   type="button"
                   style={shamCashStatus === 'saving' || !shamCashRef.trim() ? s.btnDisabled : s.btn}
                   disabled={shamCashStatus === 'saving' || !shamCashRef.trim()}
@@ -142,7 +144,7 @@ export function PaymentPicker({
       <div style={s.tabs}>
         <Tab label={pick(lang, 'المحفظة', 'Wallet', 'Portefeuille')} active={value === 'wallet'} onClick={() => onChange('wallet')} />
         <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />
-        <Tab label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
+        <Tab guide="pay-tab-shamcash" label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
         <Tab label="MSH" active={value === 'msh'} onClick={() => onChange('msh')} />
       </div>
 
@@ -180,11 +182,12 @@ export function PaymentPicker({
               <div style={s.hint}>
                 {pick(lang, 'حوّل المبلغ إلى حساب Rezekme أدناه ثم أدخل رقم المرجع.', 'Transfer the amount to the Rezekme account below and enter the reference number.', 'Transférez le montant au compte Rezekme ci-dessous et entrez la référence.')}
               </div>
-              <img src={LOCAL_WALLET_QR} alt="Sham Cash QR" style={s.qr} />
+              <img data-guide="shamcash-qr" src={LOCAL_WALLET_QR} alt="Sham Cash QR" style={s.qr} />
               <div style={{ marginBottom: 6, fontSize: 12, color: '#333' }}>
                 {pick(lang, 'المبلغ المطلوب:', 'Amount due:', 'Montant dû:')} <strong>{moneyText(fareMinor, currency, lang)}</strong>
               </div>
               <input
+                data-guide="shamcash-ref"
                 type="text"
                 dir={isAr ? 'rtl' : 'ltr'}
                 style={s.input}
@@ -193,6 +196,7 @@ export function PaymentPicker({
                 onChange={(e) => onShamCashRefChange(e.target.value)}
               />
               <button
+                data-guide="shamcash-submit"
                 type="button"
                 style={shamCashStatus === 'saving' || !shamCashRef.trim() ? s.btnDisabled : s.btn}
                 disabled={shamCashStatus === 'saving' || !shamCashRef.trim()}

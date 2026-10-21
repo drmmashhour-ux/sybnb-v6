@@ -2506,7 +2506,7 @@ function driverIdentityLabel(ride: PlatformRideRequest | null, t: { driverNotAss
 
 const styles: Record<string, CSSProperties> = {
   pageMap: { minHeight: '100vh', background: '#fff', color: '#000', maxWidth: 520, margin: '0 auto', position: 'relative', paddingBottom: 0 },
-  bookSheet: { position: 'relative', zIndex: 2, marginTop: -24, display: 'grid', gap: 16, background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,.12)', padding: '8px 16px 128px' },
+  bookSheet: { position: 'relative', zIndex: 2, marginTop: -24, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,.12)', padding: '8px 16px 128px' },
   gpsButtonOn: { background: '#000', color: '#fff' },
   page: { minHeight: '100vh', background: '#fff', color: '#000', padding: '16px 16px 128px', display: 'grid', gap: 16, maxWidth: 520, margin: '0 auto', alignContent: 'start' },
   hero: { margin: '8px 0 0', fontSize: 32, lineHeight: 1.15, fontWeight: 800, letterSpacing: -0.5 },
@@ -2516,7 +2516,7 @@ const styles: Record<string, CSSProperties> = {
   railLine: { width: 2, flex: 1, minHeight: 28, background: '#000', display: 'block', marginBlock: 3 },
   railSquare: { width: 9, height: 9, background: '#000', display: 'block' },
   routeFields: { flex: 1, display: 'grid', minWidth: 0 },
-  fieldRow: { display: 'flex', alignItems: 'center', gap: 8 },
+  fieldRow: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   routeInput: { flex: 1, minWidth: 0, minHeight: 48, border: 0, background: 'transparent', color: '#000', fontSize: 16, fontWeight: 500, padding: 0, outline: 'none' },
   routeInputBig: { fontSize: 20, fontWeight: 700 },
   divider: { height: 1, background: '#d9d9d9' },
@@ -2565,7 +2565,7 @@ const styles: Record<string, CSSProperties> = {
   bigButton: { width: '100%', minHeight: 56, border: 0, borderRadius: 12, background: '#000', color: '#fff', fontSize: 17, fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', gap: 12 },
   bigButtonInline: { width: '100%', minHeight: 52, border: 0, borderRadius: 12, background: '#000', color: '#fff', fontSize: 16, fontWeight: 700, padding: '0 20px' },
   bigButtonDisabled: { background: '#c9c9c9', color: '#fff', cursor: 'not-allowed' },
-  sheet: { position: 'relative', zIndex: 2, marginTop: -24, display: 'grid', gap: 14, background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,.12)', border: '1px solid #ececec', padding: '8px 16px 40px' },
+  sheet: { position: 'relative', zIndex: 2, marginTop: -24, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14, background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,.12)', border: '1px solid #ececec', padding: '8px 16px 40px' },
   grabber: { width: 40, height: 4, borderRadius: 2, background: '#d0d0d0', justifySelf: 'center' },
   sheetHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   sheetTitle: { margin: 0, fontSize: 22, lineHeight: 1.25, fontWeight: 800 },

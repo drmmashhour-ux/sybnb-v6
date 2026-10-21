@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import { loadGoogleMaps } from '../maps/googleLoader'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
 import { fetchRideRoute, type RideRouteRecord } from '@platform/shared/api/platformApi'
 
@@ -22,24 +21,34 @@ export function RouteViewer({ rideId, lang, asDriver = false }: { rideId: string
     return () => { off = true }
   }, [rideId, asDriver])
 
+  const [mapFailed, setMapFailed] = useState(false)
   useEffect(() => {
     if (!data || !box.current || data.points.length === 0) return
-    const map = L.map(box.current, { zoomControl: true, attributionControl: true })
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 }).addTo(map)
-    const latlngs = data.points.map((p) => [p.lat, p.lng] as [number, number])
-    const line = L.polyline(latlngs, { color: '#000', weight: 4, opacity: 0.9 }).addTo(map)
-    const dot = (c: string) => L.divIcon({ className: '', html: `<div style="width:14px;height:14px;border-radius:50%;background:${c};border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3)"></div>`, iconSize: [14, 14], iconAnchor: [7, 7] })
-    L.marker(latlngs[0], { icon: dot('#1a7f37') }).addTo(map)
-    L.marker(latlngs[latlngs.length - 1], { icon: dot('#b00020') }).addTo(map)
-    // GPS gaps: dashed red between the two fixes around each gap
-    for (const g of data.gaps) {
-      const a = data.points.find((p) => p.at === g.from)
-      const b = data.points.find((p) => p.at === g.to)
-      if (a && b) L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color: '#b00020', weight: 4, dashArray: '6 8' }).addTo(map)
-    }
-    map.fitBounds(line.getBounds(), { padding: [24, 24] })
-    return () => { map.remove() }
-  }, [data])
+    let cancelled = false
+    loadGoogleMaps(lang)
+      .then((g) => {
+        if (cancelled || !box.current) return
+        const map = new g.maps.Map(box.current, { disableDefaultUI: true, zoomControl: true, clickableIcons: false })
+        const path = data.points.map((p) => ({ lat: p.lat, lng: p.lng }))
+        new g.maps.Polyline({ map, path, strokeColor: '#000', strokeWeight: 4, strokeOpacity: 0.9 })
+        const dot = (color: string) => ({ path: g.maps.SymbolPath.CIRCLE, scale: 7, fillColor: color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 })
+        new g.maps.Marker({ map, position: path[0], icon: dot('#1a7f37') })
+        new g.maps.Marker({ map, position: path[path.length - 1], icon: dot('#b00020') })
+        // GPS gaps: dashed red between the two fixes around each gap
+        for (const gap of data.gaps) {
+          const a = data.points.find((p) => p.at === gap.from)
+          const b = data.points.find((p) => p.at === gap.to)
+          if (a && b) {
+            new g.maps.Polyline({ map, path: [{ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng }], strokeOpacity: 0, strokeColor: '#b00020', icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: '#b00020', scale: 3 }, offset: '0', repeat: '14px' }] })
+          }
+        }
+        const bounds = new g.maps.LatLngBounds()
+        path.forEach((point) => bounds.extend(point))
+        map.fitBounds(bounds, 24)
+      })
+      .catch(() => { if (!cancelled) setMapFailed(true) })
+    return () => { cancelled = true }
+  }, [data, lang])
 
   if (error) return <p style={S.note}>{error}</p>
   if (!data) return <p style={S.muted}>{t('جارٍ التحميل…', 'Loading…', 'Chargement…')}</p>
@@ -58,7 +67,7 @@ export function RouteViewer({ rideId, lang, asDriver = false }: { rideId: string
       {data.points.length === 0 ? (
         <p style={S.muted}>{t('لا يوجد مسار مسجّل لهذه الرحلة.', 'No GPS route was recorded for this trip.', 'Aucun trajet GPS enregistré pour cette course.')}</p>
       ) : (
-        <div ref={box} style={S.map} />
+        mapFailed ? <p style={S.note}>{t('تعذّر تحميل خريطة Google.', 'The Google map could not load.', 'La carte Google n’a pas pu se charger.')}</p> : <div ref={box} style={S.map} />
       )}
       <div style={S.muted}>
         {data.distanceKm} km · {data.points.length} {t('نقطة GPS', 'GPS points', 'points GPS')}

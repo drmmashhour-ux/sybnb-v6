@@ -12,6 +12,7 @@ import {
   enablePushNotifications,
   fetchBusinessMembership,
   fetchPrototypeSrRide,
+  getStoredGuestSession,
   fetchPrototypeSrRideThread,
   fetchSavedPlaces,
   fetchRideInvoice,
@@ -78,6 +79,7 @@ import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLo
 import { srFallbackFareMinor, loadSrRates } from './srFareModel'
 import { RecordingControls } from './RecordingControls'
 import { PaymentPicker, type PayMethod } from './PaymentPicker'
+import { RideSignInPanel } from './RideSignInPanel'
 import { AssistantBox, ReportProblem } from './HelpTools'
 
 type Props = {
@@ -616,9 +618,13 @@ export function RidePage({ lang }: Props) {
   const [bonusMinor, setBonusMinor] = useState(0)
   const [moreOpen, setMoreOpen] = useState(false)
   // Payment picker: guest vs client mode, wallet balance, selected method, Sham Cash fields
-  const [entryMode] = useState<'guest' | 'client'>(() => {
+  // Read on every render: the rider picks guest/client in the sign-in panel at the Confirm step, after this page is already open.
+  const entryMode: 'guest' | 'client' = (() => {
     try { return (window.localStorage.getItem('rezekme.entryMode') as 'guest' | 'client') || 'guest' } catch { return 'guest' }
-  })
+  })()
+  // Sign-in comes right before paying (Uber-style): browsing and prices need no session.
+  const sessionToken = getStoredGuestSession()?.token ?? null
+  const [signInOpen, setSignInOpen] = useState(false)
   const [walletBalanceMinor, setWalletBalanceMinor] = useState<number | null>(null)
   const [selectedPayMethod, setSelectedPayMethod] = useState<PayMethod>(null)
   const [shamCashRef, setShamCashRef] = useState('')
@@ -766,7 +772,7 @@ export function RidePage({ lang }: Props) {
     const timer = shamCashStatus === 'submitted' ? window.setInterval(() => void load(), 15000) : null
     return () => { cancelled = true; if (timer) window.clearInterval(timer) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shamCashStatus])
+  }, [shamCashStatus, sessionToken])
 
   // Fetch (lazily minting) the Rezekme invoice once the ride is terminal, to show its number + link.
   useEffect(() => {
@@ -1077,6 +1083,12 @@ export function RidePage({ lang }: Props) {
             })) {
       setStatus('error')
       setMessage(t.locationNotConfirmed)
+      return
+    }
+
+    // Not signed in yet: ask now, right before paying. Everything the rider chose stays on screen.
+    if (!getStoredGuestSession()) {
+      setSignInOpen(true)
       return
     }
 
@@ -1565,7 +1577,9 @@ export function RidePage({ lang }: Props) {
 
   const walletSufficient = walletBalanceMinor !== null && walletBalanceMinor >= fareMinor
   const payMethodReady =
-    entryMode === 'guest'
+    !sessionToken
+      ? selectedPayMethod !== null // not signed in: Continue opens the sign-in step, payment comes after it
+      : entryMode === 'guest'
       ? selectedPayMethod === 'card' || (selectedPayMethod === 'shamcash' && walletSufficient)
       : selectedPayMethod === 'wallet'
         ? walletSufficient
@@ -1579,7 +1593,7 @@ export function RidePage({ lang }: Props) {
   const payStepPrompt =
     selectedPayMethod === null
       ? pick(lang, 'الخطوة التالية: اختر طريقة الدفع', 'Next step: choose how you want to pay', 'Étape suivante : choisissez votre mode de paiement')
-      : selectedPayMethod === 'card'
+      : selectedPayMethod === 'card' && sessionToken
         ? pick(lang, 'اضغط «متابعة للدفع» لإتمام الدفع بالبطاقة ثم تأكيد الرحلة', 'Tap “Continue to pay” to pay by card, then your ride is confirmed', 'Appuyez sur « Continuer vers le paiement » puis la course est confirmée')
         : null
   const requestLabel =
@@ -1589,7 +1603,9 @@ export function RidePage({ lang }: Props) {
         ? t.scheduleRide
         : selectedPayMethod === null
           ? pick(lang, 'اختر طريقة الدفع', 'Choose a payment method', 'Choisissez un mode de paiement')
-          : selectedPayMethod === 'card'
+          : !sessionToken
+            ? pick(lang, 'متابعة', 'Continue', 'Continuer')
+            : selectedPayMethod === 'card'
             ? pick(lang, 'متابعة للدفع وتأكيد الرحلة', 'Continue to pay & confirm ride', 'Continuer vers le paiement et confirmer')
             : `${ui.confirm} ${categoryLabel(category)}`
 
@@ -1960,6 +1976,7 @@ export function RidePage({ lang }: Props) {
 
         </div>
 
+        {signInOpen && !sessionToken && <RideSignInPanel lang={lang} onClose={() => setSignInOpen(false)} />}
         <div style={styles.stickyBar}>
           <div style={styles.stickyInner}>
             {payStepPrompt && confirmedLocations && <div style={{ ...styles.hint, fontWeight: 700, color: '#1d4ed8', marginBottom: 4 }}>{payStepPrompt}</div>}

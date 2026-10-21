@@ -462,6 +462,20 @@ function generatePickupCode() {
 // Admin pricing access. The legacy ADMIN role keeps working exactly as before. Accounts seated in the
 // new admin console (Owner, etc.) are allowed through the same permission engine every other admin2
 // action uses: config.view to read, config.manage (tier 3, evidence written) to save, scoped to SR Ride.
+// Browsing endpoints (quote, availability) work without a session so a rider sees prices first and signs in
+// only when confirming. Anonymous callers are limited per IP; anyone signed in goes through the normal role check.
+async function allowAnonymousBrowse(req, context, bucket, perMinute) {
+  if (context?.user) return requireAuth(context, ['GUEST'])
+  if (await isRateLimited(`${bucket}:${clientIp(req)}`, 60_000, perMinute)) {
+    const error = new Error('Too many requests. Please slow down.')
+    error.statusCode = 429
+    error.code = 'BROWSE_RATE_LIMITED'
+    error.expose = true
+    throw error
+  }
+  return undefined
+}
+
 async function requirePricingAccess(context, write) {
   requireAuth(context, [])
   if (context.roles?.includes('ADMIN')) return { legacyAdmin: true }
@@ -497,7 +511,9 @@ export async function handleSrRides(req, res, url, context) {
 
   if (url.pathname === '/api/sr/quote') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
-    requireAuth(context, ['GUEST'])
+    // Prices can be seen before signing in (the rider signs in at the Confirm step, just before paying).
+    // An anonymous caller is rate limited by IP; a signed-in caller keeps the normal role check.
+    await allowAnonymousBrowse(req, context, 'sr-quote', 40)
     const body = await readJson(req)
     // Include stops so the quoted fare/distance match what the ride-create path (which already
     // accounts for stops) will actually charge -- otherwise a multi-stop rider is shown a cheaper
@@ -1147,7 +1163,7 @@ export async function handleSrRides(req, res, url, context) {
   // pickup ETA. Lets the app grey out categories that have nobody (no dead-end booking).
   if (url.pathname === '/api/sr/availability') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
-    requireAuth(context, ['GUEST'])
+    await allowAnonymousBrowse(req, context, 'sr-availability', 60)
     const lat = Number(url.searchParams.get('lat'))
     const lng = Number(url.searchParams.get('lng'))
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {

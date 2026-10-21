@@ -22,12 +22,12 @@ export type Coords = { lat: number; lng: number }
 /** Aligned 1:1 with the NON-BLANK stops sent in `stops` (null = no known coordinates for that stop). */
 export type StopCoords = Array<Coords | null>
 
-async function post<T>(path: string, body: unknown): Promise<T> {
+async function post<T>(path: string, body: unknown, options: { anonymousOk?: boolean } = {}): Promise<T> {
   const token = getStoredGuestSession()?.token
-  if (!token) throw new Error('Sign in to continue.')
+  if (!token && !options.anonymousOk) throw new Error('Sign in to continue.')
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
   })
   const payload = (await response.json()) as { ok?: boolean; error?: { message?: string; code?: string } } & T
@@ -54,7 +54,7 @@ export async function fetchSrQuoteWithCoords(input: {
   bagCount?: number
   scheduled?: boolean
 }): Promise<PlatformSrQuote> {
-  const response = await post<{ ok: true; quote: PlatformSrQuote }>('/api/sr/quote', input)
+  const response = await post<{ ok: true; quote: PlatformSrQuote }>('/api/sr/quote', input, { anonymousOk: true })
   return response.quote
 }
 
@@ -134,8 +134,7 @@ export type CategoryAvailability = { category: string; drivers: number; etaMinut
 // Live availability near the pickup: per category driver count + rough ETA.
 export async function fetchSrAvailability(point: Coords): Promise<CategoryAvailability[]> {
   const token = getStoredGuestSession()?.token
-  if (!token) return []
-  const response = await fetch(`${API_BASE_URL}/api/sr/availability?lat=${point.lat}&lng=${point.lng}`, { headers: { authorization: `Bearer ${token}` } })
+  const response = await fetch(`${API_BASE_URL}/api/sr/availability?lat=${point.lat}&lng=${point.lng}`, { headers: token ? { authorization: `Bearer ${token}` } : {} })
   if (!response.ok) return []
   const payload = (await response.json()) as { availability?: CategoryAvailability[] }
   return payload.availability ?? []

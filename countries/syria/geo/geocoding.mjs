@@ -329,7 +329,7 @@ export function quoteSrRide({
       + airportSurchargeUsd
       + internationalSurchargeUsd
   }
-  const baseFareUsd = Math.max(rates.minFareUsd || 0, rawBaseUsd)
+  const baseFareUsd = Math.max(rates.minFareUsd || 0, fees.minChargeUsd || 0, rawBaseUsd)
 
   // Per-trip additive fees: stops, extra bags, extra riders.
   const stopsCount = stopList.length
@@ -365,7 +365,7 @@ export function quoteSrRide({
   const variedUsd = preFactorUsd * combined
 
   // Round the charged fare UP to the nearest step (never round a fare down).
-  const fareMinor = Math.ceil(variedUsd / fees.roundingUsd - 1e-9) * fees.roundingUsd
+  const fareMinor = Math.max(Math.ceil(fees.minChargeUsd || 0), Math.ceil(variedUsd / fees.roundingUsd - 1e-9) * fees.roundingUsd)
 
   return {
     fareMinor,

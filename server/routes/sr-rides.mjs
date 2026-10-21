@@ -1395,6 +1395,17 @@ export async function handleSrRides(req, res, url, context) {
 
   // Road-following route for the map line (so it follows streets, not a straight line). Public (the booking map is shown
   // before sign-in), validated, per-IP rate limited and cached; the provider key (if any) stays on the server.
+  // Public, read-only: the live rates the rider app uses for its first price estimate before /quote
+  // answers. Same numbers the engine charges with; nothing private in it.
+  if (url.pathname === '/api/sr/rates') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    await refreshSrPricing()
+    const c = getActivePricing()
+    const rates = {}
+    for (const cat of SR_CATEGORIES) rates[cat] = { baseUsd: c.rates[cat].baseUsd, perKmUsd: c.rates[cat].perKmUsd, perMinUsd: c.rates[cat].perMinUsd, minFareUsd: c.rates[cat].minFareUsd }
+    return json(res, 200, { ok: true, rates, minChargeUsd: c.fees.minChargeUsd, roundingUsd: c.fees.roundingUsd, liveTrackingUsd: c.fees.liveTrackingUsd, safetyFeePerTripUsd: c.fees.safetyFeePerTripUsd, peak: c.multipliers.peak, night: c.multipliers.night, avgSpeedKmh: c.avgSpeedKmh })
+  }
+
   if (url.pathname === '/api/sr/route') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     const points = parseRoutePoints(url.searchParams.get('pts'))

@@ -75,7 +75,7 @@ function storeRecent(entry: RecentDestination): RecentDestination[] {
   return next
 }
 import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
-import { srFallbackFareMinor } from './srFareModel'
+import { srFallbackFareMinor, loadSrRates } from './srFareModel'
 import { RecordingControls } from './RecordingControls'
 import { PaymentPicker, type PayMethod } from './PaymentPicker'
 import { AssistantBox, ReportProblem } from './HelpTools'
@@ -658,7 +658,10 @@ export function RidePage({ lang }: Props) {
 
   // Pre-quote estimate derived from the SAME rate model the server uses (srFareModel), so it
   // matches the server's own estimated fare instead of a stale flat rate several times too high.
-  const fallbackFareMinor = useMemo(() => srFallbackFareMinor(category, lowDataMode), [category, lowDataMode])
+  const [ratesVersion, setRatesVersion] = useState(0)
+  useEffect(() => { void loadSrRates(import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:3051').then((ok) => { if (ok) setRatesVersion((v) => v + 1) }) }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fallbackFareMinor = useMemo(() => srFallbackFareMinor(category, lowDataMode), [category, lowDataMode, ratesVersion])
 
   const fareMinor = ride?.fareMinor ?? quote?.fareMinor ?? fallbackFareMinor
   // CAPSULE_RULES.noFakeTrustSignal: quote.estimated alone doesn't distinguish "GPS was imprecise
@@ -1742,7 +1745,7 @@ export function RidePage({ lang }: Props) {
                   : anyDriverNearby
                     ? pick(lang, 'لا يوجد سائق قريب', 'No drivers nearby', 'Aucun chauffeur à proximité')
                     : null
-              const price = realQuote ? quote.fareMinor : serverQuote ? serverQuote.fareMinor : srFallbackFareMinor(item, lowDataMode)
+              const price = realQuote ? quote.fareMinor : serverQuote ? serverQuote.fareMinor : srFallbackFareMinor(item, lowDataMode) // rates follow ratesVersion
               const description = vehicleDescription(item, lang)
               return (
                 <button

@@ -61,8 +61,8 @@ test('intercity km use the long-trip rate, Homs and Aleppo land in the study ran
 
 test('safety fee per trip is added; rounding step is whole dollars', () => {
   const base = recommendedConfig()
-  const none = normalizePricing({ ...base, fees: { ...base.fees, safetyFeePerTripUsd: 0, roundingUsd: 1 } })
-  const withFee = normalizePricing({ ...base, fees: { ...base.fees, safetyFeePerTripUsd: 2, roundingUsd: 1 } })
+  const none = normalizePricing({ ...base, fees: { ...base.fees, safetyFeePerTripUsd: 0, roundingUsd: 1, minChargeUsd: 0 } })
+  const withFee = normalizePricing({ ...base, fees: { ...base.fees, safetyFeePerTripUsd: 2, roundingUsd: 1, minChargeUsd: 0 } })
   assert.ok(quote(withFee).fareMinor >= quote(none).fareMinor + 2)
   assert.ok(Number.isInteger(quote(normalizePricing({ ...base, fees: { ...base.fees, roundingUsd: 0.5 } })).fareMinor))
 })
@@ -80,4 +80,14 @@ test('storable config holds inputs only; rates are re-derived on load', () => {
   const stored = storableConfig(normalizePricing(recommendedConfig()))
   assert.equal(stored.rates, undefined)
   assert.deepEqual(normalizePricing(stored).rates, normalizePricing(recommendedConfig()).rates)
+})
+
+test('minimum charge $10: a short ride never costs less, at any hour', () => {
+  const cfg = normalizePricing(recommendedConfig())
+  assert.equal(cfg.fees.minChargeUsd, 10)
+  for (const c of SR_CATEGORIES) assert.ok(quote(cfg, { category: c, distanceKmOverride: 1, estimatedMinutesOverride: 3 }).fareMinor >= 10, c)
+  const legacy = normalizePricing(null)
+  assert.equal(legacy.fees.minChargeUsd, 0) // old behaviour untouched until saved
+  const off = normalizePricing({ ...recommendedConfig(), fees: { ...recommendedConfig().fees, minChargeUsd: 0 } })
+  assert.ok(quote(off, { distanceKmOverride: 1, estimatedMinutesOverride: 3 }).fareMinor < 10)
 })

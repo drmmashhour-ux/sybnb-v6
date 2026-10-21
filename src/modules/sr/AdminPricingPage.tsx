@@ -42,6 +42,7 @@ const FIELDS: Field[] = [
   { group: 'fees', key: 'bagFeeUsd', ar: 'رسوم الحقيبة الإضافية', en: 'Fee per extra bag', unit: '$', step: 0.25 },
   { group: 'fees', key: 'baseRiders', ar: 'ركاب بلا رسوم', en: 'Riders included', unit: '' },
   { group: 'fees', key: 'extraRiderFeeUsd', ar: 'رسوم الراكب الإضافي', en: 'Fee per extra rider', unit: '$', step: 0.25 },
+  { group: 'fees', key: 'minChargeUsd', ar: 'الحد الأدنى للرحلة (كل الفئات)', en: 'Minimum charge (all classes)', unit: '$' },
   { group: 'fees', key: 'roundingUsd', ar: 'تقريب السعر لأعلى', en: 'Round fare up to', unit: '$ (whole)' },
   { group: 'intercity', key: 'thresholdKm', ar: 'بعد هذه المسافة = رحلة بين المحافظات', en: 'Intercity starts after', unit: 'km' },
   { group: 'intercity', key: 'speedKmh', ar: 'متوسط السرعة على الطريق السريع', en: 'Highway average speed', unit: 'km/h' },

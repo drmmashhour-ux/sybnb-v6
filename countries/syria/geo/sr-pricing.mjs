@@ -52,7 +52,7 @@ export const PRICING_LIMITS = {
     ringFeeUsd: [0, 10], ringWidthKm: [0.5, 20], ringCount: [1, 30], airportBaseUsd: [1, 500],
     airportSurchargeUsd: [0, 50], internationalSurchargeUsd: [0, 200], stopFeeUsd: [0, 20], freeBags: [0, 10],
     bagFeeUsd: [0, 20], baseRiders: [1, 8], extraRiderFeeUsd: [0, 20], liveTrackingUsd: [0, 5],
-    safetyFeePerTripUsd: [0, 5], roundingUsd: [1, 50],
+    safetyFeePerTripUsd: [0, 5], roundingUsd: [1, 50], minChargeUsd: [0, 100],
   },
   intercity: { thresholdKm: [10, 200], speedKmh: [20, 120], emptyKmPct: [0, 80] },
   avgSpeedKmh: [5, 100],
@@ -153,7 +153,7 @@ export function legacyConfig() {
       internationalSurchargeUsd: num('SR_INTERNATIONAL_SURCHARGE_USD', 25, 0, 200),
       stopFeeUsd: num('SR_STOP_FEE_USD', 1, 0, 20), freeBags: num('SR_FREE_BAGS', 2, 0, 10), bagFeeUsd: num('SR_BAG_FEE_USD', 1, 0, 20),
       baseRiders: num('SR_BASE_RIDERS', 4, 1, 8), extraRiderFeeUsd: num('SR_EXTRA_RIDER_FEE_USD', 1, 0, 20),
-      liveTrackingUsd: 0.2, safetyFeePerTripUsd: 0, roundingUsd: num('SR_FARE_ROUNDING_USD', 5, 1, 50),
+      liveTrackingUsd: 0.2, safetyFeePerTripUsd: 0, roundingUsd: num('SR_FARE_ROUNDING_USD', 5, 1, 50), minChargeUsd: 0,
     },
     intercity,
     avgSpeedKmh: num('SR_AVG_SPEED_KMH', 28, 1, 200),
@@ -168,7 +168,7 @@ export function recommendedConfig() {
     ...base,
     source: 'custom',
     mode: 'formula',
-    fees: { ...base.fees, ringFeeUsd: 0.4, safetyFeePerTripUsd: 0.15, roundingUsd: 1 },
+    fees: { ...base.fees, ringFeeUsd: 0.4, safetyFeePerTripUsd: 0.15, roundingUsd: 1, minChargeUsd: 10 }, // owner: minimum charge $10
   }
 }
 

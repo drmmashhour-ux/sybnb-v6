@@ -69,3 +69,12 @@ Only you can do (not code):
 - Decisions: refund rules per case, driver payout schedule, route-data retention period, transport permit/insurance requirements, whether private cars may serve the airport.
 
 Pilot acceptance before any real money: run the Sham Cash top-up -> admin approve -> ride -> complete -> 80/20 ledger -> manual payout cycle on a staging copy with test accounts and tiny amounts; check the ledger totals reconcile.
+
+## Admin app (apps/rezekme-admin)
+
+Separate Rezekme operator console (live rides, drivers, vehicles, payment review, money flow, payouts, incidents, customers, promo codes, business accounts). It reuses the existing admin pages; the server still requires the ADMIN role on every call, so a client or driver token gets 403 even if they open the site.
+
+- Build: `npm run build:rezekme-admin` (output `dist-apps/rezekme-admin`). Dev: `npm run dev:rezekme-admin` (port 5192).
+- Vercel: create a fourth project from this repo with build command `npm run build:rezekme-admin`, output directory `dist-apps/rezekme-admin`, env `VITE_API_BASE_URL=https://rezekme-api.onrender.com`; suggested domain `admin.rezekme.com`. Add that origin to the API's `CORS_ORIGIN`.
+- Admin sign-in uses the normal staff sign-in (email code). The first admin is created with `scripts/bootstrap-admin.mjs` (section 5).
+- Known cosmetic: some shared admin pages still show a small "SYBNB · ADMIN" eyebrow label.

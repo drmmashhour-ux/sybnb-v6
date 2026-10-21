@@ -16,6 +16,7 @@ export const NAV: NavGroup[] = [
     { key: 'sr', label: 'SR', anyPerm: ['platform.view'], children: [
       { key: 'sr_ride', label: 'Ride', platform: 'sr_ride' },
       { key: 'sr_restaurants', label: 'Restaurants', href: '/admin/sr/restaurants', platform: 'sr_restaurants' },
+      { key: 'sr_pricing', label: 'Pricing', href: '/admin/sr/pricing', platform: 'sr_ride' },
       { key: 'sr_drivers', label: 'Drivers & Couriers', platform: 'sr_ride' },
       { key: 'sr_vehicles', label: 'Vehicles', platform: 'sr_ride' },
     ] },
@@ -65,5 +66,5 @@ export function visibleNav(v: Visibility): NavGroup[] {
 /** Paths the new console renders itself. Everything else under /admin keeps its existing (legacy) page. */
 export function isConsolePath(pathname: string): boolean {
   return pathname === '/admin' || pathname === '/admin/work' || pathname === '/admin/parties' || /^\/admin\/parties\/[^/]+$/.test(pathname)
-    || pathname === '/admin/sr/restaurants' || /^\/admin\/sr\/restaurants\/orders\/[^/]+$/.test(pathname)
+    || pathname === '/admin/sr/pricing' || pathname === '/admin/sr/restaurants' || /^\/admin\/sr\/restaurants\/orders\/[^/]+$/.test(pathname)
 }

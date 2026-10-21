@@ -9,6 +9,7 @@ export type PageScope =
 
 export function pageScope(pathname: string): PageScope {
   if (pathname === '/admin' || pathname === '/admin/work') return { kind: 'platform-filter', label: 'Platform filter' }
+  if (pathname === '/admin/sr/pricing') return { kind: 'fixed-platform', label: 'SR Ride', platformCode: 'sr_ride' }
   if (pathname === '/admin/sr/restaurants' || pathname.startsWith('/admin/sr/restaurants/')) return { kind: 'fixed-platform', label: 'SR Restaurants', platformCode: 'sr_restaurants' }
   return { kind: 'organization', label: 'Organization-wide' }
 }

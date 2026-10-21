@@ -1,6 +1,8 @@
 import { db } from '../lib/prisma.mjs'
 import { assertDriverOnDuty, carryBags } from './driver-base.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
+import { authorize } from '../lib/authz/index.mjs'
+import { recordFacts } from './admin2/scope.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { randomInt } from 'node:crypto'
 // Consume the country-neutral geocoding seam (resolves the active country's geocoder, fail-closed) —
@@ -455,6 +457,24 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
 // impersonation. Generated here, server-side only -- a client can never supply or override it.
 function generatePickupCode() {
   return String(randomInt(0, 10000)).padStart(4, '0')
+}
+
+// Admin pricing access. The legacy ADMIN role keeps working exactly as before. Accounts seated in the
+// new admin console (Owner, etc.) are allowed through the same permission engine every other admin2
+// action uses: config.view to read, config.manage (tier 3, evidence written) to save, scoped to SR Ride.
+async function requirePricingAccess(context, write) {
+  requireAuth(context, [])
+  if (context.roles?.includes('ADMIN')) return { legacyAdmin: true }
+  const platform = await db().platform.findUnique({ where: { code: 'sr_ride' }, select: { id: true, code: true } })
+  if (!platform) {
+    const error = new Error('This account does not have permission for this V6 action.')
+    error.statusCode = 403
+    error.code = 'FORBIDDEN'
+    error.expose = true
+    throw error
+  }
+  await authorize(context, write ? 'config.manage' : 'config.view', { type: 'platform', id: platform.code, facts: await recordFacts(platform.id) })
+  return { legacyAdmin: false }
 }
 
 export async function handleSrRides(req, res, url, context) {
@@ -1962,8 +1982,8 @@ export async function handleSrRides(req, res, url, context) {
   // Admin pricing: view / preview / save the variable pricing config (cost formula, multipliers, fees).
   // Stored in admin_settings (no schema change); audited and re-authorized at commit like promo codes.
   if (url.pathname === '/api/admin/sr/pricing' || url.pathname === '/api/admin/sr/pricing/preview') {
-    requireAuth(context, ['ADMIN'])
     const preview = url.pathname.endsWith('/preview')
+    const pricingAccess = await requirePricingAccess(context, req.method === 'PUT' && !preview)
     if (req.method === 'GET' && !preview) {
       const row = await readStoredPricing()
       const config = row ? P().normalizePricing(row.value) : P().normalizePricing(null)
@@ -2007,7 +2027,7 @@ export async function handleSrRides(req, res, url, context) {
         throw error
       }
       const saved = await db().$transaction(async (tx) => {
-        await reauthorizeAtCommit(tx, context, { action: 'SR_PRICING_CHANGED', requiredRoles: ['ADMIN'] })
+        await reauthorizeAtCommit(tx, context, { action: 'SR_PRICING_CHANGED', requiredRoles: pricingAccess.legacyAdmin ? ['ADMIN'] : [] })
         const row = existing
           ? await tx.adminSetting.update({ where: { id: existing.id }, data: { value, version: { increment: 1 }, updatedById: context.user.id, updatedAt: new Date() } })
           : await tx.adminSetting.create({ data: { category: PRICING_CATEGORY, key: pricingKey(), value, updatedById: context.user.id } })

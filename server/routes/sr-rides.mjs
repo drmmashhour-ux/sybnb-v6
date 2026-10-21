@@ -5,10 +5,8 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { randomInt } from 'node:crypto'
 // Consume the country-neutral geocoding seam (resolves the active country's geocoder, fail-closed) —
 // the route does NOT depend on any country's geocoder module directly.
-import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
-import { refreshSrPricing, readStoredPricing, invalidateSrPricingCache, PRICING_CATEGORY, PRICING_KEY } from '../lib/sr-pricing-store.mjs'
-import { normalizePricing, storableConfig, recommendedConfig, legacyConfig, getActivePricing, SR_CATEGORIES, PRICING_LIMITS, CLASS_PROFILES } from '../../countries/syria/geo/sr-pricing.mjs'
-import { quoteSrRide as quoteSyriaRide } from '../../countries/syria/geo/geocoding.mjs'
+import { quoteSrRideForActiveCountry, ridePricingForActiveCountry } from '../lib/geo-adapter.mjs'
+import { refreshSrPricing, readStoredPricing, invalidateSrPricingCache, pricingKey, PRICING_CATEGORY } from '../lib/sr-pricing-store.mjs'
 import { resolveTrafficDistance } from '../lib/traffic-distance.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
@@ -141,6 +139,9 @@ async function switchOpenRideCategory(existing, category) {
   return { category, fareMinor: newFare, currency: quote.currency }
 }
 
+// The active country's pricing pack (the master never imports a country directly).
+const P = () => ridePricingForActiveCountry().pack
+
 // Sample fares so the admin sees what a config does: per class, a short city trip, a 15 km trip and
 // the Damascus airport run's distance, at noon on a weekday (no peak, night or weekend factor).
 const PRICING_SAMPLE_TRIPS = [
@@ -153,10 +154,10 @@ const PRICING_SAMPLE_TRIPS = [
 function pricingExamples(config) {
   const noon = new Date('2026-10-21T09:00:00Z') // Wednesday 12:00 in Damascus
   const out = {}
-  for (const category of SR_CATEGORIES) {
+  for (const category of P().SR_CATEGORIES) {
     out[category] = {}
     for (const trip of PRICING_SAMPLE_TRIPS) {
-      const q = quoteSyriaRide({ pickup: 'sample', dropoff: 'sample', category, lowDataMode: true, distanceKmOverride: trip.km, estimatedMinutesOverride: trip.minutes, now: noon, pricing: config })
+      const q = P().quoteSrRide({ pickup: 'sample', dropoff: 'sample', category, lowDataMode: true, distanceKmOverride: trip.km, estimatedMinutesOverride: trip.minutes, now: noon, pricing: config })
       out[category][trip.key] = q.fareMinor
     }
   }
@@ -1400,9 +1401,9 @@ export async function handleSrRides(req, res, url, context) {
   if (url.pathname === '/api/sr/rates') {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     await refreshSrPricing()
-    const c = getActivePricing()
+    const c = P().getActivePricing()
     const rates = {}
-    for (const cat of SR_CATEGORIES) rates[cat] = { baseUsd: c.rates[cat].baseUsd, perKmUsd: c.rates[cat].perKmUsd, perMinUsd: c.rates[cat].perMinUsd, minFareUsd: c.rates[cat].minFareUsd }
+    for (const cat of P().SR_CATEGORIES) rates[cat] = { baseUsd: c.rates[cat].baseUsd, perKmUsd: c.rates[cat].perKmUsd, perMinUsd: c.rates[cat].perMinUsd, minFareUsd: c.rates[cat].minFareUsd }
     return json(res, 200, { ok: true, rates, minChargeUsd: c.fees.minChargeUsd, roundingUsd: c.fees.roundingUsd, liveTrackingUsd: c.fees.liveTrackingUsd, safetyFeePerTripUsd: c.fees.safetyFeePerTripUsd, peak: c.multipliers.peak, night: c.multipliers.night, avgSpeedKmh: c.avgSpeedKmh })
   }
 
@@ -1965,24 +1966,24 @@ export async function handleSrRides(req, res, url, context) {
     const preview = url.pathname.endsWith('/preview')
     if (req.method === 'GET' && !preview) {
       const row = await readStoredPricing()
-      const config = row ? normalizePricing(row.value) : normalizePricing(null)
+      const config = row ? P().normalizePricing(row.value) : P().normalizePricing(null)
       return json(res, 200, {
         ok: true,
         stored: Boolean(row),
         version: row?.version ?? 0,
         updatedAt: row?.updatedAt ?? null,
         config,
-        recommended: normalizePricing(recommendedConfig()),
-        legacy: normalizePricing(null),
-        limits: PRICING_LIMITS,
-        categories: SR_CATEGORIES,
-        classProfiles: CLASS_PROFILES,
+        recommended: P().normalizePricing(P().recommendedConfig()),
+        legacy: P().normalizePricing(null),
+        limits: P().PRICING_LIMITS,
+        categories: P().SR_CATEGORIES,
+        classProfiles: P().CLASS_PROFILES,
         examples: pricingExamples(config),
       })
     }
     if (req.method === 'POST' && preview) {
       const body = await readJson(req)
-      const config = normalizePricing(body?.config)
+      const config = P().normalizePricing(body?.config)
       return json(res, 200, { ok: true, config, examples: pricingExamples(config) })
     }
     if (req.method === 'PUT' && !preview) {
@@ -1995,8 +1996,8 @@ export async function handleSrRides(req, res, url, context) {
         error.expose = true
         throw error
       }
-      const config = normalizePricing(body?.config)
-      const value = storableConfig(config)
+      const config = P().normalizePricing(body?.config)
+      const value = P().storableConfig(config)
       const existing = await readStoredPricing()
       if (existing && body?.expectedVersion != null && Number(body.expectedVersion) !== existing.version) {
         const error = new Error('Pricing changed since you loaded it. Reload and try again.')
@@ -2009,7 +2010,7 @@ export async function handleSrRides(req, res, url, context) {
         await reauthorizeAtCommit(tx, context, { action: 'SR_PRICING_CHANGED', requiredRoles: ['ADMIN'] })
         const row = existing
           ? await tx.adminSetting.update({ where: { id: existing.id }, data: { value, version: { increment: 1 }, updatedById: context.user.id, updatedAt: new Date() } })
-          : await tx.adminSetting.create({ data: { category: PRICING_CATEGORY, key: PRICING_KEY, value, updatedById: context.user.id } })
+          : await tx.adminSetting.create({ data: { category: PRICING_CATEGORY, key: pricingKey(), value, updatedById: context.user.id } })
         await tx.adminAuditLog.create({
           data: { actorUserId: context.user.id, action: 'SR_PRICING_CHANGED', entityType: 'admin_settings', entityId: row.id, before: existing ? { value: existing.value, version: existing.version } : null, after: { value, version: row.version }, reason },
         })
@@ -2017,7 +2018,7 @@ export async function handleSrRides(req, res, url, context) {
       })
       invalidateSrPricingCache()
       await refreshSrPricing({ force: true })
-      return json(res, 200, { ok: true, version: saved.version, config: getActivePricing(), examples: pricingExamples(getActivePricing()) })
+      return json(res, 200, { ok: true, version: saved.version, config: P().getActivePricing(), examples: pricingExamples(P().getActivePricing()) })
     }
     return methodNotAllowed(res, preview ? ['POST'] : ['GET', 'PUT'])
   }

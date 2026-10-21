@@ -404,3 +404,7 @@ export function quoteSrRide({
     stopCoords,
   }
 }
+
+// Pricing capability of this country pack (rates, cost formula, limits, active config). The master reaches it
+// only through server/lib/geo-adapter.mjs, never by importing this country directly.
+export { normalizePricing, storableConfig, recommendedConfig, legacyConfig, getActivePricing, setActivePricing, SR_CATEGORIES, PRICING_LIMITS, CLASS_PROFILES } from './sr-pricing.mjs'

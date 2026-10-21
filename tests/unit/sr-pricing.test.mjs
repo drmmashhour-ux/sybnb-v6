@@ -91,3 +91,12 @@ test('minimum charge $10: a short ride never costs less, at any hour', () => {
   const off = normalizePricing({ ...recommendedConfig(), fees: { ...recommendedConfig().fees, minChargeUsd: 0 } })
   assert.ok(quote(off, { distanceKmOverride: 1, estimatedMinutesOverride: 3 }).fareMinor < 10)
 })
+
+test('master reaches pricing only through the country seam: per-country key, unknown country fails closed', async () => {
+  const { ridePricingForActiveCountry } = await import('../../server/lib/geo-adapter.mjs')
+  const sy = ridePricingForActiveCountry({ SYBNB_COUNTRY: 'syria' })
+  assert.equal(sy.settingKey, 'sr_syria')
+  assert.equal(typeof sy.pack.normalizePricing, 'function')
+  assert.throws(() => ridePricingForActiveCountry({ SYBNB_COUNTRY: 'lebanon' }), /not supported/)
+  assert.throws(() => ridePricingForActiveCountry({}), /no country/)
+})

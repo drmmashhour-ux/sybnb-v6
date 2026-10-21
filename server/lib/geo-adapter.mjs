@@ -16,7 +16,7 @@ const GEOCODERS = {
 
 // The capability surface a country geocoder must provide (mirrors existing behavior exactly).
 function assertGeocoderComplete(mod, key) {
-  for (const fn of ['resolvePlaceText', 'haversineKm', 'quoteSrRide']) {
+  for (const fn of ['resolvePlaceText', 'haversineKm', 'quoteSrRide', 'normalizePricing', 'storableConfig', 'recommendedConfig', 'getActivePricing', 'setActivePricing']) {
     if (typeof mod[fn] !== 'function') throw new Error(`geocoder for country '${key}' is incomplete: missing ${fn} (fail-closed)`)
   }
 }
@@ -35,6 +35,14 @@ export function resolveRideGeocoder(country) {
 // without a valid SYBNB_COUNTRY, this always has a valid active country at runtime.
 export function quoteSrRideForActiveCountry(input, env = process.env) {
   return resolveRideGeocoder(env.SYBNB_COUNTRY).quoteSrRide(input)
+}
+
+// The active country's pricing capability + the key its pricing is stored under (one setting per country,
+// so two countries can never read or overwrite each other's prices).
+export function ridePricingForActiveCountry(env = process.env) {
+  const country = String(env.SYBNB_COUNTRY || '').trim().toLowerCase()
+  const mod = resolveRideGeocoder(country)
+  return { country, settingKey: `sr_${country}`, pack: mod }
 }
 
 export function supportedRideGeocoderCountries() {

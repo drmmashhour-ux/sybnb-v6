@@ -83,12 +83,10 @@ export async function createSrRideWithCoords(input: {
   bonusMinor?: number
   autoSwitch?: boolean
   guestStripeSessionId?: string
-  guestShamCashRef?: string
 }): Promise<PlatformRideRequest> {
   const response = await post<{ ok: true; ride: PlatformRideRequest }>('/api/sr/rides', {
     // Paid Stripe Checkout session (guest/client card): the server verifies it and marks the ride prepaid.
     ...(input.guestStripeSessionId ? { guestStripeSessionId: input.guestStripeSessionId } : {}),
-    ...(input.guestShamCashRef ? { guestShamCashRef: input.guestShamCashRef } : {}),
     pickup: input.pickup,
     dropoff: input.dropoff,
     category: input.category,
@@ -141,4 +139,10 @@ export async function fetchSrAvailability(point: Coords): Promise<CategoryAvaila
   if (!response.ok) return []
   const payload = (await response.json()) as { availability?: CategoryAvailability[] }
   return payload.availability ?? []
+}
+
+/** Sham Cash wallet top-up: the rider transfers to the platform account and submits the amount + transaction reference.
+ *  An admin verifies the transfer and approves it, which credits the wallet. Nothing is credited before that. */
+export async function submitWalletTopupProof(input: { amountMinor: number; currency: string; providerRef: string }): Promise<void> {
+  await post<{ ok: true }>('/api/wallet/topup-proof', input)
 }

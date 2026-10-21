@@ -32,11 +32,29 @@ export function srIsNightHour(date: Date = new Date()): boolean {
   return localHour >= 22 || localHour < 6
 }
 
+// Live rates from the server (/api/sr/rates), so the first estimate follows what the admin set. Until they arrive
+// (or if the request fails) the constants above are used.
+type LiveRates = { rates: Record<string, Rate>; minChargeUsd: number; roundingUsd: number; liveTrackingUsd: number; safetyFeePerTripUsd: number; peak: number; night: number; avgSpeedKmh: number }
+let live: LiveRates | null = null
+export async function loadSrRates(apiBase: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${apiBase}/api/sr/rates`)
+    if (!res.ok) return false
+    const j = await res.json()
+    if (!j?.ok || !j.rates) return false
+    live = j as LiveRates
+    return true
+  } catch { return false }
+}
+
 export function srFallbackFareMinor(category: string, lowDataMode: boolean): number {
-  const rates = CATEGORY_RATES[category] || CATEGORY_RATES['SR Economy']
-  const estMinutes = Math.max(1, Math.round((DEFAULT_DISTANCE_KM / SR_AVG_SPEED_KMH) * 60))
-  const base = rates.baseUsd + rates.perKmUsd * DEFAULT_DISTANCE_KM + rates.perMinUsd * estMinutes + (lowDataMode ? 0 : LIVE_TRACKING_SURCHARGE_USD)
-  const floored = Math.max(rates.minFareUsd, base)
-  const varied = floored * (srIsPeakHour() ? SR_PEAK_SURGE_MULTIPLIER : 1) * (srIsNightHour() ? SR_NIGHT_MULTIPLIER : 1)
-  return Math.ceil(varied / SR_FARE_ROUNDING_USD) * SR_FARE_ROUNDING_USD
+  const L = live
+  const rates = (L ? L.rates : CATEGORY_RATES)[category] || (L ? L.rates : CATEGORY_RATES)['SR Economy']
+  const speed = L?.avgSpeedKmh ?? SR_AVG_SPEED_KMH
+  const estMinutes = Math.max(1, Math.round((DEFAULT_DISTANCE_KM / speed) * 60))
+  const base = rates.baseUsd + rates.perKmUsd * DEFAULT_DISTANCE_KM + rates.perMinUsd * estMinutes + (L ? L.safetyFeePerTripUsd : 0) + (lowDataMode ? 0 : (L?.liveTrackingUsd ?? LIVE_TRACKING_SURCHARGE_USD))
+  const floored = Math.max(rates.minFareUsd, L?.minChargeUsd ?? 0, base)
+  const varied = floored * (srIsPeakHour() ? (L?.peak ?? SR_PEAK_SURGE_MULTIPLIER) : 1) * (srIsNightHour() ? (L?.night ?? SR_NIGHT_MULTIPLIER) : 1)
+  const step = L?.roundingUsd ?? SR_FARE_ROUNDING_USD
+  return Math.max(Math.ceil(L?.minChargeUsd ?? 0), Math.ceil(varied / step) * step)
 }

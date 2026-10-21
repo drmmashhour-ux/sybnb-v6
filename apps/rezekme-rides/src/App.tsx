@@ -11,6 +11,10 @@ const GuestAccountPage = lazy(() =>
 const LegalDocumentPage = lazy(() =>
   import('@platform/modules/legal/LegalDocumentPage').then((m) => ({ default: m.LegalDocumentPage })),
 )
+import { GuideOverlay } from './guide/GuideOverlay'
+import { HelpLauncher } from './guide/HelpLauncher'
+const WalletPage = lazy(() => import('./pages/WalletPage').then((m) => ({ default: m.WalletPage })))
+const MshDashboardPage = lazy(() => import('@platform/modules/msh/MshDashboardPage').then((m) => ({ default: m.MshDashboardPage })))
 const DriverScreen = lazy(() => import('./pages/DriverScreen').then((m) => ({ default: m.DriverScreen })))
 const DriverApplication = lazy(() => import('./pages/DriverApplication').then((m) => ({ default: m.DriverApplication })))
 const RidePage = lazy(() => import('./pages/RidePage').then((m) => ({ default: m.RidePage })))
@@ -55,10 +59,12 @@ export function App() {
   const isRideRoute = path === '/' || path === '/ride'
   const isBusinessRoute = path === '/business/account'
   const isTripsRoute = path === '/trips'
+  const isWalletRoute = path === '/wallet'
+  const isMshRoute = path === '/wallet/msh'
   const isProfileRoute = path === '/profile'
   const isAccountRoute = /^\/account\/open(?:\/[^/]+)?$/.test(path)
   // The ride form itself asks for the email (no code for a new email); only trips/business need a session.
-  const needsGate = (isBusinessRoute || isTripsRoute || isProfileRoute) && !hasGuestSession
+  const needsGate = (isBusinessRoute || isTripsRoute || isProfileRoute || isWalletRoute || isMshRoute) && !hasGuestSession
 
   if (needsGate) {
     try {
@@ -141,6 +147,10 @@ export function App() {
     content = <ProfilePage lang={lang} onSignOut={() => void handleSignOut()} />
   } else if (isTripsRoute) {
     content = <TripsPage lang={lang} />
+  } else if (isMshRoute) {
+    content = <MshDashboardPage lang={lang} />
+  } else if (isWalletRoute) {
+    content = <WalletPage lang={lang} />
   } else if (isBusinessRoute) {
     content = <BusinessAccountPage lang={lang} />
   } else if (path === '/terms') {
@@ -175,6 +185,7 @@ export function App() {
             {hasGuestSession ? (
               <>
                 <a href="#/trips" style={styles.barLink}>{pick(lang, 'رحلاتي', 'Trips', 'Courses')}</a>
+                <a href="#/wallet" style={styles.barLink}>{pick(lang, 'المحفظة', 'Wallet', 'Portefeuille')}</a>
                 <a href="#/profile" style={styles.barLink}>{pick(lang, 'حسابي', 'Profile', 'Profil')}</a>
                 <a href="#/business/account" style={styles.barLink}>{pick(lang, 'الأعمال', 'Business', 'Entreprise')}</a>
                 <button type="button" style={styles.barButton} onClick={() => void handleSignOut()}>
@@ -190,6 +201,8 @@ export function App() {
       <Suspense fallback={<div style={styles.loading}><span style={styles.skeleton} /><span style={{ ...styles.skeleton, width: '45%' }} /></div>}>
         {content}
       </Suspense>
+      <GuideOverlay lang={lang} />
+      <HelpLauncher lang={lang} path={path} />
     </div>
   )
 }
@@ -197,9 +210,9 @@ export function App() {
 const styles: Record<string, CSSProperties> = {
   shell: { minHeight: '100vh', background: '#fff', color: '#000' },
   bar: { position: 'sticky', top: 0, zIndex: 30, background: '#000', color: '#fff' },
-  barInner: { maxWidth: 520, margin: '0 auto', minHeight: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '0 16px' },
+  barInner: { maxWidth: 520, margin: '0 auto', minHeight: 52, display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '2px 8px', padding: '4px 16px' },
   wordmark: { color: '#fff', fontWeight: 800, fontSize: 20, letterSpacing: 1, textDecoration: 'none' },
-  barRight: { display: 'flex', alignItems: 'center', gap: 8 },
+  barRight: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 4 },
   langGroup: { display: 'flex', gap: 2 },
   langBtn: { minHeight: 32, minWidth: 32, border: 0, borderRadius: 999, background: 'transparent', color: '#bbb', fontSize: 12, fontWeight: 700, padding: '0 8px' },
   langBtnActive: { background: '#fff', color: '#000' },

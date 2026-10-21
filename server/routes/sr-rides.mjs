@@ -5,7 +5,8 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { randomInt } from 'node:crypto'
 // Consume the country-neutral geocoding seam (resolves the active country's geocoder, fail-closed) —
 // the route does NOT depend on any country's geocoder module directly.
-import { quoteSrRideForActiveCountry } from '../lib/geo-adapter.mjs'
+import { quoteSrRideForActiveCountry, ridePricingForActiveCountry } from '../lib/geo-adapter.mjs'
+import { refreshSrPricing, readStoredPricing, invalidateSrPricingCache, pricingKey, PRICING_CATEGORY } from '../lib/sr-pricing-store.mjs'
 import { resolveTrafficDistance } from '../lib/traffic-distance.mjs'
 import { signDriverPhotoUrl } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
@@ -23,10 +24,11 @@ import {
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { rideCategoryToVehicle, isKnownRideCategory } from '../lib/vehicle-category.mjs'
-import { isRateLimited } from '../lib/rateLimit.mjs'
+import { clientIp, isRateLimited } from '../lib/rateLimit.mjs'
 import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
 import { recordWalletEntry, refundPrepaidRide, recordCardPrepayCredit } from '../lib/finance-ledger.mjs'
 import { cardHoldAvailable, riderHasSavedCard, placeCardHold, releaseCardHold, replaceCardHold } from '../lib/ride-card-hold.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
 // file -- promo-code creation, promo-code activation toggling, and business-account onboarding --
 // were bare db().x.create/update calls with no transaction and no commit-boundary re-authorization.
@@ -40,6 +42,10 @@ import { offerRideToNextDriver, runDispatchSweep } from '../lib/ride-dispatch.mj
 import { logRideEventSafe } from '../lib/ride-events.mjs'
 import { buildAlternatives, notifyRiderNoDriverOnce, categoryAvailabilityAt } from '../lib/ride-no-driver.mjs'
 import { analyzeRide } from '../lib/ai-ride-analyst.mjs'
+import { runRideAssistant, RIDE_ASSISTANT_ROLES } from '../lib/ai-ride-assistant.mjs'
+import { lookupRoadRoute, parseRoutePoints } from '../lib/road-route.mjs'
+import { dutyBlockers } from './driver-base.mjs'
+import { driverPayoutBalances } from '../lib/finance-ledger.mjs'
 import { getOrCreateRideInvoice, renderInvoiceHtml } from '../lib/invoices.mjs'
 
 // SR Ride vs. Uber gap-closure (P0 #1): only while a driver is actually en route to or on this
@@ -133,12 +139,38 @@ async function switchOpenRideCategory(existing, category) {
   return { category, fareMinor: newFare, currency: quote.currency }
 }
 
+// The active country's pricing pack (the master never imports a country directly).
+const P = () => ridePricingForActiveCountry().pack
+
+// Sample fares so the admin sees what a config does: per class, a short city trip, a 15 km trip and
+// the Damascus airport run's distance, at noon on a weekday (no peak, night or weekend factor).
+const PRICING_SAMPLE_TRIPS = [
+  { key: 'short', km: 5, minutes: 15 },
+  { key: 'medium', km: 15, minutes: 35 },
+  { key: 'long', km: 32, minutes: 45 },
+  { key: 'homs', km: 162 },
+  { key: 'aleppo', km: 355 },
+]
+function pricingExamples(config) {
+  const noon = new Date('2026-10-21T09:00:00Z') // Wednesday 12:00 in Damascus
+  const out = {}
+  for (const category of P().SR_CATEGORIES) {
+    out[category] = {}
+    for (const trip of PRICING_SAMPLE_TRIPS) {
+      const q = P().quoteSrRide({ pickup: 'sample', dropoff: 'sample', category, lowDataMode: true, distanceKmOverride: trip.km, estimatedMinutesOverride: trip.minutes, now: noon, pricing: config })
+      out[category][trip.key] = q.fareMinor
+    }
+  }
+  return { trips: PRICING_SAMPLE_TRIPS, fares: out }
+}
+
 // Compute an SR quote, upgraded with live Google road distance + traffic when GOOGLE_MAPS_API_KEY is
 // set. Pure/sync engine first (resolves coords + a gazetteer estimate); then, if a key and valid
 // coords exist, re-quote with the live distance, traffic-aware minutes, and congestion multiplier.
 // Fail-open: any Google error leaves the gazetteer quote untouched. Used by BOTH /quote and /rides so
 // the price shown equals the price charged.
 async function computeSrQuoteWithTraffic(baseParams) {
+  await refreshSrPricing()
   let quote = quoteSrRideForActiveCountry(baseParams)
   if (!process.env.GOOGLE_MAPS_API_KEY) return quote
   if (!quote.pickupCoords || !quote.dropoffCoords) return quote
@@ -686,6 +718,7 @@ export async function handleSrRides(req, res, url, context) {
           return error
         }
         if (process.env.SR_GUEST_STRIPE_ENABLED !== '1') throw notVerified('Card payments are not enabled on this server.')
+        try { authorizePaymentOperation({ operation: 'capture', rail: 'stripe_checkout', provider: 'stripe', division: 'SR', country: activePolicyCountryKey(), environment: policyEnvironment(), actor: { roles: [] } }) } catch { throw notVerified('Card payments are not available right now.') }
         const { default: Stripe } = await import('stripe')
         const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY)
         const session = await stripeClient.checkout.sessions.retrieve(guestStripeSessionId)
@@ -715,13 +748,10 @@ export async function handleSrRides(req, res, url, context) {
         guestStripePrepaid = true
       }
 
-      // ---- guest Sham Cash: bypass prepay gate; admin verifies before dispatch ----
-      const guestShamCashRef = typeof body.guestShamCashRef === 'string' ? body.guestShamCashRef.trim() : null
-      if (guestShamCashRef) {
-        rideData.metadata = { ...rideData.metadata, guestShamCashRef, pendingShamCash: true, prepaid: false }
-      }
+      // Sham Cash is a WALLET TOP-UP only (POST /api/wallet/topup-proof, credited by an admin after the transfer is verified):
+      // a free-text reference never pays for or unlocks a ride.
 
-      if (!guestStripePrepaid && !guestShamCashRef && balanceMinor < finalFareMinor && !cardCovers) {
+      if (!guestStripePrepaid && balanceMinor < finalFareMinor && !cardCovers) {
         const error = new Error('Add funds to your wallet to request this ride.')
         error.statusCode = 402
         error.code = 'RIDE_PREPAY_REQUIRED'
@@ -1364,6 +1394,90 @@ export async function handleSrRides(req, res, url, context) {
     return json(res, 200, { ok: true, rideId: ride.id, status: ride.status, points, milestones, gaps, distanceKm: Math.round(distanceKm * 10) / 10 })
   }
 
+  // Road-following route for the map line (so it follows streets, not a straight line). Public (the booking map is shown
+  // before sign-in), validated, per-IP rate limited and cached; the provider key (if any) stays on the server.
+  // Public, read-only: the live rates the rider app uses for its first price estimate before /quote
+  // answers. Same numbers the engine charges with; nothing private in it.
+  if (url.pathname === '/api/sr/rates') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    await refreshSrPricing()
+    const c = P().getActivePricing()
+    const rates = {}
+    for (const cat of P().SR_CATEGORIES) rates[cat] = { baseUsd: c.rates[cat].baseUsd, perKmUsd: c.rates[cat].perKmUsd, perMinUsd: c.rates[cat].perMinUsd, minFareUsd: c.rates[cat].minFareUsd }
+    return json(res, 200, { ok: true, rates, minChargeUsd: c.fees.minChargeUsd, roundingUsd: c.fees.roundingUsd, liveTrackingUsd: c.fees.liveTrackingUsd, safetyFeePerTripUsd: c.fees.safetyFeePerTripUsd, peak: c.multipliers.peak, night: c.multipliers.night, avgSpeedKmh: c.avgSpeedKmh })
+  }
+
+  if (url.pathname === '/api/sr/route') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    const points = parseRoutePoints(url.searchParams.get('pts'))
+    if (!points) {
+      const error = new Error('pts must be 2 to 8 "lat,lng" pairs separated by ";".')
+      error.statusCode = 400; error.code = 'ROUTE_POINTS_INVALID'; error.expose = true
+      throw error
+    }
+    if (await isRateLimited(`sr-route:${clientIp(req)}`, 60_000, 90)) {
+      const error = new Error('Too many route requests. Please slow down.')
+      error.statusCode = 429; error.code = 'ROUTE_RATE_LIMITED'; error.expose = true
+      throw error
+    }
+    const road = await lookupRoadRoute(points)
+    return json(res, 200, road ? { ok: true, ...road } : { ok: true, provider: null, points: null })
+  }
+
+  // In-app AI helper for the rider and the driver (advisory only; see server/lib/ai-ride-assistant.mjs). It is given a small set of
+  // facts about THIS user (never anyone else's) and answers questions about their ride, wallet, documents and payouts.
+  if (url.pathname === '/api/sr/assistant') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    const body = await readJson(req).catch(() => ({}))
+    const role = String(body.role || '')
+    if (!RIDE_ASSISTANT_ROLES.includes(role)) {
+      const error = new Error('role must be rider or driver.')
+      error.statusCode = 400; error.code = 'ASSISTANT_ROLE_INVALID'; error.expose = true
+      throw error
+    }
+    requireAuth(context, [role === 'driver' ? 'DRIVER' : 'GUEST'])
+    const question = String(body.question || '').trim()
+    if (!question) {
+      const error = new Error('A question is required.')
+      error.statusCode = 400; error.code = 'ASSISTANT_QUESTION_REQUIRED'; error.expose = true
+      throw error
+    }
+    if (await isRateLimited(`ride-assistant:${context.user.id}`, 60 * 60_000, 20)) {
+      const error = new Error('Too many questions. Please try again later.')
+      error.statusCode = 429; error.code = 'ASSISTANT_RATE_LIMITED'; error.expose = true
+      throw error
+    }
+    const uid = context.user.id
+    const rideWhere = role === 'driver' ? { driverId: uid } : { riderId: uid }
+    const last = await db().rideRequest.findFirst({ where: rideWhere, orderBy: { requestedAt: 'desc' }, include: { driver: { select: { displayName: true, driverProfile: { select: { vehicleMake: true, vehicleModel: true, vehiclePlate: true } } } } } })
+    const meta = last?.metadata && typeof last.metadata === 'object' ? last.metadata : {}
+    const facts = {
+      lastRide: last ? {
+        status: last.status, fareMinor: last.fareMinor, currency: last.currency, prepaid: meta.prepaid === true, settled: meta.settled === true || undefined,
+        disputeOpen: last.status === 'DISPUTED' || undefined, disputeReason: meta.dispute?.reason ? String(meta.dispute.reason).slice(0, 200) : undefined,
+        driverName: role === 'rider' ? last.driver?.displayName ?? null : undefined,
+        vehicle: role === 'rider' && last.driver?.driverProfile ? `${last.driver.driverProfile.vehicleMake ?? ''} ${last.driver.driverProfile.vehicleModel ?? ''} ${last.driver.driverProfile.vehiclePlate ?? ''}`.trim() : undefined,
+        requestedAt: last.requestedAt,
+      } : null,
+    }
+    if (role === 'rider') {
+      const wallet = await db().wallet.findFirst({ where: { userId: uid, currency: 'USD' }, select: { cachedBalanceMinor: true } })
+      const proofs = await db().paymentProof.findMany({ where: { userId: uid }, orderBy: { createdAt: 'desc' }, take: 3, select: { status: true, amountMinor: true, currency: true, createdAt: true } }).catch(() => [])
+      facts.walletUsdMinor = wallet?.cachedBalanceMinor ?? 0
+      facts.recentTopUps = proofs
+    } else {
+      const profile = await db().driverProfile.findUnique({ where: { userId: uid } })
+      const { blockers } = await dutyBlockers(uid, profile)
+      const balances = await db().$transaction((tx) => driverPayoutBalances(tx, { userId: uid, currency: 'USD' }))
+      facts.onDuty = Boolean(profile?.onDutyAt)
+      facts.documentProblems = blockers
+      facts.payoutAvailableMinor = balances.availableMinor
+      facts.payoutPendingMinor = balances.pendingMinor
+    }
+    const out = await runRideAssistant({ role, question, facts })
+    return json(res, 200, { ok: true, ...out })
+  }
+
   // Safety Phase 1 (2026-10-10): SOS / PANIC. Either party to an ACTIVE ride -- the rider (GUEST)
   // or the assigned driver (DRIVER) -- can pull it. It creates an OPEN Incident (the single durable
   // source of truth, with a copy of the trip snapshot + the other party embedded so the admin
@@ -1843,6 +1957,70 @@ export async function handleSrRides(req, res, url, context) {
           : null,
       },
     })
+  }
+
+  // Admin pricing: view / preview / save the variable pricing config (cost formula, multipliers, fees).
+  // Stored in admin_settings (no schema change); audited and re-authorized at commit like promo codes.
+  if (url.pathname === '/api/admin/sr/pricing' || url.pathname === '/api/admin/sr/pricing/preview') {
+    requireAuth(context, ['ADMIN'])
+    const preview = url.pathname.endsWith('/preview')
+    if (req.method === 'GET' && !preview) {
+      const row = await readStoredPricing()
+      const config = row ? P().normalizePricing(row.value) : P().normalizePricing(null)
+      return json(res, 200, {
+        ok: true,
+        stored: Boolean(row),
+        version: row?.version ?? 0,
+        updatedAt: row?.updatedAt ?? null,
+        config,
+        recommended: P().normalizePricing(P().recommendedConfig()),
+        legacy: P().normalizePricing(null),
+        limits: P().PRICING_LIMITS,
+        categories: P().SR_CATEGORIES,
+        classProfiles: P().CLASS_PROFILES,
+        examples: pricingExamples(config),
+      })
+    }
+    if (req.method === 'POST' && preview) {
+      const body = await readJson(req)
+      const config = P().normalizePricing(body?.config)
+      return json(res, 200, { ok: true, config, examples: pricingExamples(config) })
+    }
+    if (req.method === 'PUT' && !preview) {
+      const body = await readJson(req)
+      const reason = String(body?.reason || '').trim()
+      if (reason.length < 8 || reason.length > 300) {
+        const error = new Error('Write a reason of 8 to 300 characters. It goes in the audit log.')
+        error.statusCode = 400
+        error.code = 'PRICING_REASON_REQUIRED'
+        error.expose = true
+        throw error
+      }
+      const config = P().normalizePricing(body?.config)
+      const value = P().storableConfig(config)
+      const existing = await readStoredPricing()
+      if (existing && body?.expectedVersion != null && Number(body.expectedVersion) !== existing.version) {
+        const error = new Error('Pricing changed since you loaded it. Reload and try again.')
+        error.statusCode = 409
+        error.code = 'PRICING_VERSION_CONFLICT'
+        error.expose = true
+        throw error
+      }
+      const saved = await db().$transaction(async (tx) => {
+        await reauthorizeAtCommit(tx, context, { action: 'SR_PRICING_CHANGED', requiredRoles: ['ADMIN'] })
+        const row = existing
+          ? await tx.adminSetting.update({ where: { id: existing.id }, data: { value, version: { increment: 1 }, updatedById: context.user.id, updatedAt: new Date() } })
+          : await tx.adminSetting.create({ data: { category: PRICING_CATEGORY, key: pricingKey(), value, updatedById: context.user.id } })
+        await tx.adminAuditLog.create({
+          data: { actorUserId: context.user.id, action: 'SR_PRICING_CHANGED', entityType: 'admin_settings', entityId: row.id, before: existing ? { value: existing.value, version: existing.version } : null, after: { value, version: row.version }, reason },
+        })
+        return row
+      })
+      invalidateSrPricingCache()
+      await refreshSrPricing({ force: true })
+      return json(res, 200, { ok: true, version: saved.version, config: P().getActivePricing(), examples: pricingExamples(P().getActivePricing()) })
+    }
+    return methodNotAllowed(res, preview ? ['POST'] : ['GET', 'PUT'])
   }
 
   // SR Ride vs. Uber gap-closure (P2 #12): admin-managed promo codes. Owner-approved scope: simple

@@ -19,7 +19,9 @@ type Props = {
   shamCashStatus: 'idle' | 'saving' | 'submitted' | 'error'
 }
 
-const LOCAL_WALLET_QR = '/assets/payments/syrian-local-wallet-qr-clean.jpg'
+// The platform's OWN Sham Cash receiving QR. Set VITE_SHAMCASH_QR_URL to the Rezekme account's QR before launch; the fallback is
+// the shared SYBNB asset and must not be used for Rezekme money.
+const LOCAL_WALLET_QR = ((import.meta.env.VITE_SHAMCASH_QR_URL as string | undefined) || '').trim() || '/assets/payments/syrian-local-wallet-qr-clean.jpg'
 
 const s: Record<string, CSSProperties> = {
   wrap: { display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 0' },
@@ -61,8 +63,8 @@ const s: Record<string, CSSProperties> = {
   notice: { color: '#16a34a', fontSize: 12, marginTop: 4 },
 }
 
-function Tab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return <button type="button" style={active ? s.tabActive : s.tab} onClick={onClick}>{label}</button>
+function Tab({ label, active, onClick, guide }: { label: string; active: boolean; onClick: () => void; guide?: string }) {
+  return <button type="button" data-guide={guide} style={active ? s.tabActive : s.tab} onClick={onClick}>{label}</button>
 }
 
 export function PaymentPicker({
@@ -78,7 +80,7 @@ export function PaymentPicker({
         <span style={s.label}>{pick(lang, 'طريقة الدفع', 'Payment method', 'Paiement')}</span>
         <div style={s.tabs}>
           <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />
-          <Tab label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
+          <Tab guide="pay-tab-shamcash" label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
         </div>
 
         {/* ---- Guest card ---- */}
@@ -95,17 +97,18 @@ export function PaymentPicker({
         {value === 'shamcash' && (
           <div style={s.body}>
             {shamCashStatus === 'submitted' ? (
-              <span style={s.ok}>✓ {pick(lang, 'تم إرسال إثبات الدفع. اضغط "طلب الرحلة" — سيُوافق عليه المشرف ثم يبدأ البحث عن سائق.', 'Payment proof sent. Tap Request ride — an admin will verify and dispatch your driver.', 'Preuve envoyée. Appuyez sur Demander le trajet — un admin vérifiera et enverra le chauffeur.')}</span>
+              <span style={s.ok}>✓ {pick(lang, 'تم إرسال إثبات الشحن. بعد أن يؤكد المشرف التحويل يُشحن رصيدك ويُفعَّل زر طلب الرحلة (يتحدّث تلقائياً).', 'Top-up proof sent. Once an admin confirms the transfer your wallet is credited and Request ride unlocks (this page checks automatically).', 'Preuve envoyée. Dès que l’admin confirme le virement, votre portefeuille est crédité et le bouton Demander le trajet se débloque (vérification automatique).')}</span>
             ) : (
               <>
                 <div style={s.hint}>
                   {pick(lang, 'حوّل المبلغ إلى حساب Rezekme أدناه ثم أدخل رقم المرجع.', 'Transfer the amount to the Rezekme account below and enter the reference number.', 'Transférez le montant au compte Rezekme ci-dessous et entrez la référence.')}
                 </div>
-                <img src={LOCAL_WALLET_QR} alt="Sham Cash QR" style={s.qr} />
+                <img data-guide="shamcash-qr" src={LOCAL_WALLET_QR} alt="Sham Cash QR" style={s.qr} />
                 <div style={{ marginBottom: 6, fontSize: 12, color: '#333' }}>
                   {pick(lang, 'المبلغ المطلوب:', 'Amount due:', 'Montant dû:')} <strong>{moneyText(fareMinor, currency, lang)}</strong>
                 </div>
                 <input
+                  data-guide="shamcash-ref"
                   type="text"
                   dir={isAr ? 'rtl' : 'ltr'}
                   style={s.input}
@@ -114,6 +117,7 @@ export function PaymentPicker({
                   onChange={(e) => onShamCashRefChange(e.target.value)}
                 />
                 <button
+                  data-guide="shamcash-submit"
                   type="button"
                   style={shamCashStatus === 'saving' || !shamCashRef.trim() ? s.btnDisabled : s.btn}
                   disabled={shamCashStatus === 'saving' || !shamCashRef.trim()}
@@ -140,7 +144,7 @@ export function PaymentPicker({
       <div style={s.tabs}>
         <Tab label={pick(lang, 'المحفظة', 'Wallet', 'Portefeuille')} active={value === 'wallet'} onClick={() => onChange('wallet')} />
         <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />
-        <Tab label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
+        <Tab guide="pay-tab-shamcash" label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
         <Tab label="MSH" active={value === 'msh'} onClick={() => onChange('msh')} />
       </div>
 
@@ -172,17 +176,18 @@ export function PaymentPicker({
       {value === 'shamcash' && (
         <div style={s.body}>
           {shamCashStatus === 'submitted' ? (
-            <span style={s.ok}>✓ {pick(lang, 'تم إرسال إثبات الشحن. بعد الموافقة يُشحن رصيدك وتُطلب الرحلة.', 'Top-up proof sent. After approval your wallet is funded and the ride will be requested.', 'Preuve envoyée. Après approbation, votre portefeuille sera crédité.')}</span>
+            <span style={s.ok}>✓ {pick(lang, 'تم إرسال إثبات الشحن. بعد موافقة المشرف يُشحن رصيدك ثم اضغط طلب الرحلة.', 'Top-up proof sent. After an admin approves it your wallet is funded; then tap Request ride.', 'Preuve envoyée. Après approbation, votre portefeuille sera crédité.')}</span>
           ) : (
             <>
               <div style={s.hint}>
                 {pick(lang, 'حوّل المبلغ إلى حساب Rezekme أدناه ثم أدخل رقم المرجع.', 'Transfer the amount to the Rezekme account below and enter the reference number.', 'Transférez le montant au compte Rezekme ci-dessous et entrez la référence.')}
               </div>
-              <img src={LOCAL_WALLET_QR} alt="Sham Cash QR" style={s.qr} />
+              <img data-guide="shamcash-qr" src={LOCAL_WALLET_QR} alt="Sham Cash QR" style={s.qr} />
               <div style={{ marginBottom: 6, fontSize: 12, color: '#333' }}>
                 {pick(lang, 'المبلغ المطلوب:', 'Amount due:', 'Montant dû:')} <strong>{moneyText(fareMinor, currency, lang)}</strong>
               </div>
               <input
+                data-guide="shamcash-ref"
                 type="text"
                 dir={isAr ? 'rtl' : 'ltr'}
                 style={s.input}
@@ -191,6 +196,7 @@ export function PaymentPicker({
                 onChange={(e) => onShamCashRefChange(e.target.value)}
               />
               <button
+                data-guide="shamcash-submit"
                 type="button"
                 style={shamCashStatus === 'saving' || !shamCashRef.trim() ? s.btnDisabled : s.btn}
                 disabled={shamCashStatus === 'saving' || !shamCashRef.trim()}
@@ -208,7 +214,8 @@ export function PaymentPicker({
       {/* ---- MSH token ---- */}
       {value === 'msh' && (
         <div style={s.body}>
-          <span style={s.hint}>{pick(lang, 'رمز MSH — قريباً', 'MSH token — coming soon', 'Jeton MSH — bientôt disponible')}</span>
+          <span style={s.hint}>{pick(lang, 'نقاط MSH هي رصيد محفظتك (1 نقطة = 1 دولار).', 'MSH points are your wallet balance (1 point = $1).', 'Les points MSH sont le solde de votre portefeuille (1 point = 1 $).')}{walletBalanceMinor !== null ? ` ${walletBalanceMinor} MSH` : ''}</span>
+          <a href="#/wallet" style={{ display: 'inline-block', marginTop: 6, fontWeight: 700 }}>{pick(lang, 'شراء نقاط MSH', 'Buy MSH points', 'Acheter des points MSH')} →</a>
         </div>
       )}
     </div>

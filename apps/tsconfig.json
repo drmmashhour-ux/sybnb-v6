@@ -14,6 +14,7 @@
     "se/src",
     "rezekme-rides/src",
     "rezekme-stay/src",
+    "rezekme-admin/src",
     "../src/vite-env.d.ts"
   ]
 }

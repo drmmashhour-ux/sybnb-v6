@@ -19,17 +19,20 @@ function distKm(a, b) {
 }
 
 // Ring 1..SR_RING_COUNT (outside the last ring stays at the last ring); null without coordinates.
-export function ringOf(coords) {
+// `fees` (optional) is the admin pricing config's `fees` group; without it the env defaults apply.
+export function ringOf(coords, fees) {
   if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) return null
-  const ring = Math.floor(distKm(coords, DAMASCUS_CENTER) / SR_RING_WIDTH_KM) + 1
-  return Math.min(SR_RING_COUNT, Math.max(1, ring))
+  const width = fees?.ringWidthKm ?? SR_RING_WIDTH_KM
+  const count = fees?.ringCount ?? SR_RING_COUNT
+  const ring = Math.floor(distKm(coords, DAMASCUS_CENTER) / width) + 1
+  return Math.min(count, Math.max(1, ring))
 }
 
 // A trip is priced by its OUTER ring (pickup or drop-off, whichever is farther out).
-export function ringFeeUsd(pickupCoords, dropoffCoords) {
-  const rings = [ringOf(pickupCoords), ringOf(dropoffCoords)].filter(Boolean)
+export function ringFeeUsd(pickupCoords, dropoffCoords, fees) {
+  const rings = [ringOf(pickupCoords, fees), ringOf(dropoffCoords, fees)].filter(Boolean)
   const ring = rings.length ? Math.max(...rings) : null
-  return { ring, feeUsd: ring ? (ring - 1) * SR_RING_FEE_USD : 0 }
+  return { ring, feeUsd: ring ? (ring - 1) * (fees?.ringFeeUsd ?? SR_RING_FEE_USD) : 0 }
 }
 
 // Day / date factor in Syria local time (UTC+3). Holidays beat the weekend factor (no stacking).
@@ -41,13 +44,14 @@ const FIXED_HOLIDAYS = ['01-01', '03-08', '04-17', '05-01', '05-06', '12-25']
 function localDate(date) {
   return new Date(date.getTime() + 3 * 3600 * 1000)
 }
-export function dayFactor(date = new Date()) {
+// `cfg` (optional) = { weekend, holiday, holidays[] } from the admin pricing config.
+export function dayFactor(date = new Date(), cfg) {
   const local = localDate(date)
   const iso = local.toISOString().slice(0, 10)
-  const extra = String(process.env.SR_HOLIDAYS || '').split(',').map((s) => s.trim()).filter(Boolean)
-  if (FIXED_HOLIDAYS.includes(iso.slice(5)) || extra.includes(iso)) return { type: 'holiday', multiplier: HOLIDAY_MULT }
+  const extra = cfg?.holidays ?? String(process.env.SR_HOLIDAYS || '').split(',').map((s) => s.trim()).filter(Boolean)
+  if (FIXED_HOLIDAYS.includes(iso.slice(5)) || extra.includes(iso)) return { type: 'holiday', multiplier: cfg?.holiday ?? HOLIDAY_MULT }
   const dow = local.getUTCDay() // 5 = Friday, 6 = Saturday
-  if (dow === 5 || dow === 6) return { type: 'weekend', multiplier: WEEKEND_MULT }
+  if (dow === 5 || dow === 6) return { type: 'weekend', multiplier: cfg?.weekend ?? WEEKEND_MULT }
   return { type: 'weekday', multiplier: 1 }
 }
 
@@ -56,4 +60,4 @@ export function dayFactor(date = new Date()) {
 // top, so an address outside the centre costs more than the $20 anchor. Env SR_AIRPORT_BASE_USD.
 export const SR_AIRPORT_BASE_USD = num('SR_AIRPORT_BASE_USD', 20, 1, 500)
 const QUALITY = { 'SR Bike': 0.7, 'SR Economy': 1, 'SR Comfort': 1.25, 'SR SUV': 1.5, 'SR Van': 1.8, 'SR VIP': 2.4 }
-export const airportBaseUsd = (category) => SR_AIRPORT_BASE_USD * (QUALITY[category] ?? 1)
+export const airportBaseUsd = (category, baseUsd = SR_AIRPORT_BASE_USD) => baseUsd * (QUALITY[category] ?? 1)

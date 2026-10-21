@@ -14,6 +14,7 @@ import Stripe from 'stripe'
 import { db } from './prisma.mjs'
 import { approvePaymentProof, firstAdminId } from './finance-ledger.mjs'
 import { withTx } from './tx-scope.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from './payment-policy.mjs'
 import { log } from './logger.mjs'
 
 const chargeCurrencyForHold = () => (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
@@ -21,6 +22,15 @@ const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SEC
 
 export async function maybeAutoChargeRideCard({ rideId }) {
   if (!stripe) return { attempted: false, reason: 'stripe_not_configured' }
+  try { authorizePaymentOperation({
+      operation: 'capture',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: 'SR',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: [] },
+    }) } catch { return { attempted: false, reason: 'payment_policy_denied' } }
   if (process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_') && process.env.PAYMENTS_ENABLED !== 'true') {
     return { attempted: false, reason: 'payments_disabled' }
   }

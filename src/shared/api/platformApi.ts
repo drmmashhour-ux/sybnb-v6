@@ -3018,6 +3018,7 @@ export async function resolveAdminIncident(incidentId: string, input: { status: 
 // wrongly-approved/duplicated fare on a completed ride — all from a screen instead of the API.
 export type PlatformAdminSrRide = {
   id: string
+  dispute?: { openedBy: string | null; reason: string; openedAt: string | null } | null
   status: string
   fareMinor: number | null
   currency: string
@@ -4876,4 +4877,55 @@ export async function issueDriverKeyCode(userId: string) {
     apiRequest<{ ok: true; code: string }>(`/api/admin/drivers/${encodeURIComponent(userId)}/key-code`, { method: 'POST', token }),
   )
   return response.code
+}
+
+
+// ---- Admin: SR variable pricing (cost formula, multipliers, fees) -----------------------------------
+export type SrRate = { baseUsd: number; perKmUsd: number; perMinUsd: number; minFareUsd: number; perKmIntercityUsd?: number; perMinIntercityUsd?: number; breakdown?: { vehicleCostPerKm: number; costPerPaidKm: number; driverPerMin: number } }
+export type SrPricingConfig = {
+  mode: 'formula' | 'manual'
+  source: string
+  costs: Record<string, number>
+  manualRates: Record<string, { baseUsd: number; perKmUsd: number; perMinUsd: number; minFareUsd: number }>
+  multipliers: Record<string, number>
+  fees: Record<string, number>
+  intercity: Record<string, number>
+  avgSpeedKmh: number
+  holidays: string[]
+  rates: Record<string, SrRate>
+}
+export type SrPricingExamples = { trips: Array<{ key: string; km: number; minutes?: number }>; fares: Record<string, Record<string, number>> }
+export type SrPricingView = {
+  stored: boolean
+  version: number
+  updatedAt: string | null
+  config: SrPricingConfig
+  recommended: SrPricingConfig
+  legacy: SrPricingConfig
+  limits: { costs: Record<string, [number, number]>; multipliers: Record<string, [number, number]>; fees: Record<string, [number, number]>; intercity: Record<string, [number, number]> }
+  categories: string[]
+  examples: SrPricingExamples
+}
+
+export async function fetchSrPricing() {
+  const session = await ensurePrototypeAdminSession()
+  return apiRequest<{ ok: true } & SrPricingView>('/api/admin/sr/pricing', { token: session.token })
+}
+
+export async function previewSrPricing(config: unknown) {
+  const session = await ensurePrototypeAdminSession()
+  return apiRequest<{ ok: true; config: SrPricingConfig; examples: SrPricingExamples }>('/api/admin/sr/pricing/preview', {
+    method: 'POST',
+    token: session.token,
+    body: { config },
+  })
+}
+
+export async function saveSrPricing(input: { config: unknown; reason: string; expectedVersion?: number }) {
+  const session = await ensurePrototypeAdminSession()
+  return apiRequest<{ ok: true; version: number; config: SrPricingConfig; examples: SrPricingExamples }>('/api/admin/sr/pricing', {
+    method: 'PUT',
+    token: session.token,
+    body: input,
+  })
 }

@@ -1,72 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { loadGoogleMaps, type GoogleNs } from './googleLoader'
+import { fetchRoadRoute, linePath, pathKey } from './roadRoute'
 import { animatePoint, bearing, CAR_PATH, fitTargets, hasMoved, initialView, isFarJump, type LatLng, type RideMapProps } from './mapTypes'
 
 /**
  * Google Maps ride map: pickup / dropoff / numbered stop pins, a route line, a live driver marker
  * that glides between the 4 s polls, the rider's own position dot, and tap / long-press to drop a pin.
  *
- * Route line: a plain polyline straight through the points (free) until a road route is available.
- * The Google Routes API (road-following) is ONLY used when VITE_GOOGLE_DIRECTIONS === '1' (billed per
- * route, cached per trip; needs the Routes API enabled on the key). If it errors, the plain line stays.
+ * Route line: follows roads via our API (/api/sr/route, see roadRoute.ts); a plain line is only the instant fallback.
  */
-const USE_DIRECTIONS = import.meta.env.VITE_GOOGLE_DIRECTIONS === '1'
-const MAPS_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim() || ''
-
-const routeCache = new Map<string, LatLng[] | null>()
-
-function decodePolyline(encoded: string): LatLng[] {
-  const points: LatLng[] = []
-  let index = 0
-  let lat = 0
-  let lng = 0
-  while (index < encoded.length) {
-    for (const axis of ['lat', 'lng'] as const) {
-      let result = 0
-      let shift = 0
-      let byte: number
-      do {
-        byte = encoded.charCodeAt(index++) - 63
-        result |= (byte & 0x1f) << shift
-        shift += 5
-      } while (byte >= 0x20)
-      const delta = result & 1 ? ~(result >> 1) : result >> 1
-      if (axis === 'lat') lat += delta
-      else lng += delta
-    }
-    points.push({ lat: lat / 1e5, lng: lng / 1e5 })
-  }
-  return points
-}
-
-/** Road-following route via the Google Routes API (REST, same browser key + referrer restriction). */
-async function fetchRoadRoute(path: LatLng[]): Promise<LatLng[] | null> {
-  const key = path.map((point) => `${point.lat.toFixed(4)},${point.lng.toFixed(4)}`).join('|')
-  if (routeCache.has(key)) return routeCache.get(key) ?? null
-  if (!MAPS_KEY) return null
-  const wp = (point: LatLng) => ({ location: { latLng: { latitude: point.lat, longitude: point.lng } } })
-  try {
-    const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': MAPS_KEY, 'X-Goog-FieldMask': 'routes.polyline.encodedPolyline' },
-      body: JSON.stringify({
-        origin: wp(path[0]),
-        destination: wp(path[path.length - 1]),
-        intermediates: path.slice(1, -1).map(wp),
-        travelMode: 'DRIVE',
-      }),
-    })
-    if (!response.ok) throw new Error(String(response.status))
-    const data = (await response.json()) as { routes?: { polyline?: { encodedPolyline?: string } }[] }
-    const encoded = data.routes?.[0]?.polyline?.encodedPolyline
-    const road = encoded ? decodePolyline(encoded) : null
-    routeCache.set(key, road)
-    return road
-  } catch {
-    routeCache.set(key, null)
-    return null
-  }
-}
 
 const BLACK = '#000000'
 const WHITE = '#ffffff'
@@ -163,7 +105,8 @@ export function GoogleRideMap(props: Props) {
   // --- static pins + route line, refit when they change
   const stopsKey = JSON.stringify(stops || [])
   const hasDriver = Boolean(driver)
-  const routeKey = route ? route.map((p) => `${p.lat.toFixed(3)},${p.lng.toFixed(3)}`).join('|') : ''
+  const livePath = linePath({ pickup, dropoff, stops, driver, phase, route })
+  const routeKey = pathKey(livePath)
   useEffect(() => {
     const g = gRef.current
     const map = mapRef.current
@@ -197,32 +140,34 @@ export function GoogleRideMap(props: Props) {
         }),
     )
 
-    const path: LatLng[] = route && route.length >= 2 ? route : [...(pickup ? [pickup] : []), ...(stops || []), ...(dropoff ? [dropoff] : [])]
-
-    // Plain polyline (default, free).
-    const drawPolyline = () => {
-      rendererRef.current?.setMap(null)
-      if (path.length < 2) {
-        lineRef.current?.setMap(null)
-        lineRef.current = null
-        return
-      }
-      if (lineRef.current) lineRef.current.setPath(path)
-      else lineRef.current = new g.maps.Polyline({ map, path, strokeColor: BLACK, strokeOpacity: 0.9, strokeWeight: 4, geodesic: true })
+    const path = livePath
+    let cancelled = false
+    const controller = new AbortController()
+    const lineOpts = { strokeColor: BLACK, strokeOpacity: 0.85, strokeWeight: 5 }
+    rendererRef.current?.setMap(null)
+    // Plain line only as the instant fallback; during a live ride the previous road line stays until the new one arrives.
+    if (path.length < 2) {
+      lineRef.current?.setMap(null)
+      lineRef.current = null
+    } else if (!lineRef.current) {
+      lineRef.current = new g.maps.Polyline({ map, path, ...lineOpts })
+    } else if (!phase) {
+      lineRef.current.setPath(path)
     }
-    drawPolyline() // instant straight line; replaced by the road route below when it arrives
-    if (USE_DIRECTIONS && path.length >= 2) {
-      // Billed per route (Google Routes API); cached per pickup/dropoff/stops so re-renders never re-bill.
-      fetchRoadRoute(path)
-        .then((road) => {
-          if (!road || !mapRef.current) return
-          if (lineRef.current) lineRef.current.setPath(road)
-          else lineRef.current = new g.maps.Polyline({ map, path: road, strokeColor: BLACK, strokeOpacity: 0.9, strokeWeight: 4 })
-        })
-        .catch(() => {})
+    // Road-following route from our API (cached server-side; no Google key needed in the browser for this).
+    if (path.length >= 2) {
+      void fetchRoadRoute(path, controller.signal).then((road) => {
+        if (!road || cancelled || !mapRef.current) return
+        if (lineRef.current) lineRef.current.setPath(road)
+        else lineRef.current = new g.maps.Polyline({ map, path: road, ...lineOpts })
+      })
     }
 
     if (!interactedRef.current) fit()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, stopsKey, hasDriver, routeKey])
 

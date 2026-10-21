@@ -2,6 +2,15 @@ import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { animatePoint, bearing, carHtml, fitTargets, hasMoved, initialView, isFarJump, type LatLng, type RideMapProps } from './mapTypes'
+import { fetchRoadRoute, linePath, pathKey } from './roadRoute'
+
+/**
+ * Keyless fallback basemap = standard OpenStreetMap tiles (works everywhere, renders Arabic labels). It looks plain; for the
+ * current, detailed Google style set VITE_GOOGLE_MAPS_API_KEY. A different raster provider can be set with VITE_MAP_TILE_URL
+ * (+ VITE_MAP_TILE_ATTRIBUTION). Note: CARTO's raster tiles now answer "API KEY REQUIRED", so they are not a free default.
+ */
+const TILE_URL = (import.meta.env.VITE_MAP_TILE_URL as string | undefined)?.trim() || 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+const TILE_ATTRIBUTION = (import.meta.env.VITE_MAP_TILE_ATTRIBUTION as string | undefined)?.trim() || '&copy; OpenStreetMap contributors'
 
 /**
  * Keyless fallback map (Leaflet + OpenStreetMap tiles -- the same stack as the platform's RideMap).
@@ -55,7 +64,7 @@ export function LeafletRideMap(props: RideMapProps) {
     const container = containerRef.current
     const view = initialView()
     const map = L.map(container, { attributionControl: true, zoomControl: false }).setView([view.center.lat, view.center.lng], view.zoom)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors', maxZoom: 19 }).addTo(map)
+    L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, subdomains: 'abc', maxZoom: 19 }).addTo(map)
     map.on('click', (event: L.LeafletMouseEvent) => {
       const target = dropTargetRef.current
       if (target) onPickRef.current?.(target, { lat: event.latlng.lat, lng: event.latlng.lng })
@@ -96,7 +105,8 @@ export function LeafletRideMap(props: RideMapProps) {
 
   const stopsKey = JSON.stringify(stops || [])
   const hasDriver = Boolean(driver)
-  const routeKey = route ? route.map((p) => `${p.lat.toFixed(3)},${p.lng.toFixed(3)}`).join('|') : ''
+  const livePath = linePath({ pickup, dropoff, stops, driver, phase, route })
+  const routeKey = pathKey(livePath)
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -116,35 +126,34 @@ export function LeafletRideMap(props: RideMapProps) {
     layers.stops.forEach((marker) => map.removeLayer(marker))
     layers.stops = (stops || []).map((point, index) => L.marker([point.lat, point.lng], { icon: dot('#6b6b6b', 22, true, String(index + 1)), keyboard: false }).addTo(map))
 
-    const path: LatLng[] = route && route.length >= 2 ? route : [...(pickup ? [pickup] : []), ...(stops || []), ...(dropoff ? [dropoff] : [])]
-    if (layers.line) {
+    const path = livePath
+    const toLL = (pts: LatLng[]) => pts.map((p) => [p.lat, p.lng] as [number, number])
+    // During a live ride keep the previous road line until the new one arrives (no flicker back to a straight line).
+    if (layers.line && !phase) {
       map.removeLayer(layers.line)
       layers.line = undefined
     }
-    if (path.length >= 2) layers.line = L.polyline(path.map((p) => [p.lat, p.lng] as [number, number]), { color: '#000', weight: 4, opacity: 0.9 }).addTo(map)
-    // Replace the straight line with the real road route (OSRM, OpenStreetMap roads). The straight
-    // line stays as the instant fallback if the router is slow or unreachable.
+    if (path.length >= 2 && !layers.line) layers.line = L.polyline(toLL(path), { color: '#111', weight: 5, opacity: 0.85, lineJoin: 'round' }).addTo(map)
+    if (path.length < 2 && layers.line) {
+      map.removeLayer(layers.line)
+      layers.line = undefined
+    }
+    // Replace it with the real road route from our API (cached server-side). The plain line is only the fallback.
     let cancelled = false
+    const controller = new AbortController()
     if (path.length >= 2) {
-      const coords = path.map((p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';')
-      const controller = new AbortController()
-      const timer = window.setTimeout(() => controller.abort(), 8000)
-      fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`, { signal: controller.signal })
-        .then((response) => (response.ok ? response.json() : null))
-        .then((data: { routes?: Array<{ geometry?: { coordinates?: Array<[number, number]> } }> } | null) => {
-          const road = data?.routes?.[0]?.geometry?.coordinates
-          if (cancelled || !road || road.length < 2 || !mapRef.current) return
-          if (layersRef.current.line) mapRef.current.removeLayer(layersRef.current.line)
-          layersRef.current.line = L.polyline(road.map(([lng, lat]) => [lat, lng] as [number, number]), { color: '#000', weight: 4, opacity: 0.9 }).addTo(mapRef.current)
-        })
-        .catch(() => {})
-        .finally(() => window.clearTimeout(timer))
+      void fetchRoadRoute(path, controller.signal).then((road) => {
+        if (cancelled || !road || !mapRef.current) return
+        if (layersRef.current.line) layersRef.current.line.setLatLngs(toLL(road))
+        else layersRef.current.line = L.polyline(toLL(road), { color: '#111', weight: 5, opacity: 0.85, lineJoin: 'round' }).addTo(mapRef.current)
+      })
     }
 
     map.invalidateSize({ animate: false })
     if (!interactedRef.current) fit()
     return () => {
       cancelled = true
+      controller.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng, stopsKey, hasDriver, routeKey])

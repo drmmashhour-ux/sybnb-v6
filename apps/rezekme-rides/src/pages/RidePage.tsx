@@ -44,7 +44,7 @@ const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 
 const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 import { moneyText, statusText } from '@platform/shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '@platform/shared/filters/VisualFilterPanel'
-import { addSrRideBonus, changeSrRideCategory, createSrRideWithCoords, fetchSrAvailability, fetchSrQuoteWithCoords, type CategoryAvailability, type Coords, type StopCoords } from '../api'
+import { addSrRideBonus, changeSrRideCategory, createSrRideWithCoords, fetchSrAvailability, fetchSrQuoteWithCoords, type CategoryAvailability, type Coords, type StopCoords, submitWalletTopupProof } from '../api'
 import { MapHero } from '../maps/MapHero'
 import { SeatIcon, VehicleArt, type VehicleKind } from './VehicleArt'
 import { PlaceInput } from '../maps/PlaceInput'
@@ -75,9 +75,10 @@ function storeRecent(entry: RecentDestination): RecentDestination[] {
   return next
 }
 import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
-import { srFallbackFareMinor } from './srFareModel'
+import { srFallbackFareMinor, loadSrRates } from './srFareModel'
 import { RecordingControls } from './RecordingControls'
 import { PaymentPicker, type PayMethod } from './PaymentPicker'
+import { AssistantBox, ReportProblem } from './HelpTools'
 
 type Props = {
   lang: Lang
@@ -657,7 +658,10 @@ export function RidePage({ lang }: Props) {
 
   // Pre-quote estimate derived from the SAME rate model the server uses (srFareModel), so it
   // matches the server's own estimated fare instead of a stale flat rate several times too high.
-  const fallbackFareMinor = useMemo(() => srFallbackFareMinor(category, lowDataMode), [category, lowDataMode])
+  const [ratesVersion, setRatesVersion] = useState(0)
+  useEffect(() => { void loadSrRates(import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:3051').then((ok) => { if (ok) setRatesVersion((v) => v + 1) }) }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fallbackFareMinor = useMemo(() => srFallbackFareMinor(category, lowDataMode), [category, lowDataMode, ratesVersion])
 
   const fareMinor = ride?.fareMinor ?? quote?.fareMinor ?? fallbackFareMinor
   // CAPSULE_RULES.noFakeTrustSignal: quote.estimated alone doesn't distinguish "GPS was imprecise
@@ -760,18 +764,21 @@ export function RidePage({ lang }: Props) {
 
   // Fetch USD wallet balance for client riders (used by PaymentPicker)
   useEffect(() => {
-    if (entryMode !== 'client') return
+    // Guests and clients both pay from a wallet; a submitted Sham Cash top-up is re-checked every 15 s until an admin credits it.
     let cancelled = false
-    fetchRideWallet('USD')
-      .then((wallet) => {
-        if (!cancelled) setWalletBalanceMinor(wallet ? wallet.cachedBalanceMinor : 0)
-      })
-      .catch(() => {
-        if (!cancelled) setWalletBalanceMinor(0)
-      })
-    return () => { cancelled = true }
+    const load = () =>
+      fetchRideWallet('USD')
+        .then((wallet) => {
+          if (!cancelled) setWalletBalanceMinor(wallet ? wallet.cachedBalanceMinor : 0)
+        })
+        .catch(() => {
+          if (!cancelled) setWalletBalanceMinor((prev) => prev ?? 0)
+        })
+    void load()
+    const timer = shamCashStatus === 'submitted' ? window.setInterval(() => void load(), 15000) : null
+    return () => { cancelled = true; if (timer) window.clearInterval(timer) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [shamCashStatus])
 
   // Fetch (lazily minting) the Rezekme invoice once the ride is terminal, to show its number + link.
   useEffect(() => {
@@ -1139,8 +1146,6 @@ export function RidePage({ lang }: Props) {
         billToBusinessAccount: businessAccountName ? billToBusinessAccount : undefined,
         shareable,
         autoSwitch,
-        ...(entryMode === 'guest' && selectedPayMethod === 'shamcash' && shamCashRef.trim()
-          ? { guestShamCashRef: shamCashRef.trim() } : {}),
       } as never)
       setRide(nextRide)
       setStatus('idle')
@@ -1573,13 +1578,13 @@ export function RidePage({ lang }: Props) {
   const walletSufficient = walletBalanceMinor !== null && walletBalanceMinor >= fareMinor
   const payMethodReady =
     entryMode === 'guest'
-      ? selectedPayMethod === 'card' || (selectedPayMethod === 'shamcash' && shamCashStatus === 'submitted')
+      ? selectedPayMethod === 'card' || (selectedPayMethod === 'shamcash' && walletSufficient)
       : selectedPayMethod === 'wallet'
         ? walletSufficient
         : selectedPayMethod === 'card'
           ? true  // always ready: redirects to Stripe
           : selectedPayMethod === 'shamcash'
-            ? shamCashStatus === 'submitted'
+            ? walletSufficient // a submitted proof is not money: the ride unlocks only after an admin credits the wallet
             : false
   const requestDisabled = status === 'saving' || guestCheckoutStatus === 'redirecting' || (scheduleForLater && !scheduledFor) || !confirmedLocations || !payMethodReady
   const requestLabel = status === 'saving' ? t.saving : scheduleForLater ? t.scheduleRide : `${ui.confirm} ${categoryLabel(category)}`
@@ -1740,7 +1745,7 @@ export function RidePage({ lang }: Props) {
                   : anyDriverNearby
                     ? pick(lang, 'لا يوجد سائق قريب', 'No drivers nearby', 'Aucun chauffeur à proximité')
                     : null
-              const price = realQuote ? quote.fareMinor : serverQuote ? serverQuote.fareMinor : srFallbackFareMinor(item, lowDataMode)
+              const price = realQuote ? quote.fareMinor : serverQuote ? serverQuote.fareMinor : srFallbackFareMinor(item, lowDataMode) // rates follow ratesVersion
               const description = vehicleDescription(item, lang)
               return (
                 <button
@@ -1965,15 +1970,12 @@ export function RidePage({ lang }: Props) {
               onShamCashRefChange={setShamCashRef}
               onShamCashSubmit={() => {
                 if (!shamCashRef.trim()) return
-                if (entryMode === 'guest') {
-                  // Guest sham cash: just mark submitted; ref sent with ride creation
-                  setShamCashStatus('submitted')
-                  return
-                }
                 setShamCashStatus('saving')
-                submitPrototypeLocalWalletProof({ amountMinor: fareMinor, currency: 'USD', providerRef: shamCashRef.trim() })
+                // Top up exactly the shortfall (at least 1 cent); the wallet is credited only after an admin verifies the transfer.
+                const topupMinor = Math.max(1, fareMinor - (walletBalanceMinor ?? 0))
+                submitWalletTopupProof({ amountMinor: topupMinor, currency: 'USD', providerRef: shamCashRef.trim() })
                   .then(() => setShamCashStatus('submitted'))
-                  .catch(() => setShamCashStatus('error'))
+                  .catch((error) => { setMessage(error instanceof Error ? error.message : t.error); setShamCashStatus('error') })
               }}
               shamCashStatus={shamCashStatus}
             />
@@ -2197,6 +2199,10 @@ export function RidePage({ lang }: Props) {
             )}
           </div>
         )}
+
+        {ride.status === 'COMPLETED' && <ReportProblem lang={lang} role="rider" rideId={ride.id} />}
+        {ride.status === 'DISPUTED' && <div style={styles.hint}>{pick(lang, 'قيد مراجعة الإدارة.', 'Under admin review.', 'En cours d’examen par l’administrateur.')}</div>}
+        {(ACTIVE_RIDE_STATUSES.includes(ride.status) || ride.status === 'COMPLETED') && <AssistantBox lang={lang} role="rider" />}
 
         {chatAllowed && chatOpen && (
           <div style={styles.subCard}>
@@ -2503,7 +2509,7 @@ function driverIdentityLabel(ride: PlatformRideRequest | null, t: { driverNotAss
 
 const styles: Record<string, CSSProperties> = {
   pageMap: { minHeight: '100vh', background: '#fff', color: '#000', maxWidth: 520, margin: '0 auto', position: 'relative', paddingBottom: 0 },
-  bookSheet: { position: 'relative', zIndex: 2, marginTop: -24, display: 'grid', gap: 16, background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,.12)', padding: '8px 16px 128px' },
+  bookSheet: { position: 'relative', zIndex: 2, marginTop: -24, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,.12)', padding: '8px 16px 128px' },
   gpsButtonOn: { background: '#000', color: '#fff' },
   page: { minHeight: '100vh', background: '#fff', color: '#000', padding: '16px 16px 128px', display: 'grid', gap: 16, maxWidth: 520, margin: '0 auto', alignContent: 'start' },
   hero: { margin: '8px 0 0', fontSize: 32, lineHeight: 1.15, fontWeight: 800, letterSpacing: -0.5 },
@@ -2513,7 +2519,7 @@ const styles: Record<string, CSSProperties> = {
   railLine: { width: 2, flex: 1, minHeight: 28, background: '#000', display: 'block', marginBlock: 3 },
   railSquare: { width: 9, height: 9, background: '#000', display: 'block' },
   routeFields: { flex: 1, display: 'grid', minWidth: 0 },
-  fieldRow: { display: 'flex', alignItems: 'center', gap: 8 },
+  fieldRow: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   routeInput: { flex: 1, minWidth: 0, minHeight: 48, border: 0, background: 'transparent', color: '#000', fontSize: 16, fontWeight: 500, padding: 0, outline: 'none' },
   routeInputBig: { fontSize: 20, fontWeight: 700 },
   divider: { height: 1, background: '#d9d9d9' },
@@ -2562,7 +2568,7 @@ const styles: Record<string, CSSProperties> = {
   bigButton: { width: '100%', minHeight: 56, border: 0, borderRadius: 12, background: '#000', color: '#fff', fontSize: 17, fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', gap: 12 },
   bigButtonInline: { width: '100%', minHeight: 52, border: 0, borderRadius: 12, background: '#000', color: '#fff', fontSize: 16, fontWeight: 700, padding: '0 20px' },
   bigButtonDisabled: { background: '#c9c9c9', color: '#fff', cursor: 'not-allowed' },
-  sheet: { position: 'relative', zIndex: 2, marginTop: -24, display: 'grid', gap: 14, background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,.12)', border: '1px solid #ececec', padding: '8px 16px 40px' },
+  sheet: { position: 'relative', zIndex: 2, marginTop: -24, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14, background: '#fff', borderRadius: '24px 24px 0 0', boxShadow: '0 -4px 24px rgba(0,0,0,.12)', border: '1px solid #ececec', padding: '8px 16px 40px' },
   grabber: { width: 40, height: 4, borderRadius: 2, background: '#d0d0d0', justifySelf: 'center' },
   sheetHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   sheetTitle: { margin: 0, fontSize: 22, lineHeight: 1.25, fontWeight: 800 },

@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import {
+  fetchAdminRideAiSummary,
   fetchAdminSrRides,
   resolveAdminRideDispute,
   reverseAdminRidePayment,
   resolveAdminRideFeeContest,
   type PlatformAdminSrRide,
+  type PlatformRideAiAnalysis,
 } from '../../shared/api/platformApi'
 import { moneyText } from '../../shared/i18n/display'
 
@@ -37,6 +39,10 @@ const copy = {
     requested: 'طُلبت',
     scheduled: 'مجدولة',
     reasonPlaceholder: 'السبب (اختياري)',
+    aiRead: 'قراءة الذكاء الاصطناعي',
+    aiNotConfigured: 'الذكاء الاصطناعي غير مفعّل على الخادم.',
+    aiFailed: 'تعذّرت قراءة الذكاء الاصطناعي.',
+    disputeReason: 'سبب البلاغ',
     confirmFare: 'تأكيد الأجرة',
     reverseRefund: 'عكس وإرجاع',
     reversePayment: 'عكس الدفعة',
@@ -67,6 +73,10 @@ const copy = {
     requested: 'Requested',
     scheduled: 'Scheduled',
     reasonPlaceholder: 'Reason (optional)',
+    aiRead: 'AI read',
+    aiNotConfigured: 'AI is not configured on the server.',
+    aiFailed: 'The AI read failed.',
+    disputeReason: 'Reported reason',
     confirmFare: 'Confirm fare',
     reverseRefund: 'Reverse & refund',
     reversePayment: 'Reverse payment',
@@ -97,6 +107,10 @@ const copy = {
     requested: 'Demandée',
     scheduled: 'Planifiée',
     reasonPlaceholder: 'Motif (facultatif)',
+    aiRead: 'Lecture IA',
+    aiNotConfigured: 'L’IA n’est pas configurée sur le serveur.',
+    aiFailed: 'La lecture IA a échoué.',
+    disputeReason: 'Motif signalé',
     confirmFare: 'Confirmer le tarif',
     reverseRefund: 'Annuler & rembourser',
     reversePayment: 'Annuler le paiement',
@@ -127,6 +141,16 @@ export function AdminLiveRidesPage({ lang }: Props) {
   const [message, setMessage] = useState('')
   const [reason, setReason] = useState('')
   const [busyId, setBusyId] = useState('')
+  const [ai, setAi] = useState<Record<string, PlatformRideAiAnalysis | 'loading' | 'error'>>({})
+  const readAi = async (id: string) => {
+    setAi((m) => ({ ...m, [id]: 'loading' }))
+    try {
+      const result = await fetchAdminRideAiSummary(id, { refresh: true })
+      setAi((m) => ({ ...m, [id]: result }))
+    } catch {
+      setAi((m) => ({ ...m, [id]: 'error' }))
+    }
+  }
 
   useEffect(() => {
     void load(filter)
@@ -291,8 +315,14 @@ export function AdminLiveRidesPage({ lang }: Props) {
                 </div>
               </>
             )}
+            {ride.status === 'DISPUTED' && ride.dispute?.reason && (
+              <span style={styles.dim}>{t.disputeReason} ({ride.dispute.openedBy === 'DRIVER' ? t.driver : t.rider}): {ride.dispute.reason}</span>
+            )}
             {ride.status === 'DISPUTED' && (
               <div style={styles.actions}>
+                <button style={styles.filterButton} disabled={ai[ride.id] === 'loading'} onClick={() => void readAi(ride.id)}>
+                  ✨ {ai[ride.id] === 'loading' ? '…' : t.aiRead}
+                </button>
                 <button style={styles.primaryButton} disabled={busyId === ride.id} onClick={() => void confirmDispute(ride.id)}>
                   {t.confirmFare}
                 </button>
@@ -301,6 +331,19 @@ export function AdminLiveRidesPage({ lang }: Props) {
                 </button>
               </div>
             )}
+            {(() => {
+              const a = ai[ride.id]
+              if (!a || a === 'loading') return null
+              if (a === 'error' || (a.configured && a.error)) return <span style={styles.dim}>{t.aiFailed}</span>
+              if (!a.configured) return <span style={styles.dim}>{t.aiNotConfigured}</span>
+              return (
+                <div style={styles.dim}>
+                  <b>{a.severity.toUpperCase()}</b> {a.summary}
+                  {a.concerns.length > 0 && <ul style={{ margin: '4px 0', paddingInlineStart: 18 }}>{a.concerns.map((c, i) => <li key={i}>{c}</li>)}</ul>}
+                  {a.recommendation && <div>→ {a.recommendation}</div>}
+                </div>
+              )
+            })()}
             {ride.status === 'COMPLETED' && (
               <div style={styles.actions}>
                 <button style={styles.dangerButton} disabled={busyId === ride.id} onClick={() => void reversePayment(ride.id)}>

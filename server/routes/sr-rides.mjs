@@ -23,7 +23,7 @@ import {
 } from '../lib/promo-code.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { rideCategoryToVehicle, isKnownRideCategory } from '../lib/vehicle-category.mjs'
-import { isRateLimited } from '../lib/rateLimit.mjs'
+import { clientIp, isRateLimited } from '../lib/rateLimit.mjs'
 import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
 import { recordWalletEntry, refundPrepaidRide, recordCardPrepayCredit } from '../lib/finance-ledger.mjs'
 import { cardHoldAvailable, riderHasSavedCard, placeCardHold, releaseCardHold, replaceCardHold } from '../lib/ride-card-hold.mjs'
@@ -42,6 +42,7 @@ import { logRideEventSafe } from '../lib/ride-events.mjs'
 import { buildAlternatives, notifyRiderNoDriverOnce, categoryAvailabilityAt } from '../lib/ride-no-driver.mjs'
 import { analyzeRide } from '../lib/ai-ride-analyst.mjs'
 import { runRideAssistant, RIDE_ASSISTANT_ROLES } from '../lib/ai-ride-assistant.mjs'
+import { lookupRoadRoute, parseRoutePoints } from '../lib/road-route.mjs'
 import { dutyBlockers } from './driver-base.mjs'
 import { driverPayoutBalances } from '../lib/finance-ledger.mjs'
 import { getOrCreateRideInvoice, renderInvoiceHtml } from '../lib/invoices.mjs'
@@ -1364,6 +1365,25 @@ export async function handleSrRides(req, res, url, context) {
       .filter((e) => e.type !== 'LOCATION_PING')
       .map((e) => ({ type: e.type, at: e.createdAt.toISOString(), lat: e.lat, lng: e.lng }))
     return json(res, 200, { ok: true, rideId: ride.id, status: ride.status, points, milestones, gaps, distanceKm: Math.round(distanceKm * 10) / 10 })
+  }
+
+  // Road-following route for the map line (so it follows streets, not a straight line). Public (the booking map is shown
+  // before sign-in), validated, per-IP rate limited and cached; the provider key (if any) stays on the server.
+  if (url.pathname === '/api/sr/route') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    const points = parseRoutePoints(url.searchParams.get('pts'))
+    if (!points) {
+      const error = new Error('pts must be 2 to 8 "lat,lng" pairs separated by ";".')
+      error.statusCode = 400; error.code = 'ROUTE_POINTS_INVALID'; error.expose = true
+      throw error
+    }
+    if (await isRateLimited(`sr-route:${clientIp(req)}`, 60_000, 90)) {
+      const error = new Error('Too many route requests. Please slow down.')
+      error.statusCode = 429; error.code = 'ROUTE_RATE_LIMITED'; error.expose = true
+      throw error
+    }
+    const road = await lookupRoadRoute(points)
+    return json(res, 200, road ? { ok: true, ...road } : { ok: true, provider: null, points: null })
   }
 
   // In-app AI helper for the rider and the driver (advisory only; see server/lib/ai-ride-assistant.mjs). It is given a small set of

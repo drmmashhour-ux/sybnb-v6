@@ -4907,13 +4907,22 @@ export type SrPricingView = {
   examples: SrPricingExamples
 }
 
+// The SR pricing calls are authorized by the server (legacy ADMIN, or an admin-console role with
+// config.view / config.manage). The browser only needs to hold a signed-in staff session, so it must not
+// insist on the legacy ADMIN role the way ensurePrototypeAdminSession does.
+function ensureStaffConsoleSession() {
+  const stored = getStoredStaffSession('ADMIN') || getStoredStaffSession()
+  if (stored) return stored
+  throw new Error('Admin staff session required')
+}
+
 export async function fetchSrPricing() {
-  const session = await ensurePrototypeAdminSession()
+  const session = ensureStaffConsoleSession()
   return apiRequest<{ ok: true } & SrPricingView>('/api/admin/sr/pricing', { token: session.token })
 }
 
 export async function previewSrPricing(config: unknown) {
-  const session = await ensurePrototypeAdminSession()
+  const session = ensureStaffConsoleSession()
   return apiRequest<{ ok: true; config: SrPricingConfig; examples: SrPricingExamples }>('/api/admin/sr/pricing/preview', {
     method: 'POST',
     token: session.token,
@@ -4922,7 +4931,7 @@ export async function previewSrPricing(config: unknown) {
 }
 
 export async function saveSrPricing(input: { config: unknown; reason: string; expectedVersion?: number }) {
-  const session = await ensurePrototypeAdminSession()
+  const session = ensureStaffConsoleSession()
   return apiRequest<{ ok: true; version: number; config: SrPricingConfig; examples: SrPricingExamples }>('/api/admin/sr/pricing', {
     method: 'PUT',
     token: session.token,

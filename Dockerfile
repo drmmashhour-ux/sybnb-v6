@@ -12,6 +12,7 @@ COPY prisma ./prisma
 RUN npx prisma generate
 COPY server ./server
 COPY countries ./countries
+COPY scripts ./scripts
 
 FROM node:24-slim AS runtime
 WORKDIR /app
@@ -23,6 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/server ./server
 COPY --from=build /app/countries ./countries
+# scripts/ ships so operators can run bootstrap-admin, admin-activation-run and preflight inside the service (never run automatically).
+COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/package.json ./package.json
 # The API binds 0.0.0.0 and honors the host-injected PORT (server/index.mjs). EXPOSE is informational.

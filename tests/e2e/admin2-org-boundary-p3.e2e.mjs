@@ -80,6 +80,19 @@ await t('users list: a user is shown to A with A\'s roles only, and B-only users
   assert.equal(listB.json.items.find((u) => u.id === both.id).roles.length, 1)
 })
 
+await t('migrate: moving an assignment to a wider role version is refused where the caller does not hold the added permissions', async () => {
+  const extra = await p.permissionDefinition.findFirst({ where: { code: { notIn: ['access.assign', 'access.view', 'user.view', 'console.access'] } } })
+  const v2 = await p.roleVersion.create({ data: { roleId: granter.id, versionNumber: 2, status: 'DRAFT', contentHash: `e2e2-${run}`, changeReason: 'e2e wider', platformCoverage: ['*'] } })
+  await p.roleVersionPermission.createMany({ data: [...granterPerms, extra.id].map((permissionId) => ({ roleVersionId: v2.id, permissionId })) })
+  await p.roleVersion.update({ where: { id: granterVersion.id }, data: { status: 'SUPERSEDED' } })
+  await p.roleVersion.update({ where: { id: v2.id }, data: { status: 'EFFECTIVE', effectiveFrom: new Date(Date.now() - 86_400_000) } })
+  const holder = await createStaffUser('migrateb', run)
+  const asg = await p.roleAssignment.create({ data: { userId: holder.id, roleVersionId: granterVersion.id, grantReason: 'e2e', scopes: { create: inOrg(B) } } })
+  const res = await sG.http.post(`${base}/access/assignments/${asg.id}/migrate`, { targetVersionId: v2.id, reason: 'caller lacks the added permission in B' })
+  assert.equal(res.status, 400, res.text.slice(0, 200))
+  assert.equal(res.json?.error?.code ?? res.json?.code, 'ESCALATION_FORBIDDEN')
+})
+
 api.stop()
 const failed = summary()
 await p.$disconnect()

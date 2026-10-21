@@ -55,3 +55,15 @@ organization for every authorization decision while the security-event, audit an
 - **Command Center** tile `pendingAccessApprovals`, and the roles shown in the users list, are restricted to the caller's authorized places.
 - **Sole-organization precondition.** Legacy accounts and records that carry no platform/organization attribution are only authorizable while the registry has exactly ONE organization. Creating a second organization makes them unattributed (invisible, fail closed) until `scripts/admin-attribute-legacy-records.mjs` has attributed them. Do not create a second organization in production before that has been reviewed.
 - Tests: `tests/unit/org-boundary-grants.test.mjs`, `tests/e2e/admin2-org-boundary-p3.e2e.mjs` (throwaway database only; creates an organization that cannot be deleted).
+
+## STEP 5L — launch preconditions and operator notes
+
+**Release check (read-only):** `NODE_ENV=production node scripts/preflight-v6.mjs` (with the service's environment) validates required configuration and warns about unset `APPROVED_MIGRATIONS`, unset `ADMIN_ACTIVATION_MODE`, a left-over `ADMIN_BOOTSTRAP_SECRET`, and payment switches. It never connects to a database and never prints secrets. The Docker image now ships `scripts/` so `bootstrap-admin`, `admin-activation-run` and the preflight can be run from the service shell (nothing runs automatically).
+
+**v1 authorization precondition:** administrator authorization is supported at ORGANIZATION, LEGAL_ENTITY, BUSINESS_UNIT and PLATFORM scope. DEPARTMENT / PROPERTY / VEHICLE / PROJECT scopes can only be placed while exactly ONE organization exists. Before production use, confirm no such grants exist and do not create a second organization until the legacy-attribution review is done.
+
+**Role migration:** `POST /access/assignments/:id/migrate` now applies the same anti-escalation rule as a new grant: the caller must hold every permission of the target version at every place of the assignment (`ESCALATION_FORBIDDEN` otherwise).
+
+**Single administrator:** with one access administrator the last-admin guard (`LAST_ACCESS_ADMIN`) blocks revoking, suspending or reducing that person. Create a second access administrator through the normal approval workflow before any change to the first.
+
+**Activation:** `render.yaml` sets `ADMIN_ACTIVATION_MODE=IN_PROCESS` (valid for one replica). With more than one replica use `EXTERNAL` and schedule `scripts/admin-activation-run.mjs`.

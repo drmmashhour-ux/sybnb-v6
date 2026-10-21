@@ -1,6 +1,6 @@
 # STEP 5E -- pre-merge security gate
 
-> **DEPLOYING THIS BRANCH TO A PRODUCTION-CONNECTED RENDER SERVICE WILL APPLY MIGRATIONS 078-082** (082 = security foundation closure). Production has never received any of them: its deployed commits stop at migration 077. Do not treat this branch as a harmless admin preview.
+> **DEPLOYING THIS BRANCH TO A PRODUCTION-CONNECTED RENDER SERVICE WILL APPLY MIGRATIONS 078-083** (082 = security foundation closure, 083 = organization boundary for security records). Production has never received any of them: its deployed commits stop at migration 077. Do not treat this branch as a harmless admin preview.
 
 ## 1. Organization binding of the Owner bootstrap
 - The 5D `?organizationId=` override is REMOVED. `POST /api/admin2/security/bootstrap/owner` takes no organization from the query, body, header or route.
@@ -14,7 +14,7 @@
 - Static test: the bootstrap route section reads no `r.query`, `r.params` or body/header organization; the only header read is `x-bootstrap-secret`.
 
 ## 2. Deployment migration safety
-- `server/lib/migration-gate.mjs` runs BEFORE `prisma migrate deploy` (in `render.yaml` preDeployCommand and `npm run start:render`). It reads `_prisma_migrations` (read-only) and, if any of 078-082 is pending and `APPROVED_MIGRATIONS` does not include `082_security_foundation_closure` (approval is "through": it covers the earlier pending gated migrations), prints a banner and exits 1: the deploy stops with no schema change. It also fails closed if the history cannot be read. It lives under `server/` so the existing Docker image already contains it. No new infrastructure.
+- `server/lib/migration-gate.mjs` runs BEFORE `prisma migrate deploy` (in `render.yaml` preDeployCommand and `npm run start:render`). It reads `_prisma_migrations` (read-only) and, if any of 078-083 is pending and `APPROVED_MIGRATIONS` does not include `083_security_record_organization_boundary` (approval is "through": it covers the earlier pending gated migrations), prints a banner and exits 1: the deploy stops with no schema change. It also fails closed if the history cannot be read. It lives under `server/` so the existing Docker image already contains it. No new infrastructure.
 - Live services (read from Render, not changed): `rezekme-api` (docker, dashboard pre-deploy `npx prisma migrate deploy`, branch main) and `sybnb-backend` (docker command `npm run start:render`, branch main), both autoDeploy off. `sybnb-backend` is gated automatically after the merge. `rezekme-api`'s pre-deploy command lives in the dashboard: an operator must change it to `node server/lib/migration-gate.mjs && npx prisma migrate deploy` BEFORE deploying merged code.
 - Before approving: approved migration 082, database recovery point/backup, environment verification, `ADMIN_ACTIVATION_MODE` decision (EXTERNAL recommended), Owner bootstrap runbook ready.
 

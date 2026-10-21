@@ -48,7 +48,7 @@ Removed from production. `bootstrap.mjs` re-exports only the OWNER entry point, 
 - Persistent test DB received an equivalent delta (the test DB had the old 082); its 290 NULL evidence rows were back-filled with the legacy marker with the append-only trigger suspended for that one statement (test DB only).
 
 ## 9. Unresolved production blockers
-1. Deploying this branch applies migrations 078-082 automatically (`start:render` and the Render pre-deploy command run `prisma migrate deploy`). 5E added an approval gate (see STEP5E_PRE_MERGE_GATE.md).
+1. Deploying this branch applies migrations 078-083 automatically (`start:render` and the Render pre-deploy command run `prisma migrate deploy`). 5E added an approval gate (see STEP5E_PRE_MERGE_GATE.md).
 2. `ADMIN_BOOTSTRAP_SECRET` must be provisioned by an operator and removed/rotated after bootstrap.
 3. Production should run `ADMIN_ACTIVATION_MODE=EXTERNAL` with a scheduled `scripts/admin-activation-run.mjs`.
 4. Legacy Prisma drift (55 product tables) remains documented, not security-relevant.

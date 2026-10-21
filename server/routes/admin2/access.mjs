@@ -374,6 +374,22 @@ export function registerAccess(router) {
     needReason(body)
     if (a.userId === r.auth.user.id) throw badRequest('You cannot change your own access.', 'SELF_ACTION_FORBIDDEN')
     await requireOnAssignment(r, 'access.assign', a)
+    // Anti-escalation (same rule as a fresh grant): the caller must hold EVERY permission of the target version at EVERY place
+    // the assignment lands. Moving a holder to another version is a grant of that version.
+    const targetVersion = await db().roleVersion.findUnique({ where: { id: String(body?.targetVersionId ?? '') }, include: { permissions: { include: { permission: true } } } })
+    if (targetVersion) {
+      const snap = await loadSnapshot(r.auth)
+      const { orgIndex: mIndex } = await registryContext()
+      const mSole = soleOrganizationId(mIndex)
+      const needed = await Promise.all(targetVersion.permissions.map((rp) => loadPermission(db(), rp.permission.code)))
+      for (const sc of await resolveScopes(a.scopes)) {
+        const facts = scopeAuthFacts(mIndex, mSole, sc)
+        if (!facts) throw authError(403, 'PERMISSION_DENIED', 'You do not have permission to do this.')
+        for (const permission of needed) {
+          if (!callerHoldsPermissionAt(snap, r.auth, permission, facts)) throw badRequest('You cannot move an assignment to a role version containing permissions you do not hold yourself at this place.', 'ESCALATION_FORBIDDEN')
+        }
+      }
+    }
     const out = await migrateAssignment(db(), { actorUserId: r.auth.user.id, assignmentId: a.id, targetVersionId: String(body?.targetVersionId ?? ''), reason: body.reason, requestId: r.requestId })
     r.ok({ assignment: assignmentView(out.assignment), needsSecondApproval: out.highRisk, highRiskPermissions: out.highRiskPermissions }, 201)
   })

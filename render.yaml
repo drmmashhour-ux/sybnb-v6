@@ -14,7 +14,7 @@ services:
     # !! DEPLOYING THE step5-admin-foundation BRANCH (or any branch containing migrations 078-083) TO A PRODUCTION-CONNECTED
     # !! SERVICE WILL APPLY THEM. The approval gate below stops the deploy BEFORE any schema change unless
     # !! APPROVED_MIGRATIONS=083_security_record_organization_boundary (the latest reviewed migration) is set on the service.
-    # !! See docs/admin/MIGRATION_082_RUNBOOK.md.
+    # !! See docs/admin/MIGRATION_082_RUNBOOK.md (covers 078-083).
     preDeployCommand: "node server/lib/migration-gate.mjs && npx prisma migrate deploy"
     autoDeploy: false        # deploy on demand; flip to true to deploy on every push to the branch.
     envVars:
@@ -26,9 +26,12 @@ services:
       - key: API_HOST
         value: 0.0.0.0
       # PORT is injected by Render; the server honors it (API_PORT || PORT). Do not hardcode.
-      # Set ONLY when migration 082 is approved for this environment (recovery point taken, runbook ready).
+      # Set ONLY when migrations through 083 are approved for this environment (recovery point taken, runbook ready).
       - key: APPROVED_MIGRATIONS
         sync: false
+      # IN_PROCESS | EXTERNAL | DISABLED. Single replica: IN_PROCESS is fine. Multi-replica: EXTERNAL + schedule scripts/admin-activation-run.mjs.
+      - key: ADMIN_ACTIVATION_MODE
+        value: IN_PROCESS
       # --- secrets: set these in the Render dashboard (Environment tab) ---
       - key: DATABASE_URL            # Neon/Supabase Postgres+PostGIS URL. Behind a pooler add &pgbouncer=true
         sync: false

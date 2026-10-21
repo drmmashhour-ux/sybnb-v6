@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { loadGoogleMaps } from '../maps/googleLoader'
+import maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
+import { MAP_STYLE_URL, pinEl } from '../maps/mapStyle'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
 import { fetchRideRoute, type RideRouteRecord } from '@platform/shared/api/platformApi'
 
@@ -25,29 +27,37 @@ export function RouteViewer({ rideId, lang, asDriver = false }: { rideId: string
   useEffect(() => {
     if (!data || !box.current || data.points.length === 0) return
     let cancelled = false
-    loadGoogleMaps(lang)
-      .then((g) => {
-        if (cancelled || !box.current) return
-        const map = new g.maps.Map(box.current, { disableDefaultUI: true, zoomControl: true, clickableIcons: false })
-        const path = data.points.map((p) => ({ lat: p.lat, lng: p.lng }))
-        new g.maps.Polyline({ map, path, strokeColor: '#000', strokeWeight: 4, strokeOpacity: 0.9 })
-        const dot = (color: string) => ({ path: g.maps.SymbolPath.CIRCLE, scale: 7, fillColor: color, fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 })
-        new g.maps.Marker({ map, position: path[0], icon: dot('#1a7f37') })
-        new g.maps.Marker({ map, position: path[path.length - 1], icon: dot('#b00020') })
+    let map: maplibregl.Map | null = null
+    try {
+      const path = data.points.map((p) => [p.lng, p.lat] as [number, number])
+      map = new maplibregl.Map({ container: box.current, style: MAP_STYLE_URL, center: path[0], zoom: 13, attributionControl: { compact: true } })
+      const m = map
+      m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
+      m.on('error', () => { if (!m.isStyleLoaded() && !cancelled) setMapFailed(true) })
+      m.on('load', () => {
+        if (cancelled) return
+        m.addSource('trip', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: path } } })
+        m.addLayer({ id: 'trip', type: 'line', source: 'trip', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#000', 'line-width': 4, 'line-opacity': 0.9 } })
         // GPS gaps: dashed red between the two fixes around each gap
-        for (const gap of data.gaps) {
+        const gapLines = data.gaps.flatMap((gap) => {
           const a = data.points.find((p) => p.at === gap.from)
           const b = data.points.find((p) => p.at === gap.to)
-          if (a && b) {
-            new g.maps.Polyline({ map, path: [{ lat: a.lat, lng: a.lng }, { lat: b.lat, lng: b.lng }], strokeOpacity: 0, strokeColor: '#b00020', icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: '#b00020', scale: 3 }, offset: '0', repeat: '14px' }] })
-          }
+          return a && b ? [[[a.lng, a.lat], [b.lng, b.lat]]] : []
+        })
+        if (gapLines.length) {
+          m.addSource('gaps', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: gapLines } } })
+          m.addLayer({ id: 'gaps', type: 'line', source: 'gaps', paint: { 'line-color': '#b00020', 'line-width': 4, 'line-dasharray': [2, 2] } })
         }
-        const bounds = new g.maps.LatLngBounds()
-        path.forEach((point) => bounds.extend(point))
-        map.fitBounds(bounds, 24)
+        new maplibregl.Marker({ element: pinEl('start') }).setLngLat(path[0]).addTo(m)
+        new maplibregl.Marker({ element: pinEl('end') }).setLngLat(path[path.length - 1]).addTo(m)
+        const bounds = new maplibregl.LngLatBounds()
+        path.forEach((pt) => bounds.extend(pt))
+        m.fitBounds(bounds, { padding: 24, maxZoom: 17, duration: 0 })
       })
-      .catch(() => { if (!cancelled) setMapFailed(true) })
-    return () => { cancelled = true }
+    } catch {
+      setMapFailed(true)
+    }
+    return () => { cancelled = true; map?.remove() }
   }, [data, lang])
 
   if (error) return <p style={S.note}>{error}</p>
@@ -67,7 +77,7 @@ export function RouteViewer({ rideId, lang, asDriver = false }: { rideId: string
       {data.points.length === 0 ? (
         <p style={S.muted}>{t('لا يوجد مسار مسجّل لهذه الرحلة.', 'No GPS route was recorded for this trip.', 'Aucun trajet GPS enregistré pour cette course.')}</p>
       ) : (
-        mapFailed ? <p style={S.note}>{t('تعذّر تحميل خريطة Google.', 'The Google map could not load.', 'La carte Google n’a pas pu se charger.')}</p> : <div ref={box} style={S.map} />
+        mapFailed ? <p style={S.note}>{t('تعذّر تحميل الخريطة.', 'The map could not load.', 'La carte n’a pas pu se charger.')}</p> : <div ref={box} style={S.map} />
       )}
       <div style={S.muted}>
         {data.distanceKm} km · {data.points.length} {t('نقطة GPS', 'GPS points', 'points GPS')}

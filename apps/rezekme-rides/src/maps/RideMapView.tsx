@@ -1,10 +1,8 @@
-import { Suspense, lazy, useEffect, useState, type CSSProperties } from 'react'
-import { hasGoogleMapsKey, loadGoogleMaps, onGoogleMapsFail, googleMapsFailed } from './googleLoader'
+import { Suspense, lazy, useState, type CSSProperties } from 'react'
 import { rememberPosition, type DropTarget, type LatLng, type MapCommand } from './mapTypes'
 
-// Google Maps is a separate lazy chunk: it is not fetched until the map is actually mounted
-// (the page calls this only after first paint, and never when saveData / 2g).
-const GoogleRideMap = lazy(() => import('./GoogleRideMap').then((m) => ({ default: m.GoogleRideMap })))
+// The map is a separate lazy chunk: not fetched until mounted (the page mounts it after first paint, never on saveData / 2g).
+const MapLibreRideMap = lazy(() => import('./MapLibreRideMap').then((m) => ({ default: m.MapLibreRideMap })))
 
 type Props = {
   lang: string
@@ -20,23 +18,11 @@ type Props = {
   loadingLabel: string
 }
 
-/**
- * The ride map is Google Maps only (the old OpenStreetMap map was removed). If Google cannot load
- * (no key, blocked script, rejected key) a clear notice is shown instead of a different map, so the
- * problem is visible and fixed at the source. Also owns the round "recenter / my location" button.
- */
+/** Ride map (MapLibre + OpenFreeMap, keyless) plus the round "recenter / my location" button. */
 export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, phase, route, onPick, recenterLabel, loadingLabel }: Props) {
-  const [failed, setFailed] = useState<boolean>(!hasGoogleMapsKey || googleMapsFailed())
+  const [failed, setFailed] = useState(false)
   const [command, setCommand] = useState<MapCommand | null>(null)
   const [user, setUser] = useState<LatLng | null>(null)
-
-  useEffect(() => {
-    if (failed) return
-    const off = onGoogleMapsFail(() => setFailed(true))
-    // Kick the loader so a bad key / blocked script is detected even before the map chunk mounts.
-    loadGoogleMaps(lang).catch(() => setFailed(true))
-    return off
-  }, [failed, lang])
 
   function recenter() {
     const hasPins = Boolean(pickup || dropoff || driver || (stops && stops.length))
@@ -57,16 +43,15 @@ export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, 
     )
   }
 
-  const common = { pickup, dropoff, stops, driver, userLocation: user, dropTarget, onPick, command, phase, route }
   return (
     <div style={styles.wrap}>
       {failed ? (
         <div role="status" style={styles.notice}>
-          {lang === 'ar' ? 'تعذّر تحميل خريطة Google. أدخل العناوين كتابةً أو أعد تحميل الصفحة.' : lang === 'fr' ? 'La carte Google n’a pas pu se charger. Saisissez les adresses ou rechargez la page.' : 'The Google map could not load. Type the addresses or reload the page.'}
+          {lang === 'ar' ? 'تعذّر تحميل الخريطة. أدخل العناوين كتابةً أو أعد تحميل الصفحة.' : lang === 'fr' ? 'La carte n’a pas pu se charger. Saisissez les adresses ou rechargez la page.' : 'The map could not load. Type the addresses or reload the page.'}
         </div>
       ) : (
         <Suspense fallback={<div style={styles.loading}>{loadingLabel}</div>}>
-          <GoogleRideMap {...common} lang={lang} onProviderFail={() => setFailed(true)} />
+          <MapLibreRideMap pickup={pickup} dropoff={dropoff} stops={stops} driver={driver} userLocation={user} dropTarget={dropTarget} onPick={onPick} command={command} phase={phase} route={route} onProviderFail={() => setFailed(true)} />
         </Suspense>
       )}
       <button type="button" aria-label={recenterLabel} title={recenterLabel} style={styles.recenter} onClick={recenter}>
@@ -82,5 +67,6 @@ export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, 
 const styles: Record<string, CSSProperties> = {
   wrap: { position: 'absolute', inset: 0, background: '#e9e9e9' },
   loading: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#6b6b6b', fontSize: 13 },
+  notice: { position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', padding: 24, textAlign: 'center', color: '#444', fontSize: 14, fontWeight: 600, background: '#ececec' },
   recenter: { position: 'absolute', insetInlineEnd: 12, bottom: 44, width: 44, height: 44, minHeight: 44, borderRadius: '50%', border: 0, background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,.25)', display: 'grid', placeItems: 'center', padding: 0, zIndex: 500 },
 }

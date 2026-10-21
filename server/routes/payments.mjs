@@ -209,6 +209,16 @@ export async function handlePayments(req, res, url, context) {
       error.expose = true
       throw error
     }
+    // Central payment policy (country gate, provider approval, emergency stop): the guest card path must not bypass it.
+    authorizePaymentOperation({
+      operation: 'create',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: 'SR',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: [] },
+    })
     const body = await readJson(req)
     const origin = String(body.origin || '').replace(/\/$/, '')
     const fareMinor = Math.round(Number(body.fareMinor || 0))

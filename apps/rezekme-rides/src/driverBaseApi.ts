@@ -28,6 +28,8 @@ export type DriverBase = {
   expiringSoon: Array<{ kind: DocKind; days: number }>
   carCare: { OUTSIDE: { lastDoneAt: string | null; due: boolean }; INSIDE: { lastDoneAt: string | null; due: boolean } }
   rating: { averageRating: number | null; ratingCount: number }
+  lowRating?: boolean
+  lowRatingThreshold?: number
 }
 
 async function call<T>(path: string, method = 'GET', body?: unknown): Promise<T> {

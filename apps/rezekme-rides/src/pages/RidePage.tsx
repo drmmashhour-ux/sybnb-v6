@@ -44,7 +44,7 @@ const MESSAGING_ELIGIBLE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 
 const LIVE_TRACKING_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 import { moneyText, statusText } from '@platform/shared/i18n/display'
 import { selectedFilterLabels, VisualFilterPanel } from '@platform/shared/filters/VisualFilterPanel'
-import { addSrRideBonus, changeSrRideCategory, createSrRideWithCoords, fetchSrAvailability, fetchSrQuoteWithCoords, type CategoryAvailability, type Coords, type StopCoords } from '../api'
+import { addSrRideBonus, changeSrRideCategory, createSrRideWithCoords, fetchSrAvailability, fetchSrQuoteWithCoords, type CategoryAvailability, type Coords, type StopCoords, submitWalletTopupProof } from '../api'
 import { MapHero } from '../maps/MapHero'
 import { SeatIcon, VehicleArt, type VehicleKind } from './VehicleArt'
 import { PlaceInput } from '../maps/PlaceInput'
@@ -760,18 +760,21 @@ export function RidePage({ lang }: Props) {
 
   // Fetch USD wallet balance for client riders (used by PaymentPicker)
   useEffect(() => {
-    if (entryMode !== 'client') return
+    // Guests and clients both pay from a wallet; a submitted Sham Cash top-up is re-checked every 15 s until an admin credits it.
     let cancelled = false
-    fetchRideWallet('USD')
-      .then((wallet) => {
-        if (!cancelled) setWalletBalanceMinor(wallet ? wallet.cachedBalanceMinor : 0)
-      })
-      .catch(() => {
-        if (!cancelled) setWalletBalanceMinor(0)
-      })
-    return () => { cancelled = true }
+    const load = () =>
+      fetchRideWallet('USD')
+        .then((wallet) => {
+          if (!cancelled) setWalletBalanceMinor(wallet ? wallet.cachedBalanceMinor : 0)
+        })
+        .catch(() => {
+          if (!cancelled) setWalletBalanceMinor((prev) => prev ?? 0)
+        })
+    void load()
+    const timer = shamCashStatus === 'submitted' ? window.setInterval(() => void load(), 15000) : null
+    return () => { cancelled = true; if (timer) window.clearInterval(timer) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [shamCashStatus])
 
   // Fetch (lazily minting) the Rezekme invoice once the ride is terminal, to show its number + link.
   useEffect(() => {
@@ -1139,8 +1142,6 @@ export function RidePage({ lang }: Props) {
         billToBusinessAccount: businessAccountName ? billToBusinessAccount : undefined,
         shareable,
         autoSwitch,
-        ...(entryMode === 'guest' && selectedPayMethod === 'shamcash' && shamCashRef.trim()
-          ? { guestShamCashRef: shamCashRef.trim() } : {}),
       } as never)
       setRide(nextRide)
       setStatus('idle')
@@ -1573,13 +1574,13 @@ export function RidePage({ lang }: Props) {
   const walletSufficient = walletBalanceMinor !== null && walletBalanceMinor >= fareMinor
   const payMethodReady =
     entryMode === 'guest'
-      ? selectedPayMethod === 'card' || (selectedPayMethod === 'shamcash' && shamCashStatus === 'submitted')
+      ? selectedPayMethod === 'card' || (selectedPayMethod === 'shamcash' && walletSufficient)
       : selectedPayMethod === 'wallet'
         ? walletSufficient
         : selectedPayMethod === 'card'
           ? true  // always ready: redirects to Stripe
           : selectedPayMethod === 'shamcash'
-            ? shamCashStatus === 'submitted'
+            ? walletSufficient // a submitted proof is not money: the ride unlocks only after an admin credits the wallet
             : false
   const requestDisabled = status === 'saving' || guestCheckoutStatus === 'redirecting' || (scheduleForLater && !scheduledFor) || !confirmedLocations || !payMethodReady
   const requestLabel = status === 'saving' ? t.saving : scheduleForLater ? t.scheduleRide : `${ui.confirm} ${categoryLabel(category)}`
@@ -1965,15 +1966,12 @@ export function RidePage({ lang }: Props) {
               onShamCashRefChange={setShamCashRef}
               onShamCashSubmit={() => {
                 if (!shamCashRef.trim()) return
-                if (entryMode === 'guest') {
-                  // Guest sham cash: just mark submitted; ref sent with ride creation
-                  setShamCashStatus('submitted')
-                  return
-                }
                 setShamCashStatus('saving')
-                submitPrototypeLocalWalletProof({ amountMinor: fareMinor, currency: 'USD', providerRef: shamCashRef.trim() })
+                // Top up exactly the shortfall (at least 1 cent); the wallet is credited only after an admin verifies the transfer.
+                const topupMinor = Math.max(1, fareMinor - (walletBalanceMinor ?? 0))
+                submitWalletTopupProof({ amountMinor: topupMinor, currency: 'USD', providerRef: shamCashRef.trim() })
                   .then(() => setShamCashStatus('submitted'))
-                  .catch(() => setShamCashStatus('error'))
+                  .catch((error) => { setMessage(error instanceof Error ? error.message : t.error); setShamCashStatus('error') })
               }}
               shamCashStatus={shamCashStatus}
             />

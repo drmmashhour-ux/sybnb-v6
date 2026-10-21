@@ -3,6 +3,7 @@
 // is never dispatched without secured money. On completion the hold is CAPTURED for the actual fare
 // (ride-auto-charge.mjs); on cancel it is released. SR fares are whole USD units -> x100 for Stripe.
 import Stripe from 'stripe'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from './payment-policy.mjs'
 import { db } from './prisma.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
@@ -31,6 +32,16 @@ export async function riderHasSavedCard(riderId) {
 
 // Place a manual-capture hold. Throws 402 RIDE_PAYMENT_FAILED if the card cannot cover it.
 export async function placeCardHold({ riderId, rideId, amountMinor, key }) {
+  // Central payment policy (country gate, provider approval, emergency stop). A denial is a 402 the ride flow already handles.
+  try { authorizePaymentOperation({
+      operation: 'create',
+      rail: 'stripe_checkout',
+      provider: 'stripe',
+      division: 'SR',
+      country: activePolicyCountryKey(),
+      environment: policyEnvironment(),
+      actor: { roles: [] },
+    }) } catch (err) { throw fail(402, 'RIDE_PAYMENT_FAILED', 'Card payments are not available right now.', { policy: err?.code || null }) }
   if (!cardHoldAvailable()) throw fail(402, 'RIDE_PAYMENT_FAILED', 'Card payments are not available right now.')
   const rider = await db().user.findUnique({ where: { id: riderId }, select: { stripeCustomerId: true, defaultCardPmId: true } })
   if (!rider?.stripeCustomerId || !rider?.defaultCardPmId) throw fail(402, 'RIDE_PREPAY_REQUIRED', 'Add a card or fund your wallet to request this ride.')

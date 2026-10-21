@@ -19,7 +19,9 @@ type Props = {
   shamCashStatus: 'idle' | 'saving' | 'submitted' | 'error'
 }
 
-const LOCAL_WALLET_QR = '/assets/payments/syrian-local-wallet-qr-clean.jpg'
+// The platform's OWN Sham Cash receiving QR. Set VITE_SHAMCASH_QR_URL to the Rezekme account's QR before launch; the fallback is
+// the shared SYBNB asset and must not be used for Rezekme money.
+const LOCAL_WALLET_QR = ((import.meta.env.VITE_SHAMCASH_QR_URL as string | undefined) || '').trim() || '/assets/payments/syrian-local-wallet-qr-clean.jpg'
 
 const s: Record<string, CSSProperties> = {
   wrap: { display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 0' },
@@ -95,7 +97,7 @@ export function PaymentPicker({
         {value === 'shamcash' && (
           <div style={s.body}>
             {shamCashStatus === 'submitted' ? (
-              <span style={s.ok}>✓ {pick(lang, 'تم إرسال إثبات الدفع. اضغط "طلب الرحلة" — سيُوافق عليه المشرف ثم يبدأ البحث عن سائق.', 'Payment proof sent. Tap Request ride — an admin will verify and dispatch your driver.', 'Preuve envoyée. Appuyez sur Demander le trajet — un admin vérifiera et enverra le chauffeur.')}</span>
+              <span style={s.ok}>✓ {pick(lang, 'تم إرسال إثبات الشحن. بعد أن يؤكد المشرف التحويل يُشحن رصيدك ويُفعَّل زر طلب الرحلة (يتحدّث تلقائياً).', 'Top-up proof sent. Once an admin confirms the transfer your wallet is credited and Request ride unlocks (this page checks automatically).', 'Preuve envoyée. Dès que l’admin confirme le virement, votre portefeuille est crédité et le bouton Demander le trajet se débloque (vérification automatique).')}</span>
             ) : (
               <>
                 <div style={s.hint}>
@@ -172,7 +174,7 @@ export function PaymentPicker({
       {value === 'shamcash' && (
         <div style={s.body}>
           {shamCashStatus === 'submitted' ? (
-            <span style={s.ok}>✓ {pick(lang, 'تم إرسال إثبات الشحن. بعد الموافقة يُشحن رصيدك وتُطلب الرحلة.', 'Top-up proof sent. After approval your wallet is funded and the ride will be requested.', 'Preuve envoyée. Après approbation, votre portefeuille sera crédité.')}</span>
+            <span style={s.ok}>✓ {pick(lang, 'تم إرسال إثبات الشحن. بعد موافقة المشرف يُشحن رصيدك ثم اضغط طلب الرحلة.', 'Top-up proof sent. After an admin approves it your wallet is funded; then tap Request ride.', 'Preuve envoyée. Après approbation, votre portefeuille sera crédité.')}</span>
           ) : (
             <>
               <div style={s.hint}>

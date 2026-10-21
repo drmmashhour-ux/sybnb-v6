@@ -27,6 +27,7 @@ import { isRateLimited } from '../lib/rateLimit.mjs'
 import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
 import { recordWalletEntry, refundPrepaidRide, recordCardPrepayCredit } from '../lib/finance-ledger.mjs'
 import { cardHoldAvailable, riderHasSavedCard, placeCardHold, releaseCardHold, replaceCardHold } from '../lib/ride-card-hold.mjs'
+import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
 // file -- promo-code creation, promo-code activation toggling, and business-account onboarding --
 // were bare db().x.create/update calls with no transaction and no commit-boundary re-authorization.
@@ -686,6 +687,7 @@ export async function handleSrRides(req, res, url, context) {
           return error
         }
         if (process.env.SR_GUEST_STRIPE_ENABLED !== '1') throw notVerified('Card payments are not enabled on this server.')
+        try { authorizePaymentOperation({ operation: 'capture', rail: 'stripe_checkout', provider: 'stripe', division: 'SR', country: activePolicyCountryKey(), environment: policyEnvironment(), actor: { roles: [] } }) } catch { throw notVerified('Card payments are not available right now.') }
         const { default: Stripe } = await import('stripe')
         const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY)
         const session = await stripeClient.checkout.sessions.retrieve(guestStripeSessionId)
@@ -715,13 +717,10 @@ export async function handleSrRides(req, res, url, context) {
         guestStripePrepaid = true
       }
 
-      // ---- guest Sham Cash: bypass prepay gate; admin verifies before dispatch ----
-      const guestShamCashRef = typeof body.guestShamCashRef === 'string' ? body.guestShamCashRef.trim() : null
-      if (guestShamCashRef) {
-        rideData.metadata = { ...rideData.metadata, guestShamCashRef, pendingShamCash: true, prepaid: false }
-      }
+      // Sham Cash is a WALLET TOP-UP only (POST /api/wallet/topup-proof, credited by an admin after the transfer is verified):
+      // a free-text reference never pays for or unlocks a ride.
 
-      if (!guestStripePrepaid && !guestShamCashRef && balanceMinor < finalFareMinor && !cardCovers) {
+      if (!guestStripePrepaid && balanceMinor < finalFareMinor && !cardCovers) {
         const error = new Error('Add funds to your wallet to request this ride.')
         error.statusCode = 402
         error.code = 'RIDE_PREPAY_REQUIRED'

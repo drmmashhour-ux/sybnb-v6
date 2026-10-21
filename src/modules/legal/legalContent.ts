@@ -350,6 +350,11 @@ export const LEGAL_DOCS: Record<LegalDocKey, LegalDoc> = {
   'listing-agreement': LISTING,
 }
 
+// Brand shown in the legal text: Rezekme builds set VITE_BRAND_NAME via Vite `define`; the platform default is SYBNB.
+// NOTE: only the NAME is swapped. The wording itself is still the SYBNB draft and must be reviewed by counsel for the
+// operating entity (Rezekme) before launch - see docs/REZEKME_LAUNCH_STEPS.md.
+const BRAND = ((import.meta.env.VITE_BRAND_NAME as string | undefined) || 'SYBNB').trim() || 'SYBNB'
+
 export function legalText(tri: LegalTri, lang: Lang): string {
-  return tri[lang] ?? tri.en
+  return (tri[lang] ?? tri.en).replace(/SYBNB/g, BRAND)
 }

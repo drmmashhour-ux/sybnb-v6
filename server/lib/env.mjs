@@ -29,6 +29,13 @@ export function validateEnv(env = process.env) {
       problems.push('EMAIL_PROVIDER must be a live email provider (not sandbox) in production — email OTP is the primary auth channel')
     } else if (emailProvider === 'resend' && (!env.RESEND_API_KEY || !env.EMAIL_FROM)) {
       problems.push('RESEND_API_KEY and EMAIL_FROM are required when EMAIL_PROVIDER=resend')
+    } else if (emailProvider === 'brevo' && (!env.BREVO_API_KEY || !env.EMAIL_FROM)) {
+      problems.push('BREVO_API_KEY and EMAIL_FROM are required when EMAIL_PROVIDER=brevo')
+    }
+    // Rezekme (PLATFORM_BRAND=rezekme): owner decision "no cash rides" must be ENFORCED, not left to an env flag that defaults off.
+    // Without prepay the ride is dispatched unpaid and the cash path stays open.
+    if ((env.PLATFORM_BRAND || '').toLowerCase() === 'rezekme' && env.SR_REQUIRE_PREPAY !== '1') {
+      problems.push('SR_REQUIRE_PREPAY=1 is required when PLATFORM_BRAND=rezekme (no cash rides; fare must be prepaid from the wallet or card)')
     }
   }
   // Fail-closed country selection (all environments): refuse when the country profile is missing,

@@ -9,7 +9,7 @@ They end up in the browser bundle, so never put a secret in a `VITE_*` variable.
 | `VITE_GOOGLE_MAPS_API_KEY` | no | Turns on Google Maps (map, Places address search, reverse geocoding for dropped pins). **If missing, or if Google fails to load or rejects the key, the app automatically uses the free Leaflet / OpenStreetMap map and plain text address inputs.** |
 | `VITE_GOOGLE_DIRECTIONS` | no | Set to `1` to draw the road-following route with the Google Directions service. Off by default: the route is a plain line between the points. Directions needs the Directions API enabled on the key and is billed per route. |
 | `VITE_MAPS_COUNTRY` | no | Two-letter country code (for example `ca`) to restrict address suggestions. Empty means worldwide; no country is built in. |
-| `VITE_MAPS_DEFAULT_CENTER` | no | `lat,lng` used as the first map view when nothing is known yet (no pins and no remembered GPS position). Empty means a neutral world view. |
+| `VITE_MAPS_DEFAULT_CENTER` | no | `lat,lng` used as the first map view when nothing is known yet (no pins and no remembered GPS position). Empty means Syria (centre 34.8, 38.5, zoom 7). |
 
 ## About the Google Maps key (please read)
 
@@ -28,3 +28,5 @@ They end up in the browser bundle, so never put a secret in a `VITE_*` variable.
 - The address search uses Google's `Autocomplete` widget (Places library). Google restricts that legacy
   widget for some newer Cloud projects; if suggestions do not appear, the app simply keeps working with
   plain text input.
+
+- `VITE_SHAMCASH_QR_URL`: URL of the Rezekme Sham Cash receiving QR shown on the payment step (falls back to the shared SYBNB asset, which must not be used for Rezekme money).

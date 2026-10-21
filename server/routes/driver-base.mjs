@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { isRateLimited } from '../lib/rateLimit.mjs'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth } from '../lib/auth-context.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
@@ -74,7 +75,10 @@ export function carryBags(profile, bags) {
   return large <= profile.largeBagCapacity && hand <= profile.handBagCapacity
 }
 
-const hashKey = (code) => crypto.createHash('sha256').update(`driver-key:${code}`).digest('hex')
+// Keyed with the server secret (a leaked database alone no longer lets anyone brute-force the 1M possible 6-digit codes offline).
+// hashKeyLegacy is the unsalted form used by codes issued before this change; verification accepts both, issuing writes the keyed form.
+const hashKey = (code) => crypto.createHmac('sha256', process.env.AUTH_SECRET || 'dev-only').update(`driver-key:${code}`).digest('hex')
+const hashKeyLegacy = (code) => crypto.createHash('sha256').update(`driver-key:${code}`).digest('hex')
 
 async function careState(userId) {
   const rows = await db().driverCarCare.findMany({ where: { userId }, orderBy: { doneAt: 'desc' }, take: 40 })
@@ -118,6 +122,9 @@ export async function handleDriverBase(req, res, url, context) {
       expiringSoon,
       carCare: care,
       rating,
+      // Owner decision 2026-10-19: the driver is warned below 4.6 (once there are enough ratings), not only the admin queue.
+      lowRating: rating.ratingCount >= 5 && rating.averageRating !== null && rating.averageRating < LOW_RATING,
+      lowRatingThreshold: LOW_RATING,
     })
   }
 
@@ -172,12 +179,16 @@ export async function handleDriverBase(req, res, url, context) {
     requireAuth(context, ['DRIVER'])
     const body = await readJson(req)
     const code = String(body.code || '').replace(/\D/g, '')
+    // A 6-digit code has only 1,000,000 values: cap guesses per driver account (every attempt counts, right or wrong).
+    if (await isRateLimited(`driver-key-verify:${context.user.id}`, 15 * 60_000, 5)) {
+      throw fail(429, 'KEY_CODE_TOO_MANY_ATTEMPTS', 'Too many attempts. Wait 15 minutes or ask the admin for a new code.')
+    }
     const profile = await db().driverProfile.findUnique({ where: { userId: context.user.id }, select: { keyCodeHash: true, vehicleStatus: true, vehicleCategory: true } })
     if (!profile?.keyCodeHash) throw fail(403, 'KEY_CODE_NOT_ISSUED', 'No key code has been issued to you yet.')
     if (profile.vehicleStatus !== 'APPROVED') throw fail(403, 'DRIVER_NOT_APPROVED', 'Your application is still in review.')
-    const given = Buffer.from(hashKey(code))
     const want = Buffer.from(profile.keyCodeHash)
-    if (code.length !== 6 || given.length !== want.length || !crypto.timingSafeEqual(given, want)) {
+    const matches = (h) => { const given = Buffer.from(h); return given.length === want.length && crypto.timingSafeEqual(given, want) }
+    if (code.length !== 6 || !(matches(hashKey(code)) || matches(hashKeyLegacy(code)))) {
       throw fail(403, 'KEY_CODE_WRONG', 'That key code is not correct.')
     }
     // Same rule as Lyft: an expired or unapproved licence, insurance or registration keeps the

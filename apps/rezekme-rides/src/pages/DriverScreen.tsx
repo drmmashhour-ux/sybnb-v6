@@ -280,6 +280,15 @@ function Home({ lang, name, onSignOut }: { lang: Lang; name: string; onSignOut: 
         <button style={S.link} onClick={onSignOut}>{t('خروج', 'Sign out', 'Quitter')}</button>
       </div>
       {error && <p style={S.note}>{error}</p>}
+      {base?.lowRating && (
+        <p style={S.note} role="alert">
+          {t(
+            `تنبيه: متوسط تقييمك ${base.rating.averageRating?.toFixed(2)} وهو أقل من ${base.lowRatingThreshold ?? 4.6}. حسّن الخدمة حتى لا يتم إيقاف حسابك.`,
+            `Warning: your average rating is ${base.rating.averageRating?.toFixed(2)}, below ${base.lowRatingThreshold ?? 4.6}. Please improve your service to keep your account active.`,
+            `Attention : votre note moyenne est de ${base.rating.averageRating?.toFixed(2)}, sous ${base.lowRatingThreshold ?? 4.6}. Améliorez votre service pour garder votre compte actif.`,
+          )}
+        </p>
+      )}
 
       {!overview || idStatus === undefined ? (
         <p style={S.muted}>…</p>

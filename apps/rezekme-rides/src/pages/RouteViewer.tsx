@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { MAP_STYLE_URL, pinEl } from '../maps/mapStyle'
+import { MAP_STYLE_URL, ensureRtlText, pinEl } from '../maps/mapStyle'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
 import { fetchRideRoute, type RideRouteRecord } from '@platform/shared/api/platformApi'
 
@@ -28,6 +28,7 @@ export function RouteViewer({ rideId, lang, asDriver = false }: { rideId: string
     if (!data || !box.current || data.points.length === 0) return
     let cancelled = false
     let map: maplibregl.Map | null = null
+    ensureRtlText()
     try {
       const path = data.points.map((p) => [p.lng, p.lat] as [number, number])
       map = new maplibregl.Map({ container: box.current, style: MAP_STYLE_URL, center: path[0], zoom: 13, attributionControl: { compact: true } })

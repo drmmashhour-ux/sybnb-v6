@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { MAP_STYLE_URL, pinEl } from './mapStyle'
+import { MAP_STYLE_URL, ensureRtlText, pinEl } from './mapStyle'
 import { fetchRoadRoute, linePath, pathKey } from './roadRoute'
 import { animatePoint, bearing, carHtml, fitTargets, hasMoved, initialView, isFarJump, type LatLng, type RideMapProps } from './mapTypes'
 
@@ -47,6 +47,7 @@ export function MapLibreRideMap(props: RideMapProps) {
   useEffect(() => {
     if (!containerRef.current) return
     const view = initialView()
+    ensureRtlText()
     let map: maplibregl.Map
     try {
       map = new maplibregl.Map({

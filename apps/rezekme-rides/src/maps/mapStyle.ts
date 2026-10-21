@@ -1,3 +1,18 @@
+import maplibregl from 'maplibre-gl'
+// Self-hosted Arabic shaping plugin: without it Arabic labels render reversed / unjoined.
+import rtlPluginUrl from './rtl-text-plugin.js?url'
+
+let rtlRegistered = false
+export function ensureRtlText() {
+  if (rtlRegistered) return
+  rtlRegistered = true
+  try {
+    void maplibregl.setRTLTextPlugin(new URL(rtlPluginUrl, window.location.href).href, true)
+  } catch {
+    /* plugin unavailable: Latin labels still fine */
+  }
+}
+
 /** Keyless vector tiles (OpenStreetMap data served by OpenFreeMap): no account, no key, no billing. */
 export const MAP_STYLE_URL = (import.meta.env.VITE_MAP_STYLE_URL as string | undefined)?.trim() || 'https://tiles.openfreemap.org/styles/liberty'
 

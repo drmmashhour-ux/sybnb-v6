@@ -24,14 +24,13 @@ export const GUIDE_TASKS: GuideTask[] = [
   {
     id: 'refill-wallet', role: 'rider',
     title: t('شحن المحفظة', 'Refill my wallet', 'Recharger mon portefeuille'),
-    keywords: ['wallet', 'refill', 'top up', 'topup', 'top-up', 'add money', 'add funds', 'balance', 'sham', 'recharge', 'portefeuille', 'solde', 'رصيد', 'محفظ', 'شحن', 'اشحن', 'شام كاش', 'ادفع', 'دفع'],
+    keywords: ['wallet', 'refill', 'top up', 'topup', 'top-up', 'add money', 'add funds', 'balance', 'sham', 'card', 'recharge', 'portefeuille', 'solde', 'carte', 'رصيد', 'محفظ', 'شحن', 'اشحن', 'شام كاش', 'بطاق', 'ادفع', 'دفع'],
     steps: [
-      { route: '/ride', text: t('سنشحن محفظتك خطوة بخطوة. أنت من يرسل التحويل، وأنا أرشدك.', 'Let us refill your wallet step by step. You send the transfer; I will show you where.', 'Rechargeons votre portefeuille pas à pas. Vous envoyez le virement, je vous montre où.') },
-      { route: '/ride', target: '[data-guide="pay-tab-shamcash"]', open: '[data-guide="pay-tab-shamcash"]', text: t('اخترنا لك «Sham Cash». الدفع قبل الرحلة من المحفظة.', 'I selected “Sham Cash” for you. Rides are paid from the wallet before the trip.', 'J’ai sélectionné « Sham Cash ». Les courses sont payées par le portefeuille avant le trajet.') },
-      { route: '/ride', target: '[data-guide="shamcash-qr"]', text: t('افتح تطبيق Sham Cash وحوّل المبلغ إلى هذا الحساب (امسح الرمز).', 'Open your Sham Cash app and send the amount to this account (scan the code).', 'Ouvrez Sham Cash et envoyez le montant à ce compte (scannez le code).') },
-      { route: '/ride', target: '[data-guide="shamcash-ref"]', text: t('اكتب رقم مرجع التحويل الذي ظهر لك في Sham Cash.', 'Type the transfer reference number that Sham Cash gave you.', 'Saisissez le numéro de référence donné par Sham Cash.') },
-      { route: '/ride', target: '[data-guide="shamcash-submit"]', text: t('اضغط «إرسال إثبات الدفع». لن يُشحن رصيدك حتى يتأكد المشرف أن المال وصل.', 'Press “Submit payment proof”. Your wallet is credited only after an admin confirms the money arrived.', 'Appuyez sur « Envoyer la preuve ». Le portefeuille est crédité seulement après confirmation par l’administrateur.') },
-      { text: t('تم. عندما يوافق المشرف سيُضاف الرصيد تلقائياً ويُفعَّل زر طلب الرحلة.', 'Done. When the admin approves, the balance appears and Request ride unlocks.', 'Terminé. Après l’approbation, le solde apparaît et le bouton Demander le trajet se débloque.') },
+      { route: '/wallet', target: '[data-guide="wallet-balance"]', text: t('هذه محفظتك. منها تُدفع رحلاتك قبل أن تبدأ. سنضيف إليها رصيداً.', 'This is your wallet. Rides are paid from it before they start. Let us add money.', 'Voici votre portefeuille. Les courses en sont payées avant le départ. Ajoutons des fonds.') },
+      { route: '/wallet', target: '[data-guide="topup-amount"]', text: t('اختر المبلغ (أو اكتب مبلغاً آخر).', 'Pick the amount (or type another).', 'Choisissez le montant (ou saisissez-en un autre).') },
+      { route: '/wallet', target: '[data-guide="topup-card"]', open: '[data-guide="topup-tab-card"]', text: t('للدفع بالبطاقة اضغط هذا الزر: ستنتقل إلى Stripe للدفع الآمن، ثم يُضاف الرصيد فوراً.', 'To pay by card press this button: you go to Stripe to pay securely, then the balance is added right away.', 'Pour payer par carte, appuyez ici : vous payez sur Stripe puis le solde est ajouté aussitôt.') },
+      { route: '/wallet', target: '[data-guide="topup-tab-sham"]', text: t('أو اختر «Sham Cash» لتحويل المبلغ من تطبيق Sham Cash (يؤكده المشرف).', 'Or choose “Sham Cash” to transfer from the Sham Cash app (an admin confirms it).', 'Ou choisissez « Sham Cash » pour virer depuis l’appli (confirmé par un administrateur).') },
+      { text: t('تم. بعد إضافة الرصيد يمكنك طلب رحلتك.', 'Done. Once the balance is in, you can request your ride.', 'Terminé. Une fois le solde ajouté, vous pouvez demander votre course.') },
     ],
   },
   {

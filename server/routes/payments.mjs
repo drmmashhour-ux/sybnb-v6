@@ -14,6 +14,8 @@ import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 import { confirmStripeCheckoutSessionForActor, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
 import { applyPaymentEvent, intakeEvent, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
 
+export const WALLET_TOPUP_MIN_USD = 5
+export const WALLET_TOPUP_MAX_USD = 500
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 
 function requireStripe() {
@@ -198,6 +200,28 @@ export async function handlePayments(req, res, url, context) {
   // The rider has not saved a card and is paying for a single ride.  We create a hosted
   // Checkout session and store the estimated fare in metadata; sr-rides.mjs verifies this
   // session on ride creation and marks the ride prepaid.  Enabled with SR_GUEST_STRIPE_ENABLED=1.
+  // Return from a wallet top-up Checkout: verify with Stripe that THIS rider paid, then credit the wallet. Idempotent with the
+  // webhook (both go through recordCardPrepayCredit, keyed by the PaymentIntent id), so a rider who closes the tab is still credited.
+  if (url.pathname === '/api/wallet/stripe/confirm-topup') {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST', 'CLIENT'])
+    requireStripe()
+    const body = await readJson(req)
+    const sessionId = String(body.sessionId || '')
+    const fail = (status, code, message) => { const error = new Error(message); error.statusCode = status; error.code = code; error.expose = true; return error }
+    if (!sessionId) throw fail(400, 'STRIPE_CONFIRM_INPUT_INVALID', 'sessionId is required.')
+    authorizePaymentOperation({ operation: 'capture', rail: 'stripe_checkout', provider: 'stripe', division: 'SR', country: activePolicyCountryKey(), environment: policyEnvironment(), actor: { roles: context.roles } })
+    const session = await stripe.checkout.sessions.retrieve(sessionId)
+    if (session.metadata?.intentType !== 'client_topup') throw fail(409, 'TOPUP_SESSION_INVALID', 'This payment is not a wallet top-up.')
+    if (session.metadata?.riderId !== context.user.id) throw fail(403, 'STRIPE_SESSION_FORBIDDEN', 'This payment session does not belong to this account.')
+    if (session.payment_status !== 'paid') throw fail(409, 'STRIPE_PAYMENT_NOT_CAPTURED', 'This card payment has not been captured yet.')
+    const amountMinor = Math.round(Number(session.metadata?.fareMinor || 0))
+    const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id
+    if (!paymentIntentId || amountMinor <= 0) throw fail(409, 'STRIPE_CONFIRM_FAILED', 'Could not confirm this payment.')
+    await db().$transaction((tx) => recordCardPrepayCredit(tx, { userId: context.user.id, paymentIntentId, sessionId: session.id, amountMinor, currency: session.metadata?.currency || 'USD' }))
+    return json(res, 200, { ok: true, creditedMinor: amountMinor, currency: session.metadata?.currency || 'USD' })
+  }
+
   if (url.pathname === '/api/payments/stripe/guest-checkout-session') {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST', 'CLIENT'])
@@ -223,6 +247,15 @@ export async function handlePayments(req, res, url, context) {
     const origin = String(body.origin || '').replace(/\/$/, '')
     const fareMinor = Math.round(Number(body.fareMinor || 0))
     const currency = String(body.currency || 'USD').toUpperCase()
+    // Wallet top-up by card (purpose 'topup'): same Checkout, but the money funds the wallet instead of one ride.
+    const isTopup = body.purpose === 'topup'
+    if (isTopup && (currency !== 'USD' || fareMinor < WALLET_TOPUP_MIN_USD || fareMinor > WALLET_TOPUP_MAX_USD)) {
+      const error = new Error(`Top-up must be between $${WALLET_TOPUP_MIN_USD} and $${WALLET_TOPUP_MAX_USD}.`)
+      error.statusCode = 400
+      error.code = 'WALLET_TOPUP_AMOUNT_INVALID'
+      error.expose = true
+      throw error
+    }
     if (!origin || fareMinor <= 0) {
       const error = new Error('origin and fareMinor are required.')
       error.statusCode = 400
@@ -239,11 +272,11 @@ export async function handlePayments(req, res, url, context) {
       mode: 'payment',
       payment_method_types: ['card'],
       line_items: [{
-        price_data: { currency: chargeCurrency, unit_amount: unitAmount, product_data: { name: 'Rezekme ride' } },
+        price_data: { currency: chargeCurrency, unit_amount: unitAmount, product_data: { name: isTopup ? 'Rezekme wallet top-up' : 'Rezekme ride' } },
         quantity: 1,
       }],
       metadata: {
-        intentType: context.roles.includes('CLIENT') ? 'client_preride' : 'guest_preride',
+        intentType: isTopup ? 'client_topup' : context.roles.includes('CLIENT') ? 'client_preride' : 'guest_preride',
         riderId: context.user.id,
         fareMinor: String(fareMinor),
         currency,
@@ -252,14 +285,14 @@ export async function handlePayments(req, res, url, context) {
       // attribute the money (who paid, how much) even if the rider never returns to the app.
       payment_intent_data: {
         metadata: {
-          intentType: context.roles.includes('CLIENT') ? 'client_preride' : 'guest_preride',
+          intentType: isTopup ? 'client_topup' : context.roles.includes('CLIENT') ? 'client_preride' : 'guest_preride',
           riderId: context.user.id,
           fareMinor: String(fareMinor),
           currency,
         },
       },
-      success_url: `${origin}/?guest_checkout_session_id={CHECKOUT_SESSION_ID}#/ride`,
-      cancel_url: `${origin}/#/ride`,
+      success_url: isTopup ? `${origin}/?topup_session_id={CHECKOUT_SESSION_ID}#/wallet` : `${origin}/?guest_checkout_session_id={CHECKOUT_SESSION_ID}#/ride`,
+      cancel_url: isTopup ? `${origin}/#/wallet` : `${origin}/#/ride`,
     })
     return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
   }
@@ -570,7 +603,7 @@ export async function handlePayments(req, res, url, context) {
     // A save-card session (Option B) is a setup-mode Checkout carrying metadata.userId + purpose.
     const isSetupEvent = obj.mode === 'setup' || obj.metadata?.purpose === 'save_card'
     // Pre-ride card payment (guest/client Stripe Checkout before a ride exists): no booking, no ride yet.
-    const isPrerideEvent = ['guest_preride', 'client_preride'].includes(obj.metadata?.intentType)
+    const isPrerideEvent = ['guest_preride', 'client_preride', 'client_topup'].includes(obj.metadata?.intentType)
     const providerReference = String(
       (isSetupEvent ? obj.metadata?.userId : obj.metadata?.bookingId || obj.metadata?.rideId) || '',
     )

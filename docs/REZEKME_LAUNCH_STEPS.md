@@ -78,3 +78,14 @@ Separate Rezekme operator console (live rides, drivers, vehicles, payment review
 - Vercel: create a fourth project from this repo with build command `npm run build:rezekme-admin`, output directory `dist-apps/rezekme-admin`, env `VITE_API_BASE_URL=https://rezekme-api.onrender.com`; suggested domain `admin.rezekme.com`. Add that origin to the API's `CORS_ORIGIN`.
 - Admin sign-in uses the normal staff sign-in (email code). The first admin is created with `scripts/bootstrap-admin.mjs` (section 5).
 - Known cosmetic: some shared admin pages still show a small "SYBNB · ADMIN" eyebrow label.
+
+## Wallet top-up by card (Stripe) — what to set on Render
+
+The rider Wallet page (`#/wallet`) adds money by card (Stripe Checkout, $5 to $500) or Sham Cash. Card top-ups are credited when Stripe confirms the payment (browser return and webhook, idempotent). Everything is OFF until you set these on the API (Render), with your Stripe keys:
+
+- `STRIPE_SECRET_KEY` (test key first), `STRIPE_WEBHOOK_SECRET` (endpoint `/api/payments/stripe/webhook`, events `checkout.session.completed` and `payment_intent.succeeded`), `STRIPE_CURRENCY=usd`
+- `SR_GUEST_STRIPE_ENABLED=1`
+- `PAYMENTS_ENABLED=true`, `PAYMENT_PROVIDER_STRIPE_APPROVED=true`
+- `PAYMENT_OPERATION_STRIPE_CHECKOUT_CREATE_ENABLED=true`, `PAYMENT_OPERATION_STRIPE_CHECKOUT_CAPTURE_ENABLED=true`
+
+Test it with Stripe test mode (card 4242 4242 4242 4242) before switching to the live key.

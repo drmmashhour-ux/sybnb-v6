@@ -7,7 +7,6 @@ dist
 *.local
 docs
 tests
-scripts
 src
 public
 capsules

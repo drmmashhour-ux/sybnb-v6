@@ -201,7 +201,7 @@ export async function handleAdmin(req, res, url, context) {
         SELECT currency, coalesce(sum(CASE WHEN type::text IN ('CREDIT','RELEASE','REFUND') THEN amount_minor WHEN type::text = 'DEBIT' THEN -amount_minor ELSE 0 END),0)::int AS "balanceMinor"
         FROM wallet_entries WHERE created_at < ${end} GROUP BY 1`,
       db().$queryRaw`
-        SELECT currency, coalesce(method,'unspecified') AS method, count(*)::int AS count, sum(amount_minor)::int AS "totalMinor"
+        SELECT currency, coalesce(method->>'type','unspecified') AS method, count(*)::int AS count, sum(amount_minor)::int AS "totalMinor"
         FROM payout_requests WHERE status::text = 'PAID' AND decided_at >= ${start} AND decided_at < ${end}
         GROUP BY 1,2 ORDER BY 1,2`,
       db().$queryRaw`

@@ -49,6 +49,10 @@ async function call<T>(path: string, method = 'GET', body?: unknown): Promise<T>
   return payload
 }
 
+export type PayoutRequestRow = { id: string; amountMinor: number; currency: string; status: 'REQUESTED' | 'PAID' | 'REJECTED'; reference?: string | null; note?: string | null; createdAt: string }
+export const fetchPayouts = (currency = 'USD') => call<{ ok: true; availableMinor: number; pendingMinor: number; currency: string; requests: PayoutRequestRow[] }>(`/api/driver/payouts?currency=${encodeURIComponent(currency)}`)
+export const requestPayout = (amountMinor: number, currency: string, method: { type: string; accountName: string; walletNumber: string }) =>
+  call<{ ok: true }>('/api/driver/payouts', 'POST', { amountMinor, currency, method })
 export const fetchDriverBase = () => call<{ ok: true } & DriverBase>('/api/driver/base')
 export const logCarCare = (kind: 'OUTSIDE' | 'INSIDE') => call<{ ok: true; carCare: DriverBase['carCare'] }>('/api/driver/car-care', 'POST', { kind })
 export const verifyKeyCode = (code: string) => call<{ ok: true }>('/api/driver/key-code/verify', 'POST', { code })

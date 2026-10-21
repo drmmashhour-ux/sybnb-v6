@@ -84,6 +84,12 @@ await t('key code issued before the change (legacy hash) still verifies', async 
   assert.notEqual(r.code, 'KEY_CODE_WRONG', `code accepted (documents may still block duty): ${JSON.stringify(r.j).slice(0, 160)}`)
 })
 
+await t('admin daily report still works once a driver payout is PAID (method is a JSON object)', async () => {
+  await p.payoutRequest.create({ data: { hostId: driver.u.id, amountMinor: 4, currency: 'USD', status: 'PAID', reference: `E2E-${run}`, decidedAt: new Date(), method: { kind: 'driver', type: 'sham_cash', accountName: 'E2E', walletNumber: '0999' } } })
+  const rep = await call('GET', '/api/admin/daily-report', admin.token)
+  assert.equal(rep.status, 200, JSON.stringify(rep.j).slice(0, 200))
+})
+
 console.log(`\n${passed} passed, ${failures.length} failed`)
 await p.$disconnect()
 process.exit(failures.length ? 1 : 0)

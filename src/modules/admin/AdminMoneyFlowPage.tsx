@@ -193,7 +193,7 @@ export function AdminMoneyFlowPage({ lang }: Props) {
                 ) : <span style={{ color: T.dim }}>—</span>}
                 {e.user?.email && <div style={{ color: T.dim, fontSize: 11 }}>{e.user.email}</div>}
               </div>
-              <div style={{ ...styles.cell, color: tone, fontWeight: 800 }}>{outflow ? '−' : '+'}{money(e.amountMinor)}</div>
+              <div style={{ ...styles.cell, color: tone, fontWeight: 800 }}>{outflow ? '−' : '+'}{money(e.amountMinor, e.currency)}</div>
               <div style={styles.cell}>
                 <span style={{ color: T.muted }}>{e.referenceType}</span>
                 <div style={{ color: T.dim, fontSize: 11 }}>{e.note || e.referenceId.slice(0, 12)}</div>

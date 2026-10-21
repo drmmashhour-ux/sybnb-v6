@@ -27,7 +27,7 @@ import {
   type PlatformRideRequest,
 } from '@platform/shared/api/platformApi'
 
-import { fetchDriverBase, verifyKeyCode, type DriverBase } from '../driverBaseApi'
+import { fetchDriverBase, fetchPayouts, requestPayout, verifyKeyCode, type DriverBase } from '../driverBaseApi'
 import { MapHero } from '../maps/MapHero'
 import { RecordingControls } from './RecordingControls'
 import { RouteViewer } from './RouteViewer'
@@ -913,6 +913,57 @@ function Earnings({ lang, overview, rate, currency }: { lang: Lang; overview: Pl
           </div>
           <button style={S.link} onClick={() => setOpenRoute(openRoute === r.id ? null : r.id)}>{t('المسار المسجّل', 'Recorded route', 'Trajet enregistré')}</button>
           {openRoute === r.id && <RouteViewer rideId={r.id} lang={lang} asDriver />}
+        </div>
+      ))}
+      <PayoutBox lang={lang} currency={currency} />
+    </div>
+  )
+}
+
+/** Balance the driver can withdraw, a request form (paid by the operator outside the platform) and the request history. */
+function PayoutBox({ lang, currency }: { lang: Lang; currency: string }) {
+  const t = (ar: string, en: string, fr: string) => pick(lang, ar, en, fr)
+  const [info, setInfo] = useState<Awaited<ReturnType<typeof fetchPayouts>> | null>(null)
+  const [amount, setAmount] = useState('')
+  const [wallet, setWallet] = useState('')
+  const [name, setName] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const load = useCallback(() => { fetchPayouts(currency).then(setInfo).catch(() => setInfo(null)) }, [currency])
+  useEffect(() => { load() }, [load])
+  if (!info) return null
+  const free = Math.max(0, info.availableMinor - info.pendingMinor)
+  const submit = async () => {
+    const minor = Math.round(Number(amount))
+    if (!Number.isInteger(minor) || minor <= 0 || minor > free) { setMsg(t('أدخل مبلغاً صحيحاً لا يتجاوز رصيدك', 'Enter a valid amount up to your balance', 'Entrez un montant valide, au plus votre solde')); return }
+    if (!wallet.trim() || !name.trim()) { setMsg(t('أدخل اسمك ورقم محفظة شام كاش', 'Enter your name and Sham Cash wallet number', 'Entrez votre nom et le numéro Sham Cash')); return }
+    setBusy(true); setMsg('')
+    try {
+      await requestPayout(minor, currency, { type: 'sham_cash', accountName: name.trim(), walletNumber: wallet.trim() })
+      setAmount(''); setMsg(t('تم إرسال الطلب، سيتم الدفع بعد مراجعة الإدارة', 'Request sent. The admin pays it after review.', 'Demande envoyée. Elle sera payée après vérification.'))
+      load()
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
+  }
+  return (
+    <div style={{ borderTop: '1px solid #eee', paddingTop: 10, marginTop: 10, display: 'grid', gap: 8 }}>
+      <div style={S.row}>
+        <strong>{t('الرصيد المتاح للسحب', 'Available to withdraw', 'Disponible au retrait')}</strong>
+        <strong>{money(free, currency)}</strong>
+      </div>
+      {info.pendingMinor > 0 && <div style={S.muted}>{t('قيد الطلب', 'Pending request', 'En attente')}: {money(info.pendingMinor, currency)}</div>}
+      {free > 0 && (
+        <>
+          <input style={S.input} inputMode="numeric" placeholder={t('المبلغ', 'Amount', 'Montant')} value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <input style={S.input} placeholder={t('الاسم على المحفظة', 'Name on the wallet', 'Nom sur le portefeuille')} value={name} onChange={(e) => setName(e.target.value)} />
+          <input style={S.input} inputMode="tel" placeholder={t('رقم محفظة شام كاش', 'Sham Cash wallet number', 'Numéro Sham Cash')} value={wallet} onChange={(e) => setWallet(e.target.value)} />
+          <button style={S.primary} disabled={busy} onClick={submit}>{t('اطلب السحب', 'Request payout', 'Demander le retrait')}</button>
+        </>
+      )}
+      {msg && <div style={S.muted}>{msg}</div>}
+      {info.requests.slice(0, 5).map((r) => (
+        <div key={r.id} style={{ ...S.row, fontSize: 14 }}>
+          <span>{money(r.amountMinor, r.currency)} · {r.status === 'PAID' ? t('مدفوع', 'Paid', 'Payé') : r.status === 'REJECTED' ? t('مرفوض', 'Rejected', 'Refusé') : t('قيد المراجعة', 'In review', 'En revue')}</span>
+          <span style={S.muted} dir="ltr">{r.reference || ''}</span>
         </div>
       ))}
     </div>

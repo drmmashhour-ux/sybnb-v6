@@ -251,27 +251,7 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
     const user = await db().user.findUnique({ where: { email }, select: { id: true, status: true, roles: { select: { role: true } } } })
     if (!user || user.status !== 'ACTIVE') throw generic()
 
-    // An account holding ADMIN needs a SECOND, independent proof: a verified single-use code that was
-    // TEXTED to the owner's phone ('admin-reset-sms'), on top of the emailed code above.
-    let verifiedSms = null
-    if (user.roles.some((r) => r.role === 'ADMIN')) {
-      verifiedSms = await db().verificationCode.findFirst({
-        where: {
-          identifierHash: hashEmail(email),
-          status: 'VERIFIED',
-          purpose: 'admin-reset-sms',
-          verifiedAt: { gt: new Date(Date.now() - OTP_BIND_WINDOW_MS) },
-        },
-        orderBy: { verifiedAt: 'desc' },
-      })
-      if (!verifiedSms) throw generic()
-    }
-
     await db().$transaction(async (tx) => {
-      if (verifiedSms) {
-        const smsConsumed = await tx.verificationCode.updateMany({ where: { id: verifiedSms.id, status: 'VERIFIED' }, data: { status: 'CANCELLED' } })
-        if (smsConsumed.count === 0) throw generic()
-      }
       // Single-use: only a still-VERIFIED code flips, so a replayed request cannot reset again.
       const consumed = await tx.verificationCode.updateMany({
         where: { id: verified.id, status: 'VERIFIED' },

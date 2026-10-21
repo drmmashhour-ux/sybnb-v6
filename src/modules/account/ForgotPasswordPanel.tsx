@@ -12,7 +12,6 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
   const [email, setEmail] = useState(initialEmail)
   const [step, setStep] = useState<'ask' | 'code' | 'done'>('ask')
   const [code, setCode] = useState('')
-  const [smsCode, setSmsCode] = useState('')
   const [password, setPassword] = useState('')
   const [password2, setPassword2] = useState('')
   const [show, setShow] = useState(false)
@@ -23,7 +22,7 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
   const fail = (err: unknown) =>
     setError(err instanceof Error && err.message ? err.message : pick(lang, 'تعذّر المتابعة. حاول مرة أخرى.', 'Could not continue. Please try again.', 'Impossible de continuer. Veuillez réessayer.'))
 
-  async function sendCode(which: 'email' | 'sms' | 'both' = 'both') {
+  async function sendCode() {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) {
       setError(pick(lang, 'أدخل بريداً إلكترونياً صحيحاً.', 'Enter a valid email.', 'Saisissez un courriel valide.'))
       return
@@ -31,9 +30,8 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
     setBusy(true)
     setError('')
     try {
-      if (!admin || which !== 'sms') await requestOtp({ email: email.trim(), purpose: 'password-reset' })
-      if (admin && which !== 'email') await requestOtp({ email: email.trim(), purpose: 'admin-reset-sms' })
-      setNote(admin ? (which === 'email' ? pick(lang, 'أُرسل الرمز إلى بريدك.', 'Code emailed.', 'Code envoyé par courriel.') : which === 'sms' ? pick(lang, 'أُرسل الرمز إلى هاتفك.', 'Code texted to your phone.', 'Code envoyé par texto.') : pick(lang, 'أُرسل رمزان: بريد ورسالة نصية.', 'Two codes sent: one by email, one by text.', 'Deux codes envoyés : courriel et texto.')) : '')
+      await requestOtp({ email: email.trim(), purpose: 'password-reset' })
+      setNote(admin ? pick(lang, 'أُرسل الرمز إلى بريدك.', 'Code emailed.', 'Code envoyé par courriel.') : '')
       setStep('code')
     } catch (err) {
       fail(err)
@@ -47,7 +45,7 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
       setError(pick(lang, 'كلمتا المرور غير متطابقتين.', 'The two passwords do not match.', 'Les deux mots de passe ne correspondent pas.'))
       return
     }
-    if (code.trim().length !== 6 || password.length < 8 || (admin && smsCode.trim().length !== 6)) {
+    if (code.trim().length !== 6 || password.length < 8) {
       setError(pick(lang, 'أدخل الرمز المكوّن من 6 أرقام وكلمة مرور من 8 أحرف على الأقل.', 'Enter the 6-digit code and a password of at least 8 characters.', 'Saisissez le code à 6 chiffres et un mot de passe d’au moins 8 caractères.'))
       return
     }
@@ -58,13 +56,6 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
       if (!ok) {
         setError(pick(lang, 'الرمز غير صحيح.', 'The code is not correct.', 'Le code est incorrect.'))
         return
-      }
-      if (admin) {
-        const smsOk = await confirmOtp({ email: email.trim(), purpose: 'admin-reset-sms', code: smsCode.trim() })
-        if (!smsOk) {
-          setError(pick(lang, 'رمز الرسالة النصية غير صحيح.', 'The text-message code is not correct.', 'Le code reçu par texto est incorrect.'))
-          return
-        }
       }
       await resetPassword(email, password)
       setStep('done')
@@ -84,14 +75,9 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
             {pick(lang, 'البريد الإلكتروني', 'Email', 'Courriel')}
             <input style={s.input} dir="ltr" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </label>
-          <button type="button" style={s.primary} disabled={busy} onClick={() => void sendCode(admin ? 'email' : 'both')}>
+          <button type="button" style={s.primary} disabled={busy} onClick={() => void sendCode()}>
             {busy ? '…' : pick(lang, 'أرسل الرمز', 'Email me a code', 'M’envoyer un code')}
           </button>
-          {admin && (
-            <button type="button" style={s.primary} disabled={busy} onClick={() => void sendCode('sms')}>
-              {busy ? '…' : pick(lang, 'أرسل الرمز برسالة نصية', 'Text me a code', 'M’envoyer un code par texto')}
-            </button>
-          )}
         </>
       )}
       {step === 'code' && (
@@ -101,8 +87,7 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
             <>
               <small role="status">{note}</small>
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                <button type="button" style={s.link} disabled={busy} onClick={() => void sendCode('email')}>{pick(lang, 'أعد إرسال رمز البريد', 'Email the code again', 'Renvoyer le code par courriel')}</button>
-                <button type="button" style={s.link} disabled={busy} onClick={() => void sendCode('sms')}>{pick(lang, 'أرسل رمزاً برسالة نصية', 'Text me a code', 'Recevoir un code par texto')}</button>
+                <button type="button" style={s.link} disabled={busy} onClick={() => void sendCode()}>{pick(lang, 'أعد إرسال رمز البريد', 'Email the code again', 'Renvoyer le code par courriel')}</button>
               </div>
             </>
           )}
@@ -110,12 +95,6 @@ export function ForgotPasswordPanel({ lang, initialEmail = '', onClose, admin = 
             {admin ? pick(lang, 'رمز البريد الإلكتروني', 'Code from the email', 'Code reçu par courriel') : pick(lang, 'الرمز', 'Code', 'Code')}
             <input style={s.input} dir="ltr" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} />
           </label>
-          {admin && (
-            <label style={s.label}>
-              {pick(lang, 'رمز الرسالة النصية', 'Code from the text message', 'Code reçu par texto')}
-              <input style={s.input} dir="ltr" inputMode="numeric" autoComplete="off" maxLength={6} value={smsCode} onChange={(e) => setSmsCode(e.target.value)} />
-            </label>
-          )}
           <label style={s.label}>
             {pick(lang, 'كلمة المرور الجديدة', 'New password', 'Nouveau mot de passe')}
             <input style={s.input} dir="ltr" type={show ? 'text' : 'password'} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />

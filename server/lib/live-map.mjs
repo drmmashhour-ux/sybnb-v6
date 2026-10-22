@@ -44,17 +44,22 @@ const driverLocationCache = ttlCache(3_000)
 const rideCoordsCache = ttlCache(30_000)
 
 export async function updateDriverLocation(driverId, lat, lng) {
-  await db().driverProfile.upsert({
-    where: { userId: driverId },
-    create: { userId: driverId },
-    update: {},
-  })
+  // One statement per GPS fix in the normal case (the hottest write in the system: every online
+  // driver, every few seconds). The profile row is only created when it does not exist yet.
   const point = `SRID=4326;POINT(${lng} ${lat})`
-  await db().$executeRaw`
+  const updated = await db().$executeRaw`
     UPDATE driver_profiles
     SET last_location_geo = ${point}::geometry, last_location_updated_at = now()
     WHERE user_id = ${driverId}::uuid
   `
+  if (updated === 0) {
+    await db().driverProfile.upsert({ where: { userId: driverId }, create: { userId: driverId }, update: {} })
+    await db().$executeRaw`
+      UPDATE driver_profiles
+      SET last_location_geo = ${point}::geometry, last_location_updated_at = now()
+      WHERE user_id = ${driverId}::uuid
+    `
+  }
   driverLocationCache.invalidate(driverId)
 }
 

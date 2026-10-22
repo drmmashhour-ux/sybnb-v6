@@ -25,8 +25,10 @@ async function setBalance(userId, currency, minor) {
   const w = await db().wallet.upsert({ where: { userId_currency: { userId, currency } }, update: {}, create: { userId, currency } })
   await db().walletEntry.deleteMany({ where: { walletId: w.id, referenceType: 'e2e_fixture' } })
   const current = (await db().wallet.findUnique({ where: { id: w.id } })).cachedBalanceMinor
-  if (minor > current) {
-    await db().walletEntry.create({ data: { walletId: w.id, type: 'CREDIT', amountMinor: minor - current, currency, referenceType: 'e2e_fixture', referenceId: `fx-${Date.now()}`, idempotencyKey: `e2e-fixture-${userId}-${currency}-${Date.now()}`, note: 'e2e fixture' } })
+  // Both directions, so a re-run starts from the balance it asks for (a positive leftover from the
+  // previous run used to let the "unfunded rider" request through).
+  if (minor !== current) {
+    await db().walletEntry.create({ data: { walletId: w.id, type: minor > current ? 'CREDIT' : 'DEBIT', amountMinor: Math.abs(minor - current), currency, referenceType: 'e2e_fixture', referenceId: `fx-${Date.now()}`, idempotencyKey: `e2e-fixture-${userId}-${currency}-${Date.now()}`, note: 'e2e fixture' } })
     await db().wallet.update({ where: { id: w.id }, data: { cachedBalanceMinor: minor } })
   }
 }

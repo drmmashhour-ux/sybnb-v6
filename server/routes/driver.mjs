@@ -5,7 +5,6 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { deleteDriverPhoto, saveDriverPhoto } from '../lib/driver-photo-storage.mjs'
 import { getDriverRatingSummary } from '../lib/driver-rating.mjs'
 import { updateDriverLocation, getDriverLocation, getRideCoords, haversineKm, etaMinutesForKm } from '../lib/live-map.mjs'
-import { activateScheduledRides } from '../lib/ride-schedule.mjs'
 import { runDispatchSweep } from '../lib/ride-dispatch.mjs'
 import { VEHICLE_CATEGORY_VALUES, isCategoryAllowedForYear, VEHICLE_MAX_AGE_YEARS } from '../lib/vehicle-category.mjs'
 import { countOffences, offenceFeeMinor, riderOffenceFeeMinor } from '../lib/ride-offences.mjs'
@@ -37,6 +36,14 @@ const LOCATION_PING_MIN_INTERVAL_MS = 15_000
 // Security (Syria): the car's route is recorded from the moment the driver accepts, not only during the trip.
 const TRACKED_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 const lastLocationPingAt = new Map()
+// Per-driver throttle on the "which ride am I on" lookup that feeds the breadcrumb: a breadcrumb is
+// kept at most every 15 s anyway, so looking the ride up on every 8 s fix only doubled the reads.
+const lastActiveRideCheckAt = new Map()
+function pruneMap(map, maxAgeMs) {
+  if (map.size < 50_000) return
+  const cutoff = Date.now() - maxAgeMs
+  for (const [k, t] of map) if (t < cutoff) map.delete(k)
+}
 
 // Safety Phase 2 (2026-10-10): the IN_PROGRESS gate honours env SR_REQUIRE_PICKUP_CODE (default ON;
 // 'false'/'0' disables it) so the pickup-PIN requirement can be turned off without a code change.
@@ -118,6 +125,11 @@ export async function handleDriver(req, res, url, context) {
     // -- it can never block or fail the location update itself.
     void (async () => {
       try {
+        const nowMs = Date.now()
+        if (nowMs - (lastActiveRideCheckAt.get(context.user.id) || 0) < LOCATION_PING_MIN_INTERVAL_MS) return
+        lastActiveRideCheckAt.set(context.user.id, nowMs)
+        pruneMap(lastActiveRideCheckAt, 10 * 60_000)
+        pruneMap(lastLocationPingAt, 10 * 60_000)
         const activeRide = await db().rideRequest.findFirst({
           where: { driverId: context.user.id, status: { in: TRACKED_RIDE_STATUSES } },
           select: { id: true, status: true },
@@ -445,7 +457,7 @@ export async function handleDriver(req, res, url, context) {
     if (!dutyProfile?.onDutyAt || (await dutyBlockers(context.user.id, dutyProfile)).blockers.length) {
       return json(res, 200, { ok: true, rides: [], driverLocated: false, onDuty: false, hiddenTooBig: 0 })
     }
-    await activateScheduledRides()
+    // Scheduled-ride activation now runs inside the throttled dispatch sweep below.
     // Full auto-dispatch (2026-10-10): no daemon in this deployment, so the offer-escalation sweep
     // runs here on the pending-list read -- mirroring activateScheduledRides() above. It expires
     // lapsed offers (re-offering to the next-nearest driver) and seeds offers on still-unoffered

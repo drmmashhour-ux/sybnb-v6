@@ -28,7 +28,7 @@ import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { rideCategoryToVehicle, isKnownRideCategory } from '../lib/vehicle-category.mjs'
 import { clientIp, isRateLimited } from '../lib/rateLimit.mjs'
 import { notifyAdmin, notifyUserMulti } from '../lib/notifications.mjs'
-import { recordWalletEntry, refundPrepaidRide, recordCardPrepayCredit } from '../lib/finance-ledger.mjs'
+import { recordWalletEntry, refundPrepaidRide, recordCardPrepayCreditOnce } from '../lib/finance-ledger.mjs'
 import { cardHoldAvailable, riderHasSavedCard, placeCardHold, releaseCardHold, replaceCardHold } from '../lib/ride-card-hold.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 // SEC-002R round 2 (findings G2 + same-shape sweep): the three platform-admin instruments in this
@@ -41,6 +41,7 @@ import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } 
 import { REAUTH_FAILURE_CODES, reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { applyShareDiscount, poolClaimEligibility } from '../lib/ride-pooling.mjs'
 import { offerRideToNextDriver, runDispatchSweep } from '../lib/ride-dispatch.mjs'
+import { inc, observeMatchSeconds } from '../lib/metrics.mjs'
 import { logRideEventSafe } from '../lib/ride-events.mjs'
 import { buildAlternatives, notifyRiderNoDriverOnce, categoryAvailabilityAt } from '../lib/ride-no-driver.mjs'
 import { analyzeRide } from '../lib/ai-ride-analyst.mjs'
@@ -357,6 +358,19 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
       action: 'SR_RIDE_CLAIMED',
       requiredRoles: ['DRIVER'],
     })
+    // One-live-ride rule, enforced INSIDE the claim transaction (scale/concurrency, 2026-10-22).
+    // poolClaimEligibility() above is a read outside any lock, so the same driver tapping two rides
+    // at once (two phones, a retry, a slow network) could pass it twice and end up assigned to both.
+    // Locking this driver's profile row serializes their claims; the re-check then sees the first.
+    await tx.$queryRaw`SELECT 1 FROM driver_profiles WHERE user_id = ${context.user.id}::uuid FOR UPDATE`
+    const liveRides = await tx.rideRequest.findMany({
+      where: { driverId: context.user.id, status: { in: ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS'] } },
+      select: { id: true },
+    })
+    const mayTake = pairedWithRideId
+      ? liveRides.length === 1 && liveRides[0].id === pairedWithRideId
+      : liveRides.length === 0
+    if (!mayTake) return { count: 0, busy: true }
     const claimed = await tx.rideRequest.updateMany({
       where: { id: rideId, driverId: null, status: { in: ['REQUESTED', 'MATCHING'] } },
       data: {
@@ -381,6 +395,15 @@ async function claimRideForDriver(context, rideId, { requireOfferForCaller = fal
     return { count: claimed.count }
   })
 
+  inc('sr_ride_claims_total', { result: claimResult.busy ? 'driver_busy' : claimResult.count === 0 ? 'already_claimed' : 'won' })
+  if (claimResult.count === 1 && existing.requestedAt) observeMatchSeconds((Date.now() - new Date(existing.requestedAt).getTime()) / 1000)
+  if (claimResult.busy) {
+    const error = new Error('You already have a ride in progress. Finish it before taking another.')
+    error.statusCode = 409
+    error.code = 'DRIVER_ALREADY_ON_RIDE'
+    error.expose = true
+    throw error
+  }
   if (claimResult.count === 0) {
     const error = new Error('This ride has already been claimed by another driver.')
     error.statusCode = 409
@@ -771,13 +794,26 @@ export async function handleSrRides(req, res, url, context) {
         if (!paymentIntentId) throw notVerified('Card payment reference missing.')
         // Master book: payment intent + wallet CREDIT (method stripe_card). The normal wallet debit
         // below then holds the fare for the ride. Idempotent with the webhook's identical call.
-        await db().$transaction((tx) => recordCardPrepayCredit(tx, {
+        // One Checkout session pays for ONE ride. Without this, re-sending the same session id on a
+        // second request skipped the wallet-balance check (guestStripePrepaid) for a ride it never paid.
+        const reused = await db().rideRequest.findFirst({
+          where: { riderId: context.user.id, metadata: { path: ['stripeSessionId'], equals: session.id } },
+          select: { id: true },
+        })
+        if (reused) {
+          const error = new Error('This card payment was already used for another ride.')
+          error.statusCode = 409
+          error.code = 'STRIPE_SESSION_ALREADY_USED'
+          error.expose = true
+          throw error
+        }
+        await recordCardPrepayCreditOnce({
           userId: context.user.id,
           paymentIntentId,
           sessionId: session.id,
           amountMinor: paidFareMinor,
           currency: session.metadata?.currency || 'USD',
-        }))
+        })
         rideData.metadata.paymentMethod = 'stripe_card'
         rideData.metadata.stripeSessionId = session.id
         rideData.metadata.stripePaymentIntentId = paymentIntentId
@@ -914,6 +950,7 @@ export async function handleSrRides(req, res, url, context) {
       lng: createdCoords.pickup?.lng ?? null,
       meta: { category, pickup, dropoff, fareMinor: ride.fareMinor ?? null, currency: ride.currency, scheduled: Boolean(scheduledFor) },
     })
+    inc('sr_ride_requests_total', { category: String(ride.metadata?.category || 'unknown').replace(/[^A-Za-z ]/g, '') })
     return json(res, 201, { ok: true, ride: { ...ride, stops: createdStops, pickupCoords: createdCoords.pickup, dropoffCoords: createdCoords.dropoff } })
   }
 

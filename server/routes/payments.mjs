@@ -2,13 +2,14 @@ import { createHash } from 'node:crypto'
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth, requireVerifiedEmail } from '../lib/auth-context.mjs'
-import { expectedTotalMinor, isProviderRefUniqueViolation, sypPerUsd, recordCardPrepayCredit } from '../lib/finance-ledger.mjs'
+import { expectedTotalMinor, isProviderRefUniqueViolation, sypPerUsd, recordCardPrepayCreditOnce } from '../lib/finance-ledger.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
 import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 import { checkoutSessionExpiresAtSeconds } from '../lib/booking-policy.mjs'
 import { log } from '../lib/logger.mjs'
+import { inc } from '../lib/metrics.mjs'
 import { expireUnpaidBookings } from '../lib/booking-lifecycle.mjs'
 import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 import { confirmStripeCheckoutSessionForActor, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
@@ -218,8 +219,8 @@ export async function handlePayments(req, res, url, context) {
     const amountMinor = Math.round(Number(session.metadata?.fareMinor || 0))
     const paymentIntentId = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id
     if (!paymentIntentId || amountMinor <= 0) throw fail(409, 'STRIPE_CONFIRM_FAILED', 'Could not confirm this payment.')
-    await db().$transaction((tx) => recordCardPrepayCredit(tx, { userId: context.user.id, paymentIntentId, sessionId: session.id, amountMinor, currency: session.metadata?.currency || 'USD' }))
-    return json(res, 200, { ok: true, creditedMinor: amountMinor, currency: session.metadata?.currency || 'USD' })
+    const credit = await recordCardPrepayCreditOnce({ userId: context.user.id, paymentIntentId, sessionId: session.id, amountMinor, currency: session.metadata?.currency || 'USD' })
+    return json(res, 200, { ok: true, creditedMinor: amountMinor, currency: session.metadata?.currency || 'USD', alreadyCredited: credit.duplicate })
   }
 
   if (url.pathname === '/api/payments/stripe/guest-checkout-session') {
@@ -662,21 +663,22 @@ export async function handlePayments(req, res, url, context) {
       const userId = obj.metadata?.riderId || obj.metadata?.guestId
       const amountMinor = Math.round(Number(obj.metadata?.fareMinor || 0))
       try {
-        await db().$transaction(async (tx) => {
-          await recordCardPrepayCredit(tx, {
-            userId,
-            paymentIntentId: piId,
-            sessionId: isPi ? null : obj.id,
-            amountMinor,
-            currency: obj.metadata?.currency || 'USD',
-          })
-          await tx.paymentEvent.update({
-            where: { id: eventRow.id },
-            data: { processingStatus: 'APPLIED', appliedAt: new Date(), amountMinor, currency: String(obj.metadata?.currency || 'USD').toLowerCase(), claimToken: null, claimExpiresAt: null },
-          })
+        // Race-safe: a concurrent redelivery, or the rider's own return from Checkout crediting the
+        // same PaymentIntent, is recognised as already-credited instead of quarantining a good payment.
+        const credit = await recordCardPrepayCreditOnce({
+          userId,
+          paymentIntentId: piId,
+          sessionId: isPi ? null : obj.id,
+          amountMinor,
+          currency: obj.metadata?.currency || 'USD',
         })
-        return json(res, 200, { ok: true, applied: true, preride: true, received: true })
+        await db().paymentEvent.update({
+          where: { id: eventRow.id },
+          data: { processingStatus: 'APPLIED', appliedAt: new Date(), amountMinor, currency: String(obj.metadata?.currency || 'USD').toLowerCase(), claimToken: null, claimExpiresAt: null },
+        })
+        return json(res, 200, { ok: true, applied: !credit.duplicate, duplicate: credit.duplicate, preride: true, received: true })
       } catch (err) {
+        inc('payment_failures_total', { rail: 'stripe_preride', reason: 'credit_failed' })
         log.warn('stripe_preride_credit_failed', { eventId: event.id, message: err?.message })
         await db().paymentEvent.update({ where: { id: eventRow.id }, data: { processingStatus: 'QUARANTINED', lastError: 'PRERIDE_CREDIT_FAILED' } })
         return json(res, 200, { ok: true, quarantined: true, received: true })

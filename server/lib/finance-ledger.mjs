@@ -1,4 +1,5 @@
 import { idempotencyKey } from './security.mjs'
+import { db } from './prisma.mjs'
 import { isPayoutEligible, payoutEligibleAt } from './booking-lifecycle.mjs'
 import {
   PROTECTION_RATE,
@@ -611,6 +612,32 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
 // ride_prepayment path, so settlement (85% driver / 15% platform) and cancellation refunds need no
 // special case. Idempotent on the Stripe PaymentIntent id: the webhook and the ride-creation path can
 // both call this and only one CREDIT is ever written.
+// Race-safe wrapper for the three callers of recordCardPrepayCredit (Stripe webhook, ride-create
+// session verification, wallet top-up confirm). They can run AT THE SAME TIME for one payment (Stripe
+// redelivers webhooks; the rider's browser returns from Checkout while the webhook lands). The ledger
+// keys make a second credit impossible, but the LOSING transaction used to surface as an error: the
+// webhook then marked a perfectly good payment QUARANTINED, and the rider saw a 409/500. Here a lost
+// race is recognised as "already credited" by reading the winning entry back.
+export async function recordCardPrepayCreditOnce(args, client = db()) {
+  try {
+    return await client.$transaction(async (tx) => {
+      // A caller arriving after the winner committed finds the entry here (recordWalletEntry would
+      // return it too, but silently), so it is reported as a duplicate rather than a fresh credit.
+      if (args?.paymentIntentId) {
+        const prior = await tx.walletEntry.findUnique({ where: { idempotencyKey: idempotencyKey(['stripe-preride', args.paymentIntentId]) } })
+        if (prior) return { entry: prior, duplicate: true }
+      }
+      return { entry: await recordCardPrepayCredit(tx, args), duplicate: false }
+    })
+  } catch (error) {
+    const raced = error?.code === 'WALLET_ENTRY_RACE_LOST' || error?.code === 'P2002'
+    if (!raced || !args?.paymentIntentId) throw error
+    const existing = await client.walletEntry.findUnique({ where: { idempotencyKey: idempotencyKey(['stripe-preride', args.paymentIntentId]) } })
+    if (!existing) throw error
+    return { entry: existing, duplicate: true }
+  }
+}
+
 export async function recordCardPrepayCredit(tx, { userId, paymentIntentId, sessionId = null, amountMinor, currency = 'USD', method = 'stripe_card' }) {
   const amount = Math.max(0, Math.round(amountMinor || 0))
   if (!userId || !paymentIntentId || !amount) return null

@@ -14,6 +14,7 @@ import { db } from './prisma.mjs'
 import { sendPushNotification } from './push-notifications.mjs'
 import { logRideEventSafe } from './ride-events.mjs'
 import { dutyBlockers } from '../routes/driver-base.mjs'
+import { isRateLimited } from './rateLimit.mjs'
 
 // Env knobs, clamped to sane bounds so a bad deploy value can't disable dispatch or offer forever.
 function envInt(name, def, min, max) {
@@ -29,6 +30,11 @@ const MAX_OFFER_ROUNDS = envInt('SR_MAX_OFFER_ROUNDS', 10, 1, 50)
 // "Online" = a driver whose last GPS report is within this many seconds (mirrors live-map's
 // LOCATION_FRESHNESS_MS default of 120s).
 const ONLINE_WINDOW_SECONDS = envInt('SR_DISPATCH_ONLINE_WINDOW_SECONDS', 120, 30, 600)
+// Only drivers within this straight-line radius of the pickup are considered (metres).
+const DISPATCH_RADIUS_M = envInt('SR_DISPATCH_RADIUS_M', 15000, 1000, 100000)
+// The sweep (lapsed-offer escalation + offering still-unoffered rides) runs at most once per this
+// window ACROSS ALL REPLICAS (shared Postgres lease), no matter how many drivers poll.
+const SWEEP_MIN_INTERVAL_MS = envInt('SR_DISPATCH_SWEEP_MIN_MS', 2000, 250, 60000)
 
 const ACTIVE_RIDE_STATUSES = ['DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS']
 const OPEN_RIDE_STATUSES = ['REQUESTED', 'MATCHING']
@@ -56,38 +62,63 @@ export async function findNextDriverForRide(ride, excludeIds = []) {
   const inspectionSql = inspectionRequired
     ? Prisma.sql`AND dp.inspection_status = 'PASSED' AND (dp.inspection_expires_at IS NULL OR dp.inspection_expires_at > now())`
     : Prisma.empty
+  // Candidate lookup (scale, 2026-10-22). The KNN ORDER BY is on the raw geometry column against a
+  // scalar pickup point, so the GIST index driver_profiles_location_gix serves it (an index-ordered scan
+  // that stops after the first matches). The old form cast both sides to ::geography, which no index
+  // covers, so every dispatch read and sorted EVERY driver row (measured: seq scan, 22 ms at 2,000
+  // drivers, linear in fleet size). Degree distance is only used to pick the nearest ~30 candidates
+  // inside the radius; the final order and the distance reported are true metres (geography).
   const rows = await db().$queryRaw(Prisma.sql`
-    SELECT dp.user_id AS "userId",
-           (dp.last_location_geo::geography <-> rr.pickup_geo::geography) AS "distanceM"
-    FROM ride_requests rr
-    JOIN driver_profiles dp ON dp.last_location_geo IS NOT NULL
-    JOIN users u ON u.id = dp.user_id
-    WHERE rr.id = ${ride.id}::uuid
-      AND rr.pickup_geo IS NOT NULL
-      AND u.id_document_status = 'APPROVED'
-      AND dp.vehicle_plate IS NOT NULL
-      AND dp.vehicle_status = 'APPROVED'
-      AND dp.vehicle_category IS NOT NULL
-      AND dp.vehicle_category::text = CASE rr.metadata->>'category'
-          WHEN 'SR Bike' THEN 'BIKE'
-          WHEN 'SR Economy' THEN 'ECONOMY'
-          WHEN 'SR Comfort' THEN 'COMFORT'
-          WHEN 'SR SUV' THEN 'SUV'
-          WHEN 'SR Van' THEN 'VAN'
-          ELSE NULL END
-      AND (dp.registration_expires_at IS NULL OR dp.registration_expires_at > now())
-      ${inspectionSql}
-      AND dp.last_location_updated_at >= now() - (interval '1 second' * ${ONLINE_WINDOW_SECONDS})
-      AND dp.user_id <> rr.rider_id
-      AND dp.user_id <> ALL(${excludeSql})
-      ${accessibilitySql}
-      AND NOT EXISTS (
-        SELECT 1 FROM ride_requests ar
-        WHERE ar.driver_id = dp.user_id
-          AND ar.status IN ('DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS')
-      )
-      ${dutySql}
-    ORDER BY dp.last_location_geo::geography <-> rr.pickup_geo::geography
+    WITH ride AS (
+      SELECT id, rider_id, pickup_geo, metadata FROM ride_requests WHERE id = ${ride.id}::uuid AND pickup_geo IS NOT NULL
+    ),
+    candidates AS (
+      SELECT dp.user_id, dp.last_location_geo
+      FROM driver_profiles dp
+      JOIN users u ON u.id = dp.user_id
+      WHERE dp.last_location_geo IS NOT NULL
+        -- index-assisted bounding box first (degrees; generous so it never cuts inside the radius), then the exact metre test
+        AND dp.last_location_geo && ST_Expand((SELECT pickup_geo FROM ride), ${DISPATCH_RADIUS_M / 80000})
+        AND ST_DWithin(dp.last_location_geo::geography, (SELECT pickup_geo FROM ride)::geography, ${DISPATCH_RADIUS_M})
+        AND u.id_document_status = 'APPROVED'
+        AND dp.vehicle_plate IS NOT NULL
+        AND dp.vehicle_status = 'APPROVED'
+        AND dp.vehicle_category IS NOT NULL
+        AND dp.vehicle_category::text = CASE (SELECT metadata->>'category' FROM ride)
+            WHEN 'SR Bike' THEN 'BIKE'
+            WHEN 'SR Economy' THEN 'ECONOMY'
+            WHEN 'SR Comfort' THEN 'COMFORT'
+            WHEN 'SR SUV' THEN 'SUV'
+            WHEN 'SR Van' THEN 'VAN'
+            ELSE NULL END
+        AND (dp.registration_expires_at IS NULL OR dp.registration_expires_at > now())
+        ${inspectionSql}
+        AND dp.last_location_updated_at >= now() - (interval '1 second' * ${ONLINE_WINDOW_SECONDS})
+        AND dp.user_id <> (SELECT rider_id FROM ride)
+        AND dp.user_id <> ALL(${excludeSql})
+        ${accessibilitySql}
+        AND NOT EXISTS (
+          SELECT 1 FROM ride_requests ar
+          WHERE ar.driver_id = dp.user_id
+            AND ar.status IN ('DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS')
+        )
+        -- one live offer per driver: never hand a driver a second ride while another offer is pending
+        AND NOT EXISTS (
+          SELECT 1 FROM ride_requests oo
+          WHERE oo.offered_driver_id = dp.user_id
+            AND oo.id <> ${ride.id}::uuid
+            AND oo.driver_id IS NULL
+            AND oo.status IN ('REQUESTED', 'MATCHING')
+            AND oo.offer_expires_at > now()
+        )
+        ${dutySql}
+      ORDER BY dp.last_location_geo <-> (SELECT pickup_geo FROM ride)
+      LIMIT 30
+    )
+    SELECT c.user_id AS "userId",
+           ST_Distance(c.last_location_geo::geography, (SELECT pickup_geo FROM ride)::geography) AS "distanceM"
+    FROM candidates c
+    ORDER BY 2
     LIMIT 8
   `)
   // Offer only to a driver who could actually ACCEPT: the claim path (assertDriverOnDuty) refuses a
@@ -111,27 +142,40 @@ export async function findNextDriverForRide(ride, excludeIds = []) {
 export async function offerRideToNextDriver(rideId) {
   const ride = await db().rideRequest.findUnique({
     where: { id: rideId },
-    select: { id: true, driverId: true, status: true, accessibilityRequired: true, riderId: true, offerSeq: true, declinedByIds: true },
+    select: { id: true, driverId: true, status: true, accessibilityRequired: true, riderId: true, offerSeq: true, declinedByIds: true, offeredDriverId: true, offerExpiresAt: true },
   })
   if (!ride) return { offered: false }
   if (ride.driverId || !OPEN_RIDE_STATUSES.includes(ride.status)) return { offered: false }
+  // A live offer is already out (e.g. ride-create and a sweep raced): never overwrite it.
+  if (ride.offeredDriverId && ride.offerExpiresAt && ride.offerExpiresAt > new Date()) return { offered: false, alreadyOffered: true }
   if (ride.offerSeq >= MAX_OFFER_ROUNDS) {
-    await db().rideRequest.update({ where: { id: ride.id }, data: { offeredDriverId: null, offerExpiresAt: null } })
+    if (ride.offeredDriverId || ride.offerExpiresAt) {
+      await db().rideRequest.updateMany({ where: { id: ride.id, driverId: null, offerSeq: ride.offerSeq }, data: { offeredDriverId: null, offerExpiresAt: null } })
+    }
     return { offered: false, exhausted: true }
   }
   const next = await findNextDriverForRide(ride, ride.declinedByIds || [])
   if (!next) {
-    await db().rideRequest.update({ where: { id: ride.id }, data: { offeredDriverId: null, offerExpiresAt: null } })
+    // Nobody eligible right now. Only write when there is something to clear: the old unconditional
+    // update fired on every sweep for every unmatched ride (thousands of no-op writes per minute).
+    if (ride.offeredDriverId || ride.offerExpiresAt) {
+      await db().rideRequest.updateMany({ where: { id: ride.id, driverId: null, offerSeq: ride.offerSeq }, data: { offeredDriverId: null, offerExpiresAt: null } })
+    }
     return { offered: false }
   }
-  await db().rideRequest.update({
-    where: { id: ride.id },
+  // Compare-and-set on the round counter: if another dispatcher (a concurrent sweep, a decline, the
+  // create path, another replica) offered this ride since we read it, our write matches 0 rows and we
+  // back off instead of clobbering their offer -- previously two sweeps could overwrite each other's
+  // offers, so the driver who saw the first offer got "not offered to you" when accepting.
+  const won = await db().rideRequest.updateMany({
+    where: { id: ride.id, driverId: null, status: { in: OPEN_RIDE_STATUSES }, offerSeq: ride.offerSeq },
     data: {
       offeredDriverId: next.userId,
       offerExpiresAt: new Date(Date.now() + OFFER_TTL_SECONDS * 1000),
       offerSeq: { increment: 1 },
     },
   })
+  if (won.count !== 1) return { offered: false, raced: true }
   sendPushNotification(next.userId, {
     title: 'New ride nearby',
     body: 'A rider needs a driver — open Rezekme to accept.',
@@ -141,6 +185,7 @@ export async function offerRideToNextDriver(rideId) {
   // actor (system dispatch), so actorId/actorRole stay null; the offered driver is in meta. Best-
   // effort and fire-and-forget -- dispatch must never be delayed or broken by audit logging.
   void logRideEventSafe(db(), { rideId: ride.id, type: 'OFFERED', meta: { offeredDriverId: next.userId, offerSeq: (ride.offerSeq ?? 0) + 1, distanceM: next.distanceM ?? null } })
+  dispatchStats.offers += 1
   return { offered: true, driverId: next.userId }
 }
 
@@ -201,7 +246,43 @@ export async function expireUnmatchedRides() {
   return expired
 }
 
-export async function runDispatchSweep() {
+// Counters read by the /api/metrics endpoint (process-local; each replica reports its own).
+export const dispatchStats = { sweeps: 0, sweepsSkipped: 0, offers: 0, lastSweepMs: 0, openUnmatched: 0 }
+
+let sweepInFlight = null
+let lastLocalSweepAt = 0
+
+// Run the sweep at most once per SWEEP_MIN_INTERVAL_MS across ALL replicas. Before this, every driver
+// pending-list poll (each idle driver, every 4 s) ran a full sweep, so N online drivers meant N
+// concurrent sweeps re-offering the same rides: measured at 500 simulated drivers it produced ~7,400
+// offer writes per minute for ~100 rides, exhausted the DB pool and broke matching. Callers that hit
+// the window just skip; the next poll after it opens runs it.
+export async function runDispatchSweep({ force = false } = {}) {
+  const now = Date.now()
+  if (sweepInFlight) { dispatchStats.sweepsSkipped += 1; return { skipped: true } }
+  if (!force && now - lastLocalSweepAt < SWEEP_MIN_INTERVAL_MS) { dispatchStats.sweepsSkipped += 1; return { skipped: true } }
+  lastLocalSweepAt = now
+  sweepInFlight = (async () => {
+    try {
+      // shared lease (one row in rate_limit_buckets): the first replica in each window wins
+      if (!force && (await isRateLimited('sr-dispatch-sweep', SWEEP_MIN_INTERVAL_MS, 1))) { dispatchStats.sweepsSkipped += 1; return { skipped: true } }
+      const t0 = Date.now()
+      const { activateScheduledRides } = await import('./ride-schedule.mjs')
+      await activateScheduledRides().catch(() => 0)
+      const result = await sweepOnce()
+      dispatchStats.sweeps += 1
+      dispatchStats.lastSweepMs = Date.now() - t0
+      return result
+    } catch {
+      return { skipped: true }
+    } finally {
+      sweepInFlight = null
+    }
+  })()
+  return sweepInFlight
+}
+
+async function sweepOnce() {
   let expired = 0
   let opened = 0
   try {
@@ -209,13 +290,18 @@ export async function runDispatchSweep() {
     const lapsed = await db().rideRequest.findMany({
       where: { driverId: null, status: { in: OPEN_RIDE_STATUSES }, offeredDriverId: { not: null }, offerExpiresAt: { lt: now } },
       select: { id: true, offeredDriverId: true, declinedByIds: true },
+      orderBy: { offerExpiresAt: 'asc' },
       take: 50,
     })
     for (const r of lapsed) {
       try {
         const declined = Array.from(new Set([...(r.declinedByIds || []), r.offeredDriverId].filter(Boolean)))
-        await db().rideRequest.update({ where: { id: r.id }, data: { declinedByIds: declined, offeredDriverId: null, offerExpiresAt: null } })
-        await offerRideToNextDriver(r.id)
+        // guarded: only clear THIS lapsed offer (a fresh offer made meanwhile is left alone)
+        const cleared = await db().rideRequest.updateMany({
+          where: { id: r.id, driverId: null, offeredDriverId: r.offeredDriverId, offerExpiresAt: { lt: now } },
+          data: { declinedByIds: declined, offeredDriverId: null, offerExpiresAt: null },
+        })
+        if (cleared.count === 1) await offerRideToNextDriver(r.id)
         expired += 1
       } catch {
         // one lapsed ride failing to re-offer must not abort the sweep
@@ -226,10 +312,11 @@ export async function runDispatchSweep() {
       select: { id: true },
       take: 50,
     })
+    dispatchStats.openUnmatched = open.length
     for (const r of open) {
       try {
-        await offerRideToNextDriver(r.id)
-        opened += 1
+        const res = await offerRideToNextDriver(r.id)
+        if (res.offered) opened += 1
       } catch {
         // one open ride failing to offer must not abort the sweep
       }

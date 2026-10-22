@@ -1,0 +1,56 @@
+# Rezekme Rides alert rules (Prometheus format) for the /api/metrics endpoint.
+# Starting thresholds, chosen from the isolated load tests (docs/launch/RIDES_SCALE_1M.md); tune them on
+# staging/production data. Every metric here is counts/durations only -- no personal or payment data.
+groups:
+  - name: rezekme-rides
+    rules:
+      - alert: ApiHighErrorRate
+        expr: sum(rate(http_requests_total{class="5xx"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 1) > 0.02
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "More than 2% of API requests are failing (5xx)" }
+      - alert: ApiSlowP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_ms_bucket[5m]))) > 1000
+        for: 10m
+        labels: { severity: warn }
+        annotations: { summary: "API p95 latency above 1 s" }
+      - alert: EventLoopBlocked
+        expr: event_loop_delay_p99_ms > 200
+        for: 5m
+        labels: { severity: warn }
+        annotations: { summary: "Node event loop delayed (CPU saturated); add a process/instance" }
+      - alert: DatabaseDown
+        expr: db_up == 0
+        for: 1m
+        labels: { severity: page }
+        annotations: { summary: "API cannot reach the database" }
+      - alert: DatabaseLongQuery
+        expr: db_longest_active_query_seconds > 10
+        for: 2m
+        labels: { severity: warn }
+        annotations: { summary: "A database query has been running for over 10 s" }
+      - alert: RidersWaitingNoDriver
+        expr: sr_open_rides_waiting_over_2m > 5
+        for: 5m
+        labels: { severity: warn }
+        annotations: { summary: "Riders waiting more than 2 minutes without a driver (driver supply or dispatch problem)" }
+      - alert: MatchingSlow
+        expr: histogram_quantile(0.9, sum by (le) (rate(ride_match_seconds_bucket[30m]))) > 120
+        for: 15m
+        labels: { severity: warn }
+        annotations: { summary: "90% of rides take more than 2 minutes to get a driver" }
+      - alert: NoDriversOnline
+        expr: sr_online_drivers == 0 and on() hour() >= 6 and on() hour() <= 22
+        for: 15m
+        labels: { severity: warn }
+        annotations: { summary: "No drivers online during service hours" }
+      - alert: DispatchSweepSlow
+        expr: sr_dispatch_last_sweep_ms > 2000
+        for: 5m
+        labels: { severity: warn }
+        annotations: { summary: "Dispatch sweep takes longer than its interval" }
+      - alert: PaymentFailures
+        expr: increase(payment_failures_total[15m]) > 0 or payment_events_failed > 0
+        for: 1m
+        labels: { severity: page }
+        annotations: { summary: "Payment credit failed or a webhook event is failed/dead-lettered/quarantined -- check the admin money pages" }

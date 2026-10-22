@@ -37,7 +37,9 @@ export async function categoriesWithDriversNear(rideId, ownCategory) {
       ${inspectionSql}
       AND dp.last_location_updated_at >= now() - (interval '1 second' * ${ONLINE_WINDOW_SECONDS})
       AND dp.user_id <> rr.rider_id
-      AND (dp.last_location_geo::geography <-> rr.pickup_geo::geography) <= ${RADIUS_M}
+      -- index-assisted bounding box, then the exact metre radius (the bare geography <-> filter could not use any index)
+      AND dp.last_location_geo && ST_Expand(rr.pickup_geo, ${RADIUS_M / 80000})
+      AND ST_DWithin(dp.last_location_geo::geography, rr.pickup_geo::geography, ${RADIUS_M})
       AND NOT EXISTS (
         SELECT 1 FROM ride_requests ar
         WHERE ar.driver_id = dp.user_id AND ar.status IN ('DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS')
@@ -83,15 +85,27 @@ export async function notifyRiderNoDriverOnce(ride, alternatives) {
 // Availability at a pickup point (before any ride exists): per category the number of eligible online
 // drivers within the radius and a rough ETA in minutes (straight-line distance at city speed + a
 // 2-minute dispatch buffer). Same gates as above.
-export async function categoryAvailabilityAt(point) {
+// Availability (scale, 2026-10-22). Every browsing rider polls this every 20 s, and the answer only
+// depends on where the eligible online drivers are -- the same for everyone. Instead of one spatial
+// aggregate query per call (measured 5 ms avg at 500 drivers, 18 ms at 1,000, linear in fleet size and
+// the top DB consumer under load), each API process keeps a snapshot of eligible online drivers
+// (category + position), refreshed at most every SR_AVAILABILITY_SNAPSHOT_MS (single-flight), and
+// answers from memory. Cost: one query per replica per refresh, independent of rider traffic.
+// Availability is an estimate shown to riders (counts, rough ETA); dispatch never uses this snapshot --
+// the driver actually offered a ride is always chosen from live database state.
+const SNAPSHOT_MS = num('SR_AVAILABILITY_SNAPSHOT_MS', 3000, 0, 60000)
+let snapshot = { at: 0, drivers: [] }
+let snapshotLoading = null
+export const availabilitySnapshotStats = { refreshes: 0, served: 0, drivers: 0, lastRefreshMs: 0 }
+
+async function loadDriverSnapshot() {
   const inspectionRequired = !['false', '0'].includes(String(process.env.SR_REQUIRE_VEHICLE_INSPECTION ?? '').trim().toLowerCase())
   const inspectionSql = inspectionRequired
     ? Prisma.sql`AND dp.inspection_status = 'PASSED' AND (dp.inspection_expires_at IS NULL OR dp.inspection_expires_at > now())`
     : Prisma.empty
-  const geo = Prisma.sql`ST_SetSRID(ST_MakePoint(${point.lng}, ${point.lat}), 4326)::geography`
+  const t0 = Date.now()
   const rows = await db().$queryRaw(Prisma.sql`
-    SELECT dp.vehicle_category::text AS "vehicle", COUNT(*)::int AS "drivers",
-           MIN(dp.last_location_geo::geography <-> ${geo}) AS "nearestM"
+    SELECT dp.vehicle_category::text AS "vehicle", ST_Y(dp.last_location_geo) AS lat, ST_X(dp.last_location_geo) AS lng
     FROM driver_profiles dp
     JOIN users u ON u.id = dp.user_id
     WHERE dp.last_location_geo IS NOT NULL
@@ -102,19 +116,54 @@ export async function categoryAvailabilityAt(point) {
       AND (dp.registration_expires_at IS NULL OR dp.registration_expires_at > now())
       ${inspectionSql}
       AND dp.last_location_updated_at >= now() - (interval '1 second' * ${ONLINE_WINDOW_SECONDS})
-      AND (dp.last_location_geo::geography <-> ${geo}) <= ${RADIUS_M}
       AND NOT EXISTS (
         SELECT 1 FROM ride_requests ar
         WHERE ar.driver_id = dp.user_id AND ar.status IN ('DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS')
       )
-    GROUP BY dp.vehicle_category
   `)
+  snapshot = { at: Date.now(), drivers: rows.map((r) => ({ vehicle: r.vehicle, lat: Number(r.lat), lng: Number(r.lng) })) }
+  availabilitySnapshotStats.refreshes += 1
+  availabilitySnapshotStats.drivers = snapshot.drivers.length
+  availabilitySnapshotStats.lastRefreshMs = Date.now() - t0
+  return snapshot
+}
+
+async function driverSnapshot() {
+  if (SNAPSHOT_MS > 0 && Date.now() - snapshot.at < SNAPSHOT_MS) return snapshot
+  if (!snapshotLoading) snapshotLoading = loadDriverSnapshot().finally(() => { snapshotLoading = null })
+  // a stale-but-recent snapshot is served while the refresh runs, instead of making riders wait on it
+  if (snapshot.at && Date.now() - snapshot.at < SNAPSHOT_MS * 5) return snapshot
+  return snapshotLoading
+}
+
+// Great-circle distance in metres (haversine); the same order of accuracy as the geography distance
+// the old query used, which is far finer than the 2-minute rounding of the ETA shown.
+function metres(a, b) {
+  const rad = Math.PI / 180
+  const dLat = (b.lat - a.lat) * rad
+  const dLng = (b.lng - a.lng) * rad
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2
+  return 2 * 6371008.8 * Math.asin(Math.min(1, Math.sqrt(h)))
+}
+
+export async function categoryAvailabilityAt(point) {
+  const snap = await driverSnapshot()
+  availabilitySnapshotStats.served += 1
+  const byVehicle = {}
+  for (const d of snap.drivers) {
+    // cheap degree pre-filter before the trig (1 degree latitude ~ 111 km)
+    if (Math.abs(d.lat - point.lat) > RADIUS_M / 100000 || Math.abs(d.lng - point.lng) > RADIUS_M / 80000) continue
+    const m = metres(point, d)
+    if (m > RADIUS_M) continue
+    const slot = byVehicle[d.vehicle] || (byVehicle[d.vehicle] = { drivers: 0, nearestM: Infinity })
+    slot.drivers += 1
+    if (m < slot.nearestM) slot.nearestM = m
+  }
   const byCategory = {}
-  for (const row of rows) {
-    const category = VEHICLE_TO_RIDE_CATEGORY[row.vehicle]
+  for (const [vehicle, row] of Object.entries(byVehicle)) {
+    const category = VEHICLE_TO_RIDE_CATEGORY[vehicle]
     if (!category) continue
-    const nearestM = row.nearestM == null ? null : Number(row.nearestM)
-    byCategory[category] = { drivers: Number(row.drivers), etaMinutes: nearestM == null ? null : Math.max(2, Math.round((nearestM / 1000 / 28) * 60) + 2) }
+    byCategory[category] = { drivers: row.drivers, etaMinutes: Math.max(2, Math.round((row.nearestM / 1000 / 28) * 60) + 2) }
   }
   return Object.values(VEHICLE_TO_RIDE_CATEGORY).map((category) => ({ category, drivers: byCategory[category]?.drivers ?? 0, etaMinutes: byCategory[category]?.etaMinutes ?? null }))
 }

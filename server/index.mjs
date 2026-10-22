@@ -51,7 +51,9 @@ import { handleSrRides } from './routes/sr-rides.mjs'
 import { handleFood } from './routes/food.mjs'
 import { handleWallet } from './routes/wallet.mjs'
 import { activateScheduledRides } from './lib/ride-schedule.mjs'
-import { runDispatchSweep } from './lib/ride-dispatch.mjs'
+import { runDispatchSweep, dispatchStats } from './lib/ride-dispatch.mjs'
+import { requestStarted, requestFinished, renderMetrics, metricsAuthorized } from './lib/metrics.mjs'
+import { availabilitySnapshotStats } from './lib/ride-no-driver.mjs'
 import { detectRideAnomalies } from './lib/ride-anomaly.mjs'
 import { runRevenueGuard } from './lib/revenue-guard.mjs'
 
@@ -197,7 +199,10 @@ const server = createServer(async (req, res) => {
   const requestId = req.headers['x-request-id'] || newRequestId()
   const startedAt = Date.now()
   res.setHeader('x-request-id', requestId)
+  requestStarted()
   res.on('finish', () => logRequest({ requestId, method: req.method, path: url.pathname, status: res.statusCode, durationMs: Date.now() - startedAt }))
+  // 'close' fires for finished AND aborted responses, so the in-flight gauge can never leak.
+  res.once('close', () => requestFinished({ method: req.method, pathname: url.pathname, status: res.writableFinished ? res.statusCode : 499, durationMs: Date.now() - startedAt }))
 
   try {
     setCors(req, res)
@@ -235,6 +240,24 @@ const server = createServer(async (req, res) => {
     // Public scheduler tick (no auth, registered BEFORE getAuthContext and every gate/role check).
     if (url.pathname === '/internal/tick' && (req.method === 'POST' || req.method === 'GET')) {
       return handleInternalTick(res)
+    }
+
+    // Prometheus metrics (no personal data). Off unless METRICS_TOKEN is set; token-protected.
+    if (url.pathname === '/api/metrics' && req.method === 'GET') {
+      if (!metricsAuthorized(req)) return json(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Not found.' } })
+      const body = await renderMetrics({
+        sr_dispatch_sweeps_total: dispatchStats.sweeps,
+        sr_dispatch_sweeps_skipped_total: dispatchStats.sweepsSkipped,
+        sr_dispatch_offers_total: dispatchStats.offers,
+        sr_dispatch_last_sweep_ms: dispatchStats.lastSweepMs,
+        sr_dispatch_queue_depth: dispatchStats.openUnmatched,
+        sr_availability_snapshot_refreshes_total: availabilitySnapshotStats.refreshes,
+        sr_availability_served_total: availabilitySnapshotStats.served,
+        sr_availability_snapshot_drivers: availabilitySnapshotStats.drivers,
+        sr_availability_snapshot_refresh_ms: availabilitySnapshotStats.lastRefreshMs,
+      })
+      res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8', 'cache-control': 'no-store' })
+      return res.end(body)
     }
 
     const context = await getAuthContext(req)
@@ -398,6 +421,9 @@ server.listen(PORT, HOST, () => {
 // redundant work; a real cron/queue is the fix if that ever matters). Runs once on boot, then on
 // the configured interval.
 const OTP_PRUNE_INTERVAL_MS = Number(process.env.OTP_PRUNE_INTERVAL_HOURS || 24) * 3600 * 1000
+// Multi-process (server/cluster.mjs): only one worker per instance runs the background timers below;
+// the others set BACKGROUND_JOBS=0 and serve requests only. Default (unset) = run them, as before.
+const RUN_BACKGROUND_JOBS = String(process.env.BACKGROUND_JOBS ?? '1') !== '0'
 async function runOtpPrune() {
   try {
     const result = await pruneExpiredOtps()
@@ -406,9 +432,9 @@ async function runOtpPrune() {
     log.error('otp_prune_failed', { error: error instanceof Error ? error.message : String(error) })
   }
 }
-void runOtpPrune()
-const otpPruneTimer = setInterval(runOtpPrune, OTP_PRUNE_INTERVAL_MS)
-otpPruneTimer.unref() // never keep the process alive on its own (tests/scripts that import this file)
+if (RUN_BACKGROUND_JOBS) void runOtpPrune()
+const otpPruneTimer = RUN_BACKGROUND_JOBS ? setInterval(runOtpPrune, OTP_PRUNE_INTERVAL_MS) : null
+otpPruneTimer?.unref() // never keep the process alive on its own (tests/scripts that import this file)
 
 // Money-flow decision 6 (2026-10-08): unpaid PAYMENT_PENDING requests past the country's payment
 // window (Syria: 48h) with no live proof are cancelled (EXPIRED_UNPAID) and their dates released.
@@ -426,8 +452,8 @@ async function runBookingExpirySweep() {
     log.error('booking_expiry_sweep_failed', { error: error instanceof Error ? error.message : String(error) })
   }
 }
-const bookingExpiryTimer = setInterval(runBookingExpirySweep, BOOKING_EXPIRY_SWEEP_INTERVAL_MS)
-bookingExpiryTimer.unref()
+const bookingExpiryTimer = RUN_BACKGROUND_JOBS ? setInterval(runBookingExpirySweep, BOOKING_EXPIRY_SWEEP_INTERVAL_MS) : null
+bookingExpiryTimer?.unref()
 
 // #204 (2026-10-10): in-process dispatch heartbeat. /internal/tick above still exists for an external
 // cron, but we ALSO run the same work on a timer so offer-escalation, scheduled-ride activation and
@@ -456,8 +482,8 @@ async function runDispatchHeartbeat() {
     log.error('dispatch_heartbeat_failed', { error: error instanceof Error ? error.message : String(error) })
   }
 }
-const dispatchTickTimer = setInterval(runDispatchHeartbeat, DISPATCH_TICK_INTERVAL_MS)
-dispatchTickTimer.unref()
+const dispatchTickTimer = RUN_BACKGROUND_JOBS ? setInterval(runDispatchHeartbeat, DISPATCH_TICK_INTERVAL_MS) : null
+dispatchTickTimer?.unref()
 
 // STEP 5C/5D: trusted time. The database clock is authoritative for security state. The security-time subsystem is
 // NOT READY until the first database clock sample succeeds (retried every 2 s); until then time-sensitive privileged
@@ -469,7 +495,7 @@ startClockSync(db(), { log })
 {
   const { mode, warning, source } = resolveActivationMode(process.env)
   if (warning) log.error('activation_mode_warning', { mode, message: warning })
-  if (mode === 'IN_PROCESS') {
+  if (mode === 'IN_PROCESS' && RUN_BACKGROUND_JOBS) {
     const activationIntervalMs = Number(process.env.ADMIN_ACTIVATION_INTERVAL_MS)
     startActivationScheduler(db(), { intervalMs: Number.isFinite(activationIntervalMs) && activationIntervalMs >= 5_000 ? activationIntervalMs : 60_000, log })
   }

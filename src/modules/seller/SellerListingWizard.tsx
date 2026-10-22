@@ -10,6 +10,7 @@ import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGr
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
+import { ListingPhotoManager, ListingPreviewCard, type WizardPhoto } from './ListingPhotoManager'
 import { PROXIMITY_TAGS, PROXIMITY_DIVISIONS } from '../../shared/listing/proximityTags'
 import { LocationPicker, type LatLng } from '../../shared/maps/LocationPicker'
 
@@ -211,8 +212,10 @@ export function SellerListingWizard({ lang }: Props) {
   // the actual public listing.media sent to the server was unconditionally the hardcoded
   // hardcoded per-division stock image (see `next()` below), so every real photo was silently discarded.
   // Separate photo state + its own upload widget fixes this at the root.
-  const [uploadedPhotoFiles, setUploadedPhotoFiles] = useState<string[]>([])
-  const [uploadedPhotoUrls, setUploadedPhotoUrls] = useState<string[]>([])
+  // Each photo keeps a local preview so the host sees (and can remove/reorder) the real images
+  // before submitting; the stored url arrives when its upload finishes.
+  const [photos, setPhotos] = useState<WizardPhoto[]>([])
+  const photosUploading = photos.some((photo) => photo.status === 'uploading')
   const [photoUploadError, setPhotoUploadError] = useState('')
   const [adFilesSent, setAdFilesSent] = useState(false)
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>(
@@ -361,6 +364,11 @@ export function SellerListingWizard({ lang }: Props) {
         setSubmitError(pick(lang, 'ارفع مستندات البائع أو إثبات الملكية قبل إرسال الإعلان للمراجعة.', 'Upload seller documents or ownership proof before sending the listing for review.', 'Téléversez les documents du vendeur ou la preuve de propriété avant d’envoyer l’annonce pour vérification.'))
         return
       }
+      if (!isAdvertisingFlow && photosUploading) {
+        setSubmitState('error')
+        setSubmitError(pick(lang, 'انتظر حتى ينتهي رفع الصور ثم أرسل.', 'Wait for the photos to finish uploading, then submit.', 'Attendez la fin du téléversement des photos, puis envoyez.'))
+        return
+      }
       if (!agreementAccepted) {
         setSubmitState('error')
         setSubmitError(pick(lang, 'وافق على اتفاقية النشر قبل الإرسال.', 'Accept the listing agreement before submitting.', 'Acceptez l’entente de publication avant l’envoi.'))
@@ -393,7 +401,9 @@ export function SellerListingWizard({ lang }: Props) {
         // way every other listing's images are served.
         const listingMedia = isAdvertisingFlow
           ? Object.entries(adSlotUploads).map(([slotId, upload], index) => ({ url: upload.url, kind: slotId, sortOrder: index }))
-          : uploadedPhotoUrls.map((url, index) => ({ url, kind: 'image', sortOrder: index }))
+          : photos
+              .filter((photo) => photo.status === 'ready' && photo.url)
+              .map((photo, index) => ({ url: photo.url as string, kind: 'image', sortOrder: index }))
         const createdListing = await createAndSubmitPrototypeListing({
           // Ads must be division='MARKETPLACE' -- that's what gates listing creation behind an
           // admin-approved paid seller plan (PAID_PLAN_DIVISIONS in server/routes/listings.mjs).
@@ -467,10 +477,8 @@ export function SellerListingWizard({ lang }: Props) {
   }
 
   async function addListingPhotoFiles(fileList: FileList | null) {
-    const files = Array.from(fileList || [])
+    const files = Array.from(fileList || []).filter((file) => /^image\/(jpeg|png)$/.test(file.type) || /\.(jpe?g|png)$/i.test(file.name))
     if (!files.length) return
-
-    setUploadedPhotoFiles((current) => Array.from(new Set([...current, ...files.map((file) => file.name)])))
     setPhotoUploadError('')
 
     const session = getStoredSellerSession()
@@ -478,12 +486,52 @@ export function SellerListingWizard({ lang }: Props) {
       setPhotoUploadError(pick(lang, 'سجّل الدخول أولاً لرفع الصور.', 'Sign in first to upload photos.', 'Connectez-vous d’abord pour téléverser des photos.'))
       return
     }
-    try {
-      const urls = await Promise.all(files.map((file) => uploadPaymentProofFile(file, session.token)))
-      setUploadedPhotoUrls((current) => [...current, ...urls])
-    } catch (error) {
-      setPhotoUploadError(error instanceof Error ? error.message : (pick(lang, 'تعذر رفع الصورة.', 'Could not upload the photo.', 'Impossible de téléverser la photo.')))
-    }
+    const added: WizardPhoto[] = files.slice(0, Math.max(0, 20 - photos.length)).map((file, index) => ({
+      key: `${Date.now()}-${index}-${file.name}`,
+      name: file.name,
+      preview: URL.createObjectURL(file),
+      status: 'uploading',
+    }))
+    if (!added.length) return
+    setPhotos((current) => [...current, ...added])
+    await Promise.all(
+      added.map(async (photo, index) => {
+        try {
+          const url = await uploadPaymentProofFile(files[index], session.token)
+          setPhotos((current) => current.map((item) => (item.key === photo.key ? { ...item, url, status: 'ready' } : item)))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : pick(lang, 'تعذر رفع الصورة.', 'Could not upload the photo.', 'Impossible de téléverser la photo.')
+          setPhotos((current) => current.map((item) => (item.key === photo.key ? { ...item, status: 'error', error: message } : item)))
+        }
+      }),
+    )
+  }
+
+  function removeListingPhoto(key: string) {
+    setPhotos((current) => {
+      const gone = current.find((photo) => photo.key === key)
+      if (gone) URL.revokeObjectURL(gone.preview)
+      return current.filter((photo) => photo.key !== key)
+    })
+  }
+
+  function moveListingPhoto(key: string, delta: number) {
+    setPhotos((current) => {
+      const from = current.findIndex((photo) => photo.key === key)
+      const to = from + delta
+      if (from < 0 || to < 0 || to >= current.length) return current
+      const nextPhotos = [...current]
+      const [moved] = nextPhotos.splice(from, 1)
+      nextPhotos.splice(to, 0, moved)
+      return nextPhotos
+    })
+  }
+
+  function makeListingPhotoCover(key: string) {
+    setPhotos((current) => {
+      const photo = current.find((item) => item.key === key)
+      return photo ? [photo, ...current.filter((item) => item.key !== key)] : current
+    })
   }
 
   async function addListingDocumentFiles(fileList: FileList | null) {
@@ -900,30 +948,35 @@ export function SellerListingWizard({ lang }: Props) {
               )}
               {!isAdvertisingFlow && (
                 <>
-                  <PaymentProofUpload
-                    cta={pick(lang, 'رفع صور العقار/المركبة/المنتج', 'Upload property/car/item photos', 'Téléverser les photos du bien, du véhicule ou de l’article')}
+                  <ListingPhotoManager
+                    cta={division === 'STAYS' ? pick(lang, 'أضف صور المكان', 'Add photos of your place', 'Ajoutez des photos de votre logement') : pick(lang, 'رفع صور العقار/المركبة/المنتج', 'Upload property/car/item photos', 'Téléverser les photos du bien, du véhicule ou de l’article')}
                     emptyText={pick(lang, 'لم يتم رفع صور بعد. تظهر "لا توجد صور بعد" للزوار حتى ترفع صورة حقيقية.', 'No photos uploaded yet. Visitors see "No photos yet" until a real photo is uploaded.', 'Aucune photo téléversée pour l’instant. Les visiteurs voient « Aucune photo pour l’instant » jusqu’à ce qu’une vraie photo soit téléversée.')}
-                    files={uploadedPhotoFiles}
                     help={pick(lang, 'هذه الصور هي ما سيراه الزوار فعلياً في نتائج البحث وصفحة التفاصيل. PNG أو JPG.', 'These are the actual photos visitors will see in search results and the detail page. PNG or JPG.', 'Ce sont les photos que les visiteurs verront réellement dans les résultats de recherche et sur la page de détails. PNG ou JPG.')}
                     lang={lang}
                     onAddFiles={(files) => void addListingPhotoFiles(files)}
+                    onMakeCover={makeListingPhotoCover}
+                    onMove={moveListingPhoto}
+                    onRemove={removeListingPhoto}
+                    photos={photos}
                     title={pick(lang, 'صور الإعلان', 'Listing photos', 'Photos de l’annonce')}
                   />
                   {photoUploadError && <p className="seller-note-line" style={{ color: '#ff5f7d' }}>{photoUploadError}</p>}
                 </>
               )}
               <PaymentProofUpload
-                cta={isAdvertisingFlow ? (pick(lang, 'رفع مستندات الإعلان', 'Upload ad documents', 'Téléverser les documents de l’annonce')) : pick(lang, 'رفع مستندات البائع', 'Upload seller documents', 'Téléverser les documents du vendeur')}
+                cta={isAdvertisingFlow ? (pick(lang, 'رفع مستندات الإعلان', 'Upload ad documents', 'Téléverser les documents de l’annonce')) : division === 'STAYS' ? pick(lang, 'رفع إثبات الملكية أو التفويض', 'Upload ownership proof or authorization', 'Téléverser la preuve de propriété ou le mandat') : pick(lang, 'رفع مستندات البائع', 'Upload seller documents', 'Téléverser les documents du vendeur')}
                 emptyText={pick(lang, 'لم يتم رفع مستندات بعد. ارفع PDF أو PNG أو JPG.', 'No documents uploaded yet. Upload PDF, PNG, or JPG.', 'Aucun document téléversé pour l’instant. Téléversez un PDF, PNG ou JPG.')}
                 files={uploadedDocumentFiles}
                 help={
                   isAdvertisingFlow
                     ? pick(lang, 'ارفع إثبات الدفع، ملفات الحملة، التفويض، أو صور النشاط حسب الخطة.', 'Upload payment proof, campaign files, authorization, or business photos based on the plan.', 'Téléversez la preuve de paiement, les fichiers de la campagne, le mandat ou les photos de l’entreprise selon le forfait.')
-                    : pick(lang, 'ارفع إثبات الملكية، التفويض، والمخططات أو ملفات السيارة/المشروع (ليست صور الإعلان — ارفعها أعلاه).', 'Upload ownership proof, authorization, and plans or car/project files (not listing photos — upload those above).', 'Téléversez la preuve de propriété, le mandat et les plans ou les fichiers du véhicule ou du projet (pas les photos de l’annonce — téléversez-les ci-dessus).')
+                    : division === 'STAYS'
+                      ? pick(lang, 'إثبات ملكية المكان، عقد إيجار، أو تفويض من المالك. تراجعه الإدارة فقط (ليست صور الإعلان — ارفعها أعلاه).', 'Proof you own the place, a lease, or the owner’s authorization. Only the admin sees it (not listing photos — add those above).', 'Preuve de propriété, bail ou mandat du propriétaire. Seule l’administration le voit (pas les photos — ajoutez-les ci-dessus).')
+                      : pick(lang, 'ارفع إثبات الملكية، التفويض، والمخططات أو ملفات السيارة/المشروع (ليست صور الإعلان — ارفعها أعلاه).', 'Upload ownership proof, authorization, and plans or car/project files (not listing photos — upload those above).', 'Téléversez la preuve de propriété, le mandat et les plans ou les fichiers du véhicule ou du projet (pas les photos de l’annonce — téléversez-les ci-dessus).')
                 }
                 lang={lang}
                 onAddFiles={(files) => void addListingDocumentFiles(files)}
-                title={isAdvertisingFlow ? (pick(lang, 'مستندات الإعلان والخطة', 'Ad and plan documents', 'Documents de l’annonce et du forfait')) : pick(lang, 'مستندات البائع', 'Seller documents', 'Documents du vendeur')}
+                title={isAdvertisingFlow ? (pick(lang, 'مستندات الإعلان والخطة', 'Ad and plan documents', 'Documents de l’annonce et du forfait')) : division === 'STAYS' ? pick(lang, 'مستندات المضيف (لا تظهر للضيوف)', 'Host documents (never shown to guests)', 'Documents de l’hôte (jamais visibles)') : pick(lang, 'مستندات البائع', 'Seller documents', 'Documents du vendeur')}
               />
               {documentUploadError && <p className="seller-note-line" style={{ color: '#ff5f7d' }}>{documentUploadError}</p>}
               <p className="seller-note-line">
@@ -936,6 +989,17 @@ export function SellerListingWizard({ lang }: Props) {
 
           {activeStep.id === 'review' && (
             <div className="seller-wizard-section">
+              {!isAdvertisingFlow && (
+                <ListingPreviewCard
+                  lang={lang}
+                  onEditDetails={() => setStepIndex(0)}
+                  onEditPhotos={() => setStepIndex(Math.max(0, steps.findIndex((step) => step.id === 'media')))}
+                  photos={photos}
+                  place={[selectedAreaLabel, selectedCityLabel].filter(Boolean).join('، ')}
+                  priceLabel={`${toNumber(price).toLocaleString(lang === 'ar' ? 'ar-SY' : 'en-US')} ${currency === 'USD' ? 'USD' : pick(lang, 'ل.س', 'SYP', 'SYP')}${division === 'STAYS' ? pick(lang, ' / ليلة', ' / night', ' / nuit') : ''}`}
+                  title={title}
+                />
+              )}
               <div className="seller-review-card" style={{ '--accent': '#d5a915' } as CSSVars}>
                 <p>{pick(lang, 'جاهز للإرسال', 'Ready to submit', 'Prêt à envoyer')}</p>
                 <h2>{isAdvertisingFlow ? (pick(lang, 'سيتم إرسال الإعلان للإدارة', 'Ad will be sent to admin', 'L’annonce sera envoyée à l’administration')) : pick(lang, 'سيتم إرسال الإعلان للمراجعة', 'Listing will be sent for review', 'L’annonce sera envoyée pour vérification')}</h2>

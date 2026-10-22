@@ -1281,6 +1281,33 @@ export async function createStaffAccountSession(
   return session
 }
 
+// Self-service driver sign-up (launch blocker #190). DRIVER cannot be self-registered directly, so a
+// new driver creates a normal account (GUEST, backed by the email code they just verified), then
+// asks for the DRIVER role via /api/me/become-driver. The new driver is only an APPLICANT: rides stay
+// locked until an operator approves their ID and vehicle (enforced server-side). An existing account
+// signs in with its password instead. The result is stored as the DRIVER staff session.
+export async function createDriverApplicantSession(emailInput: string, password: string) {
+  const email = emailInput.trim().toLowerCase()
+  let session: PlatformAuthSession
+  try {
+    session = await register({ email, password, displayName: email.split('@')[0] || email, role: 'GUEST', title: 'DRIVER' })
+  } catch (error) {
+    if (!isAccountExistsError(error)) throw error
+    session = await login(email, password)
+  }
+  if (!(session.user?.roles || []).includes('DRIVER')) {
+    const result = await apiRequest<{ ok: true; roles: string[] }>('/api/me/become-driver', {
+      method: 'POST',
+      token: session.token,
+      body: {},
+    })
+    session = { ...session, user: { ...session.user, roles: result.roles } } as PlatformAuthSession
+  }
+  authStorage.setItem(STAFF_SESSION_KEY, JSON.stringify(session))
+  authStorage.setItem(STAFF_SESSION_TOKEN_KEY, session.token)
+  return session
+}
+
 export function clearStoredStaffSession() {
   authStorage.removeItem(STAFF_SESSION_KEY)
   authStorage.removeItem(STAFF_SESSION_TOKEN_KEY)

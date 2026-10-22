@@ -7,6 +7,7 @@ import {
   clearStoredStaffSession,
   confirmOtp,
   createStaffAccountSession,
+  createDriverApplicantSession,
   fetchDriverIdentityStatus,
   fetchPendingSrRidesEx,
   fetchPrototypeSrRideThread,
@@ -128,6 +129,33 @@ function SignIn({ lang, onDone }: { lang: Lang; onDone: () => void }) {
       window.dispatchEvent(new Event('sybnb-session-changed'))
       onDone()
     } catch (e) {
+      // Not an existing driver: create the account (or sign the existing one in) and request the
+      // driver role. The applicant can then submit ID + vehicle; rides stay locked until approval.
+      let applicantError: unknown = e
+      if (!adminMode) {
+        try {
+          await createDriverApplicantSession(email, password)
+          if (getStoredStaffSession('DRIVER')) {
+            window.dispatchEvent(new Event('sybnb-session-changed'))
+            onDone()
+            return
+          }
+        } catch (err) {
+          applicantError = err
+        }
+        const codeName = (applicantError as { code?: string }).code
+        if (codeName !== 'ADMIN_LOGIN_CODE_REQUIRED') {
+          const status = (applicantError as { status?: number }).status
+          setMsg(
+            status === 401
+              ? t('كلمة المرور غير صحيحة لهذا البريد.', 'Wrong password for this email.', 'Mot de passe incorrect pour cet e-mail.')
+              : (applicantError as { message?: string }).message || t('تعذر تسجيل الدخول', 'Could not sign in', 'Connexion impossible'),
+          )
+          setSent(false)
+          setCode('')
+          return
+        }
+      }
       // The server refuses an account that also holds an admin role until an admin-login code is used;
       // the client falls back to a register() call whose own error hides that reason, so offer it.
       // Admin accounts need the admin-login code. Request it right away and switch the form to it.

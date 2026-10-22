@@ -380,6 +380,7 @@ function ShortRentAdminCommandDashboard({
   const [commandNotice, setCommandNotice] = useState('')
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null)
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
+  const [showAllProofs, setShowAllProofs] = useState(false)
   const [payoutDecisions, setPayoutDecisions] = useState<Record<string, 'RELEASE_STAGED' | 'HELD'>>({})
   const [heldPaymentIds, setHeldPaymentIds] = useState<Record<string, boolean>>({})
   const [adminOutbox, setAdminOutbox] = useState<Array<{ id: string; target: 'guest' | 'host'; bookingRef: string; message: string }>>([])
@@ -569,7 +570,19 @@ function ShortRentAdminCommandDashboard({
       items: [stats[7]],
     },
   ]
-  const proofCards = payments.slice(0, 3)
+  // Stay (booking) payments first -- they are what a guest is waiting on -- then everything else.
+  // Only the first 3 are shown until the admin asks for all: a newer guest payment used to sit
+  // hidden behind older seller-plan proofs with no way to reach it from this screen.
+  const orderedPayments = [...payments].sort((a, b) => Number(Boolean(b.bookingId)) - Number(Boolean(a.bookingId)))
+  const proofCards = showAllProofs ? orderedPayments : orderedPayments.slice(0, 3)
+  const moreProofs = orderedPayments.length - proofCards.length
+  const proofToggle = orderedPayments.length > 3 ? (
+    <button type="button" data-testid="admin-proofs-toggle" style={commandStyles.secondaryCommand} onClick={() => setShowAllProofs((v) => !v)}>
+      {showAllProofs
+        ? (isAr ? 'عرض أول 3 فقط' : 'Show first 3 only')
+        : (isAr ? `عرض كل الإثباتات (${moreProofs} أخرى)` : `Show all proofs (${moreProofs} more)`)}
+    </button>
+  ) : null
   const baseAiReview = createAiPaymentReview(previewPayment, isAr)
   const aiReview = selectedPaymentNeedsCashMatch && !shamCashReconciliation.canApprove
     ? createAiCashMatchReview(isAr, shamCashReconciliation.accountMinor == null)
@@ -919,6 +932,7 @@ function ShortRentAdminCommandDashboard({
                 </div>
               </article>
             ))}
+            {proofToggle}
           </div>
         </aside>
       </section>
@@ -1174,6 +1188,7 @@ function ShortRentAdminCommandDashboard({
                 </div>
               </article>
             ))}
+            {proofToggle}
           </div>
         </section>
 

@@ -20,6 +20,7 @@ const RidePage = lazy(() => import('./pages/RidePage').then((m) => ({ default: m
 const SharedRidePage = lazy(() => import('./pages/SharedRidePage').then((m) => ({ default: m.SharedRidePage })))
 const ProfilePage = lazy(() => import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage })))
 const TripsPage = lazy(() => import('./pages/TripsPage').then((m) => ({ default: m.TripsPage })))
+const SplitView = lazy(() => import('./pages/SplitView').then((m) => ({ default: m.SplitView })))
 const BusinessAccountPage = lazy(() =>
   import('./pages/BusinessAccountPage').then((m) => ({ default: m.BusinessAccountPage })),
 )
@@ -85,6 +86,14 @@ export function App() {
       )
     }
     navigate('/')
+  }
+
+  if (path === '/split') {
+    return (
+      <Suspense fallback={null}>
+        <SplitView lang={lang} />
+      </Suspense>
+    )
   }
 
   let content

@@ -136,6 +136,7 @@ export function App() {
                 </button>
               ))}
             </div>
+            <a href="#/driver" style={styles.barLink}>{pick(lang, 'قُد معنا', 'Drive', 'Conduire')}</a>
             {hasGuestSession ? (
               <>
                 <a href="#/trips" style={styles.barLink}>{pick(lang, 'رحلاتي', 'Trips', 'Courses')}</a>

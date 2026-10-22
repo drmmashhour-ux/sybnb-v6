@@ -38,9 +38,9 @@ export function MapLibreRideMap(props: RideMapProps) {
     if (points.length >= 2) {
       const b = new maplibregl.LngLatBounds()
       points.forEach((p) => b.extend([p.lng, p.lat]))
-      map.fitBounds(b, { padding: { top: 56, left: 40, right: 40, bottom: 90 }, maxZoom: 17, duration: 400 })
+      map.fitBounds(b, { padding: { top: 56, left: 40, right: 40, bottom: 90 }, maxZoom: 16, duration: 400 })
     } else if (points.length === 1) {
-      map.easeTo({ center: [points[0].lng, points[0].lat], zoom: 15, duration: 400 })
+      map.easeTo({ center: [points[0].lng, points[0].lat], zoom: 15.5, duration: 400 })
     }
   }
 
@@ -71,6 +71,9 @@ export function MapLibreRideMap(props: RideMapProps) {
       map.addSource('route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } } })
       map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#fff', 'line-width': 9, 'line-opacity': 0.9 } })
       map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#000', 'line-width': 5, 'line-opacity': 0.88 } })
+      // Dotted connectors: the road route starts/ends on the nearest road, so join it to the actual pins.
+      map.addSource('route-ends', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+      map.addLayer({ id: 'route-ends', type: 'line', source: 'route-ends', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#000', 'line-width': 3, 'line-opacity': 0.7, 'line-dasharray': [0.5, 2] } })
       mapRef.current = map
       setReady(true)
     })
@@ -127,16 +130,31 @@ export function MapLibreRideMap(props: RideMapProps) {
 
     const src = map.getSource('route') as maplibregl.GeoJSONSource | undefined
     const setLine = (pts: LatLng[]) => src?.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: pts.map((p) => [p.lng, p.lat]) } })
+    const endsSrc = map.getSource('route-ends') as maplibregl.GeoJSONSource | undefined
+    const setEnds = (pairs: Array<[LatLng, LatLng]>) =>
+      endsSrc?.setData({
+        type: 'FeatureCollection',
+        features: pairs.map(([a, b]) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[a.lng, a.lat], [b.lng, b.lat]] } })),
+      })
     const path = livePath
     let cancelled = false
     const controller = new AbortController()
     // Plain line is only the instant fallback; during a live ride the previous road line stays until the new one arrives.
-    if (path.length < 2) setLine([])
-    else if (!phase) setLine(path)
+    if (path.length < 2) {
+      setLine([])
+      setEnds([])
+    } else if (!phase) {
+      setLine(path)
+      setEnds([])
+    }
     if (path.length >= 2) {
       void fetchRoadRoute(path, controller.signal).then((road) => {
         if (!road || cancelled || !mapRef.current) return
         setLine(road)
+        setEnds([
+          [path[0], road[0]],
+          [road[road.length - 1], path[path.length - 1]],
+        ])
       })
     }
     if (!interactedRef.current) fit()

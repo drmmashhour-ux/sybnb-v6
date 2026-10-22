@@ -55,8 +55,11 @@ export function App() {
 
   useEffect(() => { persistLanguage(lang) }, [lang])
   useEffect(() => {
-    const sync = () => setPath(getCurrentPath())
-    const syncAuth = () => setAuthVersion((v) => v + 1)
+    // Back to the top on every page change and after sign-in: the sign-in form is long (on a phone or
+    // in the rides split view you scroll down to its button) and the console that replaces it kept
+    // that scroll position, showing only empty dark background below the content.
+    const sync = () => { setPath(getCurrentPath()); window.scrollTo(0, 0) }
+    const syncAuth = () => { setAuthVersion((v) => v + 1); window.scrollTo(0, 0) }
     window.addEventListener('hashchange', sync)
     window.addEventListener('sybnb-session-changed', syncAuth)
     return () => { window.removeEventListener('hashchange', sync); window.removeEventListener('sybnb-session-changed', syncAuth) }

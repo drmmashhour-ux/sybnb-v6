@@ -4,7 +4,7 @@ import { isAccessGateBypassed, isPublicAccessOpen } from './lib/access-gate.mjs'
 import { getAuthContext } from './lib/auth-context.mjs'
 import { isRateLimited } from './lib/rateLimit.mjs'
 import { loadEnv, validateEnv } from './lib/env.mjs'
-import { checkDatabase, disconnectDb, db } from './lib/prisma.mjs'
+import { checkDatabase, disconnectDb, db, databaseUrlWithPool } from './lib/prisma.mjs'
 import { startActivationScheduler, resolveActivationMode } from './lib/authz/activation-worker.mjs'
 import { startClockSync, securityTimeStatus } from './lib/authz/clock.mjs'
 import { bootstrapSecretDiagnostics } from './lib/authz/bootstrap.mjs'
@@ -75,9 +75,11 @@ if (envProblems.length) {
 // degrade gracefully like the rest of this file's design. Fix is an env change on the connection
 // string itself (?connection_limit=N&pool_timeout=20), not a code change -- Prisma reads it
 // natively -- so this only logs, it never blocks startup.
-if (process.env.NODE_ENV === 'production' && !/[?&]connection_limit=/.test(process.env.DATABASE_URL || '')) {
+// The pool can also be capped with DB_POOL_SIZE (server/lib/prisma.mjs), so check the URL Prisma
+// actually uses rather than the raw DATABASE_URL.
+if (process.env.NODE_ENV === 'production' && !/[?&]connection_limit=/.test(databaseUrlWithPool() || '')) {
   log.error('scale_warning_no_connection_limit', {
-    message: 'DATABASE_URL has no connection_limit set — Prisma pool is uncapped. Add ?connection_limit=N&pool_timeout=20 to DATABASE_URL before running more than one replica.',
+    message: 'Prisma pool is uncapped. Set DB_POOL_SIZE (or ?connection_limit=N&pool_timeout=20 on DATABASE_URL) before running more than one replica.',
   })
 }
 

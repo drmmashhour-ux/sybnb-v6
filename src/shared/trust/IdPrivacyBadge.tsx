@@ -1,4 +1,5 @@
 import { pick, type Lang } from '../../engines/language/languageEngine'
+import { BRAND_NAME, IS_PLATFORM_BRAND } from '../brand/brandName'
 
 // Shown next to every ID / passport / driver-licence upload. Accurate to how the platform works:
 // identity files sit in private storage and are opened only by SYBNB admin verification, via
@@ -17,9 +18,9 @@ export function IdPrivacyBadge({ lang }: { lang: Lang }) {
       <span>
         {pick(
           lang,
-          'تُشارَك فقط مع فريق التحقق في سيبنب. لا يراها أي مضيف أو سائق أو ضيف آخر أبداً.',
-          'Shared with SYBNB admin verification only. Never visible to hosts, drivers or other guests.',
-          'Partagé uniquement avec la vérification SYBNB. Jamais visible par les hôtes, chauffeurs ou autres voyageurs.',
+          IS_PLATFORM_BRAND ? 'تُشارَك فقط مع فريق التحقق في سيبنب. لا يراها أي مضيف أو سائق أو ضيف آخر أبداً.' : `تُشارَك فقط مع فريق التحقق في ${BRAND_NAME}. لا يراها أي مضيف أو سائق أو ضيف آخر أبداً.`,
+          `Shared with ${BRAND_NAME} admin verification only. Never visible to hosts, drivers or other guests.`,
+          `Partagé uniquement avec la vérification ${BRAND_NAME}. Jamais visible par les hôtes, chauffeurs ou autres voyageurs.`,
         )}
       </span>
     </div>

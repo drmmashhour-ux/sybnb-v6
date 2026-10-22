@@ -10,7 +10,11 @@ export default defineConfig({
   envDir: resolve(__dirname, '../..'),
   publicDir: resolve(__dirname, '../../public'),
   plugins: [react()],
-  define: { 'import.meta.env.VITE_BRAND_NAME': JSON.stringify('Rezekme') },
+  define: {
+    'import.meta.env.VITE_BRAND_NAME': JSON.stringify('Rezekme'),
+    // hosts on Rezekme Stay list daily stays only (the listing wizard hides the other divisions)
+    'import.meta.env.VITE_STAYS_ONLY': JSON.stringify('1'),
+  },
   resolve: { alias: { '@platform': resolve(__dirname, '../../src') } },
   server: { host: '127.0.0.1', port: 5192 },
   build: { outDir: resolve(__dirname, '../../dist-apps/rezekme-stay'), emptyOutDir: true },

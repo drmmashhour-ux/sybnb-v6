@@ -18,8 +18,7 @@ import {
   type HostProfile,
   type PlatformBooking,
   type PlatformListing,
-  type PlatformListingReview,
-} from '@platform/shared/api/platformApi'
+  type PlatformListingReview, resolveApiUrl } from '@platform/shared/api/platformApi'
 import { authStorage } from '@platform/shared/api/authStorage'
 import { divisionText, listingDescriptionText, moneyText, statusText } from '@platform/shared/i18n/display'
 import { listingDisplayTitle } from '@platform/shared/listing/displayTitle'
@@ -714,7 +713,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const isStays = listing?.division === 'STAYS'
   const unit = listing ? priceUnitText(listing.division, lang) : ''
   const mediaUrls = listing
-    ? (listing.media || []).map((item) => item.url || item.src || item.assetUrl).filter((value): value is string => typeof value === 'string')
+    ? (listing.media || []).map((item) => mediaSrc(item.url || item.src || item.assetUrl)).filter((value): value is string => typeof value === 'string')
     : []
   const mediaCount = mediaUrls.length
   const placeLabel = listing ? localizedPlaceLabel(mapTarget, lang) : ''
@@ -1753,4 +1752,10 @@ function languageName(code: string, lang: Lang) {
   }
   const pair = names[code]
   return pair ? pick(lang, pair[0], pair[1], pair[2]) : code
+}
+
+// Uploaded photos come back as server-relative signed URLs (/api/storage/...) when the API stores
+// files itself; those must load from the API's origin, not this site's.
+function mediaSrc(value: unknown) {
+  return typeof value === 'string' && value ? resolveApiUrl(value) : value
 }

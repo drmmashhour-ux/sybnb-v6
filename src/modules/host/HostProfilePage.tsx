@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../../shared/brand/brandName'
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
@@ -45,7 +46,7 @@ const copy = {
     loadError: 'تعذّر تحميل ملفك. حاول مرة أخرى.',
     preview: 'هكذا يراك الضيوف',
     hostedBy: 'المضيف',
-    memberSince: (y: number) => `على SYBNB منذ ${y}`,
+    memberSince: (y: number) => `على ${BRAND_NAME} منذ ${y}`,
     speaks: 'يتحدث',
   },
   en: {
@@ -66,7 +67,7 @@ const copy = {
     loadError: 'Could not load your profile. Please try again.',
     preview: 'How guests see you',
     hostedBy: 'Hosted by',
-    memberSince: (y: number) => `On SYBNB since ${y}`,
+    memberSince: (y: number) => `On ${BRAND_NAME} since ${y}`,
     speaks: 'Speaks',
   },
   fr: {
@@ -87,7 +88,7 @@ const copy = {
     loadError: 'Impossible de charger votre profil. Veuillez réessayer.',
     preview: 'Ce que voient les voyageurs',
     hostedBy: 'Hôte :',
-    memberSince: (y: number) => `Sur SYBNB depuis ${y}`,
+    memberSince: (y: number) => `Sur ${BRAND_NAME} depuis ${y}`,
     speaks: 'Parle',
   },
 }

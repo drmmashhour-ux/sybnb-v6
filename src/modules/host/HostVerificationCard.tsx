@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../../shared/brand/brandName'
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
@@ -44,9 +45,9 @@ function errorMessage(error: unknown, lang: Lang) {
     case 'ACTIVATION_CODE_INVALID':
       return pick(lang, 'الرمز غير صحيح. تحقق منه وحاول مرة أخرى.', 'That code is not correct. Check it and try again.', 'Ce code est incorrect. Vérifiez-le et réessayez.')
     case 'ACTIVATION_CODE_LOCKED':
-      return pick(lang, 'تم إيقاف هذا الرمز بعد 5 محاولات خاطئة. اطلب رمزاً جديداً من فريق SYBNB.', 'This code is locked after 5 wrong attempts. Ask the SYBNB team for a new code.', 'Ce code est bloqué après 5 essais erronés. Demandez un nouveau code à l’équipe SYBNB.')
+      return pick(lang, `تم إيقاف هذا الرمز بعد 5 محاولات خاطئة. اطلب رمزاً جديداً من فريق ${BRAND_NAME}.`, `This code is locked after 5 wrong attempts. Ask the ${BRAND_NAME} team for a new code.`, `Ce code est bloqué après 5 essais erronés. Demandez un nouveau code à l’équipe ${BRAND_NAME}.`)
     case 'ACTIVATION_CODE_EXPIRED':
-      return pick(lang, 'انتهت صلاحية هذا الرمز. اطلب رمزاً جديداً من فريق SYBNB.', 'This code has expired. Ask the SYBNB team for a new one.', 'Ce code a expiré. Demandez-en un nouveau à l’équipe SYBNB.')
+      return pick(lang, `انتهت صلاحية هذا الرمز. اطلب رمزاً جديداً من فريق ${BRAND_NAME}.`, `This code has expired. Ask the ${BRAND_NAME} team for a new one.`, `Ce code a expiré. Demandez-en un nouveau à l’équipe ${BRAND_NAME}.`)
     case 'ACTIVATION_CODE_NOT_FOUND':
       return pick(lang, 'لا يوجد رمز تفعيل لحسابك بعد. سيصلك بالبريد عند الموافقة على إعلانك.', 'There is no activation code for your account yet. It is emailed when your listing is approved.', 'Aucun code d’activation pour l’instant. Il vous est envoyé par e-mail à l’approbation de votre annonce.')
     case 'RATE_LIMITED':
@@ -66,7 +67,7 @@ function onboardingOf(status: HostVerificationStatus): HostOnboarding {
 function stepLabels(lang: Lang) {
   return [
     { title: pick(lang, 'أضف إعلانك', 'Add your listing', 'Ajoutez votre annonce'), hint: pick(lang, 'الصور والسعر والموقع وصورة الهوية', 'Photos, price, location and ID photo', 'Photos, prix, emplacement et pièce d’identité') },
-    { title: pick(lang, 'المراجعة', 'Review', 'Vérification'), hint: pick(lang, 'الإعلان + صورة الهوية: فحص آلي + فريق SYBNB', 'Listing + ID photo: automatic check + SYBNB team', 'Annonce + pièce d’identité : contrôle automatique + équipe SYBNB') },
+    { title: pick(lang, 'المراجعة', 'Review', 'Vérification'), hint: pick(lang, `الإعلان + صورة الهوية: فحص آلي + فريق ${BRAND_NAME}`, `Listing + ID photo: automatic check + ${BRAND_NAME} team`, `Annonce + pièce d’identité : contrôle automatique + équipe ${BRAND_NAME}`) },
     { title: pick(lang, 'رمز التفعيل بالبريد', 'Activation code by email', 'Code d’activation par e-mail'), hint: pick(lang, 'يصلك عند الموافقة', 'Sent when approved', 'Envoyé à l’approbation') },
     { title: pick(lang, 'إعلانك ظاهر للضيوف', 'Your listing is live for guests', 'Votre annonce est visible'), hint: pick(lang, 'جاهز للحجز', 'Ready to be booked', 'Prête à être réservée') },
   ]
@@ -194,9 +195,9 @@ export function HostVerificationCard({ lang, showVerified = false, onVerified, i
           <p style={styles.body}>
             {pick(
               lang,
-              'قيد المراجعة: الإعلان + صورة الهوية. فحص آلي للصور والعنوان والسعر، ثم يراجع فريق SYBNB هويتك وإعلانك. عند الموافقة نرسل رمز التفعيل إلى بريدك.',
-              'In review: your listing + ID photo. An automatic check of photos, address and price, then the SYBNB team reviews your ID and listing. When approved we email you your activation code.',
-              'En cours de vérification : l’annonce + la pièce d’identité. Contrôle automatique des photos, de l’adresse et du prix, puis l’équipe SYBNB vérifie votre pièce d’identité et votre annonce. À l’approbation, nous vous envoyons votre code par e-mail.',
+              `قيد المراجعة: الإعلان + صورة الهوية. فحص آلي للصور والعنوان والسعر، ثم يراجع فريق ${BRAND_NAME} هويتك وإعلانك. عند الموافقة نرسل رمز التفعيل إلى بريدك.`,
+              `In review: your listing + ID photo. An automatic check of photos, address and price, then the ${BRAND_NAME} team reviews your ID and listing. When approved we email you your activation code.`,
+              `En cours de vérification : l’annonce + la pièce d’identité. Contrôle automatique des photos, de l’adresse et du prix, puis l’équipe ${BRAND_NAME} vérifie votre pièce d’identité et votre annonce. À l’approbation, nous vous envoyons votre code par e-mail.`,
             )}
           </p>
         </div>
@@ -265,9 +266,9 @@ export function HostVerificationCard({ lang, showVerified = false, onVerified, i
             <p style={styles.body}>
               {pick(
                 lang,
-                'تمت الموافقة على إعلانك. رمز التفعيل في طريقه إلى بريدك؛ إن لم يصلك أو انتهت صلاحيته تواصل مع فريق SYBNB.',
-                'Your listing is approved. Your activation code is on its way to your email; if it did not arrive or has expired, contact the SYBNB team.',
-                'Votre annonce est approuvée. Votre code d’activation arrive par e-mail ; s’il n’arrive pas ou a expiré, contactez l’équipe SYBNB.',
+                `تمت الموافقة على إعلانك. رمز التفعيل في طريقه إلى بريدك؛ إن لم يصلك أو انتهت صلاحيته تواصل مع فريق ${BRAND_NAME}.`,
+                `Your listing is approved. Your activation code is on its way to your email; if it did not arrive or has expired, contact the ${BRAND_NAME} team.`,
+                `Votre annonce est approuvée. Votre code d’activation arrive par e-mail ; s’il n’arrive pas ou a expiré, contactez l’équipe ${BRAND_NAME}.`,
               )}
             </p>
           )}
@@ -315,7 +316,7 @@ function FeedbackItem({ item, lang, onResubmitted }: { item: HostOnboardingFeedb
       <strong style={styles.feedbackTitle}>{listingTitle}</strong>
       {item.note && (
         <p style={styles.note}>
-          <b>{pick(lang, 'ملاحظة فريق SYBNB: ', 'SYBNB team note: ', 'Note de l’équipe SYBNB : ')}</b>
+          <b>{pick(lang, `ملاحظة فريق ${BRAND_NAME}: `, `${BRAND_NAME} team note: `, `Note de l’équipe ${BRAND_NAME} : `)}</b>
           {item.note}
         </p>
       )}
@@ -347,9 +348,9 @@ function FeedbackItem({ item, lang, onResubmitted }: { item: HostOnboardingFeedb
           <small style={styles.trackHint}>
             {pick(
               lang,
-              'لتغيير الصور، أضف إعلاناً جديداً بالصور الصحيحة أو تواصل مع فريق SYBNB.',
-              'To change photos, add a new listing with the right photos or contact the SYBNB team.',
-              'Pour changer les photos, ajoutez une nouvelle annonce ou contactez l’équipe SYBNB.',
+              `لتغيير الصور، أضف إعلاناً جديداً بالصور الصحيحة أو تواصل مع فريق ${BRAND_NAME}.`,
+              `To change photos, add a new listing with the right photos or contact the ${BRAND_NAME} team.`,
+              `Pour changer les photos, ajoutez une nouvelle annonce ou contactez l’équipe ${BRAND_NAME}.`,
             )}
           </small>
           <div style={styles.editActions}>

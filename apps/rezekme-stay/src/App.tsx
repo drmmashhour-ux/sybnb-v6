@@ -31,6 +31,20 @@ const SyrianLocalWalletPaymentPage = lazyNamed(
 const TrustProtectionRoutes = lazyNamed(() => import('@platform/modules/trust/TrustProtectionRoutes'), 'TrustProtectionRoutes')
 const ImmocontactPage = lazyNamed(() => import('@platform/modules/immocontact/ImmocontactPage'), 'ImmocontactPage')
 
+// Hosting (same account as the guest side, like Airbnb): the platform's tested host pages, wired to the
+// Rezekme API. Listing creation is limited to daily stays in this build (VITE_STAYS_ONLY).
+const HostWhyPage = lazyNamed(() => import('@platform/modules/account/HostWhyPage'), 'HostWhyPage')
+const HostJoinPage = lazyNamed(() => import('@platform/modules/account/HostJoinPage'), 'HostJoinPage')
+const BecomeHostPage = lazyNamed(() => import('@platform/modules/account/BecomeHostPage'), 'BecomeHostPage')
+const HostDashboardPage = lazyNamed(() => import('@platform/modules/host/HostDashboardPage'), 'HostDashboardPage')
+const HostProfilePage = lazyNamed(() => import('@platform/modules/host/HostProfilePage'), 'HostProfilePage')
+const HostEarningsPage = lazyNamed(() => import('@platform/modules/host/HostEarningsPage'), 'HostEarningsPage')
+const HostPayoutsPage = lazyNamed(() => import('@platform/modules/host/HostPayoutsPage'), 'HostPayoutsPage')
+const HostInquiriesPage = lazyNamed(() => import('@platform/modules/host/HostInquiriesPage'), 'HostInquiriesPage')
+const HostCheckinPage = lazyNamed(() => import('@platform/modules/host/HostCheckinPage'), 'HostCheckinPage')
+const SellerListingWizard = lazyNamed(() => import('@platform/modules/seller/SellerListingWizard'), 'SellerListingWizard')
+const SellerSubmittedPage = lazyNamed(() => import('@platform/modules/seller/SellerSubmittedPage'), 'SellerSubmittedPage')
+
 export function App() {
   const [lang, setLang] = useState<Lang>(() => getInitialLanguage())
   const [path, setPath] = useState(() => getCurrentPath())
@@ -79,6 +93,12 @@ export function App() {
   const hasGuestSession = Boolean(authStorage.getItem('sybnb-v6-guest-token'))
   const hasAnyStaffSession = hasAnyValidStaffSession()
   const contactProtectedRoute = path === '/immocontact'
+  const hostCheckinMatch = path.match(/^\/checkin\/([^/]+)$/)
+  // Host area: /host/why and /host/join are public; every other /host page, the listing wizard and the
+  // arrival check-in need a host session (the server enforces the role on every call regardless).
+  const hostRoute = (path.startsWith('/host') && path !== '/host/why' && path !== '/host/join') ||
+    path === '/sell/listing-wizard' || path === '/sell/submitted' || Boolean(hostCheckinMatch)
+  const hasHostSession = hasRequiredHostSession()
   const needsGuestAccountGate = (guestProtectedRoute && !hasGuestSession) || (contactProtectedRoute && !hasGuestSession && !hasAnyStaffSession)
 
   if (needsGuestAccountGate) {
@@ -94,6 +114,32 @@ export function App() {
       <Suspense fallback={<RouteLoading lang={lang} />}>
         {needsGuestAccountGate ? (
           <GuestAccountPage lang={lang} flow={guestGateFlow} returnPath={path} />
+        ) : hostRoute && !hasHostSession && !hasGuestSession ? (
+          // Not signed in: the normal sign-in, then back to the host page.
+          <GuestAccountPage lang={lang} flow="generic" returnPath={path} />
+        ) : hostRoute && !hasHostSession ? (
+          // Signed in but not hosting yet: one tap turns hosting on for this same account.
+          <BecomeHostPage lang={lang} returnPath={path} />
+        ) : path === '/host/why' ? (
+          <HostWhyPage lang={lang} />
+        ) : path === '/host/join' ? (
+          <HostJoinPage lang={lang} />
+        ) : path === '/host' || path === '/host/stays' ? (
+          <HostDashboardPage lang={lang} mode="host" focus="stays" />
+        ) : path === '/host/profile' ? (
+          <HostProfilePage lang={lang} />
+        ) : path === '/host/earnings' ? (
+          <HostEarningsPage lang={lang} />
+        ) : path === '/host/payouts' ? (
+          <HostPayoutsPage lang={lang} />
+        ) : path === '/host/inquiries' ? (
+          <HostInquiriesPage lang={lang} />
+        ) : path === '/sell/listing-wizard' ? (
+          <SellerListingWizard lang={lang} />
+        ) : path === '/sell/submitted' ? (
+          <SellerSubmittedPage lang={lang} />
+        ) : hostCheckinMatch ? (
+          <HostCheckinPage bookingId={hostCheckinMatch[1]} lang={lang} />
         ) : guestAccountMatch ? (
           <GuestAccountPage
             lang={lang}
@@ -140,6 +186,18 @@ export function App() {
       </Suspense>
     </Shell>
   )
+}
+
+function hasRequiredHostSession() {
+  try {
+    const raw = authStorage.getItem('sybnb.v6.staffSession')
+    if (!raw) return false
+    const session = JSON.parse(raw) as { token?: string; user?: { roles?: string[] } }
+    const roles = session.user?.roles || []
+    return Boolean(session.token) && (roles.includes('HOST') || roles.includes('SELLER'))
+  } catch {
+    return false
+  }
 }
 
 function hasAnyValidStaffSession() {

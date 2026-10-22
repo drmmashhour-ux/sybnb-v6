@@ -300,9 +300,16 @@ export function renderNotification(kind, locale, data = {}) {
   }
   const verify = (lang) => (data.verifyUrl ? `\n\n${VERIFY[lang]}\n${data.verifyUrl}` : '')
   return {
-    subject: parts[0].subject,
-    text: parts.map((p, index) => `${p.body}${url}${verify(langs[index])}`).join('\n\n———\n\n'),
+    subject: withBrand(parts[0].subject),
+    text: withBrand(parts.map((p, index) => `${p.body}${url}${verify(langs[index])}`).join('\n\n———\n\n')),
   }
+}
+
+// White-label deployments (Rezekme) set BRAND_NAME on the API; templates are written with "SYBNB".
+export function withBrand(value, env = process.env) {
+  const brand = String(env.BRAND_NAME || '').trim()
+  if (!brand || brand === 'SYBNB' || typeof value !== 'string') return value
+  return value.replace(/SYBNB/g, brand)
 }
 
 function deliveryAvailable() {
@@ -392,7 +399,7 @@ export function renderPush(kind, locale, data = {}) {
   const lang = languagesForLocale(locale)[0]
   const part = (template[lang] || template.en)(data)
   const title = String(part.subject || '').replace(/^SYBNB\s*(?:admin)?\s*:?\s*/i, '').trim() || 'SYBNB'
-  return { title, body: part.body, url: data.url || null }
+  return { title: withBrand(title), body: withBrand(part.body), url: data.url || null }
 }
 
 // Multi-channel user notification (2026-10-11): localized web push AND a localized email fallback, so

@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
 import { getStoredGuestSession } from '@platform/shared/api/platformApi'
+import { authStorage } from '@platform/shared/api/authStorage'
 
-type TabId = 'explore' | 'saved' | 'trips' | 'profile'
+type TabId = 'explore' | 'saved' | 'trips' | 'host' | 'profile'
 
 type Props = {
   lang: Lang
@@ -21,6 +22,7 @@ export function activeTabFor(path: string): TabId | null {
   if (path === '/' || path === '' || path === '/home' || path === '/stays' || path.startsWith('/listing/')) return 'explore'
   if (path === '/saved') return 'saved'
   if (path === '/trips' || path === '/dashboard' || path.startsWith('/booking/') || path.startsWith('/payment/')) return 'trips'
+  if (path.startsWith('/host') || path.startsWith('/sell/') || path.startsWith('/checkin/')) return 'host'
   if (path === '/profile' || path.startsWith('/account')) return 'profile'
   return null
 }
@@ -30,6 +32,7 @@ export function activeTabFor(path: string): TabId | null {
 // action (listing page "Reserve", checkout).
 export function Shell({ lang, onLanguageChange, path, children }: Props) {
   const signedIn = typeof window !== 'undefined' && Boolean(getStoredGuestSession())
+  const isHost = typeof window !== 'undefined' && hasHostRole()
   const active = activeTabFor(path)
   const hideTabs = path.startsWith('/listing/') || path.startsWith('/checkout/')
 
@@ -37,6 +40,8 @@ export function Shell({ lang, onLanguageChange, path, children }: Props) {
     { id: 'explore', href: '/stays', label: pick(lang, 'استكشف', 'Explore', 'Explorer'), icon: <IconSearch /> },
     { id: 'saved', href: '/saved', label: pick(lang, 'المحفوظات', 'Wishlists', 'Favoris'), icon: <IconHeart /> },
     { id: 'trips', href: '/trips', label: pick(lang, 'رحلاتي', 'Trips', 'Voyages'), icon: <IconSuitcase /> },
+    // Hosting on the same account: hosts go to their dashboard, everyone else to "Become a host".
+    { id: 'host', href: isHost ? '/host' : '/host/join', label: isHost ? pick(lang, 'الاستضافة', 'Hosting', 'Hôte') : pick(lang, 'استضف', 'Host', 'Accueillir'), icon: <IconHome /> },
     {
       id: 'profile',
       href: signedIn ? '/profile' : '/account/open',
@@ -122,6 +127,27 @@ function IconUser() {
     <svg {...iconProps}>
       <circle cx="12" cy="8" r="4" />
       <path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6" />
+    </svg>
+  )
+}
+
+function hasHostRole() {
+  try {
+    const raw = authStorage.getItem('sybnb.v6.staffSession')
+    if (!raw) return false
+    const roles = (JSON.parse(raw) as { user?: { roles?: string[] } }).user?.roles || []
+    return roles.includes('HOST') || roles.includes('SELLER')
+  } catch {
+    return false
+  }
+}
+
+function IconHome() {
+  return (
+    <svg {...iconProps}>
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 9.5V21h14V9.5" />
+      <path d="M10 21v-6h4v6" />
     </svg>
   )
 }

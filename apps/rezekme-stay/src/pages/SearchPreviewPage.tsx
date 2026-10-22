@@ -8,8 +8,7 @@ import {
   fetchFavouriteIds,
   isSampleListing,
   removeFavourite,
-  type PlatformListing,
-} from '@platform/shared/api/platformApi'
+  type PlatformListing, resolveApiUrl } from '@platform/shared/api/platformApi'
 import { MarketInsightsPanel } from '@platform/modules/search/MarketInsightsPanel'
 import { listingDisplayTitle } from '@platform/shared/listing/displayTitle'
 import { FavouriteButton } from './FavouriteButton'
@@ -352,7 +351,7 @@ function ListingCard({
 // The listing's own uploaded photo, or nothing: a generic photo repeated on every card made every
 // result look like the same real apartment.
 function listingPhoto(listing: PlatformListing) {
-  const mediaUrl = listing.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string')
+  const mediaUrl = listing.media?.map((item) => mediaSrc(item.url || item.src || item.assetUrl)).find((value) => typeof value === 'string')
   return typeof mediaUrl === 'string' ? mediaUrl : ''
 }
 
@@ -403,4 +402,10 @@ function placeLine(listing: PlatformListing, lang: Lang) {
     parts = [cityName, area].filter((item) => item && !ARABIC_SCRIPT.test(item))
   }
   return Array.from(new Set(parts)).join(' · ')
+}
+
+// Uploaded photos come back as server-relative signed URLs (/api/storage/...) when the API stores
+// files itself; those must load from the API's origin, not this site's.
+function mediaSrc(value: unknown) {
+  return typeof value === 'string' && value ? resolveApiUrl(value) : value
 }

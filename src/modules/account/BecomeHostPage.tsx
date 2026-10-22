@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../../shared/brand/brandName'
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
@@ -11,7 +12,7 @@ type Props = { lang: Lang; returnPath: string }
 
 const copy = {
   ar: {
-    title: 'استضف على SYBNB',
+    title: `استضف على ${BRAND_NAME}`,
     body: 'حسابك نفسه يصلح للحجز وللاستضافة. فعّل الاستضافة لتنشر إعلانك وتستقبل طلبات الحجز.',
     points: ['أضف إعلانك بالصور والسعر', 'استقبل الطلبات وأكّدها أو ارفضها', 'تابع أرباحك من لوحة المضيف'],
     signedInAs: 'مسجّل الدخول باسم',
@@ -21,7 +22,7 @@ const copy = {
     error: 'تعذّر تفعيل الاستضافة. حاول مرة أخرى.',
   },
   en: {
-    title: 'Host on SYBNB',
+    title: `Host on ${BRAND_NAME}`,
     body: 'Your same account works for booking and hosting. Turn on hosting to publish your listing and receive booking requests.',
     points: ['Add your listing with photos and price', 'Receive requests and accept or decline them', 'Track your earnings from the host dashboard'],
     signedInAs: 'Signed in as',
@@ -31,7 +32,7 @@ const copy = {
     error: 'Could not turn on hosting. Please try again.',
   },
   fr: {
-    title: 'Devenez hôte sur SYBNB',
+    title: `Devenez hôte sur ${BRAND_NAME}`,
     body: 'Le même compte vous permet de réserver et d’accueillir. Activez l’accueil pour publier votre annonce et recevoir des demandes de réservation.',
     points: ['Ajoutez votre annonce avec photos et prix', 'Recevez des demandes et acceptez-les ou refusez-les', 'Suivez vos revenus dans le tableau de bord d’hôte'],
     signedInAs: 'Connecté en tant que',

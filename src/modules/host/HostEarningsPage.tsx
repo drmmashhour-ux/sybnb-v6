@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../../shared/brand/brandName'
 import { useEffect, useState } from 'react'
 import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties } from 'react'
@@ -30,7 +31,7 @@ const copy = {
     dates: 'التواريخ',
     status: 'الحالة',
     hostGross: 'صافي المضيف',
-    commission: 'عمولة SYBNB',
+    commission: `عمولة ${BRAND_NAME}`,
     payoutStatus: 'حالة الصرف',
     eligibleAt: 'تاريخ الأهلية',
     statusPENDING_HOLD: 'ضمن فترة الحجز',
@@ -52,7 +53,7 @@ const copy = {
     dates: 'Dates',
     status: 'Status',
     hostGross: 'Host net',
-    commission: 'SYBNB commission',
+    commission: `${BRAND_NAME} commission`,
     payoutStatus: 'Payout status',
     eligibleAt: 'Eligible at',
     statusPENDING_HOLD: 'In hold window',
@@ -74,7 +75,7 @@ const copy = {
     dates: 'Dates',
     status: 'Statut',
     hostGross: 'Net pour l’hôte',
-    commission: 'Commission SYBNB',
+    commission: `Commission ${BRAND_NAME}`,
     payoutStatus: 'Statut du versement',
     eligibleAt: 'Admissible le',
     statusPENDING_HOLD: 'Période de retenue en cours',

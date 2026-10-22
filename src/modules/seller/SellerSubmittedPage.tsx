@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
-import { BrandLogo } from '../../shared/brand'
+import { BrandLogo, BRAND_NAME, STAYS_ONLY } from '../../shared/brand'
 import {
   fetchPrototypeListing,
   LAST_SUBMITTED_LISTING_KEY,
@@ -17,6 +17,9 @@ export function SellerSubmittedPage({ lang }: Props) {
   const isAr = lang === 'ar'
   const isAdvertisingFlow = typeof window !== 'undefined' && window.localStorage.getItem('sybnb_v6_sell_flow') === 'advertising'
   const [listing, setListing] = useState<PlatformListing | null>(() => readLastSubmittedListing())
+  // Daily stays (and every listing in a stays-only build such as Rezekme Stay) follow the host path:
+  // review -> activation code -> visible; there is no seller plan or seller dashboard.
+  const isStay = STAYS_ONLY || listing?.division === 'STAYS'
   const advertisingReference = typeof window !== 'undefined' ? window.sessionStorage.getItem('sybnb_v6_ad_follow_code') : ''
   const reference = isAdvertisingFlow
     ? advertisingReference || 'ADV-S-2026-0042'
@@ -44,11 +47,15 @@ export function SellerSubmittedPage({ lang }: Props) {
         <p>
           {isAdvertisingFlow
             ? isAr
-              ? 'سيقوم فريق SYBNB بمراجعة إثبات الدفع وملفات الإعلان. لا يظهر الإعلان قبل تأكيد الإدارة استلام المال والموافقة على الملفات.'
-              : 'The SYBNB team will review the payment proof and ad files. The ad will not run before admin confirms the money was received and approves the files.'
-            : isAr
-              ? 'سيقوم فريق SYBNB بمراجعة المعلومات والمستندات. عند الموافقة، يتم فتح لوحة البائع ونشر الإعلان حسب الخطة.'
-              : 'The SYBNB team will review the information and documents. After approval, the seller dashboard opens and the listing publishes by plan.'}
+              ? `سيقوم فريق ${BRAND_NAME} بمراجعة إثبات الدفع وملفات الإعلان. لا يظهر الإعلان قبل تأكيد الإدارة استلام المال والموافقة على الملفات.`
+              : `The ${BRAND_NAME} team will review the payment proof and ad files. The ad will not run before admin confirms the money was received and approves the files.`
+            : isStay
+              ? isAr
+                ? `سيراجع فريق ${BRAND_NAME} الإعلان وصورة الهوية. عند الموافقة نرسل إلى بريدك رمز تفعيل من 6 أرقام؛ أدخله في لوحة المضيف ليظهر إعلانك للضيوف.`
+                : `The ${BRAND_NAME} team will review your listing and ID photo. When it is approved we email you a 6-digit activation code; enter it in your host dashboard and guests can see and book your stay.`
+              : isAr
+                ? `سيقوم فريق ${BRAND_NAME} بمراجعة المعلومات والمستندات. عند الموافقة، يتم فتح لوحة البائع ونشر الإعلان حسب الخطة.`
+                : `The ${BRAND_NAME} team will review the information and documents. After approval, the seller dashboard opens and the listing publishes by plan.`}
         </p>
         <div className="seller-reference-card">
           <span>{isAr ? 'رقم المرجع' : 'Reference'}</span>
@@ -64,9 +71,13 @@ export function SellerSubmittedPage({ lang }: Props) {
             ? isAr
               ? ['تم الاستلام', 'مطابقة الدفع', 'مراجعة ملفات الإعلان', 'منشور']
               : ['Received', 'Payment match', 'Ad file review', 'Published']
-            : isAr
-              ? ['تم الاستلام', 'مراجعة الدفع والملفات', 'قرار الإدارة', 'منشور']
-              : ['Received', 'Payment and file review', 'Admin decision', 'Published']
+            : isStay
+              ? isAr
+                ? ['تم الاستلام', 'مراجعة الإعلان والهوية', 'رمز التفعيل بالبريد', 'ظاهر للضيوف']
+                : ['Received', 'Listing and ID review', 'Activation code by email', 'Visible to guests']
+              : isAr
+                ? ['تم الاستلام', 'مراجعة الدفع والملفات', 'قرار الإدارة', 'منشور']
+                : ['Received', 'Payment and file review', 'Admin decision', 'Published']
           ).map((item, index) => (
             <span key={item} className={index === 0 ? 'active' : ''}>
               {item}
@@ -77,9 +88,9 @@ export function SellerSubmittedPage({ lang }: Props) {
           {!isAdvertisingFlow && (
             <button
               className="seller-primary-button"
-              onClick={() => navigate('/host/seller')}
+              onClick={() => navigate(isStay ? '/host/stays' : '/host/seller')}
             >
-              {isAr ? 'فتح لوحة البائع' : 'Open seller dashboard'}
+              {isStay ? (isAr ? 'فتح لوحة المضيف' : 'Open host dashboard') : isAr ? 'فتح لوحة البائع' : 'Open seller dashboard'}
             </button>
           )}
           <button className="seller-secondary-button" onClick={() => navigate(isAdvertisingFlow ? '/advertising/account' : '/sell/listing-wizard')}>

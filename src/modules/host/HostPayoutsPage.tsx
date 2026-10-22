@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../../shared/brand/brandName'
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
@@ -192,9 +193,9 @@ export function HostPayoutsPage({ lang, mode = 'host' }: Props) {
         <p style={styles.body}>
           {pick(
             lang,
-            'اختر كيف تستلم أرباحك، ثم اطلب سحب رصيدك المتاح. يدفع فريق SYBNB المبلغ ويسجّل رقم العملية هنا.',
-            'Choose how you receive your earnings, then request a withdrawal of your available balance. The SYBNB team pays it and records the transfer reference here.',
-            'Choisissez comment recevoir vos revenus, puis demandez le retrait de votre solde disponible. L’équipe SYBNB effectue le paiement et inscrit ici la référence du virement.',
+            `اختر كيف تستلم أرباحك، ثم اطلب سحب رصيدك المتاح. يدفع فريق ${BRAND_NAME} المبلغ ويسجّل رقم العملية هنا.`,
+            `Choose how you receive your earnings, then request a withdrawal of your available balance. The ${BRAND_NAME} team pays it and records the transfer reference here.`,
+            `Choisissez comment recevoir vos revenus, puis demandez le retrait de votre solde disponible. L’équipe ${BRAND_NAME} effectue le paiement et inscrit ici la référence du virement.`,
           )}
         </p>
       </section>
@@ -251,9 +252,9 @@ export function HostPayoutsPage({ lang, mode = 'host' }: Props) {
                   <small style={styles.body}>
                     {pick(
                       lang,
-                      'تستلم المبلغ نقداً من مكتب SYBNB في المدينة المختارة بعد موافقة الإدارة، مع إبراز هويتك.',
-                      'You collect the cash at the SYBNB office in the chosen city after admin approval, showing your ID.',
-                      'Vous retirez les espèces au bureau SYBNB de la ville choisie après approbation, sur présentation de votre pièce d’identité.',
+                      `تستلم المبلغ نقداً من مكتب ${BRAND_NAME} في المدينة المختارة بعد موافقة الإدارة، مع إبراز هويتك.`,
+                      `You collect the cash at the ${BRAND_NAME} office in the chosen city after admin approval, showing your ID.`,
+                      `Vous retirez les espèces au bureau ${BRAND_NAME} de la ville choisie après approbation, sur présentation de votre pièce d’identité.`,
                     )}
                   </small>
                 </>
@@ -342,7 +343,7 @@ export function HostPayoutsPage({ lang, mode = 'host' }: Props) {
                 {withdrawState === 'error' && <p style={styles.alert}>{withdrawError}</p>}
                 {withdrawState === 'done' && (
                   <p style={styles.okBox}>
-                    ✓ {pick(lang, 'تم إرسال طلب السحب. سيدفعه فريق SYBNB ويسجّل رقم العملية.', 'Withdrawal requested. The SYBNB team will pay it and record the reference.', 'Retrait demandé. L’équipe SYBNB effectuera le paiement et inscrira la référence.')}
+                    ✓ {pick(lang, `تم إرسال طلب السحب. سيدفعه فريق ${BRAND_NAME} ويسجّل رقم العملية.`, `Withdrawal requested. The ${BRAND_NAME} team will pay it and record the reference.`, `Retrait demandé. L’équipe ${BRAND_NAME} effectuera le paiement et inscrira la référence.`)}
                   </p>
                 )}
                 <button

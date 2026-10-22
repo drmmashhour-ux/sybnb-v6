@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../../shared/brand/brandName'
 import QRCode from 'qrcode'
 import { useEffect, useMemo, useState } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
@@ -40,7 +41,7 @@ const copy = {
   ar: {
     back: 'العودة للرئيسية',
     title: 'الدفع عبر المحفظة المحلية السورية',
-    subtitle: 'أرسل إثبات التحويل داخل SYBNB فقط ليبقى الحجز محمياً.',
+    subtitle: `أرسل إثبات التحويل داخل ${BRAND_NAME} فقط ليبقى الحجز محمياً.`,
     mode: 'الدفع بالحوالة أو شام كاش',
     recipient: 'المستلم',
     maskedAccount: 'الحساب',
@@ -62,7 +63,7 @@ const copy = {
     hostApproved: 'تم تأكيد الدفع ويمكن متابعة الحجز.',
     hostRejected: 'تم رفض الدفع. يمكن للضيف إعادة إرسال الإثبات.',
     bookingStatus: 'حالة دفع الحجز',
-    manualOnly: 'يتم التحويل عبر تطبيق المحفظة أو شام كاش. ارفع صورة الإيصال هنا ويؤكده فريق SYBNB.',
+    manualOnly: `يتم التحويل عبر تطبيق المحفظة أو شام كاش. ارفع صورة الإيصال هنا ويؤكده فريق ${BRAND_NAME}.`,
     seed: 'حالة المراجعة',
     security: 'حالة الدفع',
     validationPassed: 'تم التحقق من الحقول',
@@ -85,7 +86,7 @@ const copy = {
     adminConfirmedTitle: 'تم تأكيد الدفع والحجز',
     adminConfirmedBody: 'أكدت الإدارة استلام المال ومطابقة إثبات الدفع. أصبح الحجز مؤكداً ويمكن للعميل متابعة رحلته من حسابه.',
     phoneMessageTitle: 'متابعة الحجز',
-    phoneMessageBody: 'تم تأكيد حجزك في SYBNB. سجّل الدخول بالبريد الإلكتروني لمتابعة تفاصيل الحجز والرحلة حتى الانتهاء.',
+    phoneMessageBody: `تم تأكيد حجزك في ${BRAND_NAME}. سجّل الدخول بالبريد الإلكتروني لمتابعة تفاصيل الحجز والرحلة حتى الانتهاء.`,
     reservationConfirmed: 'الحجز مؤكد',
     adminReviewApproved: 'الإدارة أكدت الاستلام',
     continueTrip: 'متابعة الرحلة من حسابي',
@@ -95,7 +96,7 @@ const copy = {
   en: {
     back: 'Back to landing',
     title: 'Syrian Local Wallet / QR Payment',
-    subtitle: 'Submit transfer proof inside SYBNB only so the booking stays protected.',
+    subtitle: `Submit transfer proof inside ${BRAND_NAME} only so the booking stays protected.`,
     mode: 'Pay by bank transfer or Sham Cash',
     recipient: 'Recipient',
     maskedAccount: 'Account',
@@ -117,7 +118,7 @@ const copy = {
     hostApproved: 'Payment confirmed. Booking can continue.',
     hostRejected: 'Payment rejected. Guest can resubmit proof.',
     bookingStatus: 'Booking payment status',
-    manualOnly: 'The transfer happens in your wallet or Sham Cash app. Upload your receipt here and the SYBNB team confirms it.',
+    manualOnly: `The transfer happens in your wallet or Sham Cash app. Upload your receipt here and the ${BRAND_NAME} team confirms it.`,
     seed: 'Review status',
     security: 'Payment status',
     validationPassed: 'Fields validated',
@@ -140,7 +141,7 @@ const copy = {
     adminConfirmedTitle: 'Payment and booking confirmed',
     adminConfirmedBody: 'Admin confirmed the money was received and the proof matches. The reservation is now confirmed and the guest can continue the trip from the account.',
     phoneMessageTitle: 'Continue your booking',
-    phoneMessageBody: 'Your SYBNB booking is confirmed. Sign in with your email to follow booking and trip details until completion.',
+    phoneMessageBody: `Your ${BRAND_NAME} booking is confirmed. Sign in with your email to follow booking and trip details until completion.`,
     reservationConfirmed: 'Reservation confirmed',
     adminReviewApproved: 'Admin confirmed receipt',
     continueTrip: 'Continue trip from my account',
@@ -150,7 +151,7 @@ const copy = {
   fr: {
     back: 'Retour à l’accueil',
     title: 'Paiement par portefeuille local syrien / QR',
-    subtitle: 'Envoyez la preuve de virement uniquement dans SYBNB pour que la réservation reste protégée.',
+    subtitle: `Envoyez la preuve de virement uniquement dans ${BRAND_NAME} pour que la réservation reste protégée.`,
     mode: 'Paiement par virement ou Sham Cash',
     recipient: 'Destinataire',
     maskedAccount: 'Compte',
@@ -172,7 +173,7 @@ const copy = {
     hostApproved: 'Paiement confirmé. La réservation peut se poursuivre.',
     hostRejected: 'Paiement refusé. Le voyageur peut renvoyer une preuve.',
     bookingStatus: 'Statut du paiement de la réservation',
-    manualOnly: 'Le virement se fait dans votre application de portefeuille ou Sham Cash. Téléversez votre reçu ici et l’équipe SYBNB le confirme.',
+    manualOnly: `Le virement se fait dans votre application de portefeuille ou Sham Cash. Téléversez votre reçu ici et l’équipe ${BRAND_NAME} le confirme.`,
     seed: 'Statut de la vérification',
     security: 'État du paiement',
     validationPassed: 'Champs validés',
@@ -195,7 +196,7 @@ const copy = {
     adminConfirmedTitle: 'Paiement et réservation confirmés',
     adminConfirmedBody: 'L’administration a confirmé la réception des fonds et la conformité de la preuve. La réservation est maintenant confirmée et le voyageur peut suivre son voyage depuis son compte.',
     phoneMessageTitle: 'Suivre votre réservation',
-    phoneMessageBody: 'Votre réservation SYBNB est confirmée. Connectez-vous avec votre courriel pour suivre les détails de la réservation et du voyage jusqu’à la fin.',
+    phoneMessageBody: `Votre réservation ${BRAND_NAME} est confirmée. Connectez-vous avec votre courriel pour suivre les détails de la réservation et du voyage jusqu’à la fin.`,
     reservationConfirmed: 'Réservation confirmée',
     adminReviewApproved: 'Réception confirmée par l’administration',
     continueTrip: 'Suivre le voyage depuis mon compte',

@@ -5,8 +5,8 @@ import { getStoredStaffSession, signOutStaff } from '@platform/shared/api/platfo
 
 /**
  * Rezekme Admin. Every screen here is an existing, tested admin page (same server authorization: ADMIN role on every call);
- * this app only chooses which ones a Rezekme operator needs and draws them in a Rezekme shell. Stays, food, hosts and
- * listing pages are deliberately not included.
+ * this app only chooses which ones a Rezekme operator needs and draws them in a Rezekme shell. Stays: the review queue
+ * (approve/reject listings and booking payments) and the host activation desk. Food pages are not included.
  */
 type PageProps = { lang: Lang }
 const page = (load: () => Promise<Record<string, unknown>>, name: string) =>
@@ -24,6 +24,7 @@ const Customers = page(() => import('@platform/modules/admin/AdminCustomerPage')
 const Ops = page(() => import('@platform/modules/admin/AdminOperationsPage'), 'AdminOperationsPage')
 const Promo = page(() => import('@platform/modules/sr/AdminPromoCodesPage'), 'AdminPromoCodesPage')
 const Pricing = page(() => import('@platform/modules/sr/AdminPricingPage'), 'AdminPricingPage')
+const Hosts = page(() => import('@platform/modules/admin/AdminHostsPage'), 'AdminHostsPage')
 const Business = page(() => import('@platform/modules/sr/AdminBusinessAccountsPage'), 'AdminBusinessAccountsPage')
 
 type Item = { path: string; ar: string; en: string; fr: string; Page: ComponentType<PageProps> }
@@ -32,7 +33,8 @@ const ITEMS: Item[] = [
   { path: '/admin/sr/rides', ar: 'الرحلات المباشرة', en: 'Live rides', fr: 'Courses en direct', Page: LiveRides },
   { path: '/admin/drivers', ar: 'السائقون', en: 'Drivers', fr: 'Chauffeurs', Page: Drivers },
   { path: '/admin/vehicles', ar: 'المركبات', en: 'Vehicles', fr: 'Véhicules', Page: Vehicles },
-  { path: '/admin/review', ar: 'مراجعة الدفعات', en: 'Payment review', fr: 'Vérif. paiements', Page: Review },
+  { path: '/admin/review', ar: 'المراجعة: الإقامات والدفعات', en: 'Review: stays & payments', fr: 'Vérif. : séjours et paiements', Page: Review },
+  { path: '/admin/hosts', ar: 'المضيفون ورموز التفعيل', en: 'Hosts & activation codes', fr: 'Hôtes et codes', Page: Hosts },
   { path: '/admin/money-flow', ar: 'حركة الأموال', en: 'Money flow', fr: 'Flux d’argent', Page: MoneyFlow },
   { path: '/admin/money', ar: 'الصرف والاسترداد', en: 'Payouts & refunds', fr: 'Versements', Page: Money },
   { path: '/admin/sr/incidents', ar: 'الحوادث', en: 'Incidents', fr: 'Incidents', Page: Incidents },
@@ -42,6 +44,7 @@ const ITEMS: Item[] = [
   { path: '/admin/sr/business-accounts', ar: 'حسابات الأعمال', en: 'Business accounts', fr: 'Comptes entreprise', Page: Business },
 ]
 const LANGS: Lang[] = ['ar', 'en', 'fr']
+const STAY_SITE = 'https://stay.rezekme.com'
 
 export function App() {
   const [lang, setLang] = useState<Lang>(() => getInitialLanguage())
@@ -62,8 +65,19 @@ export function App() {
   const basePath = path.split('?')[0]
   const current = ITEMS.find((i) => basePath === i.path || (i.path === '/admin/customers' && basePath.startsWith('/admin/customers/')))
 
-  // Unknown or empty paths land on the live rides screen.
-  useEffect(() => { if (session && !current) navigate('/admin/sr/rides') }, [session, current])
+  // Shared admin pages link a stay's "Details" to /listing/:id. The public stay page lives on the Stays
+  // site, so open it there (new tab) and stay on the review screen. Other unknown or empty paths land
+  // on the live rides screen.
+  const listingLink = basePath.match(/^\/listing\/([^/]+)$/)
+  useEffect(() => {
+    if (!session || current) return
+    if (listingLink) {
+      window.open(`${STAY_SITE}/#/listing/${encodeURIComponent(listingLink[1])}`, '_blank', 'noopener')
+      navigate('/admin/review')
+      return
+    }
+    navigate('/admin/sr/rides')
+  }, [session, current, listingLink?.[1]])
 
   const shell = (children: React.ReactNode) => (
     <div dir={lang === 'ar' ? 'rtl' : 'ltr'} style={S.root}>

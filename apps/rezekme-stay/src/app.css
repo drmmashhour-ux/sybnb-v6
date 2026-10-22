@@ -154,7 +154,7 @@ body {
   border-top: 1px solid var(--str-line);
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   inset-inline: 0;
   padding-bottom: env(safe-area-inset-bottom);
   position: fixed;

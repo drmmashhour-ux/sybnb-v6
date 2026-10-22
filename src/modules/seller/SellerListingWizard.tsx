@@ -3,7 +3,7 @@ import { GridSpecFields } from './GridSpecFields'
 import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
-import { BrandLogo } from '../../shared/brand'
+import { BrandLogo, BRAND_NAME, STAYS_ONLY } from '../../shared/brand'
 import { acceptListingAgreement, createAndSubmitPrototypeListing, createListingAuction, fetchMyIdDocumentStatus, getStoredSellerSession, submitHostIdDocument, uploadPaymentProofFile, type IdDocumentStatus } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGroups, sellerRealEstateFilterGroups, type VisualFilterSelection } from '../../engines/filters'
@@ -94,7 +94,7 @@ const STEPS: WizardStep[] = [
   {
     id: 'review',
     title: { ar: 'المراجعة والإرسال', en: 'Review and submit', fr: 'Vérification et envoi' },
-    helper: { ar: 'تأكد من البيانات قبل إرسالها لفريق SYBNB.', en: 'Confirm details before sending to the SYBNB team.', fr: 'Confirmez les informations avant de les envoyer à l’équipe SYBNB.' },
+    helper: { ar: `تأكد من البيانات قبل إرسالها لفريق ${BRAND_NAME}.`, en: `Confirm details before sending to the ${BRAND_NAME} team.`, fr: `Confirmez les informations avant de les envoyer à l’équipe ${BRAND_NAME}.` },
   },
 ]
 
@@ -171,7 +171,8 @@ export function SellerListingWizard({ lang }: Props) {
   const bannerSlots = adFileSlots.filter((item) => item.id !== 'documents')
   const draft = useMemo(() => loadDraft(), [])
   const [stepIndex, setStepIndex] = useState(0)
-  const [division, setDivision] = useState<ListingDivision>(draft.division || 'STAYS')
+  // Rezekme Stay (STAYS_ONLY): hosts list daily stays only; the division picker is hidden.
+  const [division, setDivision] = useState<ListingDivision>(STAYS_ONLY ? 'STAYS' : draft.division || 'STAYS')
   const [selectedType, setSelectedType] = useState(draft.selectedType || PROPERTY_TYPES[0].en)
   const [title, setTitle] = useState(draft.title ?? '')
   const [description, setDescription] = useState(draft.description ?? '')
@@ -399,7 +400,7 @@ export function SellerListingWizard({ lang }: Props) {
           // Leaving this as the property-flow's default 'STAYS' meant an ad could reach
           // PENDING_REVIEW/APPROVED without the required plan payment ever being verified.
           division: isAdvertisingFlow ? 'MARKETPLACE' : division,
-          titleAr: title || 'إعلان SYBNB جديد',
+          titleAr: title || `إعلان ${BRAND_NAME} جديد`,
           titleEn: title,
           description,
           priceMinor: toMinor(price),
@@ -570,7 +571,7 @@ export function SellerListingWizard({ lang }: Props) {
         <div className="seller-wizard-body">
           {activeStep.id === 'basics' && (
             <div className="seller-wizard-section">
-              {!isAdvertisingFlow && (
+              {!isAdvertisingFlow && !STAYS_ONLY && (
                 <TouchChoiceGroup
                   active={DIVISION_OPTIONS.find((item) => item.value === division)?.[lang] || ''}
                   items={DIVISION_OPTIONS.map((item) => item[lang])}
@@ -836,7 +837,7 @@ export function SellerListingWizard({ lang }: Props) {
               )}
               {division === 'STAYS' && (
                 <div className="seller-wide-field seller-money-note">
-                  {pick(lang, 'تخصم SYBNB عمولة خدمة 15% من إجمالي قيمة الحجز (عدا رسوم الحماية) من مستحقاتك عند كل حجز مكتمل.', 'SYBNB deducts a 15% service commission of the total booking amount (excluding the protection fee) from your payout on every completed booking.', 'SYBNB déduit de votre versement une commission de service de 15 % du montant total de la réservation (hors frais de protection) pour chaque réservation terminée.')}
+                  {pick(lang, `تخصم ${BRAND_NAME} عمولة خدمة 15% من إجمالي قيمة الحجز (عدا رسوم الحماية) من مستحقاتك عند كل حجز مكتمل.`, `${BRAND_NAME} deducts a 15% service commission of the total booking amount (excluding the protection fee) from your payout on every completed booking.`, `${BRAND_NAME} déduit de votre versement une commission de service de 15 % du montant total de la réservation (hors frais de protection) pour chaque réservation terminée.`)}
                 </div>
               )}
               <div className="seller-wide-field">
@@ -974,7 +975,7 @@ export function SellerListingWizard({ lang }: Props) {
                   onChange={(event) => setAgreementAccepted(event.target.checked)}
                 />
                 <span>
-                  {pick(lang, 'أقر بأنني قرأت اتفاقية النشر الخاصة بمنصة SYBNB ووافقت عليها، وأن هويتي مقدمة للتحقق.', 'I have read and accept the SYBNB platform listing agreement, and my identity has been submitted for verification.', 'J’ai lu et j’accepte l’entente de publication de la plateforme SYBNB, et mon identité a été soumise pour vérification.')}
+                  {pick(lang, `أقر بأنني قرأت اتفاقية النشر الخاصة بمنصة ${BRAND_NAME} ووافقت عليها، وأن هويتي مقدمة للتحقق.`, `I have read and accept the ${BRAND_NAME} platform listing agreement, and my identity has been submitted for verification.`, `J’ai lu et j’accepte l’entente de publication de la plateforme ${BRAND_NAME}, et mon identité a été soumise pour vérification.`)}
                 </span>
               </label>
               {submitState === 'error' && (

@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../../shared/brand/brandName'
 import { useEffect, useMemo, useState } from 'react'
 import { ProjectUnitsBuilder } from '../seller/ProjectUnitsBuilder'
 import { priceFreshness } from '../../shared/listing/priceFreshness'
@@ -126,9 +127,9 @@ const copy = {
     openOperations: 'فتح العمليات',
     trustBadge: 'شارة الثقة',
     protection: 'حماية الطلبات',
-    termsTitle: 'شروط حماية SYBNB',
+    termsTitle: `شروط حماية ${BRAND_NAME}`,
     termsCopy: 'أتعهد بصحة الإعلان، جاهزية الاستضافة، احترام السعر والحجز، عدم طلب دفع خارجي، والالتزام بسياسة الإلغاء والنزاع.',
-    termsRequired: 'يجب قبول شروط SYBNB قبل تأكيد الحجز.',
+    termsRequired: `يجب قبول شروط ${BRAND_NAME} قبل تأكيد الحجز.`,
     markCheckedIn: 'تأكيد وصول الضيف',
     markCheckedOut: 'تأكيد مغادرة الضيف',
     checkedInAt: 'وصل الضيف',
@@ -233,9 +234,9 @@ const copy = {
     openOperations: 'Open operations',
     trustBadge: 'Trust badge',
     protection: 'Request protection',
-    termsTitle: 'SYBNB protection rules',
+    termsTitle: `${BRAND_NAME} protection rules`,
     termsCopy: 'I confirm the listing is accurate, the stay is ready, the price and booking will be honored, no outside payment will be requested, and cancellation/dispute rules apply.',
-    termsRequired: 'You must accept SYBNB rules before confirming the booking.',
+    termsRequired: `You must accept ${BRAND_NAME} rules before confirming the booking.`,
     markCheckedIn: 'Mark guest checked in',
     markCheckedOut: 'Mark guest checked out',
     checkedInAt: 'Guest checked in',
@@ -340,9 +341,9 @@ const copy = {
     openOperations: 'Ouvrir les opérations',
     trustBadge: 'Badge de confiance',
     protection: 'Protection des demandes',
-    termsTitle: 'Règles de protection SYBNB',
+    termsTitle: `Règles de protection ${BRAND_NAME}`,
     termsCopy: 'Je confirme que l’annonce est exacte, que le logement est prêt, que le prix et la réservation seront respectés, qu’aucun paiement externe ne sera demandé et que les règles d’annulation et de litige s’appliquent.',
-    termsRequired: 'Vous devez accepter les règles SYBNB avant de confirmer la réservation.',
+    termsRequired: `Vous devez accepter les règles ${BRAND_NAME} avant de confirmer la réservation.`,
     markCheckedIn: 'Confirmer l’arrivée du voyageur',
     markCheckedOut: 'Confirmer le départ du voyageur',
     checkedInAt: 'Arrivée du voyageur',
@@ -663,7 +664,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
 
       <section style={styles.providerHealth}>
         <article style={styles.healthHero}>
-          <span>SYBNB · {verificationStatusText}</span>
+          <span>{BRAND_NAME} · {verificationStatusText}</span>
           <strong>{trustScore}%</strong>
           <small>{responseScore}% {pick(lang, 'معدل الاستجابة', 'response score', 'taux de réponse')}</small>
         </article>

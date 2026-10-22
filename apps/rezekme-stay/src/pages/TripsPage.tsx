@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
-import { fetchPrototypeOverview, getStoredGuestSession, type PlatformOverview } from '@platform/shared/api/platformApi'
+import { fetchPrototypeOverview, getStoredGuestSession, type PlatformOverview, resolveApiUrl } from '@platform/shared/api/platformApi'
 import { moneyText, statusText } from '@platform/shared/i18n/display'
 import { listingDisplayTitle } from '@platform/shared/listing/displayTitle'
 
@@ -61,7 +61,7 @@ export function TripsPage({ lang }: { lang: Lang }) {
       ) : (
         <div className="str-list">
           {trips.map((trip) => {
-            const photo = trip.listing?.media?.map((item) => item.url || item.src || item.assetUrl).find((value) => typeof value === 'string') as string | undefined
+            const photo = trip.listing?.media?.map((item) => mediaSrc(item.url || item.src || item.assetUrl)).find((value) => typeof value === 'string') as string | undefined
             return (
               <button key={trip.id} type="button" className="str-trip" onClick={() => (window.location.hash = `/booking/${trip.id}`)}>
                 <span className="str-trip-photo">{photo ? <img src={photo} alt="" loading="lazy" decoding="async" width={96} height={96} /> : null}</span>
@@ -80,4 +80,10 @@ export function TripsPage({ lang }: { lang: Lang }) {
       )}
     </main>
   )
+}
+
+// Uploaded photos come back as server-relative signed URLs (/api/storage/...) when the API stores
+// files itself; those must load from the API's origin, not this site's.
+function mediaSrc(value: unknown) {
+  return typeof value === 'string' && value ? resolveApiUrl(value) : value
 }

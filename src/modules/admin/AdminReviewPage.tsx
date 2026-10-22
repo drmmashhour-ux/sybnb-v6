@@ -28,7 +28,7 @@ import {
   type PlatformReviewQueue,
   type PlatformWalletGift,
 } from '../../shared/api/platformApi'
-import { BrandLogo } from '../../shared/brand'
+import { BrandLogo, BRAND_NAME } from '../../shared/brand'
 import { AdminAiAssistButton } from './AdminAiAssistButton'
 import { divisionText, listingDescriptionText, listingTitleText, moneyText, providerText, statusText } from '../../shared/i18n/display'
 
@@ -524,7 +524,7 @@ function ShortRentAdminCommandDashboard({
   const queueAdminMessage = (target: 'guest' | 'host') => {
     const message =
       target === 'guest'
-        ? isAr ? `رسالة للعميل: تم تحديث حالة الحجز ${selectedBookingRef}. تابع من حسابك داخل SYBNB.` : `Guest message: booking ${selectedBookingRef} status was updated. Continue from your SYBNB account.`
+        ? isAr ? `رسالة للعميل: تم تحديث حالة الحجز ${selectedBookingRef}. تابع من حسابك داخل ${BRAND_NAME}.` : `Guest message: booking ${selectedBookingRef} status was updated. Continue from your ${BRAND_NAME} account.`
         : isAr ? `رسالة للمضيف: تم تحديث حالة الحجز ${selectedBookingRef}. راجع لوحة المضيف قبل الصرف.` : `Host message: booking ${selectedBookingRef} status was updated. Review host dashboard before payout.`
     setAdminOutbox((current) => [
       {
@@ -1227,7 +1227,7 @@ function ShortRentAdminCommandDashboard({
               </span>
               <h2>{isAr ? 'مطابقة شام كاش' : 'Sham Cash match'}</h2>
             </div>
-            <FeeLine label={isAr ? 'المتوقع في SYBNB' : 'SYBNB expected'} value={moneyText(shamCashReconciliation.expectedMinor, 'SYP', lang)} />
+            <FeeLine label={isAr ? `المتوقع في ${BRAND_NAME}` : `${BRAND_NAME} expected`} value={moneyText(shamCashReconciliation.expectedMinor, 'SYP', lang)} />
             <FeeLine label={isAr ? 'حساب شام كاش' : 'Sham Cash account'} value={moneyText(shamCashReconciliation.accountMinor, 'SYP', lang)} />
             <FeeLine label={isAr ? 'الفرق' : 'Difference'} value={moneyText(shamCashReconciliation.differenceMinor, 'SYP', lang)} strong danger={!shamCashReconciliation.isMatched} />
           </article>
@@ -1239,7 +1239,7 @@ function ShortRentAdminCommandDashboard({
           <h2>{isAr ? 'محفظة المضيف والصرف' : 'Host wallet and payout'}</h2>
           <div style={commandStyles.walletTimeline}>
             <span>{isAr ? 'مدفوعات الضيف' : 'Guest paid'} <b>{moneyText(amountMinor, currency, lang)}</b></span>
-            <span>{isAr ? 'محمي داخل SYBNB' : 'Protected by SYBNB'} <b>{moneyText(amountMinor, currency, lang)}</b></span>
+            <span>{isAr ? `محمي داخل ${BRAND_NAME}` : `Protected by ${BRAND_NAME}`} <b>{moneyText(amountMinor, currency, lang)}</b></span>
             <span>{isAr ? 'موافقة الإدارة' : 'Admin approved'} <b>{isAr ? 'بانتظار الصرف' : 'Pending release'}</b></span>
             <span>{isAr ? 'أرباح المضيف' : 'Host payout'} <b>{moneyText(activeLedger.hostPayoutMinor, currency, lang)}</b></span>
           </div>
@@ -1522,7 +1522,7 @@ function ShamCashReconciliationPanel({
       </div>
       <div style={commandStyles.shamCashGrid}>
         <div style={commandStyles.moneyCommandCard}>
-          <small>{isAr ? 'المتوقع حسب SYBNB' : 'Expected by SYBNB'}</small>
+          <small>{isAr ? `المتوقع حسب ${BRAND_NAME}` : `Expected by ${BRAND_NAME}`}</small>
           <strong style={commandTone('gold')}>{moneyText(data.expectedMinor, 'SYP', lang)}</strong>
         </div>
         <div style={commandStyles.moneyCommandCard}>
@@ -1541,7 +1541,7 @@ function ShamCashReconciliationPanel({
       <div style={commandStyles.outcomeGrid}>
         <article style={commandStyles.outcomeCard}>
           <strong>{isAr ? 'إذا قبلت الإدارة' : 'If admin accepts'}</strong>
-          <p>{isAr ? 'تتحول الدفعة إلى محمية داخل SYBNB، يتأكد الحجز، تسجل عمولة المنصة، ويبقى صرف المضيف معلقا حتى انتهاء الإقامة.' : 'Payment becomes protected in SYBNB, booking is confirmed, platform commission is recorded, and host payout stays held until checkout.'}</p>
+          <p>{isAr ? `تتحول الدفعة إلى محمية داخل ${BRAND_NAME}، يتأكد الحجز، تسجل عمولة المنصة، ويبقى صرف المضيف معلقا حتى انتهاء الإقامة.` : `Payment becomes protected in ${BRAND_NAME}, booking is confirmed, platform commission is recorded, and host payout stays held until checkout.`}</p>
         </article>
         <article style={commandStyles.outcomeCard}>
           <strong>{isAr ? 'إذا رفضت الإدارة' : 'If admin refuses'}</strong>
@@ -1962,7 +1962,7 @@ function createShamCashReconciliation(realPayments: PlatformPaymentProof[], disp
     controlNote: hasExternalAccount
       ? (isMatched
         ? (isAr ? 'تمت المطابقة مع رصيد شام كاش المدخل. يمكن قبول الدفع بعد مراجعة الإدارة.' : 'Matched against the entered Sham Cash balance. Admin can approve after review.')
-        : (isAr ? 'يوجد فرق بين سجل SYBNB وحساب شام كاش. لا تقبل الدفع قبل حل الفرق.' : 'There is a difference between the SYBNB ledger and Sham Cash. Do not approve before resolving it.'))
+        : (isAr ? `يوجد فرق بين سجل ${BRAND_NAME} وحساب شام كاش. لا تقبل الدفع قبل حل الفرق.` : `There is a difference between the ${BRAND_NAME} ledger and Sham Cash. Do not approve before resolving it.`))
       : (isAr ? 'لا يوجد ربط حي مع شام كاش بعد. أدخل رصيد الحساب الحقيقي أو اربط API قبل قبول الدفع.' : 'No live Sham Cash feed is connected yet. Enter the real account balance or connect an API before approval.'),
     differenceMinor,
     expectedMinor,
@@ -2074,7 +2074,7 @@ function createAiCashMatchReview(isAr: boolean, missingAccount: boolean) {
     reasons: [
       missingAccount
         ? (isAr ? 'لا يوجد رصيد حساب شام كاش مؤكد للمطابقة.' : 'No confirmed Sham Cash account balance is available.')
-        : (isAr ? 'يوجد فرق بين سجل SYBNB وحساب شام كاش.' : 'SYBNB ledger and Sham Cash account do not match.'),
+        : (isAr ? `يوجد فرق بين سجل ${BRAND_NAME} وحساب شام كاش.` : `${BRAND_NAME} ledger and Sham Cash account do not match.`),
       isAr ? 'لا تقبل الدفع قبل تأكيد استلام المال فعليا.' : 'Do not approve payment before real money receipt is confirmed.',
       isAr ? 'يمكن طلب إثبات جديد أو تحديث رصيد شام كاش.' : 'Request new proof or update Sham Cash balance.',
     ],

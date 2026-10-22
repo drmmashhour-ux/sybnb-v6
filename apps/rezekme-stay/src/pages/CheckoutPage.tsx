@@ -10,8 +10,7 @@ import {
   getStoredGuestSession,
   type BookingQuote,
   type PlatformBooking,
-  type PlatformListing,
-} from '@platform/shared/api/platformApi'
+  type PlatformListing, resolveApiUrl } from '@platform/shared/api/platformApi'
 import { cancellationRuleText, freeCancellationLabel } from '@platform/shared/booking/cancellationPolicy'
 import { stayGuestAgreement } from '@platform/shared/booking/guestAgreement'
 import { divisionText, moneyText } from '@platform/shared/i18n/display'
@@ -82,7 +81,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
     .slice(0, 2)
     .join(isAr ? '، ' : ', ')
   const photo = listing
-    ? (listing.media || []).map((item) => item.url || item.src || item.assetUrl).find((value): value is string => typeof value === 'string')
+    ? (listing.media || []).map((item) => mediaSrc(item.url || item.src || item.assetUrl)).find((value): value is string => typeof value === 'string')
     : undefined
 
   const canConfirm = signedIn && hasDates && agreed && method !== '' && !blocked && quoteReason === '' && quoteState !== 'loading' && !submitting
@@ -569,3 +568,9 @@ const COPY = {
   ],
   genericError: ['حدث خطأ. حاول مرة أخرى.', 'Something went wrong. Try again.', 'Une erreur s’est produite. Réessayez.'],
 } as const satisfies Record<string, readonly [string, string, string]>
+
+// Uploaded photos come back as server-relative signed URLs (/api/storage/...) when the API stores
+// files itself; those must load from the API's origin, not this site's.
+function mediaSrc(value: unknown) {
+  return typeof value === 'string' && value ? resolveApiUrl(value) : value
+}

@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../../shared/brand/brandName'
 import { useEffect, useState, type FormEvent } from 'react'
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
@@ -109,7 +110,7 @@ export function HostJoinPage({ lang }: Props) {
       body: pick(lang, 'سجّل الدخول أو أنشئ حسابك، ثم أضف الصور والسعر والموقع.', 'Sign in or create your account, then add photos, price and location.', 'Connectez-vous ou créez votre compte, puis ajoutez photos, prix et emplacement.'),
     },
     {
-      title: pick(lang, 'المراجعة: فحص آلي + فريق SYBNB', 'Review: automatic check + SYBNB team', 'Vérification : contrôle automatique + équipe SYBNB'),
+      title: pick(lang, `المراجعة: فحص آلي + فريق ${BRAND_NAME}`, `Review: automatic check + ${BRAND_NAME} team`, `Vérification : contrôle automatique + équipe ${BRAND_NAME}`),
       body: pick(lang, 'نفحص الصور والعنوان والسعر آلياً، ثم يراجع فريقنا الإعلان. إن احتاج تعديلاً نخبرك بما يجب تصحيحه.', 'Photos, address and price are checked automatically, then our team reviews the listing. If it needs changes we tell you what to fix.', 'Photos, adresse et prix sont contrôlés automatiquement, puis notre équipe vérifie l’annonce. Si des corrections sont nécessaires, nous vous les indiquons.'),
     },
     {
@@ -122,7 +123,7 @@ export function HostJoinPage({ lang }: Props) {
     },
   ]
 
-  const headline = pick(lang, 'ابدأ الاستضافة على SYBNB', 'Start hosting on SYBNB', 'Devenez hôte sur SYBNB')
+  const headline = pick(lang, `ابدأ الاستضافة على ${BRAND_NAME}`, `Start hosting on ${BRAND_NAME}`, `Devenez hôte sur ${BRAND_NAME}`)
 
   return (
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
@@ -132,7 +133,7 @@ export function HostJoinPage({ lang }: Props) {
         <section className="host-join-head" style={styles.intro} aria-labelledby="host-join-title">
           <span style={styles.eyebrow}>{pick(lang, 'للمضيفين', 'For hosts', 'Pour les hôtes')}</span>
           <h1 id="host-join-title" style={styles.title}>
-            {view === 'hostPending' ? pick(lang, 'أنت الآن مضيف على SYBNB', 'You are now a host on SYBNB', 'Vous êtes maintenant hôte sur SYBNB') : headline}
+            {view === 'hostPending' ? pick(lang, `أنت الآن مضيف على ${BRAND_NAME}`, `You are now a host on ${BRAND_NAME}`, `Vous êtes maintenant hôte sur ${BRAND_NAME}`) : headline}
           </h1>
           <p style={styles.body}>
             {pick(

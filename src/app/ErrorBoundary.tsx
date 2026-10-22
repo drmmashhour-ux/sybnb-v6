@@ -1,3 +1,4 @@
+import { BRAND_NAME, IS_PLATFORM_BRAND } from '../shared/brand/brandName'
 import { Component } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
 import { getInitialLanguage } from '../engines/language/languageEngine'
@@ -63,9 +64,11 @@ export class ErrorBoundary extends Component<Props, State> {
           >
             {t.home}
           </button>
-          <a href="mailto:support@sybnb.app" style={{ color: '#8fa2ff', fontSize: 13 }}>support@sybnb.app</a>
+          <a href={`mailto:${SUPPORT_EMAIL}`} style={{ color: '#8fa2ff', fontSize: 13 }}>{SUPPORT_EMAIL}</a>
         </div>
       </main>
     )
   }
 }
+
+const SUPPORT_EMAIL = IS_PLATFORM_BRAND ? 'support@sybnb.app' : `support@${BRAND_NAME.toLowerCase()}.com`

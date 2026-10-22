@@ -150,7 +150,7 @@ function SignIn({ lang, onDone }: { lang: Lang; onDone: () => void }) {
   return (
     <main dir={lang === 'ar' ? 'rtl' : 'ltr'} style={S.page}>
       <h1 style={S.h1}>{t('سائق Rezekme', 'Rezekme Driver', 'Chauffeur Rezekme')}</h1>
-      <p style={S.muted}>{t('سجّل دخولك لتستقبل الرحلات.', 'Sign in to receive rides.', 'Connectez-vous pour recevoir des courses.')}</p>
+      <p style={S.muted}>{t('سجّل دخولك لتستقبل الرحلات. سائق جديد؟ أدخل بريدك واختر كلمة مرور لإنشاء حسابك، ثم أكمل طلبك (الهوية والسيارة).', 'Sign in to receive rides. New driver? Enter your email and choose a password to create your account, then finish your application (ID and vehicle).', 'Connectez-vous pour recevoir des courses. Nouveau chauffeur ? Saisissez votre e-mail et choisissez un mot de passe pour créer votre compte, puis terminez votre demande (pièce d’identité et véhicule).')}</p>
       <label style={S.label}>{t('البريد الإلكتروني', 'Email', 'Courriel')}</label>
       <input style={S.input} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       <label style={S.label}>{t('كلمة المرور', 'Password', 'Mot de passe')}</label>

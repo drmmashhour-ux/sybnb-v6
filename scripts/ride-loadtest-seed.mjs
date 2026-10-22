@@ -1,5 +1,5 @@
-// Rezekme Rides — SYNTHETIC load-test seed. ISOLATED databases only; refuses anything that looks like
-// production. Creates, in bulk:
+// Rezekme Rides — SYNTHETIC load-test seed. Local databases, or a marked staging branch (see
+// scripts/ride-loadtest-db-guard.mjs); refuses everything else. Creates, in bulk:
 //   - REGISTERED  plain accounts (default 1,000,000) to size the users table like a 1M-user platform
 //   - DRIVERS     fully approved, on-duty drivers spread over Damascus with fresh locations
 //   - RIDERS      riders with a funded wallet
@@ -12,17 +12,21 @@
 import { writeFileSync } from 'node:fs'
 import { db } from '../server/lib/prisma.mjs'
 import { issueUserSession } from '../server/lib/session-store.mjs'
+import { assertLoadTestDatabase } from './ride-loadtest-db-guard.mjs'
 
-const url = String(process.env.DATABASE_URL || '')
-if (!/127\.0\.0\.1|localhost/.test(url) || /neon\.tech|onrender|amazonaws/.test(url)) {
-  console.error('refusing: ride-loadtest-seed only runs against a local, isolated database')
-  process.exit(2)
-}
-const REGISTERED = Number(process.env.REGISTERED ?? 1_000_000)
+const prisma = db()
+// Local databases, or a MARKED staging branch with explicit confirmation (see ride-loadtest-db-guard.mjs).
+const target = await assertLoadTestDatabase(prisma, { script: 'ride-loadtest-seed' })
+// The 1M-row sizing default is for local runs; on a remote staging branch it costs storage, so it
+// must be asked for explicitly.
+const REGISTERED = Number(process.env.REGISTERED ?? (target.local ? 1_000_000 : 0))
 const DRIVERS = Number(process.env.DRIVERS ?? 2000)
 const RIDERS = Number(process.env.RIDERS ?? 5000)
 const OUT = process.env.OUT || '/tmp/ride-loadtest-tokens.json'
-const prisma = db()
+// Drivers start OFFLINE (stale location) unless DRIVERS_ONLINE_AT_SEED=1: a driver counts as online only
+// once the load generator sends its first location update, exactly like a real driver opening the app.
+// Otherwise dispatch would offer rides to seeded drivers that no simulated phone is answering.
+const LOC_AT = process.env.DRIVERS_ONLINE_AT_SEED === '1' ? 'now()' : "now() - interval '1 day'"
 
 // Damascus urban box (approx.): lat 33.47..33.56, lng 36.22..36.34
 const BOX = { lat0: 33.47, lat1: 33.56, lng0: 36.22, lng1: 36.34 }
@@ -31,7 +35,14 @@ const DOCS = ['LICENCE', 'CRIMINAL_RECORD', 'REGISTRATION', 'INSURANCE', 'MECHAN
 
 async function main() {
   const t0 = Date.now()
-  await prisma.$executeRawUnsafe(`delete from users where email like '%@load.rezekme.test'`)
+  // Retire earlier synthetic drivers/riders instead of deleting them: rides, ledger rows and the
+  // immutable admin audit log reference them. Retired accounts get an x-retired-* email (outside the
+  // d%/r% patterns used below) and their drivers go offline, so they never receive offers again.
+  await prisma.$executeRawUnsafe(`update driver_profiles set on_duty_at = null, last_location_updated_at = now() - interval '1 day'
+    where user_id in (select id from users where email like 'd%@load.rezekme.test')`)
+  await prisma.$executeRawUnsafe(`update users set email = 'x-retired-' || id || '@load.rezekme.test'
+    where email like 'd%@load.rezekme.test' or email like 'r%@load.rezekme.test'`)
+  if (REGISTERED > 0) await prisma.$executeRawUnsafe(`delete from users where email like 'u%@load.rezekme.test'`)
 
   // 1) registered accounts, in one set-based insert (fast; no per-row round trips)
   if (REGISTERED > 0) {
@@ -65,7 +76,7 @@ async function main() {
       on_duty_at, last_location_geo, last_location_updated_at, created_at, updated_at)
     select gen_random_uuid(), v.uid, 'LT-' || substr(v.uid::text, 1, 6), 'APPROVED', v.cat::"VehicleCategory", 'PASSED',
       now() + interval '1 year', now() + interval '1 year', 3, 3, 4,
-      now(), ST_SetSRID(ST_MakePoint(v.lng, v.lat), 4326), now(), now(), now()
+      now(), ST_SetSRID(ST_MakePoint(v.lng, v.lat), 4326), ${LOC_AT}, now(), now()
     from (values ${values}) as v(uid, lng, lat, cat)`).catch(async (e) => {
     // enum type names differ between databases created by Prisma; fall back to text casts
     if (!String(e.message).includes('does not exist')) throw e
@@ -75,7 +86,7 @@ async function main() {
         on_duty_at, last_location_geo, last_location_updated_at, created_at, updated_at)
       select gen_random_uuid(), v.uid, 'LT-' || substr(v.uid::text, 1, 6), 'APPROVED', v.cat, 'PASSED',
         now() + interval '1 year', now() + interval '1 year', 3, 3, 4,
-        now(), ST_SetSRID(ST_MakePoint(v.lng, v.lat), 4326), now(), now(), now()
+        now(), ST_SetSRID(ST_MakePoint(v.lng, v.lat), 4326), ${LOC_AT}, now(), now()
       from (values ${values}) as v(uid, lng, lat, cat)`)
   })
   await prisma.$executeRawUnsafe(`

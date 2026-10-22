@@ -53,6 +53,7 @@ import { handleWallet } from './routes/wallet.mjs'
 import { activateScheduledRides } from './lib/ride-schedule.mjs'
 import { runDispatchSweep, dispatchStats } from './lib/ride-dispatch.mjs'
 import { requestStarted, requestFinished, renderMetrics, metricsAuthorized } from './lib/metrics.mjs'
+import { isLoadTestTarget } from './lib/loadtest-target.mjs'
 import { availabilitySnapshotStats } from './lib/ride-no-driver.mjs'
 import { detectRideAnomalies } from './lib/ride-anomaly.mjs'
 import { runRevenueGuard } from './lib/revenue-guard.mjs'
@@ -226,6 +227,8 @@ const server = createServer(async (req, res) => {
         // STEP 5D: false until the first database clock sample (and again if the sample goes stale). Time-sensitive
         // privileged authorization fails closed (SECURITY_TIME_NOT_READY) while false; harmless reads keep working.
         securityTimeReady: securityTimeStatus().ready,
+        // true ONLY on a marked staging/test environment; the k6 scripts refuse to run otherwise.
+        loadTestTarget: db.ok ? await isLoadTestTarget() : false,
       })
     }
 

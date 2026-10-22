@@ -15,7 +15,7 @@ type Props = {
 
 const copy = {
   ar: {
-    title: 'متابعة رحلة سير',
+    title: 'متابعة رحلة Rezekme',
     subtitle: 'رابط متابعة مباشرة -- بدون الحاجة لحساب.',
     status: 'حالة الرحلة',
     driver: 'السائق',
@@ -24,7 +24,7 @@ const copy = {
     verifiedDriver: 'هوية موثقة',
   },
   en: {
-    title: 'Track an SR ride',
+    title: 'Track a Rezekme ride',
     subtitle: 'A live tracking link -- no account needed.',
     status: 'Ride status',
     driver: 'Driver',

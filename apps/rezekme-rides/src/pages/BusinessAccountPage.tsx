@@ -20,7 +20,7 @@ const copy = {
   ar: {
     back: 'العودة للرئيسية',
     title: 'إدارة الحساب التجاري',
-    subtitle: 'أضف الموظفين، وتابع استخدامهم لرحلات سير المحتسبة على حساب الشركة.',
+    subtitle: 'أضف الموظفين، وتابع استخدامهم لرحلات Rezekme المحتسبة على حساب الشركة.',
     notAdmin: 'هذا الحساب لا يدير حساباً تجارياً.',
     members: 'الأعضاء',
     addMemberPlaceholder: 'البريد الإلكتروني للموظف',
@@ -40,7 +40,7 @@ const copy = {
   en: {
     back: 'Back to landing',
     title: 'Manage Business Account',
-    subtitle: 'Add employees and track their SR ride usage billed to your company.',
+    subtitle: 'Add employees and track their Rezekme ride usage billed to your company.',
     notAdmin: 'This account does not manage a business account.',
     members: 'Members',
     addMemberPlaceholder: "Employee's email",
@@ -60,7 +60,7 @@ const copy = {
   fr: {
     back: 'Retour à l’accueil',
     title: 'Gérer le compte entreprise',
-    subtitle: 'Ajoutez des employés et suivez leur utilisation des courses SR facturées à votre entreprise.',
+    subtitle: 'Ajoutez des employés et suivez leur utilisation des courses Rezekme facturées à votre entreprise.',
     notAdmin: 'Ce compte ne gère aucun compte entreprise.',
     members: 'Membres',
     addMemberPlaceholder: 'Courriel de l’employé',

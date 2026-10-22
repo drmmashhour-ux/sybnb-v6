@@ -26,6 +26,9 @@ export type PlatformAuthSession = AuthResponse
 
 export type PlatformListing = {
   id: string
+  // Owner/staff preview of a stay that is not live yet (in review, rejected, or awaiting activation).
+  preview?: boolean
+  previewReason?: string
   ownerId: string
   division: string
   titleAr: string
@@ -1687,7 +1690,9 @@ export async function updateHostListingAvailability(
 // about to send a real booking request; letting them do that against fake data is worse than
 // showing the real error. See fetchApprovedListings for the same rule on the list view.
 export async function fetchPrototypeListing(listingId: string) {
-  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`)
+  // Signed in? Send the token so an owner (or staff) can preview their own stay before it is live.
+  const token = getStoredSellerSession()?.token || getStoredGuestSession()?.token || getStoredStaffSession()?.token || undefined
+  const response = await apiRequest<{ ok: true; listing: PlatformListing }>(`/api/listings/${listingId}`, { token })
   return response.listing
 }
 

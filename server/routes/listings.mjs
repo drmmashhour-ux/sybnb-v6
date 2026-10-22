@@ -657,7 +657,7 @@ export async function handleListings(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     await expireOldListings({ id: detailMatch[1] })
     const found = await db().listing.findFirst({
-      where: { id: detailMatch[1], status: 'APPROVED' },
+      where: { id: detailMatch[1] },
       include: {
         location: true,
         media: true,
@@ -670,10 +670,23 @@ export async function handleListings(req, res, url, context) {
         },
       },
     })
-    // Host verification: an unverified owner's stay is a plain 404 publicly (the owner still sees
-    // it through /api/host/*, admins through /api/admin/*). toPublicListing() exposes only the
-    // owner's id + displayName, never hostVerifiedAt.
-    const listing = isListingPubliclyVisible(found, found?.owner) ? found : null
+    // Host verification: an unverified owner's stay is a plain 404 publicly. toPublicListing()
+    // exposes only the owner's id + displayName, never hostVerifiedAt.
+    if (found && isListingPubliclyVisible(found, found.owner)) {
+      return json(res, 200, { ok: true, listing: toPublicListing(found) })
+    }
+    // Owner preview (2026-10-22): the owner (or staff) can open their own stay before it is live --
+    // in review, rejected, or approved but waiting for the activation code -- to check how guests
+    // will see it. Marked preview so the page shows a banner; booking stays closed (the quote and
+    // booking routes still require a publicly visible listing).
+    const privileged = Boolean(found && context?.user && (found.ownerId === context.user.id || context.roles?.includes('ADMIN') || context.roles?.includes('SUPPORT')))
+    if (privileged) {
+      return json(res, 200, {
+        ok: true,
+        listing: { ...toPublicListing(found), preview: true, previewReason: found.status !== 'APPROVED' ? found.status : 'HOST_NOT_ACTIVATED' },
+      })
+    }
+    const listing = null
     if (!listing) {
       const error = new Error('Listing not found.')
       error.statusCode = 404

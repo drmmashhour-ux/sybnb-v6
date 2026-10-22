@@ -9,17 +9,20 @@ import { pick, type Lang } from '@platform/engines/language/languageEngine'
  */
 const PHONE_W = 390
 const PHONE_H = 844
+// The admin is its own site (separate sign-in). Live rides page.
+const ADMIN_URL = ((import.meta.env.VITE_ADMIN_URL as string | undefined)?.trim() || 'https://rezekme-admin.vercel.app') + '/#/admin/sr/rides'
 
 export function SplitView({ lang }: { lang: Lang }) {
   const t = (ar: string, en: string, fr: string) => pick(lang, ar, en, fr)
   const base = window.location.pathname
-  const [mode, setMode] = useState<'pip' | 'side'>('pip')
+  const [mode, setMode] = useState<'three' | 'pip' | 'side'>('three')
   const [bigIsDriver, setBigIsDriver] = useState(true)
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 16, y: 70 })
   const drag = useRef<{ dx: number; dy: number } | null>(null)
 
   const client = <iframe title="client" src={`${base}#/ride`} style={S.frame} allow="geolocation" />
   const driver = <iframe title="driver" src={`${base}#/driver`} style={S.frame} allow="geolocation" />
+  const admin = <iframe title="admin" src={ADMIN_URL} style={S.frame} />
   const label = (isDriver: boolean) => (isDriver ? t('السائق', 'Driver', 'Chauffeur') : t('الراكب', 'Client', 'Client'))
 
   function down(e: RPointerEvent<HTMLDivElement>) {
@@ -40,16 +43,24 @@ export function SplitView({ lang }: { lang: Lang }) {
       <div style={S.bar}>
         <strong>Rezekme</strong>
         <span style={S.hint}>{t('شاشة الراكب وشاشة السائق معاً', 'Client and driver screens together', 'Écrans client et chauffeur ensemble')}</span>
-        <button type="button" style={S.btn} onClick={() => setMode(mode === 'pip' ? 'side' : 'pip')}>
-          {mode === 'pip' ? t('جنباً إلى جنب', 'Side by side', 'Côte à côte') : t('نافذة عائمة', 'Floating window', 'Fenêtre flottante')}
-        </button>
+        {(['three', 'pip', 'side'] as const).map((m) => (
+          <button key={m} type="button" style={{ ...S.btn, ...(mode === m ? S.btnOn : null) }} onClick={() => setMode(m)}>
+            {m === 'three' ? t('٣ شاشات + الإدارة', '3 screens + admin', '3 écrans + admin') : m === 'pip' ? t('نافذة عائمة', 'Floating window', 'Fenêtre flottante') : t('جنباً إلى جنب', 'Side by side', 'Côte à côte')}
+          </button>
+        ))}
         {mode === 'pip' && (
           <button type="button" style={S.btn} onClick={() => setBigIsDriver(!bigIsDriver)}>⇄ {t('تبديل', 'Swap', 'Inverser')}</button>
         )}
         <a href="#/ride" style={S.btn}>{t('خروج', 'Exit', 'Quitter')}</a>
       </div>
 
-      {mode === 'side' ? (
+      {mode === 'three' ? (
+        <div style={S.side}>
+          <figure style={S.fig}><figcaption style={S.cap}>{label(false)}</figcaption><div style={S.phone}>{client}</div></figure>
+          <figure style={S.fig}><figcaption style={S.cap}>{label(true)}</figcaption><div style={S.phone}>{driver}</div></figure>
+          <figure style={{ ...S.fig, width: 'min(560px, 100%)', flex: '1 1 420px' }}><figcaption style={S.cap}>{t('الإدارة', 'Admin', 'Admin')}</figcaption><div style={S.phone}>{admin}</div></figure>
+        </div>
+      ) : mode === 'side' ? (
         <div style={S.side}>
           <figure style={S.fig}><figcaption style={S.cap}>{label(false)}</figcaption><div style={S.phone}>{client}</div></figure>
           <figure style={S.fig}><figcaption style={S.cap}>{label(true)}</figcaption><div style={S.phone}>{driver}</div></figure>
@@ -78,6 +89,7 @@ const S: Record<string, CSSProperties> = {
   bar: { display: 'flex', gap: 8, alignItems: 'center', padding: '10px 16px', flexWrap: 'wrap' },
   hint: { color: '#bbb', fontSize: 13, flex: 1, minWidth: 120 },
   btn: { color: '#fff', background: 'transparent', fontWeight: 700, fontSize: 13, textDecoration: 'none', border: '1px solid #555', borderRadius: 999, padding: '6px 14px', cursor: 'pointer' },
+  btnOn: { background: '#fff', color: '#000' },
   side: { display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', padding: '0 16px 16px' },
   fig: { margin: 0, display: 'flex', flexDirection: 'column', gap: 6, width: `min(${PHONE_W}px, 100%)` },
   cap: { fontSize: 13, fontWeight: 700, color: '#ddd', textAlign: 'center' },

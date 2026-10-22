@@ -29,6 +29,39 @@
           "key": "Permissions-Policy",
           "value": "geolocation=(self), camera=(self), microphone=(self), payment=(self)"
         }
+      ],
+      "missing": [
+        {
+          "type": "host",
+          "value": "(admin\\.rezekme\\.com|rezekme-admin\\.vercel\\.app)"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "(admin\\.rezekme\\.com|rezekme-admin\\.vercel\\.app)"
+        }
+      ],
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self' https://rides.rezekme.com"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "geolocation=(self), camera=(self), microphone=(self), payment=(self)"
+        }
       ]
     }
   ]

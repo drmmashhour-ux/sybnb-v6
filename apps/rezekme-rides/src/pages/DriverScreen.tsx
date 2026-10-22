@@ -33,6 +33,7 @@ import { fetchDriverBase, fetchPayouts, requestPayout, verifyKeyCode, type Drive
 import { MapHero } from '../maps/MapHero'
 import { RecordingControls } from './RecordingControls'
 import { RouteViewer } from './RouteViewer'
+import { DriverNav } from './DriverNav'
 
 /**
  * Rezekme driver screen: the phone-sized view a driver sees (not the full SYBNB dashboard).
@@ -53,13 +54,6 @@ function money(minor: number | null | undefined, currency = 'USD') {
   }
 }
 
-/** Current Google Maps URL format; opens the Google Maps app (turn-by-turn) on a phone. */
-function navUrl(ride: PlatformRideRequest, toDropoff: boolean) {
-  const coords = toDropoff ? ride.dropoffCoords : ride.pickupCoords
-  const text = String((toDropoff ? ride.metadata.dropoff : ride.metadata.pickup) || '')
-  const destination = coords ? `${coords.lat},${coords.lng}` : text
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving&dir_action=navigate`
-}
 
 export function DriverScreen({ lang }: { lang: Lang }) {
   const [session, setSession] = useState(() => getStoredStaffSession('DRIVER'))
@@ -681,6 +675,12 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
   const [safetyOpen, setSafetyOpen] = useState(false)
   const [sosArm, setSosArm] = useState(false)
   const [sosState, setSosState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [navOpen, setNavOpen] = useState(false)
+  // Uber-style: navigation opens by itself when the driver has somewhere to go (accepted -> pickup, trip -> drop-off).
+  useEffect(() => {
+    if (ride.status === 'DRIVER_ASSIGNED' || ride.status === 'IN_PROGRESS') setNavOpen(true)
+    if (ride.status === 'DRIVER_ARRIVING') setNavOpen(false)
+  }, [ride.status])
 
   const verified = typeof ride.metadata.pickupVerifiedAt === 'string'
   const toDropoff = ride.status === 'IN_PROGRESS'
@@ -773,8 +773,29 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
         ? verified ? t('تم التأكد من الرمز', 'Code confirmed', 'Code confirmé') : t('بانتظار الراكب', 'Waiting for the rider', 'En attente du client')
         : t('الرحلة جارية', 'Trip in progress', 'Course en cours')
 
+  const navTarget = toDropoff ? ride.dropoffCoords : ride.pickupCoords
+  const navOn = navOpen && Boolean(navTarget) && ride.status !== 'DRIVER_ARRIVING'
   return (
     <>
+      {navOn && navTarget && (
+        <DriverNav
+          lang={lang}
+          me={me}
+          target={navTarget}
+          toDropoff={toDropoff}
+          pickup={ride.pickupCoords ?? null}
+          dropoff={ride.dropoffCoords ?? null}
+          riderName={ride.rider?.displayName || t('الراكب', 'Rider', 'Client')}
+          onClose={() => setNavOpen(false)}
+          action={
+            ride.status === 'DRIVER_ASSIGNED' ? (
+              <SlideButton disabled={busy} label={t('اسحب: وصلت', 'Slide: I’ve arrived', 'Glisser : je suis arrivé')} onDone={() => void run(() => markDriverArrived(ride.id), () => setNavOpen(false))} />
+            ) : ride.status === 'IN_PROGRESS' ? (
+              <SlideButton disabled={busy} label={t('اسحب لإنهاء الرحلة', 'Slide to complete trip', 'Glisser pour terminer')} onDone={() => void run(() => updatePrototypeDriverRideStatus(ride.id, 'COMPLETED'), () => { setNavOpen(false); onCompleted(ride.fareMinor ?? 0, ride.currency) })} />
+            ) : null
+          }
+        />
+      )}
       {(() => {
         const target = toDropoff ? ride.dropoffCoords : ride.pickupCoords
         const from = me
@@ -832,9 +853,11 @@ function Trip({ lang, ride, rate, onChanged, onCompleted }: {
           <span style={S.pill}>{money((ride.fareMinor ?? 0) * (1 - rate), ride.currency)}</span>
         </div>
         <Route ride={ride} />
-        <a style={S.navBtn} href={navUrl(ride, toDropoff)} target="_blank" rel="noreferrer">
-          🧭 {toDropoff ? t('الملاحة إلى الوجهة', 'Navigate to drop-off', 'Naviguer vers la destination') : t('الملاحة إلى الراكب', 'Navigate to pickup', 'Naviguer vers le client')}
-        </a>
+        {(toDropoff ? ride.dropoffCoords : ride.pickupCoords) && ride.status !== 'DRIVER_ARRIVING' && (
+          <button type="button" style={{ ...S.navBtn, border: 0, width: '100%' }} onClick={() => setNavOpen(true)}>
+            🧭 {toDropoff ? t('الملاحة إلى الوجهة', 'Navigate to drop-off', 'Naviguer vers la destination') : t('الملاحة إلى الراكب', 'Navigate to pickup', 'Naviguer vers le client')}
+          </button>
+        )}
       </div>
 
       {ride.status === 'DRIVER_ASSIGNED' && (

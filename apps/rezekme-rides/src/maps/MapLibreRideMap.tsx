@@ -34,7 +34,14 @@ export function MapLibreRideMap(props: RideMapProps) {
   function fit() {
     const map = mapRef.current
     if (!map) return
-    const points = fitTargets(latest.current)
+    const cur = latest.current
+    if (cur.follow && cur.driver) {
+      const d = driverPosRef.current || cur.driver
+      map.easeTo({ center: [d.lng, d.lat], zoom: 16.5, bearing: headingRef.current, pitch: 50, duration: 900 })
+      return
+    }
+    if (map.getPitch() !== 0 || map.getBearing() !== 0) map.easeTo({ pitch: 0, bearing: 0, duration: 300 })
+    const points = fitTargets(cur)
     if (points.length >= 2) {
       const b = new maplibregl.LngLatBounds()
       points.forEach((p) => b.extend([p.lng, p.lat]))
@@ -183,13 +190,13 @@ export function MapLibreRideMap(props: RideMapProps) {
     const from = driverPosRef.current
     if (!markers.current.driver) {
       const el = document.createElement('div')
-      el.innerHTML = carHtml(headingRef.current)
+      el.innerHTML = carHtml(latest.current.follow ? 0 : headingRef.current)
       carElRef.current = el
       markers.current.driver = new maplibregl.Marker({ element: el }).setLngLat([driver.lng, driver.lat]).addTo(map)
       driverPosRef.current = driver
     } else {
       const inner = carElRef.current?.firstElementChild as HTMLElement | null
-      if (inner) inner.style.transform = `rotate(${Math.round(headingRef.current)}deg)`
+      if (inner) inner.style.transform = `rotate(${Math.round(latest.current.follow ? 0 : headingRef.current)}deg)`
       if (!from || isFarJump(from, driver)) {
         markers.current.driver.setLngLat([driver.lng, driver.lat])
         driverPosRef.current = driver
@@ -200,16 +207,18 @@ export function MapLibreRideMap(props: RideMapProps) {
         })
       }
     }
-    if (phase && !interactedRef.current) fit()
+    if ((phase || latest.current.follow) && !interactedRef.current) fit()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, driver?.lat, driver?.lng])
 
   useEffect(() => {
     if (!ready) return
     interactedRef.current = false
+    const inner = carElRef.current?.firstElementChild as HTMLElement | null
+    if (inner) inner.style.transform = `rotate(${Math.round(props.follow ? 0 : headingRef.current)}deg)`
     fit()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, phase])
+  }, [ready, phase, props.follow])
 
   useEffect(() => {
     const map = mapRef.current

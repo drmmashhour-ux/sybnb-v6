@@ -13,13 +13,14 @@ type Props = {
   dropTarget?: DropTarget | null
   phase?: 'approach' | 'trip' | null
   route?: LatLng[] | null
+  follow?: boolean
   onPick?: (target: DropTarget, point: LatLng) => void
   recenterLabel: string
   loadingLabel: string
 }
 
 /** Ride map (MapLibre + OpenFreeMap, keyless) plus the round "recenter / my location" button. */
-export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, phase, route, onPick, recenterLabel, loadingLabel }: Props) {
+export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, phase, route, follow, onPick, recenterLabel, loadingLabel }: Props) {
   const [failed, setFailed] = useState(false)
   const [command, setCommand] = useState<MapCommand | null>(null)
   const [user, setUser] = useState<LatLng | null>(null)
@@ -51,7 +52,7 @@ export function RideMapView({ lang, pickup, dropoff, stops, driver, dropTarget, 
         </div>
       ) : (
         <Suspense fallback={<div style={styles.loading}>{loadingLabel}</div>}>
-          <MapLibreRideMap pickup={pickup} dropoff={dropoff} stops={stops} driver={driver} userLocation={user} dropTarget={dropTarget} onPick={onPick} command={command} phase={phase} route={route} onProviderFail={() => setFailed(true)} />
+          <MapLibreRideMap pickup={pickup} dropoff={dropoff} stops={stops} driver={driver} userLocation={user} dropTarget={dropTarget} onPick={onPick} command={command} phase={phase} route={route} follow={follow} onProviderFail={() => setFailed(true)} />
         </Suspense>
       )}
       <button type="button" aria-label={recenterLabel} title={recenterLabel} style={styles.recenter} onClick={recenter}>

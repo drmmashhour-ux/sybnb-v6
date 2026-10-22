@@ -46,3 +46,30 @@ export async function fetchRoadRoute(path: LatLng[], signal?: AbortSignal): Prom
     window.clearTimeout(timer)
   }
 }
+
+export type NavStep = { lat: number; lng: number; type: string; modifier: string; exit: number | null; name: string; distanceM: number }
+export type NavRoute = { points: LatLng[]; steps: NavStep[]; distanceM: number | null; durationS: number | null }
+
+/** Road route WITH turn-by-turn steps, for the in-app driver navigation. Not cached: it is re-asked as the car moves. */
+export async function fetchNavRoute(from: LatLng, to: LatLng, signal?: AbortSignal): Promise<NavRoute | null> {
+  const timeout = new AbortController()
+  const timer = window.setTimeout(() => timeout.abort(), 9000)
+  signal?.addEventListener('abort', () => timeout.abort())
+  try {
+    const pts = [from, to].map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join(';')
+    const response = await fetch(`${API_BASE_URL}/api/sr/route?pts=${encodeURIComponent(pts)}`, { signal: timeout.signal })
+    if (!response.ok) return null
+    const data = (await response.json()) as { points?: Array<[number, number]> | null; steps?: NavStep[]; distanceM?: number | null; durationS?: number | null }
+    if (!Array.isArray(data.points) || data.points.length < 2) return null
+    return {
+      points: data.points.map(([lat, lng]) => ({ lat, lng })),
+      steps: Array.isArray(data.steps) ? data.steps : [],
+      distanceM: typeof data.distanceM === 'number' ? data.distanceM : null,
+      durationS: typeof data.durationS === 'number' ? data.durationS : null,
+    }
+  } catch {
+    return null
+  } finally {
+    window.clearTimeout(timer)
+  }
+}

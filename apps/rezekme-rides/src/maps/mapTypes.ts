@@ -27,6 +27,8 @@ export interface RideMapProps {
   phase?: 'approach' | 'trip' | null
   /** Explicit route to draw (e.g. driver -> pickup). Pins stay pickup/dropoff. Omit for pickup -> stops -> dropoff. */
   route?: LatLng[] | null
+  /** Navigation mode: camera follows the driver, heading-up and tilted (in-app turn-by-turn). */
+  follow?: boolean
 }
 
 /** Neutral initial view when nothing is known yet: no country is baked in. */

@@ -67,12 +67,36 @@ async function viaGoogle(points, { key, fetchImpl, signal }) {
 
 async function viaOsrm(points, { base, fetchImpl, signal }) {
   const coords = points.map((p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';')
-  const r = await fetchImpl(`${base.replace(/\/+$/, '')}/route/v1/driving/${coords}?overview=full&geometries=geojson`, { signal })
+  const r = await fetchImpl(`${base.replace(/\/+$/, '')}/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true`, { signal })
   if (!r.ok) return null
   const route = (await r.json())?.routes?.[0]
   const line = route?.geometry?.coordinates
   if (!Array.isArray(line) || line.length < 2) return null
-  return { provider: 'osrm', coords: line.map(([lng, lat]) => [lat, lng]), distanceM: Number(route.distance) || null, durationS: Number(route.duration) || null }
+  return { provider: 'osrm', coords: line.map(([lng, lat]) => [lat, lng]), distanceM: Number(route.distance) || null, durationS: Number(route.duration) || null, steps: osrmSteps(route) }
+}
+
+// Turn-by-turn steps for the in-app driver navigation: one entry per maneuver (where it happens, what to do,
+// the street name and the distance driven after it). Bounded so a response stays small.
+function osrmSteps(route) {
+  const out = []
+  for (const leg of route?.legs || []) {
+    for (const step of leg?.steps || []) {
+      const m = step?.maneuver
+      const loc = m?.location
+      if (!Array.isArray(loc) || loc.length < 2) continue
+      out.push({
+        lat: Number(loc[1]),
+        lng: Number(loc[0]),
+        type: String(m.type || ''),
+        modifier: String(m.modifier || ''),
+        exit: Number.isFinite(m.exit) ? m.exit : null,
+        name: String(step.name || '').slice(0, 80),
+        distanceM: Math.round(Number(step.distance) || 0),
+      })
+      if (out.length >= 120) return out
+    }
+  }
+  return out
 }
 
 export async function lookupRoadRoute(points, { env = process.env, fetchImpl = globalThis.fetch, timeoutMs = 7000, now = Date.now } = {}) {
@@ -92,7 +116,7 @@ export async function lookupRoadRoute(points, { env = process.env, fetchImpl = g
       try { found = await attempt({ fetchImpl, signal: controller.signal }) } catch { found = null } finally { clearTimeout(timer) }
       if (found) break
     }
-    const value = found ? { provider: found.provider, points: thin(found.coords), distanceM: found.distanceM, durationS: found.durationS } : null
+    const value = found ? { provider: found.provider, points: thin(found.coords), distanceM: found.distanceM, durationS: found.durationS, steps: found.steps || [] } : null
     if (value) {
       if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value)
       cache.set(key, { value, until: now() + CACHE_TTL_MS })

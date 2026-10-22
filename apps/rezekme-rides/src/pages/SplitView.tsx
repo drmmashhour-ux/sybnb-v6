@@ -65,7 +65,7 @@ export function SplitView({ lang }: { lang: Lang }) {
               <span>⠿ {label(!bigIsDriver)}</span>
               <button type="button" style={S.mini} onClick={() => setBigIsDriver(!bigIsDriver)} aria-label={t('تبديل', 'Swap', 'Inverser')}>⇄</button>
             </div>
-            <div style={{ width: PHONE_W, height: PHONE_H, transform: `scale(${smallScale})`, transformOrigin: '0 0' }}>{bigIsDriver ? client : driver}</div>
+            <div dir="ltr" style={{ position: 'absolute', left: 0, top: 26, width: PHONE_W, height: PHONE_H, transform: `scale(${smallScale})`, transformOrigin: '0 0' }}>{bigIsDriver ? client : driver}</div>
           </div>
         </div>
       )}

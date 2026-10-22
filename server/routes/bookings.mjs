@@ -564,7 +564,7 @@ export async function handleBookings(req, res, url, context) {
     }
 
     const quote = isShortStay && checkIn && checkOut
-      ? await computeStayTotalMinor(listing, checkIn, checkOut)
+      ? await computeStayTotalMinor(listing, checkIn, checkOut, tx)
       : { totalMinor: listing.priceMinor, nights: 0, perNight: [] }
 
     return tx.booking.create({

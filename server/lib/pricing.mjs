@@ -22,13 +22,19 @@ function eachNight(checkIn, checkOut) {
 // (weekend/high-season pricing) wins over the listing's base price for that specific night.
 // Shared between the booking-quote endpoint and actual booking creation so a guest is never
 // charged something different from what they were quoted.
-export async function computeStayTotalMinor(listing, checkIn, checkOut) {
+// `client` lets a caller inside a transaction read with that transaction's connection. Booking
+// creation holds a per-listing advisory lock on its transaction connection; reading the price
+// overrides through a SECOND pooled connection meant that, with several guests racing for one
+// listing, every pooled connection could be held by a transaction waiting for the lock while the
+// lock holder waited for a free connection: requests failed after the pool timeout (P2024/P2028,
+// HTTP 500) instead of the losers getting a clean 409. Measured: 7 of 10 racing requests got 500.
+export async function computeStayTotalMinor(listing, checkIn, checkOut, client = db()) {
   const nights = eachNight(checkIn, checkOut)
   if (!nights.length) {
     return { totalMinor: listing.priceMinor, nights: 0, perNight: [] }
   }
 
-  const overrides = await db().listingAvailability.findMany({
+  const overrides = await client.listingAvailability.findMany({
     where: {
       listingId: listing.id,
       date: { gte: new Date(checkIn), lt: new Date(checkOut) },

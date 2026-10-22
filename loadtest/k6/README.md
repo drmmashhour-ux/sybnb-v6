@@ -11,6 +11,25 @@
 
 **Payments are test-only.** The seed gives every synthetic rider a synthetic wallet credit, and rides are paid from that wallet. The scripts never call Stripe and never send a card number, and the target API refuses to identify itself as a test target when a live Stripe key is configured.
 
+## Stays (STR)
+
+`stays.js` follows the same rules and safety checks. It uses tokens from `scripts/stay-loadtest-seed.mjs`.
+- **Browsing guests:** search, open a listing, calendar, price quote.
+- **Booking requests per minute:** calendar → quote → book → view → cancel. 20% target "hot" dates, so 409 conflicts are expected. Bookings stay unpaid and are cancelled, so no payment is made.
+
+| Profile | Tiers |
+|---|---|
+| `smoke` | 10 guests |
+| `staging-launch` | 50 → 300 guests |
+| `staging-step` | 300 → 2,000 guests |
+| `staging-soak` | 300 guests for 30 min |
+
+```bash
+LISTINGS=100000 GUESTS=3000 OUT=/tmp/stay-tokens.json node scripts/stay-loadtest-seed.mjs
+LOADTEST_ENV=local BASE_URL=http://127.0.0.1:3061 TOKENS_FILE=/tmp/stay-tokens.json k6 run loadtest/k6/stays.js
+node scripts/stay-loadtest-verify.mjs   # no overlapping bookings, no double payments
+```
+
 ## Safety: why it cannot run against production
 
 The script refuses to run unless all of these checks pass.

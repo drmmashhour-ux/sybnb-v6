@@ -114,6 +114,7 @@ Notes on the results:
 - **"Matched" counts:** rides created in the last few seconds of a run had no time to match, so they show as unmatched.
 - **The "before" runs** used Prisma's default pool of 5 connections; the "after" runs used `DB_POOL_SIZE=20`. With the dispatch fixes alone, still at pool 5, d500 already went from 41% errors to 0% (run `after-d500`: p95 ≤ 121 ms).
 - **What fails beyond d800:** CPU saturation of the shared box, with the API process's Prisma engine plus Postgres plus the generator all on two cores. Requests then queue for a pool connection and fail with `P2024`.
+- **The API CPU column** is `ps %cpu` sampled during the run, which is the process's average since it started. Treat it as indicative only.
 - **Correctness held at every tier, including overload:** 0 double assignments, 0 double debits or refunds, and 0 wallet drift.
 
 ## 5. Traffic model: from users to load

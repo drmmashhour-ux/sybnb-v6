@@ -7,7 +7,7 @@ import { requireAuth } from '../lib/auth-context.mjs'
 import { publicDisplayName } from '../lib/public-name.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
-import { expireOldListings, listingExpiryDate, PLAN_DURATION_DAYS } from '../lib/listing-lifecycle.mjs'
+import { expireOldListings, expireOldListingsThrottled, listingExpiryDate, PLAN_DURATION_DAYS } from '../lib/listing-lifecycle.mjs'
 import { normalizeBrowseCity, resolveListingCityName } from '../lib/listing-location.mjs'
 import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
 // Host verification (2026-10-08): stays of an owner without users.host_verified_at are not public.
@@ -202,7 +202,10 @@ export async function handleListings(req, res, url, context) {
 
   if (url.pathname === '/api/listings') {
     if (req.method === 'GET') {
-      await expireOldListings()
+      // Expiry sweep, at most once a minute per process (scale, 2026-10-22): it used to run an
+      // UPDATE over every approved listing on EVERY search. Correctness no longer depends on the
+      // sweep: the search below also excludes rows whose expiresAt has passed.
+      void expireOldListingsThrottled()
       const division = url.searchParams.get('division') || undefined
       // Accept English, slug, Arabic or French city labels; match case-insensitively.
       const city = normalizeBrowseCity(url.searchParams.get('city'))
@@ -306,6 +309,10 @@ export async function handleListings(req, res, url, context) {
       const PAGE_SIZE = 50
       const SCAN_BATCH_SIZE = 250
       const MAX_SCAN_BATCHES = 4 // safety cap: at most 1,000 rows scanned per request
+      // With attribute filters the candidates are checked in a second, id-bounded query (see the
+      // loop), so more candidates may be walked; still a fixed cap: at most 2,000 per request.
+      const MAX_FILTERED_SCAN_BATCHES = 8
+      const FIRST_BATCH_SIZE = 100
 
       // A real scale-readiness audit found this endpoint's *entire* result set was a single fixed
       // `take: 250` with no pagination anywhere -- confirmed the server never read a cursor/page
@@ -319,12 +326,28 @@ export async function handleListings(req, res, url, context) {
       let scanCursor = cursor
       const listings = []
       let hasMore = false
-      // Host verification: stays whose owner is not verified never appear. A to-one relation
-      // filter on listings.owner_id -> users (primary key), so no extra round trip per page.
-      const visibility = publicListingVisibilityWhere(division)
-      for (let batchNum = 0; batchNum < MAX_SCAN_BATCHES; batchNum++) {
-        const andConditions = [...attributeConditions]
-        if (Object.keys(visibility).length) andConditions.push(visibility)
+      // Host verification: stays whose owner is not verified never appear. Checked per row in the
+      // scan loop below with isListingPubliclyVisible() (same rule as the detail page), NOT as a
+      // join filter in SQL: with ~1M users and few verified hosts, Postgres estimated almost no rows
+      // would survive that join and switched from walking the (division, status, created_at) index
+      // to reading, joining and sorting EVERY approved listing -- 76 ms instead of 2.5 ms at 20k
+      // listings, growing linearly (measured, scale work 2026-10-22). The owner's verification
+      // timestamp is loaded with the batch (one extra IN-list query), never exposed.
+      //
+      // Attribute filters (bedrooms, amenities, property type...) live in the metadata JSON. Put in
+      // the same WHERE as the ordered scan, Postgres cannot estimate how many rows they keep, guesses
+      // "almost none", and again reads + sorts every listing in the city (60-120 ms at 20k listings,
+      // growing with the catalogue; measured 2026-10-22). So the scan walks candidates in sort order
+      // using only indexable conditions, and the JSON filters are applied by Postgres to just that
+      // batch of ids. Same rows, same order, same Prisma filter semantics; bounded cost per request.
+      const now = new Date()
+      const filtered = attributeConditions.length > 0
+      const batchLimit = filtered ? MAX_FILTERED_SCAN_BATCHES : MAX_SCAN_BATCHES
+      for (let batchNum = 0; batchNum < batchLimit; batchNum++) {
+        // first batch sized for a typical page (most rows qualify), later ones larger
+        const batchTake = batchNum === 0 && !filtered ? FIRST_BATCH_SIZE : SCAN_BATCH_SIZE
+        const andConditions = []
+        andConditions.push({ OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] })
         if (scanCursor) {
           andConditions.push({
             OR: [
@@ -341,18 +364,30 @@ export async function handleListings(req, res, url, context) {
             priceMinor: Object.keys(priceFilter).length ? priceFilter : undefined,
             AND: andConditions.length ? andConditions : undefined,
           },
-          include: { location: true, media: true },
+          // The scan reads only what it needs to decide (sort key, flags, visibility); full rows,
+          // locations and photos are loaded afterwards for the (at most 50) rows actually returned.
+          select: { id: true, [sortConfig.field]: true, status: true, division: true, metadata: true, owner: { select: { hostVerifiedAt: true } } },
           orderBy: [{ [sortConfig.field]: sortConfig.direction }, { id: sortConfig.direction }],
-          take: SCAN_BATCH_SIZE,
+          take: batchTake,
         })
         if (batch.length === 0) {
           hasMore = false
           break
         }
+        let matching = null
+        if (filtered) {
+          const hits = await db().listing.findMany({
+            where: { id: { in: batch.map((l) => l.id) }, AND: attributeConditions },
+            select: { id: true },
+          })
+          matching = new Set(hits.map((h) => h.id))
+        }
 
         let hitPageSize = false
         for (const listing of batch) {
-          if (listing.metadata?.advertising !== true && listing.metadata?.sold !== true) listings.push(listing)
+          if ((!matching || matching.has(listing.id)) && listing.metadata?.advertising !== true && listing.metadata?.sold !== true && isListingPubliclyVisible(listing, listing.owner)) {
+            listings.push(listing.id)
+          }
           scanCursor = { value: listing[sortConfig.field], id: listing.id }
           if (listings.length >= PAGE_SIZE) {
             hitPageSize = true
@@ -363,7 +398,7 @@ export async function handleListings(req, res, url, context) {
           hasMore = true
           break
         }
-        if (batch.length < SCAN_BATCH_SIZE) {
+        if (batch.length < batchTake) {
           // Fewer rows than requested came back: the dataset is exhausted, not just this batch.
           hasMore = false
           break
@@ -374,7 +409,15 @@ export async function handleListings(req, res, url, context) {
       }
 
       const nextCursor = hasMore && scanCursor ? encodeListingCursor(sort, scanCursor) : null
-      return json(res, 200, { ok: true, listings: listings.map(toPublicListing), nextCursor })
+      const rows = listings.length
+        ? await db().listing.findMany({
+          where: { id: { in: listings }, status: 'APPROVED' },
+          include: { location: true, media: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }] } },
+        })
+        : []
+      const byId = new Map(rows.map((r) => [r.id, r]))
+      const page = listings.map((id) => byId.get(id)).filter(Boolean)
+      return json(res, 200, { ok: true, listings: page.map(toPublicListing), nextCursor })
     }
 
     if (req.method === 'POST') {
@@ -675,7 +718,9 @@ export async function handleListings(req, res, url, context) {
         where: {
           listingId,
           checkIn: { not: null },
-          checkOut: { not: null },
+          // only stays that are not over yet: past bookings can never block a date the calendar
+          // shows, and returning all of them made this response grow forever with a listing's history
+          checkOut: { not: null, gt: from },
           // Decision 6 (2026-10-08): stale unpaid requests past their payment window (no live
           // proof) no longer show as booked, matching the booking-creation overlap check.
           ...dateBlockingBookingWhere(new Date(), bookingPolicySettings()),

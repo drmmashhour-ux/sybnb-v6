@@ -13,6 +13,7 @@ import { Prisma } from '@prisma/client'
 import { db } from './prisma.mjs'
 import { sendPushNotification } from './push-notifications.mjs'
 import { logRideEventSafe } from './ride-events.mjs'
+import { dutyBlockers } from '../routes/driver-base.mjs'
 
 // Env knobs, clamped to sane bounds so a bad deploy value can't disable dispatch or offer forever.
 function envInt(name, def, min, max) {
@@ -49,6 +50,9 @@ export async function findNextDriverForRide(ride, excludeIds = []) {
   // unconditionally below); the mechanical-inspection requirement is gated by the same env flag
   // SR_REQUIRE_VEHICLE_INSPECTION (default on -- only an explicit 'false'/'0' skips it).
   const inspectionRequired = !['false', '0'].includes(String(process.env.SR_REQUIRE_VEHICLE_INSPECTION ?? '').trim().toLowerCase())
+  // Default on; SR_DISPATCH_REQUIRE_DUTY=false only for local tests that do not seed duty/documents.
+  const requireDuty = !['false', '0'].includes(String(process.env.SR_DISPATCH_REQUIRE_DUTY ?? '').trim().toLowerCase())
+  const dutySql = requireDuty ? Prisma.sql`AND dp.on_duty_at IS NOT NULL` : Prisma.empty
   const inspectionSql = inspectionRequired
     ? Prisma.sql`AND dp.inspection_status = 'PASSED' AND (dp.inspection_expires_at IS NULL OR dp.inspection_expires_at > now())`
     : Prisma.empty
@@ -82,12 +86,22 @@ export async function findNextDriverForRide(ride, excludeIds = []) {
         WHERE ar.driver_id = dp.user_id
           AND ar.status IN ('DRIVER_ASSIGNED', 'DRIVER_ARRIVING', 'IN_PROGRESS')
       )
+      ${dutySql}
     ORDER BY dp.last_location_geo::geography <-> rr.pickup_geo::geography
-    LIMIT 1
+    LIMIT 8
   `)
-  const row = rows[0]
-  if (!row) return null
-  return { userId: row.userId, distanceM: row.distanceM == null ? null : Number(row.distanceM) }
+  // Offer only to a driver who could actually ACCEPT: the claim path (assertDriverOnDuty) refuses a
+  // driver who is off duty or has a missing/rejected/expired document, so offering to them just made
+  // the rider wait out the offer window for nothing. Same rule, checked here before offering.
+  for (const row of rows) {
+    if (requireDuty) {
+      const profile = await db().driverProfile.findUnique({ where: { userId: row.userId }, select: { vehicleCategory: true } })
+      const { blockers } = await dutyBlockers(row.userId, profile)
+      if (blockers.length) continue
+    }
+    return { userId: row.userId, distanceM: row.distanceM == null ? null : Number(row.distanceM) }
+  }
+  return null
 }
 
 // Offer the ride to the next eligible driver. No-op (returns {offered:false}) if the ride is already
@@ -120,7 +134,7 @@ export async function offerRideToNextDriver(rideId) {
   })
   sendPushNotification(next.userId, {
     title: 'New ride nearby',
-    body: 'A rider needs a driver — open SR to accept.',
+    body: 'A rider needs a driver — open Rezekme to accept.',
     url: '/driver',
   }).catch(() => {})
   // Safety Phase 1 (2026-10-10): record the auto-dispatch offer in the ride's black box. No human

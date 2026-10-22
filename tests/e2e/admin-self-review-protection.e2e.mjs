@@ -191,6 +191,8 @@ console.log('\n=== 4. RE-RUN: existing listing/paymentProof self-review protecti
   const legal = await call('GET', '/api/legal', null)
   const doc = legal.j.documents.find((d) => d.key === 'listing-agreement')
   await call('POST', '/api/legal/consent', AG, { documentKey: 'listing-agreement', version: doc.version })
+  // Stays need payout details before /submit (owner decision 2026-10-22).
+  await call('PUT', '/api/host/payout-method', AG, { type: 'SHAM_CASH', shamCashNumber: '0999000000', accountName: 'E2E Host' })
 
   const listingRes = await call('POST', '/api/listings', AG, { division: 'STAYS', titleAr: 'اختبار مراجعة ذاتية', priceMinor: 100000, currency: 'SYP', metadata: {} })
   const listingId = listingRes.j?.listing?.id
@@ -241,6 +243,8 @@ console.log('\n=== 5. THE 4 MONEY-MOVING ENDPOINTS OUTSIDE THE REVIEW-QUEUE SYST
   const hostLegal = await call('GET', '/api/legal', null)
   const hostLegalDoc = hostLegal.j.documents.find((d) => d.key === 'listing-agreement')
   await call('POST', '/api/legal/consent', H, { documentKey: 'listing-agreement', version: hostLegalDoc.version })
+  // Stays need payout details before /submit (owner decision 2026-10-22).
+  await call('PUT', '/api/host/payout-method', H, { type: 'SHAM_CASH', shamCashNumber: '0999000000', accountName: 'E2E Host' })
   const secondListing = await call('POST', '/api/listings', H, { division: 'STAYS', titleAr: 'استضافة اختبار الاسترداد', priceMinor: 150000, currency: 'SYP', instantBookEnabled: true })
   const secondListingId = secondListing.j?.listing?.id
   await call('PATCH', `/api/listings/${secondListingId}/submit`, H)

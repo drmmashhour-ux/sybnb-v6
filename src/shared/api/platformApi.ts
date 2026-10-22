@@ -3695,6 +3695,12 @@ export type BookingQuote = {
   commissionMinor: number
   hostShareMinor: number
   currency: string
+  // Variable pricing (2026-10-22): stayMinor is already after the discount.
+  staySubtotalMinor?: number
+  stayDiscountMinor?: number
+  stayDiscountPct?: number
+  stayDiscountKind?: 'WEEKLY' | 'MONTHLY' | null
+  perNight?: Array<{ date: string; priceMinor: number; basis: 'base' | 'weekend' | 'custom'; season?: string; upliftPct?: number }>
   bookable: boolean
   reason?: string
 }
@@ -4964,4 +4970,71 @@ export async function saveSrPricing(input: { config: unknown; reason: string; ex
     token: session.token,
     body: input,
   })
+}
+
+// --- Stay variable pricing (2026-10-22) -----------------------------------------------------------
+export type HostStayPricing = {
+  weekendPriceMinor: number | null
+  weeklyDiscountPct: number
+  monthlyDiscountPct: number
+  seasonalOptOut: boolean
+}
+export type StaySeason = { id: string; name: string; from: string; to: string; upliftPct: number }
+export type StayPricingConfig = { weekendNights: number[]; seasons: StaySeason[] }
+export type StayPricingLimits = {
+  maxSeasons: number
+  maxSeasonUpliftPct: number
+  maxWeeklyDiscountPct: number
+  maxMonthlyDiscountPct: number
+  weeklyMinNights: number
+  monthlyMinNights: number
+  maxSeasonDays: number
+}
+export type StayPricingExample = { label: string; from: string; nights: number; subtotalMinor: number; discountMinor: number; totalMinor: number }
+
+export async function fetchHostListingPricing(listingId: string, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  return apiRequest<{ ok: true; pricing: HostStayPricing; basePriceMinor: number; currency: string; weekendNights: number[]; seasons: StaySeason[]; limits: StayPricingLimits }>(
+    `/api/host/listings/${encodeURIComponent(listingId)}/pricing`,
+    { token: session.token },
+  )
+}
+
+export async function saveHostListingPricing(listingId: string, pricing: Partial<HostStayPricing>, mode: HostDashboardMode = 'host') {
+  const session = await getHostDashboardSession(mode)
+  return apiRequest<{ ok: true; pricing: HostStayPricing }>(`/api/host/listings/${encodeURIComponent(listingId)}/pricing`, {
+    method: 'PATCH',
+    token: session.token,
+    body: pricing,
+  })
+}
+
+export async function fetchStayPricingAdmin() {
+  const session = ensureStaffConsoleSession()
+  return apiRequest<{ ok: true; stored: boolean; version: number; updatedAt: string | null; config: StayPricingConfig; defaults: StayPricingConfig; limits: StayPricingLimits; examples: StayPricingExample[] }>(
+    '/api/admin/stays/pricing',
+    { token: session.token },
+  )
+}
+
+export async function previewStayPricingAdmin(config: StayPricingConfig) {
+  const session = ensureStaffConsoleSession()
+  return apiRequest<{ ok: true; config: StayPricingConfig; examples: StayPricingExample[] }>('/api/admin/stays/pricing/preview', {
+    method: 'POST',
+    token: session.token,
+    body: { config },
+  })
+}
+
+export async function saveStayPricingAdmin(input: { config: StayPricingConfig; reason: string; expectedVersion?: number }) {
+  const session = ensureStaffConsoleSession()
+  return apiRequest<{ ok: true; version: number; config: StayPricingConfig; examples: StayPricingExample[] }>('/api/admin/stays/pricing', {
+    method: 'PUT',
+    token: session.token,
+    body: input,
+  })
+}
+
+export async function fetchStayPricingInfo() {
+  return apiRequest<{ ok: true; weekendNights: number[]; seasons: StaySeason[]; limits: StayPricingLimits }>('/api/stays/pricing-info')
 }

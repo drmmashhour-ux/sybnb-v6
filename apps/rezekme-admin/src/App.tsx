@@ -25,6 +25,7 @@ const Ops = page(() => import('@platform/modules/admin/AdminOperationsPage'), 'A
 const Promo = page(() => import('@platform/modules/sr/AdminPromoCodesPage'), 'AdminPromoCodesPage')
 const Pricing = page(() => import('@platform/modules/sr/AdminPricingPage'), 'AdminPricingPage')
 const Hosts = page(() => import('@platform/modules/admin/AdminHostsPage'), 'AdminHostsPage')
+const StayPricing = page(() => import('@platform/modules/admin/AdminStayPricingPage'), 'AdminStayPricingPage')
 const Business = page(() => import('@platform/modules/sr/AdminBusinessAccountsPage'), 'AdminBusinessAccountsPage')
 
 type Item = { path: string; ar: string; en: string; fr: string; Page: ComponentType<PageProps> }
@@ -35,11 +36,12 @@ const ITEMS: Item[] = [
   { path: '/admin/vehicles', ar: 'المركبات', en: 'Vehicles', fr: 'Véhicules', Page: Vehicles },
   { path: '/admin/review', ar: 'المراجعة: الإقامات والدفعات', en: 'Review: stays & payments', fr: 'Vérif. : séjours et paiements', Page: Review },
   { path: '/admin/hosts', ar: 'المضيفون ورموز التفعيل', en: 'Hosts & activation codes', fr: 'Hôtes et codes', Page: Hosts },
+  { path: '/admin/stays/pricing', ar: 'أسعار الإقامات والمواسم', en: 'Stay pricing & seasons', fr: 'Tarifs séjours et saisons', Page: StayPricing },
   { path: '/admin/money-flow', ar: 'حركة الأموال', en: 'Money flow', fr: 'Flux d’argent', Page: MoneyFlow },
   { path: '/admin/money', ar: 'الصرف والاسترداد', en: 'Payouts & refunds', fr: 'Versements', Page: Money },
   { path: '/admin/sr/incidents', ar: 'الحوادث', en: 'Incidents', fr: 'Incidents', Page: Incidents },
   { path: '/admin/customers', ar: 'العملاء', en: 'Customers', fr: 'Clients', Page: Customers },
-  { path: '/admin/sr/pricing', ar: 'الأسعار', en: 'Pricing', fr: 'Tarifs', Page: Pricing },
+  { path: '/admin/sr/pricing', ar: 'أسعار الرحلات', en: 'Ride pricing', fr: 'Tarifs courses', Page: Pricing },
   { path: '/admin/sr/promo-codes', ar: 'أكواد الخصم', en: 'Promo codes', fr: 'Codes promo', Page: Promo },
   { path: '/admin/sr/business-accounts', ar: 'حسابات الأعمال', en: 'Business accounts', fr: 'Comptes entreprise', Page: Business },
 ]

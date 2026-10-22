@@ -310,6 +310,8 @@ async function main() {
   const legal = await call('GET', '/api/legal', null)
   const agreement = legal.j?.documents?.find((d) => d.key === 'listing-agreement')
   await call('POST', '/api/legal/consent', HOST_T, { documentKey: 'listing-agreement', version: agreement.version })
+  // Stays need payout details before /submit (owner decision 2026-10-22).
+  await call('PUT', '/api/host/payout-method', HOST_T, { type: 'SHAM_CASH', shamCashNumber: '0999000000', accountName: 'E2E Host' })
 
   async function makeListing({ instantBook }) {
     const res = await call('POST', '/api/listings', await hostT(), {

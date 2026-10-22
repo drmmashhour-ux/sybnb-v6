@@ -9,7 +9,7 @@ import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { computeStayTotalMinor } from '../lib/pricing.mjs'
 import { expireOldListings, expireOldListingsThrottled, listingExpiryDate, PLAN_DURATION_DAYS } from '../lib/listing-lifecycle.mjs'
 import { normalizeBrowseCity, resolveListingCityName } from '../lib/listing-location.mjs'
-import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed } from '../lib/country.mjs'
+import { bookingPolicySettings, defaultCurrency, isCurrencyAllowed, payoutMethodConfig } from '../lib/country.mjs'
 // Host verification (2026-10-08): stays of an owner without users.host_verified_at are not public.
 import { isListingPubliclyVisible, publicListingVisibilityWhere } from '../lib/host-verification.mjs'
 // Owner decision 2026-10-09: automatic AI pre-check for the admin reviewer (advisory only).
@@ -196,6 +196,10 @@ export async function handleListings(req, res, url, context) {
       totalMinor: quote.totalMinor,
       nights: quote.nights,
       perNight: quote.perNight,
+      subtotalMinor: quote.subtotalMinor,
+      discountMinor: quote.discountMinor,
+      discountPct: quote.discountPct,
+      discountKind: quote.discountKind,
       currency: listing.currency,
     })
   }
@@ -911,6 +915,19 @@ export async function handleListings(req, res, url, context) {
       error.code = 'LISTING_AGREEMENT_REQUIRED'
       error.expose = true
       throw error
+    }
+    // Stays (owner decision 2026-10-22): the host must tell us where to send their money (Sham Cash
+    // or bank, from the active country's payout methods) before the listing goes to review, so a
+    // first booking never waits on missing payout details.
+    if (existing.division === 'STAYS' && existing.metadata?.advertising !== true) {
+      const payoutMethod = await db().hostPayoutMethod.findUnique({ where: { userId: context.user.id }, select: { type: true } })
+      if (!payoutMethod || !payoutMethodConfig()[payoutMethod.type]) {
+        const error = new Error('Add how you want to be paid (Sham Cash or bank account) before sending your stay for review.')
+        error.statusCode = 403
+        error.code = 'PAYOUT_METHOD_REQUIRED'
+        error.expose = true
+        throw error
+      }
     }
     const listing = await db().listing.update({
       where: { id: existing.id },

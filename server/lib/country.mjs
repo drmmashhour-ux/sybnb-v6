@@ -117,3 +117,16 @@ export function payoutMethodConfig(env = process.env) {
   const { profile } = loadCountryProfile(env)
   return profile?.payoutMethods || {}
 }
+
+// The active country's key (e.g. 'syria') and its stay-pricing defaults (weekend nights). Neutral
+// fallback when no profile is loaded: no weekend nights, so a host's weekend price never applies.
+export function activeCountryKey(env = process.env) {
+  const { profile } = loadCountryProfile(env)
+  return profile?.key || 'none'
+}
+
+export function stayPricingDefaults(env = process.env) {
+  const { profile } = loadCountryProfile(env)
+  const nights = profile?.stayPricing?.weekendNights
+  return { weekendNights: Array.isArray(nights) ? [...nights] : [], seasons: [] }
+}

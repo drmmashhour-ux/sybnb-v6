@@ -42,6 +42,8 @@ async function verifySellerKyc(token, userId) {
   const legal = await call('GET', '/api/legal', null)
   const doc = legal.j.documents.find((d) => d.key === 'listing-agreement')
   await call('POST', '/api/legal/consent', token, { documentKey: 'listing-agreement', version: doc.version })
+  // Stays need payout details before /submit (owner decision 2026-10-22).
+  await call('PUT', '/api/host/payout-method', token, { type: 'SHAM_CASH', shamCashNumber: '0999000000', accountName: 'E2E Host' })
 }
 console.log('=== 0. KYC + LEGAL-CONSENT BOOTSTRAP (required by the listings.mjs publish gate) ===')
 await verifySellerKyc(S1, seller1.id)

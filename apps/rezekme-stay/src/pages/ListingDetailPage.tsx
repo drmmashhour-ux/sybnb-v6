@@ -457,6 +457,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
         source: 'quote' as const,
         nights: standard.nights,
         stayMinor: standard.stayMinor,
+        discountMinor: standard.stayDiscountMinor || 0,
+        discountPct: standard.stayDiscountPct || 0,
+        discountKind: standard.stayDiscountKind || null,
         cleaningMinor: standard.cleaningMinor,
         taxesMinor: standard.taxesMinor,
         otherFeesMinor: standard.otherFeesMinor,
@@ -471,6 +474,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       source: 'local' as const,
       nights: stayQuote?.nights ?? 1,
       stayMinor: feesStandard.stayAmountMinor,
+      discountMinor: 0,
+      discountPct: 0,
+      discountKind: null,
       cleaningMinor: feesStandard.cleaningFeeMinor,
       taxesMinor: feesStandard.taxesMinor,
       otherFeesMinor: feesStandard.serviceFeeMinor + feesStandard.parkingFeeMinor + feesStandard.extraFeesMinor,
@@ -1119,9 +1125,17 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                       {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
                     </button>
                   </div>
-                  {!quoteLoading && (pricing.cleaningMinor > 0 || pricing.taxesMinor > 0 || pricing.otherFeesMinor > 0 || cancellationProtection) && (
+                  {!quoteLoading && (pricing.cleaningMinor > 0 || pricing.taxesMinor > 0 || pricing.otherFeesMinor > 0 || pricing.discountMinor > 0 || cancellationProtection) && (
                     <div style={styles.feeBreakdownRow}>
                       <span>{t.stayAmount}{colon}{moneyText(pricing.stayMinor, pricing.currency, lang)}</span>
+                      {pricing.discountMinor > 0 && (
+                        <span data-testid="stay-discount">
+                          {pricing.discountKind === 'MONTHLY'
+                            ? pick(lang, `يشمل خصم الإقامة الشهرية ${pricing.discountPct}٪`, `Includes ${pricing.discountPct}% monthly discount`, `Remise mensuelle de ${pricing.discountPct} % incluse`)
+                            : pick(lang, `يشمل خصم الإقامة الأسبوعية ${pricing.discountPct}٪`, `Includes ${pricing.discountPct}% weekly discount`, `Remise hebdomadaire de ${pricing.discountPct} % incluse`)}
+                          {colon}-{moneyText(pricing.discountMinor, pricing.currency, lang)}
+                        </span>
+                      )}
                       {pricing.cleaningMinor > 0 && (
                         <span>{t.cleaningFee}{colon}{moneyText(pricing.cleaningMinor, pricing.currency, lang)}</span>
                       )}

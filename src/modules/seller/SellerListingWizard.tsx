@@ -4,13 +4,15 @@ import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
 import { BrandLogo, BRAND_NAME, STAYS_ONLY } from '../../shared/brand'
-import { acceptListingAgreement, createAndSubmitPrototypeListing, createListingAuction, fetchMyIdDocumentStatus, getStoredSellerSession, submitHostIdDocument, uploadPaymentProofFile, type IdDocumentStatus } from '../../shared/api/platformApi'
+import { acceptListingAgreement, createAndSubmitPrototypeListing, fetchStayPricingInfo, createListingAuction, fetchMyIdDocumentStatus, getStoredSellerSession, submitHostIdDocument, uploadPaymentProofFile, type IdDocumentStatus } from '../../shared/api/platformApi'
 import type { CSSVars } from '../../shared/theme/cssVars'
 import { sellerCarFilterGroups, sellerMarketFilterGroups, sellerPropertyFilterGroups, sellerRealEstateFilterGroups, type VisualFilterSelection } from '../../engines/filters'
 import { getCity, getGovernorate, labelFor, SYRIA_GOVERNORATES } from '../../engines/search'
 import { selectedFilterLabels, VisualFilterPanel } from '../../shared/filters/VisualFilterPanel'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { ListingPhotoManager, ListingPreviewCard, type WizardPhoto } from './ListingPhotoManager'
+import { EMPTY_STAY_PRICING, StayPricingFields, stayPricingPayload, stayPricingProblem, type StayPricingDraft } from '../host/StayPricingFields'
+import { HostPayoutSetup } from '../host/HostPayoutSetup'
 import { PROXIMITY_TAGS, PROXIMITY_DIVISIONS } from '../../shared/listing/proximityTags'
 import { LocationPicker, type LatLng } from '../../shared/maps/LocationPicker'
 
@@ -217,6 +219,10 @@ export function SellerListingWizard({ lang }: Props) {
   const [photos, setPhotos] = useState<WizardPhoto[]>([])
   const photosUploading = photos.some((photo) => photo.status === 'uploading')
   const [photoUploadError, setPhotoUploadError] = useState('')
+  // Variable pricing (stays) and payout details (2026-10-22).
+  const [pricingDraft, setPricingDraft] = useState<StayPricingDraft>(EMPTY_STAY_PRICING)
+  const [weekendNights, setWeekendNights] = useState<number[]>([])
+  const [payoutReady, setPayoutReady] = useState(false)
   const [adFilesSent, setAdFilesSent] = useState(false)
   const [visualFilters, setVisualFilters] = useState<VisualFilterSelection>(
     draft.visualFilters || {
@@ -239,6 +245,18 @@ export function SellerListingWizard({ lang }: Props) {
   const [idFileName, setIdFileName] = useState('')
   const [idUploadError, setIdUploadError] = useState('')
   const idUploaded = idStatus === 'PENDING_REVIEW' || idStatus === 'APPROVED'
+
+  useEffect(() => {
+    let cancelled = false
+    fetchStayPricingInfo()
+      .then((info) => {
+        if (!cancelled) setWeekendNights(info.weekendNights)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -364,6 +382,16 @@ export function SellerListingWizard({ lang }: Props) {
         setSubmitError(pick(lang, 'ارفع مستندات البائع أو إثبات الملكية قبل إرسال الإعلان للمراجعة.', 'Upload seller documents or ownership proof before sending the listing for review.', 'Téléversez les documents du vendeur ou la preuve de propriété avant d’envoyer l’annonce pour vérification.'))
         return
       }
+      if (!isAdvertisingFlow && division === 'STAYS' && stayPricingProblem(pricingDraft, toNumber(price), lang)) {
+        setSubmitState('error')
+        setSubmitError(stayPricingProblem(pricingDraft, toNumber(price), lang))
+        return
+      }
+      if (!isAdvertisingFlow && division === 'STAYS' && !payoutReady) {
+        setSubmitState('error')
+        setSubmitError(pick(lang, 'أضف طريقة استلام أموالك (شام كاش أو حساب بنكي) قبل الإرسال.', 'Add how you want to be paid (Sham Cash or bank account) before submitting.', 'Indiquez comment être payé (Sham Cash ou compte bancaire) avant l’envoi.'))
+        return
+      }
       if (!isAdvertisingFlow && photosUploading) {
         setSubmitState('error')
         setSubmitError(pick(lang, 'انتظر حتى ينتهي رفع الصور ثم أرسل.', 'Wait for the photos to finish uploading, then submit.', 'Attendez la fin du téléversement des photos, puis envoyez.'))
@@ -442,6 +470,7 @@ export function SellerListingWizard({ lang }: Props) {
             lat: coords?.lat,
             lng: coords?.lng,
             virtualTourUrl: PROXIMITY_DIVISIONS.has(division) ? (virtualTourUrl.trim() || undefined) : undefined,
+            pricing: division === 'STAYS' && !isAdvertisingFlow ? stayPricingPayload(pricingDraft) : undefined,
           },
         })
         if (division === 'CARS' && saleMode === 'AUCTION') {
@@ -761,7 +790,7 @@ export function SellerListingWizard({ lang }: Props) {
           {activeStep.id === 'price' && !isAdvertisingFlow && (
             <div className="seller-wizard-section seller-form-grid">
               <label>
-                <span>{pick(lang, 'السعر المطلوب', 'Asking price', 'Prix demandé')}</span>
+                <span>{division === 'STAYS' ? pick(lang, 'سعر الليلة', 'Price per night', 'Prix par nuit') : pick(lang, 'السعر المطلوب', 'Asking price', 'Prix demandé')}</span>
                 <input dir="ltr" onChange={(event) => setPrice(event.target.value)} placeholder={currency === 'USD' ? '120' : '250000'} value={price} />
               </label>
               <label>
@@ -783,6 +812,11 @@ export function SellerListingWizard({ lang }: Props) {
                 <span>{pick(lang, 'الحمامات', 'Bathrooms', 'Salles de bain')}</span>
                 <input dir="ltr" onChange={(event) => setBathrooms(event.target.value)} placeholder="2" value={bathrooms} />
               </label>
+              {division === 'STAYS' && (
+                <div className="seller-wide-field">
+                  <StayPricingFields lang={lang} draft={pricingDraft} onChange={setPricingDraft} basePrice={toNumber(price)} currency={currency} weekendNights={weekendNights} />
+                </div>
+              )}
               {division === 'CARS' && (
                 <div className="seller-wide-field" style={{ display: 'grid', gap: 12, border: '1px solid #e4e9f2', borderRadius: 12, padding: 14 }}>
                   <strong>{pick(lang, 'طريقة البيع', 'How to sell', 'Mode de vente')}</strong>
@@ -1032,6 +1066,7 @@ export function SellerListingWizard({ lang }: Props) {
                   {!isAdvertisingFlow && <li>{selectedFilterLabels(sellerPropertyFilterGroups, visualFilters, lang).join(' · ')}</li>}
                 </ul>
               </div>
+              {!isAdvertisingFlow && division === 'STAYS' && <HostPayoutSetup lang={lang} onReadyChange={setPayoutReady} />}
               <label className="seller-agreement-check">
                 <input
                   type="checkbox"

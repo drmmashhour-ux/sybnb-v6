@@ -39,6 +39,11 @@ export const profile = {
   //   unpaidExpiryHours: an unpaid PAYMENT_PENDING request with no live proof expires after 48h.
   bookingPolicy: { timezoneOffsetMinutes: 180, fullRefundCutoffHours: 72, unpaidExpiryHours: 48 },
 
+  // Stay variable pricing (server/lib/stay-pricing.mjs): which nights count as "weekend" for a
+  // host's weekend price, as JS weekdays (0 = Sunday). Syria's weekend is Friday + Saturday, so the
+  // busy nights are Thursday (4) and Friday (5). Admin can change it from the stay pricing page.
+  stayPricing: { weekendNights: [4, 5] },
+
   // Host payout (withdrawal) methods available in this country, with the fields each requires.
   // Admin pays these outside the platform and marks the request PAID; nothing moves automatically.
   payoutMethods: {

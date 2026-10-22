@@ -22,6 +22,7 @@ import { handleBookings } from './routes/bookings.mjs'
 import { handleDriver } from './routes/driver.mjs'
 import { handleDriverBase } from './routes/driver-base.mjs'
 import { handleHost } from './routes/host.mjs'
+import { handleStayPricing } from './routes/stay-pricing.mjs'
 import { handleListings } from './routes/listings.mjs'
 import { handleAuctions, closeDueAuctions } from './routes/auctions.mjs'
 import { handleEngagement } from './routes/engagement.mjs'
@@ -343,6 +344,7 @@ async function dispatch(req, res, url, context) {
     handleMe,
     handleHostProfile,
     handleHostVerification,
+    handleStayPricing,
     handleHost,
     handleDriver,
     handleDriverBase,

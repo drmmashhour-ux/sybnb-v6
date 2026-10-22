@@ -82,6 +82,12 @@ export async function handleBookings(req, res, url, context) {
       quote: {
         nights: stay.nights,
         stayMinor: totals.stayMinor,
+        // Variable pricing breakdown: stayMinor above is already after the discount.
+        staySubtotalMinor: stay.subtotalMinor ?? totals.stayMinor,
+        stayDiscountMinor: stay.discountMinor || 0,
+        stayDiscountPct: stay.discountPct || 0,
+        stayDiscountKind: stay.discountKind || null,
+        perNight: (stay.perNight || []).map((night) => ({ date: night.date, priceMinor: night.priceMinor, basis: night.basis, ...(night.season ? { season: night.season, upliftPct: night.upliftPct } : {}) })),
         cleaningMinor: totals.cleaningMinor,
         taxesMinor: totals.taxesMinor,
         otherFeesMinor: totals.otherFeesMinor,
@@ -576,7 +582,12 @@ export async function handleBookings(req, res, url, context) {
         checkOut,
         amountMinor: quote.totalMinor,
         currency: listing.currency,
-        metadata: { ...buildBookingMetadata(body, listing, quote.totalMinor), ...(guestCount ? { guests: guestCount } : {}) },
+        metadata: {
+          ...buildBookingMetadata(body, listing, quote.totalMinor),
+          ...(guestCount ? { guests: guestCount } : {}),
+          // What the variable pricing did, kept on the booking for support/audit (informational).
+          ...(quote.nights ? { stayPricing: { subtotalMinor: quote.subtotalMinor, discountMinor: quote.discountMinor || 0, discountKind: quote.discountKind || null, discountPct: quote.discountPct || 0, seasonNights: (quote.perNight || []).filter((night) => night.season).length, weekendNights: (quote.perNight || []).filter((night) => night.basis === 'weekend').length } } : {}),
+        },
       },
     })
   })

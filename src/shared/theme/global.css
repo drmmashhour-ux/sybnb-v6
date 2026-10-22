@@ -8785,3 +8785,31 @@ a {
 .listing-preview-strip img { width: 72px; height: 54px; object-fit: cover; border-radius: 6px; flex: 0 0 auto; }
 .listing-preview-edit { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 @media (max-width: 560px) { .listing-preview-body { grid-template-columns: 1fr; } }
+
+/* Stay variable pricing fields + "How we pay you" (listing wizard, host pricing page). */
+.stay-pricing-fields, .host-payout-setup { display: grid; gap: 10px; border: 1px solid rgba(255,255,255,.16); border-radius: 12px; padding: 14px; background: #0f172a; color: #f1f5f9; }
+.stay-pricing-fields > p, .host-payout-setup > p { margin: 0; color: #cbd5e1; font-size: 14px; }
+.stay-pricing-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.stay-pricing-grid label, .host-payout-form label { display: grid; gap: 6px; font-size: 14px; color: #e2e8f0; }
+.stay-pricing-grid input, .host-payout-form input { min-height: 42px; border-radius: 8px; border: 1px solid rgba(255,255,255,.22); background: #020617; color: #f8fafc; padding: 0 10px; font: inherit; }
+.stay-pricing-check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: #e2e8f0; }
+.stay-pricing-check input { margin-top: 3px; width: 18px; height: 18px; flex: 0 0 auto; }
+.stay-pricing-example { margin: 0; color: #e2e8f0; }
+.stay-pricing-note { margin: 0; font-size: 13px; color: #94a3b8; }
+.stay-pricing-problem { margin: 0; color: #ff8aa0; font-weight: 700; }
+.stay-pricing-ok { margin: 0; color: #34d399; font-weight: 700; }
+.stay-pricing-seasons { margin-top: 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 12px; padding: 12px; background: #0f172a; color: #f1f5f9; }
+.stay-pricing-seasons ul { margin: 6px 0 0; padding-inline-start: 18px; }
+.host-payout-setup { margin-bottom: 16px; }
+.host-payout-saved { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; color: #34d399; font-weight: 700; }
+.host-payout-form { display: grid; gap: 10px; }
+.host-payout-kinds { display: flex; gap: 8px; flex-wrap: wrap; }
+.host-payout-kinds button { min-height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.25); background: #1e293b; color: #f1f5f9; font-weight: 800; cursor: pointer; }
+.host-payout-kinds button.active { background: #2563eb; border-color: #2563eb; }
+.host-payout-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.stay-pricing-fields label.stay-pricing-check { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; }
+.stay-pricing-fields label.stay-pricing-check span { flex: 1 1 auto; }
+.stay-pricing-grid label { min-width: 0; align-content: end; }
+.stay-pricing-grid input, .host-payout-form input { width: 100%; box-sizing: border-box; min-width: 0; }
+.host-pricing-page .seller-secondary-button { width: auto; padding: 0 16px; min-height: 40px; }
+.stay-pricing-fields .stay-pricing-check input[type='checkbox'] { width: 18px; height: 18px; min-height: 0; padding: 0; margin: 3px 0 0; flex: 0 0 18px; }

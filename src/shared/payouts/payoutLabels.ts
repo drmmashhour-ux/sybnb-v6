@@ -1,4 +1,5 @@
 import { pick, type Lang } from '../../engines/language/languageEngine'
+import { BRAND_NAME } from '../brand/brandName'
 import type { HostPayoutMethod, PayoutMethodType, PayoutRequestStatus } from '../api/platformApi'
 
 // Shared labels for host payout methods / withdrawal requests (host payouts page + admin money desk).
@@ -6,7 +7,7 @@ import type { HostPayoutMethod, PayoutMethodType, PayoutRequestStatus } from '..
 export function methodTypeLabel(type: PayoutMethodType | string | undefined, lang: Lang) {
   if (type === 'SHAM_CASH') return pick(lang, 'شام كاش', 'Sham Cash', 'Sham Cash')
   if (type === 'BANK') return pick(lang, 'تحويل بنكي', 'Bank transfer', 'Virement bancaire')
-  if (type === 'CASH_OFFICE') return pick(lang, 'نقداً من مكتب SYBNB', 'Cash at a SYBNB office', 'Espèces dans un bureau SYBNB')
+  if (type === 'CASH_OFFICE') return pick(lang, `نقداً من مكتب ${BRAND_NAME}`, `Cash at a ${BRAND_NAME} office`, `Espèces dans un bureau ${BRAND_NAME}`)
   return '-'
 }
 

@@ -796,7 +796,20 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
                 <span style={{ ...styles.statusPill, ...statusTone }}>{statusLabel}</span>
                 <span>{listingViewCount(listing) ?? '—'}</span>
                 <span>{listingInquiryCount(listing, visibleRequests)}</span>
-                <button style={styles.editButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>✎</button>
+                <span style={{ display: 'flex', gap: 6 }}>
+                  <button style={styles.editButton} onClick={() => (window.location.hash = `/listing/${listing.id}`)}>✎</button>
+                  {listing.division === 'STAYS' && (
+                    <button
+                      style={styles.editButton}
+                      data-testid="host-listing-pricing"
+                      title={pick(lang, 'التسعير', 'Pricing', 'Tarifs')}
+                      aria-label={pick(lang, 'التسعير', 'Pricing', 'Tarifs')}
+                      onClick={() => (window.location.hash = `/host/pricing/${listing.id}`)}
+                    >
+                      $
+                    </button>
+                  )}
+                </span>
                 <button
                   style={styles.editButton}
                   disabled={status === 'saving' && activeListingId === listing.id}
@@ -1321,8 +1334,8 @@ const styles: Record<string, CSSProperties> = {
   activeListings: { display: 'grid', gap: 16 },
   sectionHead: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'end' },
   hostTable: { border: '1px solid #242735', borderRadius: 8, background: '#101016', overflowX: 'auto', overflowY: 'hidden' },
-  hostTableHead: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px 70px', gap: 12, padding: '14px 18px', borderBottom: '1px solid #242735', color: '#8d92a2', fontSize: 13, minWidth: 780 },
-  hostTableRow: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 70px 70px', gap: 12, alignItems: 'center', padding: '18px', borderBottom: '1px solid #242735', minWidth: 780 },
+  hostTableHead: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 96px 60px', gap: 12, padding: '14px 18px', borderBottom: '1px solid #242735', color: '#8d92a2', fontSize: 13, minWidth: 780 },
+  hostTableRow: { display: 'grid', gridTemplateColumns: 'minmax(220px, 2fr) minmax(120px, 1fr) minmax(120px, 1fr) 90px 90px 96px 60px', gap: 12, alignItems: 'center', padding: '18px', borderBottom: '1px solid #242735', minWidth: 780 },
   tableQuality: { height: 7, borderRadius: 999, background: '#23222b', overflow: 'hidden', display: 'block' },
   statusPill: { borderRadius: 8, padding: '8px 10px', textAlign: 'center', fontWeight: 900, fontSize: 12 },
   statusGreen: { background: 'rgba(32,210,155,.14)', color: '#20d29b', border: '1px solid rgba(32,210,155,.42)' },

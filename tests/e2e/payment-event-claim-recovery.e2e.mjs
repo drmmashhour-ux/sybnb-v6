@@ -107,6 +107,8 @@ async function verifyHostForPublishing() {
   const legal = await call('GET', '/api/legal', null)
   const doc = legal.j.documents.find((d) => d.key === 'listing-agreement')
   await call('POST', '/api/legal/consent', H, { documentKey: 'listing-agreement', version: doc.version })
+  // Stays need payout details before /submit (owner decision 2026-10-22).
+  await call('PUT', '/api/host/payout-method', H, { type: 'SHAM_CASH', shamCashNumber: '0999000000', accountName: 'E2E Host' })
 }
 async function makeStaysListing(priceMinor) {
   const created = await call('POST', '/api/listings', H, {

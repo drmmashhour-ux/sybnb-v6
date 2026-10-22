@@ -37,6 +37,7 @@ const HostProfilePage = lazyNamed(() => import('../modules/host/HostProfilePage'
 const ProfilePage = lazyNamed(() => import('../modules/profile/ProfilePage'), 'ProfilePage')
 const HostEarningsPage = lazyNamed(() => import('../modules/host/HostEarningsPage'), 'HostEarningsPage')
 const HostPayoutsPage = lazyNamed(() => import('../modules/host/HostPayoutsPage'), 'HostPayoutsPage')
+const HostPricingPage = lazyNamed(() => import('../modules/host/HostPricingPage'), 'HostPricingPage')
 const AdminMoneyPage = lazyNamed(() => import('../modules/admin/AdminMoneyPage'), 'AdminMoneyPage')
 const AdminCustomerPage = lazyNamed(() => import('../modules/admin/AdminCustomerPage'), 'AdminCustomerPage')
 const AdminMoneyFlowPage = lazyNamed(() => import('../modules/admin/AdminMoneyFlowPage'), 'AdminMoneyFlowPage')
@@ -277,6 +278,8 @@ export function App() {
           <HostEarningsPage lang={lang} />
         ) : path === '/host/payouts' ? (
           <HostPayoutsPage lang={lang} />
+        ) : /^\/host\/pricing\/[^/]+$/.test(path) ? (
+          <HostPricingPage lang={lang} listingId={path.split('/')[3]} />
         ) : path === '/host/inquiries' ? (
           <HostInquiriesPage lang={lang} />
         ) : path === '/driver' ? (

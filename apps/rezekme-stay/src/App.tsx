@@ -40,6 +40,7 @@ const HostDashboardPage = lazyNamed(() => import('@platform/modules/host/HostDas
 const HostProfilePage = lazyNamed(() => import('@platform/modules/host/HostProfilePage'), 'HostProfilePage')
 const HostEarningsPage = lazyNamed(() => import('@platform/modules/host/HostEarningsPage'), 'HostEarningsPage')
 const HostPayoutsPage = lazyNamed(() => import('@platform/modules/host/HostPayoutsPage'), 'HostPayoutsPage')
+const HostPricingPage = lazyNamed(() => import('@platform/modules/host/HostPricingPage'), 'HostPricingPage')
 const HostInquiriesPage = lazyNamed(() => import('@platform/modules/host/HostInquiriesPage'), 'HostInquiriesPage')
 const HostCheckinPage = lazyNamed(() => import('@platform/modules/host/HostCheckinPage'), 'HostCheckinPage')
 const SellerListingWizard = lazyNamed(() => import('@platform/modules/seller/SellerListingWizard'), 'SellerListingWizard')
@@ -96,6 +97,7 @@ export function App() {
   const hostCheckinMatch = path.match(/^\/checkin\/([^/]+)$/)
   // Host area: /host/why and /host/join are public; every other /host page, the listing wizard and the
   // arrival check-in need a host session (the server enforces the role on every call regardless).
+  const hostPricingMatch = path.match(/^\/host\/pricing\/([^/]+)$/)
   const hostRoute = (path.startsWith('/host') && path !== '/host/why' && path !== '/host/join') ||
     path === '/sell/listing-wizard' || path === '/sell/submitted' || Boolean(hostCheckinMatch)
   const hasHostSession = hasRequiredHostSession()
@@ -132,6 +134,8 @@ export function App() {
           <HostEarningsPage lang={lang} />
         ) : path === '/host/payouts' ? (
           <HostPayoutsPage lang={lang} />
+        ) : hostPricingMatch ? (
+          <HostPricingPage lang={lang} listingId={hostPricingMatch[1]} />
         ) : path === '/host/inquiries' ? (
           <HostInquiriesPage lang={lang} />
         ) : path === '/sell/listing-wizard' ? (

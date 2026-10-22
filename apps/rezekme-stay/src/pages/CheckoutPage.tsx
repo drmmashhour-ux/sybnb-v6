@@ -264,12 +264,16 @@ export function CheckoutPage({ listingId, lang }: Props) {
 
   const priceRows = quote
     ? [
-        { label: `${moneyText(Math.round(quote.stayMinor / Math.max(1, quote.nights)), quote.currency, lang)} × ${quote.nights} ${nightsWord(quote.nights, lang)}`, value: quote.stayMinor },
+        // Variable pricing: show the nights before any weekly/monthly discount, then the discount.
+        { label: `${moneyText(Math.round((quote.staySubtotalMinor ?? quote.stayMinor) / Math.max(1, quote.nights)), quote.currency, lang)} × ${quote.nights} ${nightsWord(quote.nights, lang)}`, value: quote.staySubtotalMinor ?? quote.stayMinor },
+        ...(quote.stayDiscountMinor
+          ? [{ label: stayDiscountLabel(quote.stayDiscountKind, quote.stayDiscountPct || 0, lang), value: -quote.stayDiscountMinor }]
+          : []),
         { label: t('cleaning'), value: quote.cleaningMinor },
         { label: t('taxes'), value: quote.taxesMinor },
         { label: t('otherFees'), value: quote.otherFeesMinor },
         ...(protection ? [{ label: t('protectionFee'), value: quote.protectionMinor }] : []),
-      ].filter((row, index) => index === 0 || row.value > 0)
+      ].filter((row, index) => index === 0 || row.value !== 0)
     : []
 
   return (
@@ -573,4 +577,9 @@ const COPY = {
 // files itself; those must load from the API's origin, not this site's.
 function mediaSrc(value: unknown) {
   return typeof value === 'string' && value ? resolveApiUrl(value) : value
+}
+
+function stayDiscountLabel(kind: string | null | undefined, pct: number, lang: Lang) {
+  if (kind === 'MONTHLY') return pick(lang, `خصم الإقامة الشهرية (${pct}٪)`, `Monthly stay discount (${pct}%)`, `Remise séjour au mois (${pct} %)`)
+  return pick(lang, `خصم الإقامة الأسبوعية (${pct}٪)`, `Weekly stay discount (${pct}%)`, `Remise séjour à la semaine (${pct} %)`)
 }

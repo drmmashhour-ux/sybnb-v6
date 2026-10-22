@@ -77,10 +77,12 @@ async function seedUser(label, roles, extra = {}) {
 async function makePublisher(user) {
   await db().user.update({ where: { id: user.id }, data: { idDocumentStatus: 'APPROVED' } })
   await db().legalConsent.create({ data: { userId: user.id, documentKey: 'listing-agreement', version: 'e2e' } })
+  await db().hostPayoutMethod.upsert({ where: { userId: user.id }, update: {}, create: { userId: user.id, type: 'SHAM_CASH', details: { shamCashNumber: '0999000000', accountName: 'E2E Host' } } })
 }
 // The new-host path: only the listing agreement; the ID is uploaded through the real endpoint below.
 async function signAgreementOnly(user) {
   await db().legalConsent.create({ data: { userId: user.id, documentKey: 'listing-agreement', version: 'e2e' } })
+  await db().hostPayoutMethod.upsert({ where: { userId: user.id }, update: {}, create: { userId: user.id, type: 'SHAM_CASH', details: { shamCashNumber: '0999000000', accountName: 'E2E Host' } } })
 }
 // 1x1 transparent PNG.
 const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='

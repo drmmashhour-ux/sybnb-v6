@@ -12,6 +12,8 @@ import { isGiftFlowRoute } from '../modules/wallet/giftRoutes'
 import { getCurrentPath } from './routes'
 import { authStorage } from '../shared/api/authStorage'
 import { refreshStoredSessionRoles } from '../shared/api/platformApi'
+import { STAYS_ONLY } from '../shared/brand'
+import { navigate } from './routes'
 
 const AdminReviewPage = lazyNamed(() => import('../modules/admin/AdminReviewPage'), 'AdminReviewPage')
 const AiBrainPage = lazyNamed(() => import('../modules/ai/AiBrainPage'), 'AiBrainPage')
@@ -94,6 +96,14 @@ export function App() {
   useEffect(() => {
     persistLanguage(lang)
   }, [lang])
+
+  // Stays-only build (Rezekme Stays): the same full app, limited to daily stays + hosting. Other
+  // sections (rentals, buy, cars, marketplace, rides, driver, staff/admin pages...) are not part of
+  // it; any link to them lands on the stays search instead. Admin lives at admin.rezekme.com.
+  const staysOnlyBlocked = STAYS_ONLY && isOutsideStaysOnly(path)
+  useEffect(() => {
+    if (staysOnlyBlocked) navigate('/stays')
+  }, [staysOnlyBlocked])
 
   useEffect(() => {
     // On hash-route change, reset scroll and move keyboard/screen-reader focus to the main content
@@ -203,6 +213,10 @@ export function App() {
   // authorizes every call; this only chooses which screen to draw for a signed-in staff session.
   // Staff access here is assignment-based (not the legacy ADMIN role flag), so a signed-in staff token is
   // enough to draw the console; /api/admin2/me answers 403 for anyone without console access.
+  if (staysOnlyBlocked) {
+    return <RouteLoading lang={lang} />
+  }
+
   if (isConsolePath(path.split('?')[0]) && hasStaffToken()) {
     return (
       <Suspense fallback={<RouteLoading lang={lang} />}>
@@ -385,6 +399,8 @@ export function App() {
           <WalletPage lang={lang} />
         ) : division ? (
           <DivisionLivePage division={division} lang={lang} />
+        ) : (path === '/' || path === '' || path === '/home') && STAYS_ONLY ? (
+          <SearchPreviewPage key="stays" lang={lang} initialDivision="stays" entry="stays" />
         ) : path === '/' || path === '' || path === '/home' ? (
           <LandingPage lang={lang} />
         ) : (
@@ -465,4 +481,21 @@ function RouteLoading({ lang }: { lang: Lang }) {
       </section>
     </main>
   )
+}
+
+// Paths that are not part of the stays-only build (see STAYS_ONLY in App).
+const STAYS_ONLY_BLOCKED_PREFIXES = [
+  '/rentals', '/buy', '/cars', '/marketplace', '/new-construction',
+  '/ride', '/driver', '/merchant', '/business', '/immocontact', '/advertising',
+  '/agents', '/agent', '/visits', '/guides', '/get-app', '/wallet/msh',
+  '/host/seller', '/host/cars', '/host/new-construction', '/host/marketplace',
+  '/admin', '/ai-brain', '/competitors', '/operations', '/finance', '/status',
+]
+
+function isOutsideStaysOnly(rawPath: string) {
+  const path = rawPath.split('?')[0]
+  if (STAYS_ONLY_BLOCKED_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))) return true
+  if (path === '/sell' || (path.startsWith('/sell/') && path !== '/sell/listing-wizard' && path !== '/sell/submitted')) return true
+  if (isConsolePath(path)) return true
+  return false
 }

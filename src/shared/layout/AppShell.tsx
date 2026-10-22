@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
-import { BrandLogo } from '../brand'
+import { BrandLogo, STAYS_ONLY } from '../brand'
 import { becomeDriver, currentAccountIsHost, deleteMyAccount, getStoredGuestSession, getStoredStaffSession, refreshStoredSessionRoles, signOutGuest as revokeGuestSession } from '../api/platformApi'
 import { Footer } from './Footer'
 
@@ -304,6 +304,11 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
         { key: 'host', label: pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte'), onSelect: () => go('/host/join') },
       ]
 
+  // Stays-only build (Rezekme Stays): no rides/driver, agents, visits, guides or app-download entries,
+  // and admin lives on its own site, so those menu items are left out.
+  const STAYS_ONLY_HIDDEN = new Set(['visits', 'agents', 'guides', 'get-app', 'driver', 'admin', 'admin-hosts'])
+  const visibleItems = STAYS_ONLY ? items.filter((item) => !STAYS_ONLY_HIDDEN.has(item.key)) : items
+
   function onPanelKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     const buttons = Array.from(panelRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') || [])
     if (!buttons.length) return
@@ -367,7 +372,7 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
               {pick(lang, `مرحباً، ${displayName}`, `Hi, ${displayName}`, `Bonjour, ${displayName}`)}
             </div>
           )}
-          {items.map((item) =>
+          {visibleItems.map((item) =>
             'separator' in item ? (
               <div key={item.key} className="account-menu-separator" role="separator" />
             ) : (

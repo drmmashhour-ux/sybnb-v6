@@ -457,6 +457,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
         source: 'quote' as const,
         nights: standard.nights,
         stayMinor: standard.stayMinor,
+        discountMinor: standard.stayDiscountMinor || 0,
+        discountPct: standard.stayDiscountPct || 0,
+        discountKind: standard.stayDiscountKind || null,
         cleaningMinor: standard.cleaningMinor,
         taxesMinor: standard.taxesMinor,
         otherFeesMinor: standard.otherFeesMinor,
@@ -471,6 +474,9 @@ export function ListingDetailPage({ listingId, lang }: Props) {
       source: 'local' as const,
       nights: stayQuote?.nights ?? 1,
       stayMinor: feesStandard.stayAmountMinor,
+      discountMinor: 0,
+      discountPct: 0,
+      discountKind: null,
       cleaningMinor: feesStandard.cleaningFeeMinor,
       taxesMinor: feesStandard.taxesMinor,
       otherFeesMinor: feesStandard.serviceFeeMinor + feesStandard.parkingFeeMinor + feesStandard.extraFeesMinor,
@@ -484,7 +490,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const protectedTotalMinor = pricing.protectedTotalMinor
   const selectedTotalMinor = cancellationProtection ? pricing.protectedTotalMinor : pricing.standardTotalMinor
   const isDemoListing = listing?.metadata?.demo === true
-  const notBookable = isDemoListing || quotes?.standard.bookable === false
+  const notBookable = isDemoListing || Boolean(listing?.preview) || quotes?.standard.bookable === false
   const mapTarget = listing ? listingMapTarget(listing, title, lang) : null
 
   useEffect(() => {
@@ -751,6 +757,22 @@ export function ListingDetailPage({ listingId, lang }: Props) {
         </section>
       )}
 
+      {listing?.preview && (
+        <div
+          data-testid="listing-preview-banner"
+          role="status"
+          style={{ margin: '0 0 14px', padding: '12px 14px', borderRadius: 12, background: '#fff7e6', border: '1px solid #f5c26b', color: '#5c3d00', lineHeight: 1.6 }}
+        >
+          <strong>{pick(lang, 'معاينة — إعلانك غير ظاهر للضيوف بعد.', 'Preview — your listing is not visible to guests yet.', 'Aperçu — votre annonce n’est pas encore visible.')}</strong>{' '}
+          {listing.previewReason === 'PENDING_REVIEW'
+            ? pick(lang, 'إنه قيد مراجعة الفريق. عند الموافقة يصلك رمز تفعيل بالبريد.', 'It is being reviewed by the team. When approved you get an activation code by email.', 'Elle est en cours de vérification. Une fois approuvée, vous recevez un code d’activation par e-mail.')
+            : listing.previewReason === 'REJECTED'
+              ? pick(lang, 'تحتاج إلى تعديلات — راجع ملاحظات الإدارة في لوحة المضيف.', 'It needs changes — see the admin notes in your host dashboard.', 'Des modifications sont nécessaires — voir les notes dans votre tableau de bord.')
+              : listing.previewReason === 'HOST_NOT_ACTIVATED'
+                ? pick(lang, 'تمت الموافقة — أدخل رمز التفعيل من بريدك في لوحة المضيف ليظهر للضيوف.', 'Approved — enter the activation code from your email in the host dashboard to make it visible.', 'Approuvée — saisissez le code d’activation reçu par e-mail dans votre tableau de bord.')
+                : pick(lang, 'الحجز غير متاح في وضع المعاينة.', 'Booking is not available in preview.', 'La réservation n’est pas disponible en aperçu.')}
+        </div>
+      )}
       {listing && (
         <>
           <section style={styles.detailHero}>
@@ -993,6 +1015,7 @@ export function ListingDetailPage({ listingId, lang }: Props) {
 
           {/* Booking / contact block: always visible below the tabs, whatever tab is active. */}
           <section id="listing-booking" style={styles.bookingBlock}>
+            {isStays && <StayOffers listing={listing} lang={lang} />}
             {notBookable && (
               <section style={styles.demoNotice} role="note">
                 <strong>{isDemoListing ? t.demoNotice : t.notBookableNotice}</strong>
@@ -1076,9 +1099,17 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                       {!quoteLoading && <small style={styles.feesIncludedNote}>{t.feesIncluded}</small>}
                     </button>
                   </div>
-                  {!quoteLoading && (pricing.cleaningMinor > 0 || pricing.taxesMinor > 0 || pricing.otherFeesMinor > 0 || cancellationProtection) && (
+                  {!quoteLoading && (pricing.cleaningMinor > 0 || pricing.taxesMinor > 0 || pricing.otherFeesMinor > 0 || pricing.discountMinor > 0 || cancellationProtection) && (
                     <div style={styles.feeBreakdownRow}>
                       <span>{t.stayAmount}{colon}{moneyText(pricing.stayMinor, pricing.currency, lang)}</span>
+                      {pricing.discountMinor > 0 && (
+                        <span data-testid="stay-discount">
+                          {pricing.discountKind === 'MONTHLY'
+                            ? pick(lang, `يشمل خصم الإقامة الشهرية ${pricing.discountPct}٪`, `Includes ${pricing.discountPct}% monthly discount`, `Remise mensuelle de ${pricing.discountPct} % incluse`)
+                            : pick(lang, `يشمل خصم الإقامة الأسبوعية ${pricing.discountPct}٪`, `Includes ${pricing.discountPct}% weekly discount`, `Remise hebdomadaire de ${pricing.discountPct} % incluse`)}
+                          {colon}-{moneyText(pricing.discountMinor, pricing.currency, lang)}
+                        </span>
+                      )}
                       {pricing.cleaningMinor > 0 && (
                         <span>{t.cleaningFee}{colon}{moneyText(pricing.cleaningMinor, pricing.currency, lang)}</span>
                       )}
@@ -1673,4 +1704,22 @@ function languageName(code: string, lang: Lang) {
   }
   const pair = names[code]
   return pair ? pick(lang, pair[0], pair[1], pair[2]) : code
+}
+
+// Host pricing offers (2026-10-22): weekend price and length-of-stay discounts the host set, shown
+// before the guest picks dates. The checkout breakdown applies them; this only advertises them.
+function StayOffers({ listing, lang }: { listing: { priceMinor: number; currency: string; metadata?: Record<string, unknown> | null }; lang: Lang }) {
+  const raw = (listing.metadata?.pricing || {}) as { weekendPriceMinor?: number | null; weeklyDiscountPct?: number; monthlyDiscountPct?: number }
+  const weekend = typeof raw.weekendPriceMinor === 'number' && raw.weekendPriceMinor > 0 && raw.weekendPriceMinor !== listing.priceMinor ? raw.weekendPriceMinor : null
+  const weekly = Number(raw.weeklyDiscountPct) > 0 ? Math.round(Number(raw.weeklyDiscountPct)) : 0
+  const monthly = Number(raw.monthlyDiscountPct) > 0 ? Math.round(Number(raw.monthlyDiscountPct)) : 0
+  if (!weekend && !weekly && !monthly) return null
+  return (
+    <div data-testid="stay-offers" style={{ display: 'grid', gap: 6, margin: '10px 0', padding: '10px 12px', borderRadius: 12, background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#14532d', fontSize: 14 }}>
+      <strong>{pick(lang, 'العروض', 'Offers', 'Offres')}</strong>
+      {weekly > 0 && <span>🏷️ {pick(lang, `خصم ${weekly}٪ للإقامة 7 ليالٍ أو أكثر`, `${weekly}% off stays of 7+ nights`, `${weekly} % de remise dès 7 nuits`)}</span>}
+      {monthly > 0 && <span>🏷️ {pick(lang, `خصم ${monthly}٪ للإقامة 28 ليلة أو أكثر`, `${monthly}% off stays of 28+ nights`, `${monthly} % de remise dès 28 nuits`)}</span>}
+      {weekend && <span>📅 {pick(lang, 'ليالي نهاية الأسبوع: ', 'Weekend nights: ', 'Nuits du week-end : ')}{moneyText(weekend, listing.currency, lang)}</span>}
+    </div>
+  )
 }

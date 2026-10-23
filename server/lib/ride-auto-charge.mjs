@@ -16,6 +16,7 @@ import { approvePaymentProof, firstAdminId } from './finance-ledger.mjs'
 import { withTx } from './tx-scope.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from './payment-policy.mjs'
 import { log } from './logger.mjs'
+import { cardPaymentsOff } from './card-payments.mjs'
 
 const chargeCurrencyForHold = () => (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
@@ -43,6 +44,8 @@ export async function maybeAutoChargeRideCard({ rideId }) {
   if (ride.metadata?.prepaid) return { attempted: false, reason: 'prepaid' }
   const amountMinor = Math.round(ride.fareMinor || 0)
   if (amountMinor <= 0) return { attempted: false, reason: 'no_fare' }
+  // CARD_PAYMENTS=off: no new card charges. A hold authorised before the switch is still captured.
+  if (cardPaymentsOff() && !ride.metadata?.cardHoldIntentId) return { attempted: false, reason: 'card_payments_off' }
 
   // Hold-and-capture (Rezekme Payment Standard): capture the authorised hold for the actual fare.
   const holdId = ride.metadata?.cardHoldIntentId

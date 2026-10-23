@@ -15,6 +15,7 @@ import { expireUnpaidBookings } from '../lib/booking-lifecycle.mjs'
 import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
 import { confirmStripeCheckoutSessionForActor, applyStripeCheckoutEvent, notifyCardBookingConfirmed } from '../lib/stripe-checkout-apply.mjs'
 import { applyPaymentEvent, intakeEvent, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
+import { cardPaymentsOff, requireCardPaymentsOn } from '../lib/card-payments.mjs'
 
 export const WALLET_TOPUP_MIN_USD = 5
 export const WALLET_TOPUP_MAX_USD = 500
@@ -228,6 +229,7 @@ export async function handlePayments(req, res, url, context) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST', 'CLIENT'])
     requireStripe()
+    requireCardPaymentsOn()
     if (process.env.SR_GUEST_STRIPE_ENABLED !== '1') {
       const error = new Error('Guest card payments are not enabled on this server.')
       error.statusCode = 503
@@ -303,6 +305,7 @@ export async function handlePayments(req, res, url, context) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
     requireStripe()
+    requireCardPaymentsOn()
 
     const body = await readJson(req)
     const bookingId = String(body.bookingId || '')
@@ -865,6 +868,7 @@ export async function handlePayments(req, res, url, context) {
     if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
     requireAuth(context, ['GUEST'])
     requireStripe()
+    requireCardPaymentsOn()
     const body = await readJson(req)
     const origin = String(body.origin || '').replace(/\/$/, '')
     if (!origin) {
@@ -996,6 +1000,8 @@ export async function handlePayments(req, res, url, context) {
     return json(res, 200, {
       ok: true,
       configured: Boolean(stripe),
+      // false when CARD_PAYMENTS=off (or Stripe is not set up): the apps hide the card option.
+      cardEnabled: Boolean(stripe) && !cardPaymentsOff(),
       currency: (process.env.STRIPE_CURRENCY || 'usd').toLowerCase(),
     })
   }

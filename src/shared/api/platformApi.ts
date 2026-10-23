@@ -1744,7 +1744,7 @@ export async function submitPrototypeLocalWalletProof(input: {
 }
 
 export async function fetchStripePaymentStatus() {
-  const response = await apiRequest<{ ok: true; configured: boolean; currency: string }>('/api/payments/stripe/status')
+  const response = await apiRequest<{ ok: true; configured: boolean; cardEnabled?: boolean; currency: string }>('/api/payments/stripe/status')
   return response
 }
 

@@ -5,6 +5,7 @@
 import Stripe from 'stripe'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from './payment-policy.mjs'
 import { db } from './prisma.mjs'
+import { cardPaymentsOff } from './card-payments.mjs'
 
 const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 const currency = () => (process.env.STRIPE_CURRENCY || 'usd').toLowerCase()
@@ -21,6 +22,7 @@ function fail(statusCode, code, message, details) {
 
 export function cardHoldAvailable() {
   if (!stripe) return false
+  if (cardPaymentsOff()) return false
   if (process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_') && process.env.PAYMENTS_ENABLED !== 'true') return false
   return true
 }

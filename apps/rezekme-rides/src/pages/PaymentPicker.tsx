@@ -1,4 +1,5 @@
-import type { CSSProperties } from 'react'
+import { useEffect, type CSSProperties } from 'react'
+import { useCardPaymentsEnabled } from '@platform/shared/payments/useCardPaymentsEnabled'
 import type { Lang } from '@platform/engines/language/languageEngine'
 import { pick } from '@platform/engines/language/languageEngine'
 import { moneyText } from '@platform/shared/i18n/display'
@@ -72,6 +73,12 @@ export function PaymentPicker({
   shamCashRef, onShamCashRefChange, onShamCashSubmit, shamCashStatus,
 }: Props) {
   const isAr = lang === 'ar'
+  // Card tabs only while the server has card payments on (CARD_PAYMENTS is not 'off').
+  const cardStatus = useCardPaymentsEnabled()
+  const cardEnabled = cardStatus === true
+  useEffect(() => {
+    if (cardStatus === false && value === 'card') onChange(null)
+  }, [cardStatus, value, onChange])
 
   // ---------- GUEST: card or Sham Cash ----------
   if (mode === 'guest') {
@@ -79,12 +86,12 @@ export function PaymentPicker({
       <div style={s.wrap}>
         <span style={s.label}>{pick(lang, 'طريقة الدفع', 'Payment method', 'Paiement')}</span>
         <div style={s.tabs}>
-          <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />
+          {cardEnabled && <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />}
           <Tab guide="pay-tab-shamcash" label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
         </div>
 
         {/* ---- Guest card ---- */}
-        {value === 'card' && (
+        {cardEnabled && value === 'card' && (
           <div style={s.body}>
             <div style={s.hint}>
               {pick(lang, 'ستُحوّل إلى Stripe لإتمام الدفع بأمان قبل البحث عن سائق.', "You'll be redirected to Stripe to pay securely before we look for a driver.", 'Vous serez redirigé vers Stripe avant la mise en relation avec un chauffeur.')}
@@ -143,7 +150,7 @@ export function PaymentPicker({
       <span style={s.label}>{pick(lang, 'طريقة الدفع', 'Payment method', 'Paiement')}</span>
       <div style={s.tabs}>
         <Tab label={pick(lang, 'المحفظة', 'Wallet', 'Portefeuille')} active={value === 'wallet'} onClick={() => onChange('wallet')} />
-        <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />
+        {cardEnabled && <Tab label={pick(lang, 'بطاقة ائتمانية', 'Credit card', 'Carte bancaire')} active={value === 'card'} onClick={() => onChange('card')} />}
         <Tab guide="pay-tab-shamcash" label="Sham Cash" active={value === 'shamcash'} onClick={() => onChange('shamcash')} />
         <Tab label="MSH" active={value === 'msh'} onClick={() => onChange('msh')} />
       </div>
@@ -163,7 +170,7 @@ export function PaymentPicker({
       )}
 
       {/* ---- Card (Stripe 3D redirect) ---- */}
-      {value === 'card' && (
+      {cardEnabled && value === 'card' && (
         <div style={s.body}>
           <div style={s.hint}>
             {pick(lang, 'ستُحوّل إلى Stripe لإتمام الدفع بأمان (3D Secure) قبل البحث عن سائق.', "You'll be redirected to Stripe to pay securely (3D Secure) before we look for a driver.", 'Vous serez redirigé vers Stripe pour un paiement sécurisé (3D Secure) avant la mise en relation.')}

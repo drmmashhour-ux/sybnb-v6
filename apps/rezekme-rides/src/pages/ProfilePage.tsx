@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
+import { useCardPaymentsEnabled } from '@platform/shared/payments/useCardPaymentsEnabled'
 import {
   createSavedPlace,
   createStripeSetupSession,
@@ -32,6 +33,7 @@ export function ProfilePage({ lang, onSignOut }: Props) {
   const [placeLabel, setPlaceLabel] = useState('')
   const [placeAddress, setPlaceAddress] = useState('')
   const [error, setError] = useState('')
+  const cardEnabled = useCardPaymentsEnabled() === true
 
   async function reload() {
     try {
@@ -104,9 +106,11 @@ export function ProfilePage({ lang, onSignOut }: Props) {
             {cardBad && <span style={warn}>{pick(lang, 'انتهت صلاحية البطاقة. أضف بطاقة جديدة لمتابعة الطلب.', 'This card has expired. Add a new card to keep booking rides.', 'Cette carte a expiré. Ajoutez une nouvelle carte pour continuer à réserver.')}</span>}
             {!cardBad && cardSoon && <span style={warn}>{pick(lang, 'ستنتهي صلاحية البطاقة قريباً.', 'This card expires soon.', 'Cette carte expire bientôt.')}</span>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" style={btn} onClick={() => void createStripeSetupSession().then(({ url }) => { window.location.href = url }).catch((e) => setError(e instanceof Error ? e.message : String(e)))}>
-                {pick(lang, 'استبدال البطاقة', 'Replace card', 'Remplacer la carte')}
-              </button>
+              {cardEnabled && (
+                <button type="button" style={btn} onClick={() => void createStripeSetupSession().then(({ url }) => { window.location.href = url }).catch((e) => setError(e instanceof Error ? e.message : String(e)))}>
+                  {pick(lang, 'استبدال البطاقة', 'Replace card', 'Remplacer la carte')}
+                </button>
+              )}
               <button type="button" style={btn} onClick={() => void deleteSavedCard().then(() => setSavedCard(null)).catch((e) => setError(e instanceof Error ? e.message : String(e)))}>
                 {pick(lang, 'إزالة', 'Remove', 'Retirer')}
               </button>
@@ -114,10 +118,16 @@ export function ProfilePage({ lang, onSignOut }: Props) {
           </>
         ) : (
           <>
-            <span>{pick(lang, 'لا توجد بطاقة محفوظة. الدفع بالبطاقة فقط، لا نقد.', 'No card saved. Card only, no cash.', 'Aucune carte enregistrée. Carte seulement, pas d’espèces.')}</span>
-            <button type="button" style={btn} onClick={() => void createStripeSetupSession().then(({ url }) => { window.location.href = url }).catch((e) => setError(e instanceof Error ? e.message : String(e)))}>
-              {pick(lang, 'إضافة بطاقة', 'Add card', 'Ajouter une carte')}
-            </button>
+            {cardEnabled ? (
+              <>
+                <span>{pick(lang, 'لا توجد بطاقة محفوظة. الدفع بالبطاقة فقط، لا نقد.', 'No card saved. Card only, no cash.', 'Aucune carte enregistrée. Carte seulement, pas d’espèces.')}</span>
+                <button type="button" style={btn} onClick={() => void createStripeSetupSession().then(({ url }) => { window.location.href = url }).catch((e) => setError(e instanceof Error ? e.message : String(e)))}>
+                  {pick(lang, 'إضافة بطاقة', 'Add card', 'Ajouter une carte')}
+                </button>
+              </>
+            ) : (
+              <span>{pick(lang, 'ادفع من محفظة Rezekme أو عبر شام كاش.', 'Pay from your Rezekme wallet or with Sham Cash.', 'Payez avec votre portefeuille Rezekme ou Sham Cash.')}</span>
+            )}
           </>
         )}
       </section>

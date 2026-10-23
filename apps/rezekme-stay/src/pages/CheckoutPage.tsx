@@ -16,6 +16,7 @@ import { stayGuestAgreement } from '@platform/shared/booking/guestAgreement'
 import { divisionText, moneyText } from '@platform/shared/i18n/display'
 import { listingDisplayTitle } from '@platform/shared/listing/displayTitle'
 import { RiderSignInGate } from '@platform/shared/auth/RiderSignInGate'
+import { useCardPaymentsEnabled } from '@platform/shared/payments/useCardPaymentsEnabled'
 import { DateRangePicker, formatDateForLang, isValidDate, nightsBetween, type DateRange } from './DateRangePicker'
 import { guestFeeSummary } from '@platform/modules/bookings/guestFeeSummary'
 import { CHECKOUT_DRAFT_KEY, CHECKOUT_NOTE_KEY_PREFIX, STRIPE_PENDING_KEY_PREFIX, loadCheckoutDraft, saveCheckoutDraft } from '@platform/modules/bookings/checkoutDraft'
@@ -55,6 +56,11 @@ export function CheckoutPage({ listingId, lang }: Props) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [cardUnavailable, setCardUnavailable] = useState(false)
+  // Card is shown only when the server says card payments are on (CARD_PAYMENTS is not 'off').
+  const cardEnabled = useCardPaymentsEnabled()
+  useEffect(() => {
+    if (cardEnabled === false) setMethod((current) => (current === 'card' ? '' : current))
+  }, [cardEnabled])
   // A booking created by an earlier click (e.g. the card call failed afterwards) is reused, so a
   // second click never creates a second PAYMENT_PENDING booking for the same dates.
   const [createdBooking, setCreatedBooking] = useState<PlatformBooking | null>(null)
@@ -239,7 +245,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
       } catch (err) {
         const code = (err as { code?: string; status?: number } | null)?.code
         const status = (err as { status?: number } | null)?.status
-        if (code === 'PAYMENTS_DISABLED' || code === 'PAYMENT_POLICY_DENIED' || code === 'STRIPE_NOT_CONFIGURED' || status === 503) {
+        if (code === 'CARD_PAYMENTS_OFF' || code === 'PAYMENTS_DISABLED' || code === 'PAYMENT_POLICY_DENIED' || code === 'STRIPE_NOT_CONFIGURED' || status === 503) {
           setCardUnavailable(true)
           setMethod('')
           setError(t('cardUnavailable'))
@@ -374,7 +380,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
             <section className="checkout-card" aria-labelledby="checkout-method">
               <h2 id="checkout-method">{t('paymentMethod')}</h2>
               <div className="checkout-options" role="radiogroup" aria-labelledby="checkout-method">
-                {(['card', 'shamCash', 'bank'] as const).map((value) => {
+                {(cardEnabled ? (['card', 'shamCash', 'bank'] as const) : (['shamCash', 'bank'] as const)).map((value) => {
                   const disabled = value === 'card' && cardUnavailable
                   return (
                     <label key={value} className={`checkout-option${method === value ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}>

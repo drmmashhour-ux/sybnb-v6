@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
 import { getStoredGuestSession } from '@platform/shared/api/platformApi'
 import { publicWebOrigin } from '@platform/shared/native/nativeShell'
+import { useCardPaymentsEnabled } from '@platform/shared/payments/useCardPaymentsEnabled'
 
 /**
  * Rezekme wallet (the balance the rider pays rides from). Add money by:
@@ -32,7 +33,12 @@ export function WalletPage({ lang }: { lang: Lang }) {
   const [wallet, setWallet] = useState<WalletInfo | null>(null)
   const [amount, setAmount] = useState<number>(20)
   const [custom, setCustom] = useState('')
-  const [method, setMethod] = useState<'card' | 'sham'>('card')
+  // Card top-up only while the server has card payments on; otherwise Sham Cash only.
+  const cardEnabled = useCardPaymentsEnabled()
+  const [method, setMethod] = useState<'card' | 'sham'>('sham')
+  useEffect(() => {
+    setMethod(cardEnabled === true ? 'card' : 'sham')
+  }, [cardEnabled])
   const [ref, setRef] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
@@ -98,7 +104,9 @@ export function WalletPage({ lang }: { lang: Lang }) {
         <span style={valid ? S.muted : S.warn}>{rangeText}</span>
 
         <div style={S.tabs}>
-          <button type="button" data-guide="topup-tab-card" style={method === 'card' ? S.tabOn : S.tab} onClick={() => setMethod('card')}>{t('بطاقة ائتمانية', 'Credit card', 'Carte bancaire')}</button>
+          {cardEnabled === true && (
+            <button type="button" data-guide="topup-tab-card" style={method === 'card' ? S.tabOn : S.tab} onClick={() => setMethod('card')}>{t('بطاقة ائتمانية', 'Credit card', 'Carte bancaire')}</button>
+          )}
           <button type="button" data-guide="topup-tab-sham" style={method === 'sham' ? S.tabOn : S.tab} onClick={() => setMethod('sham')}>Sham Cash</button>
         </div>
 

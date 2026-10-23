@@ -252,7 +252,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
 
   useEffect(() => {
     fetchStripePaymentStatus()
-      .then((result) => setStripeConfigured(result.configured))
+      .then((result) => setStripeConfigured(result.cardEnabled ?? result.configured))
       .catch(() => setStripeConfigured(false))
   }, [])
 

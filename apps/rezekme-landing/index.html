@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#14261f" />
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20120%20120%22%3E%3Crect%20width%3D%22120%22%20height%3D%22120%22%20rx%3D%2230%22%20fill%3D%22%2314261f%22/%3E%3Cpath%20d%3D%22M40%2082%20V24%20H62%20a16%2016%200%200%201%200%2032%20H40%20M62%2056%20L82%2082%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%229%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22/%3E%3Ccircle%20cx%3D%2244%22%20cy%3D%2296%22%20r%3D%229%22%20fill%3D%22%23e07a52%22/%3E%3Ccircle%20cx%3D%2244%22%20cy%3D%2296%22%20r%3D%223.5%22%20fill%3D%22%2314261f%22/%3E%3Ccircle%20cx%3D%2282%22%20cy%3D%2296%22%20r%3D%229%22%20fill%3D%22%23e07a52%22/%3E%3Ccircle%20cx%3D%2282%22%20cy%3D%2296%22%20r%3D%223.5%22%20fill%3D%22%2314261f%22/%3E%3C/svg%3E" />
 <title>Rezekme — Move. Stay. Belong.</title>
-<meta name="description" content="Book trusted rides and places that feel like home, all in one account." />
+<meta name="description" content="رحلات موثوقة وإقامات تشعرك بأنك في بيتك، بحساب واحد. Trusted rides and stays in Syria, one account." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700&family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -71,46 +71,68 @@ footer{background:var(--green);color:#b9c9bf;padding:56px 0 32px}
 .fgrid h4{color:#fff;letter-spacing:.14em;font-size:12px;text-transform:uppercase;margin:0 0 12px}
 .legal{border-top:1px solid rgba(255,255,255,.12);margin-top:40px;padding-top:20px;font-size:13px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
 @media(max-width:700px){.links a:not(.pill){display:none}.tabs button{padding:18px 20px}}
+
+.langs{display:flex;gap:4px;background:rgba(255,255,255,.12);border-radius:999px;padding:4px}
+.langs button{all:unset;cursor:pointer;padding:6px 12px;border-radius:999px;font-weight:700;font-size:13px;color:#fff;opacity:.75}
+.langs button[aria-pressed=true]{background:#fff;color:var(--green);opacity:1}
+.signin{position:relative}
+.signin-menu{display:none;position:absolute;inset-inline-end:0;top:calc(100% + 8px);background:#fffdf8;color:var(--ink);border-radius:16px;box-shadow:0 18px 40px rgba(0,0,0,.25);padding:8px;min-width:220px;z-index:5}
+.signin.open .signin-menu{display:grid}
+.signin-menu a{padding:12px 14px;border-radius:10px;font-weight:700}
+.signin-menu a:hover{background:var(--sand)}
+.signin-menu small{display:block;font-weight:400;color:var(--muted)}
+.pay{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+[dir=rtl] body,[dir=rtl] h1,[dir=rtl] h2,[dir=rtl] h3{font-family:'Cairo','DM Sans',system-ui,sans-serif;letter-spacing:0}
+[dir=rtl] .serif{font-family:'Cairo',sans-serif;font-style:normal;font-weight:700}
+[dir=rtl] .eyebrow,[dir=rtl] .tag{letter-spacing:0}
+[dir=rtl] header{background:linear-gradient(270deg,rgba(20,38,31,.94) 20%,rgba(20,38,31,.35)),url(img/hero.jpg) center/cover var(--green)}
+@media(max-width:700px){.links{gap:10px}}
 </style>
 </head>
 <body>
 <header>
  <div class="wrap">
   <nav>
-   <a class="logo" href="#top"><svg width="36" height="36" role="img" aria-label="Rezekme" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" rx="30" fill="#14261f"/><path d="M40 82 V24 H62 a16 16 0 0 1 0 32 H40 M62 56 L82 82" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="44" cy="96" r="9" fill="#e07a52"/><circle cx="44" cy="96" r="3.5" fill="#14261f"/><circle cx="82" cy="96" r="9" fill="#e07a52"/><circle cx="82" cy="96" r="3.5" fill="#14261f"/></svg><span>rezekme<em>.com</em></span></a>
-   <div class="links"><a href="#explore">Explore</a><a href="#how">How it works</a><a href="https://rides.rezekme.com/#/driver">Drive with us</a><a href="#host">Become a host</a><a class="pill" href="https://stay.rezekme.com">Sign in</a></div>
+   <a class="logo" href="#top" dir="ltr"><svg width="36" height="36" role="img" aria-label="Rezekme" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" rx="30" fill="#14261f"/><path d="M40 82 V24 H62 a16 16 0 0 1 0 32 H40 M62 56 L82 82" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="44" cy="96" r="9" fill="#e07a52"/><circle cx="44" cy="96" r="3.5" fill="#14261f"/><circle cx="82" cy="96" r="9" fill="#e07a52"/><circle cx="82" cy="96" r="3.5" fill="#14261f"/></svg><span>rezekme<em>.com</em></span></a>
+   <div class="links">
+    <a href="#explore" data-i="nav_explore"></a><a href="#how" data-i="nav_how"></a><a href="https://rides.rezekme.com/#/driver" data-i="nav_drive"></a><a href="#host" data-i="nav_host"></a>
+    <div class="langs" role="group" aria-label="Language"><button type="button" data-lang="ar">AR</button><button type="button" data-lang="en">EN</button><button type="button" data-lang="fr">FR</button></div>
+    <div class="signin" id="signin"><button type="button" class="pill" id="signin-btn" aria-haspopup="true" aria-expanded="false" data-i="signin" style="all:unset;cursor:pointer;background:#fff;color:var(--green);padding:12px 24px;border-radius:999px;font-weight:700"></button>
+     <div class="signin-menu" role="menu"><a role="menuitem" href="https://stay.rezekme.com/#/account/open" data-l="stay"><span data-i="signin_stays"></span><small data-i="signin_stays_sub"></small></a><a role="menuitem" href="https://rides.rezekme.com/" data-l="rides"><span data-i="signin_rides"></span><small data-i="signin_rides_sub"></small></a><a role="menuitem" href="https://stay.rezekme.com/#/host" data-l="stay"><span data-i="signin_host"></span><small data-i="signin_host_sub"></small></a></div>
+    </div>
+   </div>
   </nav>
   <div class="hero" id="top">
    <div class="wrap" style="padding:0">
-    <div class="eyebrow">Move. Stay. Belong. <span style="opacity:.4">|</span> <b dir="rtl" lang="ar">رحلتك على طريقتك</b></div>
-    <h1>Every journey leads <span class="serif">somewhere.</span></h1>
-    <p class="lead">Book a trusted ride or find a place that feels like home, all in one beautifully simple journey.</p>
+    <div class="eyebrow"><span data-i="eyebrow"></span></div>
+    <h1><span data-i="h1a"></span> <span class="serif" data-i="h1b"></span></h1>
+    <p class="lead" data-i="lead"></p>
    </div>
   </div>
  </div>
 </header>
 
 <div class="wrap">
- <div class="search" role="region" aria-label="Start your journey">
+ <div class="search" role="region" aria-label="Rezekme">
   <div class="tabs" role="tablist">
-   <button role="tab" id="t-ride" aria-selected="true">Find a ride</button>
-   <button role="tab" id="t-stay" aria-selected="false">Find a stay</button>
+   <button role="tab" id="t-stay" aria-selected="true" data-i="tab_stay"></button>
+   <button role="tab" id="t-ride" aria-selected="false" data-i="tab_ride"></button>
   </div>
   <div class="panel">
-   <p id="ptext">Pick your route, choose a verified driver and see the price before you go.</p>
-   <a class="cta" id="pcta" href="https://rides.rezekme.com">Book a ride →</a>
+   <p id="ptext"></p>
+   <a class="cta" id="pcta" href="https://stay.rezekme.com"></a>
   </div>
  </div>
- <div class="trust"><span>✓ Verified community</span><span>✓ Clear pricing</span><span>✓ Secure card payments</span><span>✓ Arabic · English · Français</span></div>
+ <div class="trust"><span data-i="trust1"></span><span data-i="trust2"></span><span data-i="trust3"></span><span>✓ العربية · English · Français</span></div>
 </div>
 
 <section id="explore">
  <div class="wrap">
-  <div class="tag">Made for discovery</div>
-  <h2>Go where it feels right.</h2>
+  <div class="tag" data-i="explore_tag"></div>
+  <h2 data-i="explore_h2"></h2>
   <div class="cards">
-   <a class="card a" href="https://stay.rezekme.com"><h3>Stays</h3><p>Apartments, riads and homes with clear prices and hosts who are reviewed before they list.</p><span>Explore stays →</span></a>
-   <a class="card b" href="https://rides.rezekme.com"><h3>Rides</h3><p>Verified drivers, honest fares and trips on your schedule, across the city or between cities.</p><span>Book a ride →</span></a>
+   <a class="card a" href="https://stay.rezekme.com" data-l="stay"><h3 data-i="stays_h"></h3><p data-i="stays_p"></p><span data-i="stays_cta"></span></a>
+   <a class="card b" href="https://rides.rezekme.com" data-l="rides"><h3 data-i="rides_h"></h3><p data-i="rides_p"></p><span data-i="rides_cta"></span></a>
   </div>
  </div>
 </section>
@@ -118,28 +140,29 @@ footer{background:var(--green);color:#b9c9bf;padding:56px 0 32px}
 <section class="dark" id="how">
  <div class="wrap split">
   <div>
-   <div class="tag" style="color:var(--gold)">One platform. More possibilities.</div>
-   <h2>Your whole journey, <span class="serif">beautifully connected.</span></h2>
-   <p style="color:#b9c9bf;font-size:18px;max-width:520px">No switching apps. No complicated plans. One account for the ride there and the place you stay.</p>
+   <div class="tag" style="color:var(--gold)" data-i="how_tag"></div>
+   <h2><span data-i="how_h2a"></span> <span class="serif" data-i="how_h2b"></span></h2>
+   <p style="color:#b9c9bf;font-size:18px;max-width:520px" data-i="how_p"></p>
    <div class="rows">
-    <div class="row"><h3>Ride with confidence</h3><p>Choose verified drivers, compare transparent prices and travel on your schedule.</p></div>
-    <div class="row"><h3>Stay somewhere special</h3><p>From city apartments to peaceful homes, discover stays with real local character.</p></div>
+    <div class="row"><h3 data-i="row1_h"></h3><p data-i="row1_p"></p></div>
+    <div class="row"><h3 data-i="row2_h"></h3><p data-i="row2_p"></p></div>
+    <div class="row"><h3 data-i="row3_h"></h3><p data-i="row3_p"></p></div>
    </div>
   </div>
-  <div class="photo" role="img" aria-label="A driver on the road at sunset"></div>
+  <div class="photo" role="img" data-ia="photo_alt"></div>
  </div>
 </section>
 
 <section id="host">
  <div class="wrap split">
-  <div class="arch" role="img" aria-label="A traditional courtyard pavilion with a fountain"></div>
+  <div class="arch" role="img" data-ia="arch_alt"></div>
   <div>
-   <div class="tag">Share what you have</div>
-   <h2>There’s room for opportunity.</h2>
-   <p style="color:var(--muted);font-size:18px">Whether it’s an empty seat or a welcoming space, turn what you have into extra income, while helping someone get where they need to go.</p>
+   <div class="tag" data-i="host_tag"></div>
+   <h2 data-i="host_h2"></h2>
+   <p style="color:var(--muted);font-size:18px" data-i="host_p"></p>
    <div class="opts">
-    <a class="opt" href="https://rides.rezekme.com/#/driver"><div><b>Drive with Rezekme</b><small>Earn on every route you take</small></div>→</a>
-    <a class="opt" href="https://stay.rezekme.com/#/host/join"><div><b>Host your space</b><small>Welcome guests on your terms</small></div>→</a>
+    <a class="opt" href="https://rides.rezekme.com/#/driver" data-l="rides"><div><b data-i="opt1_b"></b><small data-i="opt1_s"></small></div><span aria-hidden="true">→</span></a>
+    <a class="opt" href="https://stay.rezekme.com/#/host/join" data-l="stay"><div><b data-i="opt2_b"></b><small data-i="opt2_s"></small></div><span aria-hidden="true">→</span></a>
    </div>
   </div>
  </div>
@@ -147,36 +170,77 @@ footer{background:var(--green);color:#b9c9bf;padding:56px 0 32px}
 
 <section class="faq" id="faq">
  <div class="wrap" style="max-width:820px">
-  <h2>Questions</h2>
-  <details><summary>Do I need two accounts?</summary><p>No. One Rezekme account works for rides and stays.</p></details>
-  <details><summary>Which languages are supported?</summary><p>Arabic, English and French.</p></details>
-  <details><summary>How do I sign in?</summary><p>Enter your email and we send you a one-time code. No password to remember.</p></details>
-  <details><summary>How do I pay?</summary><p>By card, processed securely by Stripe.</p></details>
+  <h2 data-i="faq_h2"></h2>
+  <details><summary data-i="q1"></summary><p data-i="a1"></p></details>
+  <details><summary data-i="q2"></summary><p data-i="a2"></p></details>
+  <details><summary data-i="q3"></summary><p data-i="a3"></p></details>
+  <details><summary data-i="q4"></summary><p data-i="a4"></p></details>
+  <details><summary data-i="q5"></summary><p data-i="a5"></p></details>
  </div>
 </section>
 
 <footer>
  <div class="wrap">
   <div class="fgrid">
-   <div><a class="logo" href="#top" style="color:#fff"><svg width="36" height="36" role="img" aria-label="Rezekme" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" rx="30" fill="#14261f"/><path d="M40 82 V24 H62 a16 16 0 0 1 0 32 H40 M62 56 L82 82" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="44" cy="96" r="9" fill="#e07a52"/><circle cx="44" cy="96" r="3.5" fill="#14261f"/><circle cx="82" cy="96" r="9" fill="#e07a52"/><circle cx="82" cy="96" r="3.5" fill="#14261f"/></svg><span>rezekme<em>.com</em></span></a><p style="max-width:280px">Better rides. Warmer stays. One community moving together.</p></div>
-   <div><h4>Explore</h4><a href="https://rides.rezekme.com">Find a ride</a><a href="https://stay.rezekme.com">Find a stay</a></div>
-   <div><h4>Earn</h4><a href="https://rides.rezekme.com/#/driver">Become a driver</a><a href="https://stay.rezekme.com/#/host/join">Host your place</a></div>
-   <div><h4>Help</h4><a href="mailto:support@rezekme.com">support@rezekme.com</a></div>
+   <div><a class="logo" href="#top" style="color:#fff" dir="ltr"><svg width="36" height="36" role="img" aria-label="Rezekme" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" rx="30" fill="#14261f"/><path d="M40 82 V24 H62 a16 16 0 0 1 0 32 H40 M62 56 L82 82" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><circle cx="44" cy="96" r="9" fill="#e07a52"/><circle cx="44" cy="96" r="3.5" fill="#14261f"/><circle cx="82" cy="96" r="9" fill="#e07a52"/><circle cx="82" cy="96" r="3.5" fill="#14261f"/></svg><span>rezekme<em>.com</em></span></a><p style="max-width:280px" data-i="foot_p"></p></div>
+   <div><h4 data-i="foot_explore"></h4><a href="https://rides.rezekme.com" data-l="rides" data-i="tab_ride"></a><a href="https://stay.rezekme.com" data-l="stay" data-i="tab_stay"></a></div>
+   <div><h4 data-i="foot_earn"></h4><a href="https://rides.rezekme.com/#/driver" data-l="rides" data-i="opt1_b"></a><a href="https://stay.rezekme.com/#/host/join" data-l="stay" data-i="opt2_b"></a></div>
+   <div><h4 data-i="foot_help"></h4><a href="mailto:support@rezekme.com" dir="ltr">support@rezekme.com</a><a href="https://stay.rezekme.com/#/privacy" data-l="stay" data-i="privacy"></a><a href="https://stay.rezekme.com/#/terms" data-l="stay" data-i="terms"></a></div>
   </div>
-  <div class="legal"><span>© 2026 Rezekme · 9375-7649 Québec Inc.</span><span>Made with care</span></div>
+  <div class="legal"><span dir="ltr">© 2026 Rezekme · 9375-7649 Québec Inc.</span><span data-i="made"></span></div>
  </div>
 </footer>
 
 <script>
 (function(){
-  var r=document.getElementById('t-ride'),s=document.getElementById('t-stay'),t=document.getElementById('ptext'),c=document.getElementById('pcta');
-  function set(ride){
-    r.setAttribute('aria-selected',ride);s.setAttribute('aria-selected',!ride);
-    t.textContent=ride?'Pick your route, choose a verified driver and see the price before you go.':'Find a place that feels like home, with clear prices and verified hosts.';
-    c.textContent=ride?'Book a ride →':'Find a stay →';
-    c.href=ride?'https://rides.rezekme.com':'https://stay.rezekme.com';
-  }
-  r.onclick=function(){set(true)};s.onclick=function(){set(false)};
+var T={
+ar:{nav_explore:'اكتشف',nav_how:'كيف يعمل',nav_drive:'اعمل سائقاً',nav_host:'أصبح مضيفاً',signin:'تسجيل الدخول',signin_stays:'الإقامات',signin_stays_sub:'حجوزاتي وحسابي',signin_rides:'الرحلات',signin_rides_sub:'اطلب رحلة وتابعها',signin_host:'المضيفون',signin_host_sub:'لوحة المضيف',
+eyebrow:'تنقّل. أقم. انتمِ. — رحلتك على طريقتك',h1a:'كل رحلة تقودك',h1b:'إلى مكان ما.',lead:'اطلب رحلة موثوقة أو احجز مكاناً يشعرك بأنك في بيتك — في سوريا، بحساب واحد وبخطوات بسيطة.',
+tab_stay:'ابحث عن إقامة',tab_ride:'اطلب رحلة',p_stay:'شقق وبيوت ومضيفون موثّقون، بأسعار واضحة قبل الحجز.',cta_stay:'ابحث عن إقامة ←',p_ride:'حدّد طريقك، واختر سائقاً موثّقاً، واعرف السعر قبل الانطلاق.',cta_ride:'اطلب رحلة ←',
+trust1:'✓ مجتمع موثّق',trust2:'✓ أسعار واضحة',trust3:'✓ بطاقة · شام كاش · نقاط MSH',
+explore_tag:'صُمّم للاكتشاف',explore_h2:'اذهب حيث ترتاح.',stays_h:'الإقامات',stays_p:'شقق وبيوت عربية وإقامات يومية بأسعار واضحة، ومضيفون تتم مراجعتهم قبل نشر أماكنهم.',stays_cta:'تصفّح الإقامات ←',rides_h:'الرحلات',rides_p:'سائقون موثّقون وأجرة عادلة ورحلات في موعدك، داخل المدينة أو بين المدن.',rides_cta:'اطلب رحلة ←',
+how_tag:'منصة واحدة. إمكانيات أكثر.',how_h2a:'رحلتك كاملة،',how_h2b:'مترابطة بسهولة.',how_p:'لا حاجة لتبديل التطبيقات. حساب واحد للرحلة وللمكان الذي تقيم فيه.',row1_h:'تنقّل بثقة',row1_p:'سائقون موثّقون وأسعار شفافة ورحلات في موعدك.',row2_h:'أقم في مكان مميز',row2_p:'من شقق المدينة إلى البيوت الهادئة — إقامات بطابع محلي حقيقي.',row3_h:'ادفع كما يناسبك',row3_p:'بالبطاقة، أو شام كاش، أو برصيد نقاط MSH (1 نقطة = 1$). الدفع بالبطاقة أو النقاط يؤكد الحجز فوراً.',
+photo_alt:'سائق على الطريق وقت الغروب',arch_alt:'فناء بيت عربي تقليدي مع نافورة',
+host_tag:'شارك ما لديك',host_h2:'هناك مكان للفرص.',host_p:'سواء كان مقعداً فارغاً أو مساحة مرحِّبة، حوّل ما لديك إلى دخل إضافي، وساعد غيرك على الوصول.',opt1_b:'اعمل سائقاً مع Rezekme',opt1_s:'اكسب من كل مشوار',opt2_b:'استضف في مكانك',opt2_s:'استقبل الضيوف بشروطك',
+faq_h2:'أسئلة شائعة',q1:'هل أحتاج إلى حسابين؟',a1:'لا. حساب Rezekme واحد يكفي للرحلات والإقامات.',q2:'ما اللغات المتاحة؟',a2:'العربية والإنجليزية والفرنسية.',q3:'كيف أسجّل الدخول؟',a3:'أدخل بريدك الإلكتروني ونرسل لك رمزاً لمرة واحدة. ولحجز إقامة والدفع بالبطاقة لا تحتاج إلى حساب أصلاً.',q4:'كيف أدفع؟',a4:'بالبطاقة (آمن عبر Stripe)، أو شام كاش، أو برصيد نقاط MSH. يتأكد الحجز فوراً عند الدفع بالبطاقة أو النقاط.',q5:'ما هي نقاط MSH؟',a5:'رصيد داخل Rezekme (1 نقطة = 1 دولار) تشتريه بالبطاقة أو شام كاش وتدفع منه رحلاتك وإقاماتك.',
+foot_p:'رحلات أفضل. إقامات أدفأ. مجتمع واحد يتحرك معاً.',foot_explore:'اكتشف',foot_earn:'اكسب',foot_help:'مساعدة',privacy:'سياسة الخصوصية',terms:'شروط الاستخدام',made:'صُنع بعناية'},
+en:{nav_explore:'Explore',nav_how:'How it works',nav_drive:'Drive with us',nav_host:'Become a host',signin:'Sign in',signin_stays:'Stays',signin_stays_sub:'My trips & account',signin_rides:'Rides',signin_rides_sub:'Request and track a ride',signin_host:'Hosts',signin_host_sub:'Host dashboard',
+eyebrow:'Move. Stay. Belong.',h1a:'Every journey leads',h1b:'somewhere.',lead:'Book a trusted ride or find a place that feels like home in Syria — one account, a few simple steps.',
+tab_stay:'Find a stay',tab_ride:'Find a ride',p_stay:'Apartments and homes from verified hosts, with clear prices before you book.',cta_stay:'Find a stay →',p_ride:'Pick your route, choose a verified driver and see the price before you go.',cta_ride:'Book a ride →',
+trust1:'✓ Verified community',trust2:'✓ Clear pricing',trust3:'✓ Card · Sham Cash · MSH points',
+explore_tag:'Made for discovery',explore_h2:'Go where it feels right.',stays_h:'Stays',stays_p:'Apartments, traditional Arab houses and daily stays with clear prices, from hosts reviewed before they list.',stays_cta:'Explore stays →',rides_h:'Rides',rides_p:'Verified drivers, honest fares and trips on your schedule, across the city or between cities.',rides_cta:'Book a ride →',
+how_tag:'One platform. More possibilities.',how_h2a:'Your whole journey,',how_h2b:'beautifully connected.',how_p:'No switching apps. One account for the ride there and the place you stay.',row1_h:'Ride with confidence',row1_p:'Verified drivers, transparent prices, trips on your schedule.',row2_h:'Stay somewhere special',row2_p:'From city apartments to peaceful homes — stays with real local character.',row3_h:'Pay your way',row3_p:'By card, Sham Cash or MSH points (1 point = $1). Card and points confirm your booking instantly.',
+photo_alt:'A driver on the road at sunset',arch_alt:'A traditional courtyard with a fountain',
+host_tag:'Share what you have',host_h2:'There’s room for opportunity.',host_p:'Whether it’s an empty seat or a welcoming space, turn what you have into extra income while helping someone get where they need to go.',opt1_b:'Drive with Rezekme',opt1_s:'Earn on every route you take',opt2_b:'Host your space',opt2_s:'Welcome guests on your terms',
+faq_h2:'Questions',q1:'Do I need two accounts?',a1:'No. One Rezekme account works for rides and stays.',q2:'Which languages are supported?',a2:'Arabic, English and French.',q3:'How do I sign in?',a3:'Enter your email and we send you a one-time code. To book a stay and pay by card you don’t even need an account.',q4:'How do I pay?',a4:'By card (securely via Stripe), Sham Cash, or MSH points. Card and points confirm your booking instantly.',q5:'What are MSH points?',a5:'Rezekme credit (1 point = $1) that you buy by card or Sham Cash and use to pay rides and stays.',
+foot_p:'Better rides. Warmer stays. One community moving together.',foot_explore:'Explore',foot_earn:'Earn',foot_help:'Help',privacy:'Privacy policy',terms:'Terms of use',made:'Made with care'},
+fr:{nav_explore:'Explorer',nav_how:'Comment ça marche',nav_drive:'Devenir chauffeur',nav_host:'Devenir hôte',signin:'Connexion',signin_stays:'Séjours',signin_stays_sub:'Mes voyages et compte',signin_rides:'Courses',signin_rides_sub:'Commander et suivre une course',signin_host:'Hôtes',signin_host_sub:'Tableau de bord hôte',
+eyebrow:'Bouger. Séjourner. Appartenir.',h1a:'Chaque voyage mène',h1b:'quelque part.',lead:'Réservez une course fiable ou un logement où vous vous sentez chez vous en Syrie — un seul compte, quelques étapes simples.',
+tab_stay:'Trouver un séjour',tab_ride:'Trouver une course',p_stay:'Appartements et maisons d’hôtes vérifiés, avec des prix clairs avant de réserver.',cta_stay:'Trouver un séjour →',p_ride:'Choisissez votre trajet, un chauffeur vérifié et voyez le prix avant de partir.',cta_ride:'Réserver une course →',
+trust1:'✓ Communauté vérifiée',trust2:'✓ Prix clairs',trust3:'✓ Carte · Sham Cash · points MSH',
+explore_tag:'Fait pour la découverte',explore_h2:'Allez là où vous êtes bien.',stays_h:'Séjours',stays_p:'Appartements, maisons arabes traditionnelles et séjours à la nuit, prix clairs, hôtes vérifiés avant publication.',stays_cta:'Voir les séjours →',rides_h:'Courses',rides_p:'Chauffeurs vérifiés, tarifs honnêtes, trajets à votre horaire, en ville ou entre villes.',rides_cta:'Réserver une course →',
+how_tag:'Une plateforme. Plus de possibilités.',how_h2a:'Tout votre voyage,',how_h2b:'simplement relié.',how_p:'Pas besoin de changer d’application. Un compte pour la course et pour le logement.',row1_h:'Voyagez sereinement',row1_p:'Chauffeurs vérifiés, prix transparents, trajets à votre horaire.',row2_h:'Séjournez autrement',row2_p:'Des appartements en ville aux maisons paisibles — des séjours au vrai caractère local.',row3_h:'Payez comme vous voulez',row3_p:'Par carte, Sham Cash ou points MSH (1 point = 1 $). Carte et points confirment la réservation immédiatement.',
+photo_alt:'Un chauffeur sur la route au coucher du soleil',arch_alt:'Une cour traditionnelle avec une fontaine',
+host_tag:'Partagez ce que vous avez',host_h2:'Il y a de la place pour les opportunités.',host_p:'Un siège libre ou un espace accueillant : transformez-le en revenu tout en aidant quelqu’un à arriver à destination.',opt1_b:'Conduire avec Rezekme',opt1_s:'Gagnez à chaque trajet',opt2_b:'Accueillir chez vous',opt2_s:'Recevez des voyageurs à vos conditions',
+faq_h2:'Questions',q1:'Faut-il deux comptes ?',a1:'Non. Un seul compte Rezekme pour les courses et les séjours.',q2:'Quelles langues ?',a2:'Arabe, anglais et français.',q3:'Comment me connecter ?',a3:'Saisissez votre e-mail et recevez un code à usage unique. Pour réserver un séjour et payer par carte, aucun compte n’est nécessaire.',q4:'Comment payer ?',a4:'Par carte (sécurisé via Stripe), Sham Cash ou points MSH. Carte et points confirment immédiatement.',q5:'Que sont les points MSH ?',a5:'Un crédit Rezekme (1 point = 1 $) acheté par carte ou Sham Cash pour payer courses et séjours.',
+foot_p:'De meilleures courses. Des séjours plus chaleureux. Une communauté qui avance ensemble.',foot_explore:'Explorer',foot_earn:'Gagner',foot_help:'Aide',privacy:'Confidentialité',terms:'Conditions d’utilisation',made:'Fait avec soin'}
+};
+var KEY='rezekme_landing_lang',lang='ar';
+try{var q=new URLSearchParams(location.search).get('lang');var st=localStorage.getItem(KEY);lang=['ar','en','fr'].indexOf(q)>=0?q:['ar','en','fr'].indexOf(st)>=0?st:((navigator.language||'').slice(0,2)==='fr'?'fr':(navigator.language||'').slice(0,2)==='en'?'en':'ar')}catch(e){}
+var ride=false;
+function panel(){var d=T[lang];document.getElementById('t-ride').setAttribute('aria-selected',ride);document.getElementById('t-stay').setAttribute('aria-selected',!ride);document.getElementById('ptext').textContent=ride?d.p_ride:d.p_stay;var c=document.getElementById('pcta');c.textContent=ride?d.cta_ride:d.cta_stay;c.href=(ride?'https://rides.rezekme.com/':'https://stay.rezekme.com/')+'?lang='+lang}
+function apply(l){lang=l;var d=T[l];document.documentElement.lang=l;document.documentElement.dir=l==='ar'?'rtl':'ltr';
+document.querySelectorAll('[data-i]').forEach(function(e){var v=d[e.getAttribute('data-i')];if(v!=null)e.textContent=v});
+document.querySelectorAll('[data-ia]').forEach(function(e){e.setAttribute('aria-label',d[e.getAttribute('data-ia')]||'')});
+document.querySelectorAll('a[data-l]').forEach(function(a){var u=new URL(a.getAttribute('href'),location.href);u.searchParams.set('lang',l);a.href=u.toString()});
+document.querySelectorAll('.langs button').forEach(function(b){b.setAttribute('aria-pressed',b.getAttribute('data-lang')===l)});
+document.querySelectorAll('.opt span[aria-hidden]').forEach(function(e){e.textContent=l==='ar'?'←':'→'});
+document.title=l==='ar'?'Rezekme — رحلات وإقامات في سوريا':l==='fr'?'Rezekme — Courses et séjours en Syrie':'Rezekme — Rides and stays in Syria';
+try{localStorage.setItem(KEY,l)}catch(e){};panel()}
+document.querySelectorAll('.langs button').forEach(function(b){b.onclick=function(){apply(b.getAttribute('data-lang'))}});
+document.getElementById('t-ride').onclick=function(){ride=true;panel()};document.getElementById('t-stay').onclick=function(){ride=false;panel()};
+var si=document.getElementById('signin'),sb=document.getElementById('signin-btn');sb.onclick=function(e){e.stopPropagation();var o=si.classList.toggle('open');sb.setAttribute('aria-expanded',o)};document.addEventListener('click',function(){si.classList.remove('open');sb.setAttribute('aria-expanded','false')});
+apply(lang);
 })();
 </script>
 </body>

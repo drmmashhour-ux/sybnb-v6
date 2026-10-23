@@ -448,6 +448,21 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
     // their address. The new account is flagged email_unverified (see requireVerifiedEmail).
     const skipCode = body.skipCode === true && !verified
     if (!verified && !skipCode) throw codeRequired()
+    let user = await db().user.findUnique({ where: { email }, include: { roles: true } })
+    if (skipCode && user) throw codeRequired()
+    // Partner check BEFORE the code is consumed (2026-10-22): a host/admin who proves their email here
+    // is refused, but the code stays usable, so a retry does not turn into a confusing 'no active
+    // code'. Only reached with a verified code, so it never reveals account type to a stranger.
+    if (verified && user) {
+      const roles = user.roles.map((item) => item.role)
+      if (user.status !== 'ACTIVE' || roles.some((role) => role !== 'GUEST')) {
+        const error = new Error('This email belongs to a partner account. Please sign in with your password.')
+        error.statusCode = 403
+        error.code = 'GUEST_SESSION_NOT_ALLOWED'
+        error.expose = true
+        throw error
+      }
+    }
     if (verified) {
       // Single-use: only a still-VERIFIED row flips, so one code yields exactly one session.
       const consumed = await db().verificationCode.updateMany({
@@ -456,9 +471,6 @@ const ALLOWED_SIGNUP_TITLES = new Set(['CLIENT', 'DRIVER', 'SELLER', 'BUYER', 'R
       })
       if (consumed.count === 0) throw codeRequired()
     }
-
-    let user = await db().user.findUnique({ where: { email }, include: { roles: true } })
-    if (skipCode && user) throw codeRequired()
     if (verified && user?.emailUnverified) {
       // The real owner just proved the email: clear the flag and revoke every session issued while it
       // was unproven (bumping the epoch invalidates them all), so a squatter keeps nothing.

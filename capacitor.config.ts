@@ -59,8 +59,8 @@ function rezekme(opts: RezekmeApp): CapacitorConfig {
 }
 
 const APPS: Record<string, CapacitorConfig> = {
-  'rezekme-stay': rezekme({ slug: 'rezekme-stay', appId: 'com.rezekme.stay', appName: 'Rezekme Stays', splash: '#0a0f1d', mode: 'stay' }),
-  'rezekme-rides': rezekme({ slug: 'rezekme-rides', appId: 'com.rezekme.rides', appName: 'Rezekme Rides', splash: '#14261f', mode: 'rides' }),
+  'rezekme-stay': rezekme({ slug: 'rezekme-stay', appId: 'com.rezekme.stay', appName: 'Rezekme Stays', splash: '#ff5a3c', mode: 'stay' }),
+  'rezekme-rides': rezekme({ slug: 'rezekme-rides', appId: 'com.rezekme.rides', appName: 'Rezekme Rides', splash: '#0e0e10', mode: 'rides' }),
 }
 
 const which = (process.env.CAP_APP || '').trim()

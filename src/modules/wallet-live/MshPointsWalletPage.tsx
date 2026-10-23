@@ -3,6 +3,7 @@ import { pick, type Lang } from '../../engines/language/languageEngine'
 import { getStoredGuestSession } from '../../shared/api/platformApi'
 import { goToExternalPayment } from '../../shared/api/authStorage'
 
+import { publicWebOrigin } from '../../shared/native/nativeShell'
 /**
  * Rezekme Stays wallet: MSH points (1 MSH = $1), the same platform credit riders use on
  * rides.rezekme.com (one account, one USD wallet). Buy points by card (Stripe Checkout, credited as
@@ -65,7 +66,7 @@ export function MshPointsWalletPage({ lang }: { lang: Lang }) {
     if (!valid || busy) return
     setBusy(true); setMsg(null)
     try {
-      const r = await call<{ url: string }>('POST', '/api/payments/stripe/guest-checkout-session', { purpose: 'topup', fareMinor: value, currency: 'USD', origin: window.location.origin })
+      const r = await call<{ url: string }>('POST', '/api/payments/stripe/guest-checkout-session', { purpose: 'topup', fareMinor: value, currency: 'USD', origin: publicWebOrigin() })
       goToExternalPayment(r.url)
     } catch (e) { setMsg({ kind: 'err', text: e instanceof Error ? e.message : String(e) }); setBusy(false) }
   }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { pick, type Lang } from '@platform/engines/language/languageEngine'
 import { getStoredGuestSession } from '@platform/shared/api/platformApi'
+import { publicWebOrigin } from '@platform/shared/native/nativeShell'
 
 /**
  * Rezekme wallet (the balance the rider pays rides from). Add money by:
@@ -62,7 +63,7 @@ export function WalletPage({ lang }: { lang: Lang }) {
     if (!valid || busy) return
     setBusy(true); setMsg(null)
     try {
-      const r = await call<{ url: string }>('POST', '/api/payments/stripe/guest-checkout-session', { purpose: 'topup', fareMinor: value, currency: 'USD', origin: window.location.origin })
+      const r = await call<{ url: string }>('POST', '/api/payments/stripe/guest-checkout-session', { purpose: 'topup', fareMinor: value, currency: 'USD', origin: publicWebOrigin() })
       window.location.href = r.url
     } catch (e) { setMsg({ kind: 'err', text: e instanceof Error ? e.message : String(e) }); setBusy(false) }
   }

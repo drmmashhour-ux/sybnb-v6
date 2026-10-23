@@ -18,3 +18,7 @@ dist-apps/
 # k6 load-test outputs / synthetic session tokens (never commit)
 k6-rides-*-summary.json
 *k6*tokens*.json
+
+# Rezekme native projects: IDE files
+native/*/android/.idea/
+store-screenshots/

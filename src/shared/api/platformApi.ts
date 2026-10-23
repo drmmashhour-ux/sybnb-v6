@@ -533,6 +533,7 @@ export const STAFF_SESSION_KEY = 'sybnb.v6.staffSession'
 export const STAFF_SESSION_TOKEN_KEY = 'sybnb-v6-staff-token'
 
 export { authStorage } from './authStorage'
+import { publicWebOrigin } from '../native/nativeShell'
 import { addLocalFavourite, clearLocalFavourites, readLocalFavourites, removeLocalFavourite } from './localFavourites'
 import { readQueue, enqueueFix, clearQueue } from '../lib/gps-queue'
 import { optimizePhoto } from '../lib/image-compress'
@@ -1752,7 +1753,7 @@ export async function createStripeCheckoutSession(bookingId: string) {
   const response = await apiRequest<{ ok: true; url: string; sessionId: string }>('/api/payments/stripe/create-checkout-session', {
     method: 'POST',
     token: session.token,
-    body: { bookingId, origin: window.location.origin },
+    body: { bookingId, origin: publicWebOrigin() },
   })
   return response
 }
@@ -1777,7 +1778,7 @@ export async function createStripeSetupSession() {
   const response = await apiRequest<{ ok: true; url: string; sessionId: string }>('/api/payments/stripe/setup-session', {
     method: 'POST',
     token: session.token,
-    body: { origin: window.location.origin },
+    body: { origin: publicWebOrigin() },
   })
   return response
 }
@@ -1797,7 +1798,7 @@ export async function createStripeRideCheckoutSession(rideId: string) {
   const response = await apiRequest<{ ok: true; url: string; sessionId: string }>('/api/payments/stripe/create-checkout-session', {
     method: 'POST',
     token: session.token,
-    body: { rideId, origin: window.location.origin },
+    body: { rideId, origin: publicWebOrigin() },
   })
   return response
 }
@@ -1832,7 +1833,7 @@ export async function createGuestPreRideCheckout(fareMinor: number, currency: st
     {
       method: 'POST',
       token: session.token,
-      body: { fareMinor, currency, origin: window.location.origin },
+      body: { fareMinor, currency, origin: publicWebOrigin() },
     },
   )
   return { url: response.url, sessionId: response.sessionId }

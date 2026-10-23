@@ -165,6 +165,11 @@ export function App() {
       <Suspense fallback={<div style={styles.loading}><span style={styles.skeleton} /><span style={{ ...styles.skeleton, width: '45%' }} /></div>}>
         {content}
       </Suspense>
+      <footer style={styles.legal}>
+        <a href="#/privacy" style={styles.legalLink}>{pick(lang, 'الخصوصية', 'Privacy', 'Confidentialité')}</a>
+        <span aria-hidden="true">·</span>
+        <a href="#/terms" style={styles.legalLink}>{pick(lang, 'الشروط', 'Terms', 'Conditions')}</a>
+      </footer>
       <GuideOverlay lang={lang} />
       <HelpLauncher lang={lang} path={path} />
     </div>
@@ -183,5 +188,7 @@ const styles: Record<string, CSSProperties> = {
   barLink: { color: '#fff', fontSize: 13, fontWeight: 700, textDecoration: 'none', padding: '0 6px' },
   barButton: { minHeight: 32, border: 0, borderRadius: 999, background: '#fff', color: '#000', fontSize: 12, fontWeight: 700, padding: '0 12px' },
   loading: { maxWidth: 520, margin: '0 auto', padding: 16, display: 'grid', gap: 12 },
+  legal: { maxWidth: 520, margin: '0 auto', padding: '8px 16px 96px', display: 'flex', gap: 8, justifyContent: 'center', color: '#888', fontSize: 12 },
+  legalLink: { color: '#666', textDecoration: 'underline' },
   skeleton: { display: 'block', height: 28, width: '80%', borderRadius: 8, background: '#eee' },
 }

@@ -87,7 +87,14 @@
     "build:rezekme-stay": "tsc -p apps && vite build --config apps/rezekme-stay/vite.config.ts",
     "build:rezekme-admin": "tsc -p apps && vite build --config apps/rezekme-admin/vite.config.ts",
     "build:rezekme-landing": "vite build --config apps/rezekme-landing/vite.config.ts",
-    "build:rezekme": "npm run build:rezekme-rides && npm run build:rezekme-stay && npm run build:rezekme-admin && npm run build:rezekme-landing"
+    "build:rezekme": "npm run build:rezekme-rides && npm run build:rezekme-stay && npm run build:rezekme-admin && npm run build:rezekme-landing",
+    "native:stay": "node scripts/rezekme-native.mjs stay",
+    "native:rides": "node scripts/rezekme-native.mjs rides",
+    "native:stay:android": "CAP_APP=rezekme-stay cap open android",
+    "native:stay:ios": "CAP_APP=rezekme-stay cap open ios",
+    "native:rides:android": "CAP_APP=rezekme-rides cap open android",
+    "native:rides:ios": "CAP_APP=rezekme-rides cap open ios",
+    "icons:rezekme": "python3 scripts/rezekme-icons.py"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",

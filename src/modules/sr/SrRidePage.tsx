@@ -53,6 +53,7 @@ import { getStoredGuestSession } from '../../shared/api/platformApi'
 import { isSrRideLocationConfirmed, type SrRideLocationSource } from './srRideLocationGuard'
 import { srFallbackFareMinor } from './srFareModel'
 import { RecordingControls } from './RecordingControls'
+import { publicWebOrigin } from '../../shared/native/nativeShell'
 
 type Props = {
   lang: Lang
@@ -738,7 +739,7 @@ export function SrRidePage({ lang }: Props) {
     setShareStatus('sharing')
     try {
       const { rideId, exp, sig } = await sharePrototypeSrRide(ride.id)
-      const shareUrl = `${window.location.origin}${window.location.pathname}#/ride/shared/${rideId}?exp=${exp}&sig=${sig}`
+      const shareUrl = `${publicWebOrigin()}${window.location.pathname}#/ride/shared/${rideId}?exp=${exp}&sig=${sig}`
       if (navigator.share) {
         await navigator.share({ title: t.shareTitle, text: t.shareText, url: shareUrl })
         setShareStatus('idle')

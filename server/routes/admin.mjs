@@ -1,3 +1,4 @@
+import { publicListingMedia } from '../lib/listing-media-url.mjs'
 import { waiveRideCancellationFee } from '../lib/ride-fee-waiver.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
 import { db } from '../lib/prisma.mjs'
@@ -1902,7 +1903,10 @@ export async function handleAdmin(req, res, url, context) {
       campaignListing: p.campaignListingId ? campaignListingById.get(p.campaignListingId) || null : null,
     }))
 
-    const listingsWithAi = listings.map(({ aiReview, ...listing }) => ({ ...listing, aiReview: serializeAiReview(aiReview) }))
+    // Photos are stored as private references (payment-proof://...). Sign the reviewer's thumbnail
+    // the same way public listing pages do -- the admin queue showed "No image" for every listing.
+    // This route is admin-only, so a short-lived signed link to a pending listing's photo is fine.
+    const listingsWithAi = listings.map(({ aiReview, ...listing }) => ({ ...listing, media: publicListingMedia(listing.media), aiReview: serializeAiReview(aiReview) }))
 
     return json(res, 200, {
       ok: true,

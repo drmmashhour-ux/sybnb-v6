@@ -419,6 +419,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const [dateRange, setDateRange] = useState<DateRange>(
     bookingDraft.dateRange || loadSearchDatesDraft() || { checkIn: '', checkOut: '' },
   )
+  // Once both dates are picked, the "choose your dates first" hint from an earlier Reserve tap is
+  // out of date -- clear it instead of leaving it under the filled-in dates.
+  useEffect(() => {
+    if (dateRange.checkIn && dateRange.checkOut) setMessage((current) => (current === t.datesRequired ? '' : current))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange.checkIn, dateRange.checkOut])
   const [showDatePicker, setShowDatePicker] = useState(false)
   const [disabledDates, setDisabledDates] = useState<Set<string>>(new Set())
   // Local fallback only (legacy per-night quote) -- used when GET /api/bookings/quote fails.

@@ -8,6 +8,7 @@ import { localeForLang } from '../../shared/country/presentation'
 import type { CSSProperties, ReactNode } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import {
+  fetchHostPayoutMethod,
   decidePrototypeHostRequest,
   deletePrototypeHostListing,
   fetchPrototypeHostEarnings,
@@ -368,6 +369,16 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
   const isStaysHost = focus === 'stays'
   const providerCopy = getProviderCopy(t, lang, focus, mode)
   const [overview, setOverview] = useState<PlatformHostOverview | null>(null)
+  // Whether this host already told us how to pay them (the wizard asks for it before submitting a
+  // stay). null = not known yet; the "payout method" next step only shows when it is really missing.
+  const [hasPayoutMethod, setHasPayoutMethod] = useState<boolean | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    fetchHostPayoutMethod(mode)
+      .then((method) => { if (!cancelled) setHasPayoutMethod(Boolean(method)) })
+      .catch(() => { if (!cancelled) setHasPayoutMethod(null) })
+    return () => { cancelled = true }
+  }, [mode])
   const [earnings, setEarnings] = useState<PlatformHostEarnings | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error' | 'saving'>('loading')
   const [message, setMessage] = useState('')
@@ -730,7 +741,7 @@ export function HostDashboardPage({ lang, mode = 'host', focus }: Props) {
             go: () => (window.location.hash = `/listing/${fewPhotos.id}`),
           })
         }
-        steps.push({
+        if (hasPayoutMethod === false) steps.push({
           key: 'payout',
           text: pick(lang, 'حدّد كيف تستلم أرباحك (شام كاش، تحويل بنكي، أو نقداً).', 'Choose how you receive your earnings (Sham Cash, bank, or cash).', 'Choisissez comment recevoir vos revenus.'),
           action: pick(lang, 'طريقة الاستلام', 'Payout method', 'Versements'),

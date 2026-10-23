@@ -81,6 +81,7 @@ const SyrianLocalWalletPaymentPage = lazyNamed(
 const TrustProtectionRoutes = lazyNamed(() => import('../modules/trust/TrustProtectionRoutes'), 'TrustProtectionRoutes')
 const MshDashboardPage = lazyNamed(() => import('../modules/msh/MshDashboardPage'), 'MshDashboardPage')
 const WalletPage = lazyNamed(() => import('../modules/wallet-live/WalletPage'), 'WalletPage')
+const MshPointsWalletPage = lazyNamed(() => import('../modules/wallet-live/MshPointsWalletPage'), 'MshPointsWalletPage')
 
 function lazyNamed<T extends Record<string, unknown>, K extends keyof T>(
   loader: () => Promise<T>,
@@ -406,7 +407,7 @@ export function App() {
         ) : path === '/wallet/msh' ? (
           <MshDashboardPage lang={lang} />
         ) : path === '/wallet' ? (
-          <WalletPage lang={lang} />
+          STAYS_ONLY ? <MshPointsWalletPage lang={lang} /> : <WalletPage lang={lang} />
         ) : division ? (
           <DivisionLivePage division={division} lang={lang} />
         ) : (path === '/' || path === '' || path === '/home') && STAYS_ONLY ? (

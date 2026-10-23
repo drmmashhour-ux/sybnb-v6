@@ -27,6 +27,7 @@ import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappI
 import { guestFeeSummary } from './guestFeeSummary'
 import { CHECKOUT_NOTE_KEY_PREFIX, STRIPE_PENDING_KEY_PREFIX, takeSessionFlag } from './checkoutDraft'
 import { OpenAccountOffer } from '../../shared/auth/OpenAccountOffer'
+import { MshPayOption } from './MshPayOption'
 
 // Owner decision 2026-10-22: guests pay without sending an ID photo first (card, Sham Cash, bank).
 const ID_BEFORE_PAYMENT = false
@@ -488,16 +489,24 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
       )
     }
 
+    const mshOption = booking && String(booking.currency).toUpperCase() === 'USD' ? (
+      <MshPayOption lang={lang} bookingId={booking.id} totalMinor={fees?.totalMinor ?? booking.amountMinor} onPaid={() => { setCardResult('paid'); void loadBooking() }} />
+    ) : null
+
     if (!stripeConfigured) {
       return (
-        <button style={styles.primaryButton} disabled={cardState === 'confirming'} onClick={() => (window.location.hash = paymentRoute)}>
-          {t.pay}
-        </button>
+        <>
+          {mshOption}
+          <button style={styles.primaryButton} disabled={cardState === 'confirming'} onClick={() => (window.location.hash = paymentRoute)}>
+            {t.pay}
+          </button>
+        </>
       )
     }
 
     return (
       <div style={styles.payOptions}>
+        {mshOption}
         <button style={styles.payOptionCard} disabled={cardState === 'starting' || cardState === 'confirming'} onClick={() => void payWithCard()}>
           <strong>{cardState === 'starting' ? t.payingByCard : t.payByCard}</strong>
           <small>{t.stripeCardNote}</small>
@@ -911,7 +920,7 @@ function Info({ label, value, dir = 'ltr', strong = false }: { label: string; va
 }
 
 const styles: Record<string, CSSProperties> = {
-  page: { minHeight: '100vh', background: '#08090f', color: '#fff', padding: '24px 16px 90px', display: 'grid', gap: 22, maxWidth: 1080, margin: '0 auto' },
+  page: { minHeight: '100vh', background: '#08090f', color: '#fff', padding: '24px 16px 90px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 22, maxWidth: 1080, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
   flowNav: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
   arrowButton: { width: 54, height: 54, borderRadius: 999, border: '1px solid #30384d', background: '#111827', color: '#fff', fontSize: 34, fontWeight: 900, display: 'grid', placeItems: 'center' },
@@ -926,12 +935,12 @@ const styles: Record<string, CSSProperties> = {
   protectionHeader: { display: 'grid', gap: 8 },
   protectedBadge: { background: 'rgba(32,210,155,.16)', borderRadius: 999, color: '#20d29b', fontWeight: 950, padding: '7px 12px' },
   timeline: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' },
-  tunnelTimeline: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(5, minmax(120px, 1fr))' },
+  tunnelTimeline: { display: 'grid', gap: 8, gridTemplateColumns: 'repeat(5, minmax(120px, 1fr))', overflowX: 'auto' },
   timelineStep: { borderTop: '2px solid #30384d', color: '#687082', fontWeight: 900, padding: '16px 8px 0', textAlign: 'center' },
   timelineActive: { borderTop: '2px solid #20d29b', color: '#20d29b', fontWeight: 950, padding: '16px 8px 0', textAlign: 'center' },
   warning: { border: '1px solid rgba(255,95,125,.65)', borderRadius: 8, background: 'rgba(255,95,125,.08)', color: '#ff5f7d', fontWeight: 900, padding: 18 },
-  grid: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' },
-  moneyTunnelGrid: { display: 'grid', gap: 16, gridTemplateColumns: '1.2fr 1fr' },
+  grid: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 14, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))' },
+  moneyTunnelGrid: { display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))' },
   breakdown: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', padding: 18, display: 'grid', gap: 10 },
   guaranteeCard: { borderLeft: '5px solid #20d29b', borderRadius: 8, background: '#111118', padding: 18, display: 'grid', gap: 8 },
   sectionTitle: { gridColumn: '1 / -1', fontSize: 24, margin: 0 },

@@ -365,7 +365,7 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
     // is enough to confirm the stay outright, same as Airbnb's Instant Book.
     // Owner decision 2026-10-22: a captured card payment confirms the stay right away too -- the
     // money is already received, so the guest has their reservation and the host is informed.
-    const nextStatus = existing.booking?.listing?.instantBookEnabled || existing.provider === 'stripe' ? 'CONFIRMED' : 'REQUESTED'
+    const nextStatus = existing.booking?.listing?.instantBookEnabled || existing.provider === 'stripe' || existing.provider === 'wallet_balance' ? 'CONFIRMED' : 'REQUESTED'
     // Review fix (LOW): only an unpaid booking can be moved forward by a payment. Conditional on
     // PAYMENT_PENDING in the UPDATE itself, so a guest cancel / expiry sweep / second proof that
     // landed after the read above cannot be overwritten (and no second HOLD/commission is posted);
@@ -1440,7 +1440,8 @@ function isActiveRefundUniqueViolation(err) {
 // Mirrors the manual-family allowlist scripts/migrate-legacy-refunds-2a.mjs already uses for the
 // exact same reasoning: these are the only providers with no external processor to canonicalize
 // against, so the PaymentProof itself can stand in as the refunded object's identity.
-const MANUAL_REFUND_PROVIDER_FAMILY = new Set(['manual', 'syrian_local_wallet', 'sham_cash'])
+// 'wallet_balance' (2026-10-22): a stay paid from the guest's wallet is refunded back to that wallet.
+const MANUAL_REFUND_PROVIDER_FAMILY = new Set(['manual', 'syrian_local_wallet', 'sham_cash', 'wallet_balance'])
 
 // The closed, code-level catalogue this refund-request layer accepts -- matches the approved
 // design's REFUND_ELIGIBILITY_POLICY reason codes exactly. 'LEGACY_UNKNOWN' is deliberately absent:

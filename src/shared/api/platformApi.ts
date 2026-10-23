@@ -3506,6 +3506,20 @@ export async function fetchPrototypeWalletGift(giftId: string) {
   return response.gift
 }
 
+// MSH points = the guest's USD wallet (1 MSH = $1). Null when not signed in.
+export async function fetchMshPointsBalance(): Promise<number | null> {
+  const session = getStoredGuestSession()
+  if (!session?.token) return null
+  const response = await apiRequest<{ ok: true; wallet: { availableMinor?: number; cachedBalanceMinor?: number } | null }>('/api/wallet?currency=USD', { token: session.token })
+  return response.wallet ? Number(response.wallet.availableMinor ?? response.wallet.cachedBalanceMinor ?? 0) : 0
+}
+
+// Pay a stay from the wallet balance (POST /api/bookings/:id/pay-with-wallet): confirmed instantly.
+export async function payBookingWithWallet(bookingId: string) {
+  const session = await ensurePrototypeGuestSession()
+  return apiRequest<{ ok: true; bookingStatus: string }>(`/api/bookings/${bookingId}/pay-with-wallet`, { method: 'POST', token: session.token, body: {} })
+}
+
 export async function fetchPrototypeWallet() {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; wallet: PlatformWallet | null }>('/api/wallet', {

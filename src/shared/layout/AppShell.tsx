@@ -872,6 +872,11 @@ function StaysQuickBar({ lang, signedIn, isHost, isAdmin }: { lang: Lang; signed
         <button type="button" data-testid="quickbar-account" onClick={() => navigate('/dashboard')}>
           {pick(lang, 'حجوزاتي وحسابي', 'My trips & account', 'Mes voyages et compte')}
         </button>
+      ) : null}
+      {signedIn ? (
+        <button type="button" data-testid="quickbar-wallet" onClick={() => navigate('/wallet')}>
+          {pick(lang, 'محفظتي MSH', 'My MSH wallet', 'Mon portefeuille MSH')}
+        </button>
       ) : (
         <button type="button" data-testid="quickbar-account" onClick={() => navigate('/account/open')}>
           {pick(lang, 'تسجيل الدخول / إنشاء حساب', 'Log in / Sign up', 'Connexion / Inscription')}

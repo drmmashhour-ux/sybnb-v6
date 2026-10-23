@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import Stripe from 'stripe'
 import { db } from '../lib/prisma.mjs'
 import { requireAuth, requireVerifiedEmail } from '../lib/auth-context.mjs'
-import { expectedTotalMinor, isProviderRefUniqueViolation, sypPerUsd, recordCardPrepayCreditOnce } from '../lib/finance-ledger.mjs'
+import { approvePaymentProof, expectedTotalMinor, firstAdminId, isProviderRefUniqueViolation, recordWalletEntry, sypPerUsd, recordCardPrepayCreditOnce } from '../lib/finance-ledger.mjs'
+import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { putObject, signObjectUrl } from '../lib/storage.mjs'
 import { authorizePaymentOperation, policyEnvironment, activePolicyCountryKey } from '../lib/payment-policy.mjs'
@@ -12,7 +13,7 @@ import { log } from '../lib/logger.mjs'
 import { inc } from '../lib/metrics.mjs'
 import { expireUnpaidBookings } from '../lib/booking-lifecycle.mjs'
 import { formatMoney, notifyAdmin } from '../lib/notifications.mjs'
-import { confirmStripeCheckoutSessionForActor, applyStripeCheckoutEvent } from '../lib/stripe-checkout-apply.mjs'
+import { confirmStripeCheckoutSessionForActor, applyStripeCheckoutEvent, notifyCardBookingConfirmed } from '../lib/stripe-checkout-apply.mjs'
 import { applyPaymentEvent, intakeEvent, webhookAcknowledgeStatus } from '../lib/payment-event-pipeline.mjs'
 
 export const WALLET_TOPUP_MIN_USD = 5
@@ -474,6 +475,69 @@ export async function handlePayments(req, res, url, context) {
     })
 
     return json(res, 201, { ok: true, url: session.url, sessionId: session.id })
+  }
+
+  // Owner decision 2026-10-22: a guest who bought wallet credit (card or Sham Cash top-up) pays a
+  // stay from that balance. The money is already in platform custody, so -- like a captured card --
+  // the booking is confirmed at once and guest + host are told. One atomic transaction: DEBIT the
+  // guest's wallet in the booking's currency (no-overdraw guard), record the payment as a
+  // 'wallet_balance' proof and approve it (host HOLD + platform share, exactly like every other rail).
+  // A cancellation refunds it back to the wallet (manual-family refund).
+  const walletPayMatch = url.pathname.match(/^\/api\/bookings\/([^/]+)\/pay-with-wallet$/)
+  if (walletPayMatch) {
+    if (req.method !== 'POST') return methodNotAllowed(res, ['POST'])
+    requireAuth(context, ['GUEST'])
+    const bookingId = walletPayMatch[1]
+    const fail = (status, code, message) => { const error = new Error(message); error.statusCode = status; error.code = code; error.expose = true; return error }
+    await expireUnpaidBookings({ id: bookingId, guestId: context.user.id })
+    const preview = await db().booking.findFirst({ where: { id: bookingId, guestId: context.user.id }, include: { listing: true } })
+    if (!preview) throw fail(403, 'PAYMENT_BOOKING_FORBIDDEN', 'This booking is not available for payment.')
+    if (preview.status !== 'PAYMENT_PENDING') throw fail(409, 'BOOKING_NOT_PAYABLE', 'This booking is not awaiting payment.')
+    authorizePaymentOperation({
+      operation: 'create', rail: 'manual_proof', provider: 'manual', division: preview.listing?.division || 'STAYS',
+      country: activePolicyCountryKey(), environment: policyEnvironment(), actor: { roles: context.roles },
+    })
+    let proof
+    try {
+      proof = await db().$transaction(async (tx) => {
+        await reauthorizeAtCommit(tx, context, { action: 'BOOKING_WALLET_PAYMENT', requiredRoles: ['GUEST'] })
+        const booking = await tx.booking.findFirst({ where: { id: bookingId, guestId: context.user.id }, include: { listing: true } })
+        if (!booking || booking.status !== 'PAYMENT_PENDING') throw fail(409, 'BOOKING_NOT_PAYABLE', 'This booking is not awaiting payment.')
+        const totalMinor = expectedTotalMinor(booking)
+        await recordWalletEntry(tx, {
+          userId: context.user.id,
+          type: 'DEBIT',
+          amountMinor: totalMinor,
+          currency: booking.currency,
+          referenceType: 'booking_wallet_payment',
+          referenceId: booking.id,
+          keyParts: ['booking-wallet-payment', booking.id],
+          note: 'Guest paid the stay from wallet balance.',
+        })
+        const created = await tx.paymentProof.create({
+          data: {
+            bookingId: booking.id,
+            userId: context.user.id,
+            provider: 'wallet_balance',
+            status: 'PENDING_ADMIN_REVIEW',
+            amountMinor: totalMinor,
+            currency: booking.currency,
+            providerRef: `wallet:${booking.id}`,
+          },
+        })
+        return approvePaymentProof(tx, {
+          proofId: created.id,
+          actorUserId: await firstAdminId(tx),
+          note: 'Auto-approved: paid from the guest wallet balance (funds already in platform custody).',
+        })
+      })
+    } catch (err) {
+      if (err?.code === 'WALLET_INSUFFICIENT_FUNDS') throw fail(402, 'WALLET_INSUFFICIENT_FUNDS', 'Your wallet balance is not enough for this booking. Top up first.')
+      if (isProviderRefUniqueViolation(err)) throw fail(409, 'BOOKING_NOT_PAYABLE', 'This booking was already paid.')
+      throw err
+    }
+    notifyCardBookingConfirmed({ bookingId, amountMinor: proof.amountMinor, currency: proof.currency })
+    return json(res, 200, { ok: true, proof, bookingStatus: 'CONFIRMED' })
   }
 
   if (url.pathname === '/api/payments/stripe/confirm') {

@@ -23,7 +23,12 @@ const driver = await createSessionToken({ id: DRIVER, roles: [{ role: 'DRIVER' }
 
 async function setBalance(userId, currency, minor) {
   const w = await db().wallet.upsert({ where: { userId_currency: { userId, currency } }, update: {}, create: { userId, currency } })
+  // Keep the cached balance equal to its entries: removing an earlier fixture entry also takes its
+  // amount back out of the cache (it used to stay in, so a re-run left the wallet out of balance).
+  const old = await db().walletEntry.findMany({ where: { walletId: w.id, referenceType: 'e2e_fixture' }, select: { type: true, amountMinor: true } })
+  const oldDelta = old.reduce((sum, e) => sum + (e.type === 'DEBIT' ? -e.amountMinor : e.amountMinor), 0)
   await db().walletEntry.deleteMany({ where: { walletId: w.id, referenceType: 'e2e_fixture' } })
+  if (oldDelta) await db().wallet.update({ where: { id: w.id }, data: { cachedBalanceMinor: { decrement: oldDelta } } })
   const current = (await db().wallet.findUnique({ where: { id: w.id } })).cachedBalanceMinor
   // Both directions, so a re-run starts from the balance it asks for (a positive leftover from the
   // previous run used to let the "unfunded rider" request through).

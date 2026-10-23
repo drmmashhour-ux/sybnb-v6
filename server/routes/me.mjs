@@ -6,6 +6,7 @@ import { bookingExpiresAt } from '../lib/booking-policy.mjs'
 import { deleteIdDocument, readIdDocument, saveIdDocument } from '../lib/id-document-storage.mjs'
 import { bookingPolicySettings, defaultCurrency } from '../lib/country.mjs'
 import { loyaltySummary, redeemPoints } from '../lib/loyalty.mjs'
+import { readRewardsActivity } from '../lib/msh-rewards-preview.mjs'
 // SEC-002R round 3, item 1: the self-service half of finding G1 -- see the id-document handler below.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { revokeUserAccess, REVOCATION_REASONS } from '../lib/session-store.mjs'
@@ -434,6 +435,14 @@ export async function handleMe(req, res, url, context) {
     if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
     requireAuth(context)
     return json(res, 200, { ok: true, loyalty: await loyaltySummary(context.user.id) })
+  }
+
+  // MSH rewards draft (read-only preview of the caller's own completed stays and rides). Always the
+  // signed-in account: any ?userId= in the URL is ignored. Never awards, redeems or writes a ledger.
+  if (url.pathname === '/api/me/msh-rewards-preview') {
+    if (req.method !== 'GET') return methodNotAllowed(res, ['GET'])
+    requireAuth(context)
+    return json(res, 200, { ok: true, rewards: await readRewardsActivity(db(), context.user.id) })
   }
 
   if (url.pathname === '/api/me/loyalty/redeem') {

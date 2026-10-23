@@ -77,6 +77,22 @@ export async function handleBookings(req, res, url, context) {
     if (isDemoListing(listing)) reason = 'LISTING_NOT_BOOKABLE'
     else if (context?.user?.id && listing.ownerId === context.user.id) reason = 'OWN_LISTING'
     else if (checkIn && checkOut && (await datesUnavailable(db(), listing.id, checkIn, checkOut))) reason = 'BOOKING_DATES_UNAVAILABLE'
+    // The signed-in guest's OWN booking may be what holds these dates (e.g. an unpaid request from
+    // an earlier visit): point them to it instead of a bare "not available" (2026-10-22).
+    let yourBooking = null
+    if (reason === 'BOOKING_DATES_UNAVAILABLE' && context?.user?.id) {
+      yourBooking = await db().booking.findFirst({
+        where: {
+          listingId: listing.id,
+          guestId: context.user.id,
+          status: { in: ['PAYMENT_PENDING', 'REQUESTED', 'CONFIRMED'] },
+          checkIn: { lt: checkOut },
+          checkOut: { gt: checkIn },
+        },
+        select: { id: true, status: true },
+        orderBy: { createdAt: 'desc' },
+      })
+    }
     return json(res, 200, {
       ok: true,
       quote: {
@@ -98,6 +114,7 @@ export async function handleBookings(req, res, url, context) {
         currency: listing.currency,
         bookable: !reason,
         ...(reason ? { reason } : {}),
+        ...(yourBooking ? { yourBookingId: yourBooking.id, yourBookingStatus: yourBooking.status } : {}),
       },
     })
   }

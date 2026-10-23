@@ -496,7 +496,12 @@ export function ListingDetailPage({ listingId, lang }: Props) {
   const protectedTotalMinor = pricing.protectedTotalMinor
   const selectedTotalMinor = cancellationProtection ? pricing.protectedTotalMinor : pricing.standardTotalMinor
   const isDemoListing = listing?.metadata?.demo === true
-  const notBookable = isDemoListing || Boolean(listing?.preview) || quotes?.standard.bookable === false
+  // Dates already taken is not "this listing is unavailable": the guest can pick other dates, or --
+  // when the dates are held by their own unpaid/confirmed booking -- go straight to it.
+  const datesTaken = quotes?.standard.reason === 'BOOKING_DATES_UNAVAILABLE'
+  const ownBookingId = datesTaken ? quotes?.standard.yourBookingId || '' : ''
+  const ownBookingUnpaid = quotes?.standard.yourBookingStatus === 'PAYMENT_PENDING'
+  const notBookable = isDemoListing || Boolean(listing?.preview) || (quotes?.standard.bookable === false && !datesTaken)
   const mapTarget = listing ? listingMapTarget(listing, title, lang) : null
 
   useEffect(() => {
@@ -1029,6 +1034,24 @@ export function ListingDetailPage({ listingId, lang }: Props) {
                 <button type="button" style={styles.secondaryButton} onClick={() => (window.location.hash = returnPath || '/stays')}>
                   {t.browseAll}
                 </button>
+              </section>
+            )}
+            {!notBookable && datesTaken && (
+              <section style={styles.demoNotice} role="status" data-testid="dates-taken">
+                <strong>
+                  {ownBookingId
+                    ? ownBookingUnpaid
+                      ? pick(lang, 'لديك حجز لهذه التواريخ بانتظار الدفع', 'You already have a booking for these dates, awaiting payment', 'Vous avez déjà une réservation pour ces dates, en attente de paiement')
+                      : pick(lang, 'لديك حجز لهذه التواريخ', 'You already have a booking for these dates', 'Vous avez déjà une réservation pour ces dates')
+                    : pick(lang, 'هذه التواريخ محجوزة. اختر تواريخ أخرى.', 'These dates are taken. Please choose other dates.', 'Ces dates sont prises. Choisissez d’autres dates.')}
+                </strong>
+                {ownBookingId && (
+                  <button type="button" style={styles.secondaryButton} onClick={() => (window.location.hash = `/booking/${ownBookingId}`)}>
+                    {ownBookingUnpaid
+                      ? pick(lang, 'أكمل الدفع', 'Continue to payment', 'Continuer vers le paiement')
+                      : pick(lang, 'عرض حجزك', 'View your booking', 'Voir votre réservation')}
+                  </button>
+                )}
               </section>
             )}
             {!notBookable && (<>

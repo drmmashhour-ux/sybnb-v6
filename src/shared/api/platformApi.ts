@@ -3726,6 +3726,9 @@ export type BookingQuote = {
   perNight?: Array<{ date: string; priceMinor: number; basis: 'base' | 'weekend' | 'custom'; season?: string; upliftPct?: number }>
   bookable: boolean
   reason?: string
+  // Present when the dates are held by the signed-in guest's own booking.
+  yourBookingId?: string
+  yourBookingStatus?: string
 }
 
 // Public. `protection` adds the 3%-of-the-full-stay protection fee into totalMinor.
@@ -3736,7 +3739,18 @@ export async function fetchBookingQuote(input: { listingId: string; checkIn: str
     checkOut: input.checkOut,
     protection: input.protection ? '1' : '0',
   })
-  const response = await apiRequest<{ ok: true; quote: BookingQuote }>(`/api/bookings/quote?${params.toString()}`)
+  // Signed-in guests send their token so the server can say when the dates are held by their own booking.
+  const token = getStoredGuestSession()?.token
+  const path = `/api/bookings/quote?${params.toString()}`
+  if (token) {
+    try {
+      return (await apiRequest<{ ok: true; quote: BookingQuote }>(path, { token })).quote
+    } catch (error) {
+      // An expired session must never block the public quote: retry anonymously.
+      if ((error as { status?: number })?.status !== 401) throw error
+    }
+  }
+  const response = await apiRequest<{ ok: true; quote: BookingQuote }>(path)
   return response.quote
 }
 

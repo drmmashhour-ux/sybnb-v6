@@ -363,9 +363,10 @@ export async function approvePaymentProof(tx, { proofId, actorUserId, note }) {
   if (proof.bookingId) {
     // Instant Book listings skip the manual host-confirmation step: payment approval
     // is enough to confirm the stay outright, same as Airbnb's Instant Book.
-    // Owner decision 2026-10-22: a captured card payment confirms the stay right away too -- the
-    // money is already received, so the guest has their reservation and the host is informed.
-    const nextStatus = existing.booking?.listing?.instantBookEnabled || existing.provider === 'stripe' || existing.provider === 'wallet_balance' ? 'CONFIRMED' : 'REQUESTED'
+    // Owner decisions 2026-10-22/23: an approved payment means the money is received -- card
+    // (Stripe captured), wallet balance, and Sham Cash / bank once the admin accepts the receipt --
+    // so the booking is confirmed right away and the host is informed (no separate host-accept step).
+    const nextStatus = 'CONFIRMED'
     // Review fix (LOW): only an unpaid booking can be moved forward by a payment. Conditional on
     // PAYMENT_PENDING in the UPDATE itself, so a guest cancel / expiry sweep / second proof that
     // landed after the read above cannot be overwritten (and no second HOLD/commission is posted);

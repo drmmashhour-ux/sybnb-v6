@@ -1,3 +1,4 @@
+import { notifyCardBookingConfirmed } from '../lib/stripe-checkout-apply.mjs'
 import { publicListingMedia } from '../lib/listing-media-url.mjs'
 import { waiveRideCancellationFee } from '../lib/ride-fee-waiver.mjs'
 import { sendPushNotification } from '../lib/push-notifications.mjs'
@@ -2495,9 +2496,10 @@ export async function handleAdmin(req, res, url, context) {
     })
     // Decision 8: a verified booking payment tells the guest and asks the host to accept (or tells
     // the host about a confirmed Instant Book booking). Fire-and-forget, after commit.
+    // Owner decision 2026-10-23: an accepted receipt confirms the booking at once, so guest and host
+    // get the same confirmation emails as a card payment (with the account invitation / full details).
     if (moneyMovingOperation === 'capture' && result.entity?.bookingId) {
-      notifyBooking('guest_payment_confirmed', result.entity.bookingId, { amount: formatMoney(result.entity.amountMinor, result.entity.currency) })
-      notifyBooking('host_new_paid_request', result.entity.bookingId)
+      notifyCardBookingConfirmed({ bookingId: result.entity.bookingId, amountMinor: result.entity.amountMinor, currency: result.entity.currency })
     }
     // Activation code email: fire-and-forget, only after the approval committed.
     const { activation, ...rest } = result

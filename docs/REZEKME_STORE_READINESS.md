@@ -410,3 +410,14 @@ are gone; it photographs the live sites in Arabic and English at both sizes):
   move to a tile provider you control before large volumes. (Rides uses OpenFreeMap.)
 - **Capacitor CLI is 7.6.9 while the native libraries are 8.5.x**: it works (verified here), but upgrade
   `@capacitor/cli` to 8.x together with `package-lock.json` when convenient.
+
+## Countries (owner decision 2026-10-23)
+
+- First check in App Store Connect (Pricing and Availability) and Google Play Console (Production → Countries/regions) whether **Syria** can be selected.
+- If Syria is not available, publish in **Canada** (the company, 9375-7649 Québec Inc., is Canadian). Add other countries with Syrian communities later (e.g. Lebanon, Jordan, UAE, Turkey, Germany) if wanted.
+- Guests in Syria can always use the websites (stay.rezekme.com, rides.rezekme.com) and add them to the home screen, whether or not the store apps are available there.
+- Listing content: the apps are in Arabic, English and French; write the Canadian store listing in English and French (Canada requires neither, but French helps for Québec).
+
+## Live data before review (2026-10-23)
+
+- The two test stays were removed and the test booking cancelled on the live site. The stays search is now empty: list at least a few real stays (with real photos) before taking store screenshots and before submitting for review — reviewers reject apps that look empty or show test content.

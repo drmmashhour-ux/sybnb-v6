@@ -4,7 +4,7 @@
 // path — see that route's handling of a stripe_checkout-rail PaymentEvent) can call it, and so the
 // webhook path can wrap it with the same attempts/dead-letter bookkeeping the payment_intent rail
 // already has (see payment-event-pipeline.mjs).
-import { approvePaymentProof, firstAdminId, isProviderRefUniqueViolation, recordCardPaymentForClosedBooking } from './finance-ledger.mjs'
+import { approvePaymentProof, bookingFinanceSplit, firstAdminId, isProviderRefUniqueViolation, recordCardPaymentForClosedBooking } from './finance-ledger.mjs'
 import { appLink, formatMoney, notifyAdmin, notifyBooking } from './notifications.mjs'
 import { createMagicLink } from './magic-link.mjs'
 import { db } from './prisma.mjs'
@@ -301,7 +301,11 @@ export function notifyCardBookingConfirmed({ bookingId, amountMinor, currency })
     .then(async () => {
       const booking = await db().booking.findUnique({
         where: { id: bookingId },
-        select: { id: true, guestId: true, guest: { select: { passwordHash: true, roles: { select: { role: true } } } } },
+        select: {
+          id: true, guestId: true, amountMinor: true, currency: true, checkIn: true, checkOut: true, metadata: true,
+          listing: { select: { division: true, metadata: true } },
+          guest: { select: { passwordHash: true, roles: { select: { role: true } } } },
+        },
       })
       if (!booking) return
       let accountUrl = ''
@@ -318,7 +322,19 @@ export function notifyCardBookingConfirmed({ bookingId, amountMinor, currency })
         ...(accountUrl ? { accountUrl } : {}),
         idempotencySuffix: 'card',
       })
-      notifyBooking('host_new_paid_request', booking.id, { instantBook: true, idempotencySuffix: 'card' })
+      const split = bookingFinanceSplit(booking, amountMinor)
+      const nights = booking.checkIn && booking.checkOut
+        ? Math.max(1, Math.round((new Date(booking.checkOut).getTime() - new Date(booking.checkIn).getTime()) / 86400000))
+        : 1
+      notifyBooking('host_card_booking_confirmed', booking.id, {
+        amount: formatMoney(amountMinor, currency),
+        payout: formatMoney(split.hostGrossMinor, currency),
+        nights,
+        guests: Number(booking.metadata?.guests) || 1,
+        protection: split.cancellationProtectionPurchased === true,
+        url: appLink('/#/host'),
+        idempotencySuffix: 'card',
+      })
     })
     .catch((error) => {
       log.warn('card_booking_notify_failed', { message: error instanceof Error ? error.message : String(error) })

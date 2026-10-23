@@ -742,7 +742,7 @@ export async function handleListings(req, res, url, context) {
           // proof) no longer show as booked, matching the booking-creation overlap check.
           ...dateBlockingBookingWhere(new Date(), bookingPolicySettings()),
         },
-        select: { checkIn: true, checkOut: true },
+        select: { checkIn: true, checkOut: true, status: true },
       }),
     ])
 
@@ -751,6 +751,8 @@ export async function handleListings(req, res, url, context) {
     const bookedRanges = activeBookings.map((booking) => ({
       checkIn: isoDate(booking.checkIn),
       checkOut: isoDate(booking.checkOut),
+      // The owner/staff calendar tells paid reservations apart from requests still awaiting payment.
+      ...(privileged ? { paid: booking.status !== 'PAYMENT_PENDING' } : {}),
     }))
 
     return json(res, 200, { ok: true, blockedDates, priceOverrides, bookedRanges })

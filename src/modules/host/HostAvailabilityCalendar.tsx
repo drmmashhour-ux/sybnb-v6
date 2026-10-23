@@ -30,7 +30,8 @@ const T = {
     help: 'اضغط على أي تاريخ متاح لحجبه، واضغط عليه مجددا لإعادة إتاحته. لمسة واحدة كافية.',
     legendAvailable: 'متاح',
     legendBlocked: 'محجوب من المضيف',
-    legendBooked: 'محجوز من ضيف',
+    legendBooked: 'محجوز ومدفوع',
+    legendAwaiting: 'طلب بانتظار دفع الضيف',
     saving: 'جار الحفظ...',
     loadError: 'تعذر تحميل تقويم الحجوزات المتوفرة.',
     saveError: 'تعذر حفظ التغيير. حاول مجددا.',
@@ -53,7 +54,8 @@ const T = {
     help: 'Tap any available date to block it, tap again to make it available. One tap is all it takes.',
     legendAvailable: 'Available',
     legendBlocked: 'Blocked by host',
-    legendBooked: 'Booked by a guest',
+    legendBooked: 'Booked and paid',
+    legendAwaiting: 'Request awaiting guest payment',
     saving: 'Saving...',
     loadError: 'Could not load the availability calendar.',
     saveError: 'Could not save that change. Try again.',
@@ -76,7 +78,8 @@ const T = {
     help: 'Touchez une date disponible pour la bloquer, touchez-la de nouveau pour la rendre disponible. Une seule touche suffit.',
     legendAvailable: 'Disponible',
     legendBlocked: 'Bloqué par l’hôte',
-    legendBooked: 'Réservé par un voyageur',
+    legendBooked: 'Réservé et payé',
+    legendAwaiting: 'Demande en attente de paiement',
     saving: 'Enregistrement...',
     loadError: 'Impossible de charger le calendrier des disponibilités.',
     saveError: 'Impossible d’enregistrer ce changement. Veuillez réessayer.',
@@ -116,6 +119,7 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
   const [cursor, setCursor] = useState(() => new Date())
   const [blockedDates, setBlockedDates] = useState<Set<string>>(new Set())
   const [bookedDates, setBookedDates] = useState<Set<string>>(new Set())
+  const [awaitingDates, setAwaitingDates] = useState<Set<string>>(new Set())
   const [priceOverrides, setPriceOverrides] = useState<Map<string, number>>(new Map())
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [savingDate, setSavingDate] = useState('')
@@ -137,19 +141,22 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
     setMessage('')
     try {
       const { from, to } = monthRange(cursor)
-      const response = await fetchListingAvailability(listingId, from, to)
+      const response = await fetchListingAvailability(listingId, from, to, mode)
       setBlockedDates(new Set(response.blockedDates))
       setPriceOverrides(new Map(response.priceOverrides.map((row) => [row.date, row.priceMinor])))
       const booked = new Set<string>()
+      const awaiting = new Set<string>()
       response.bookedRanges.forEach((range) => {
         let day = new Date(`${range.checkIn}T00:00:00`)
         const end = new Date(`${range.checkOut}T00:00:00`)
         while (day < end) {
-          booked.add(toISO(day))
+          // paid === false: a request still awaiting the guest's payment (dates held, not yet reserved)
+          ;(range.paid === false ? awaiting : booked).add(toISO(day))
           day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)
         }
       })
       setBookedDates(booked)
+      setAwaitingDates(awaiting)
       setStatus('ready')
     } catch {
       setStatus('error')
@@ -256,6 +263,7 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
           <b style={{ ...styles.dot, background: '#20d29b' }} /> {t.legendAvailable}
           <b style={{ ...styles.dot, background: '#e5b80b' }} /> {t.legendBlocked}
           <b style={{ ...styles.dot, background: '#ff4e77' }} /> {t.legendBooked}
+          <b style={{ ...styles.dot, background: '#a78bfa' }} /> {t.legendAwaiting}
         </span>
       </div>
       <p style={styles.help}>{t.help}</p>
@@ -292,6 +300,7 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
           if (!date) return <span key={`empty-${index}`} />
           const iso = toISO(date)
           const isBooked = bookedDates.has(iso)
+          const isAwaiting = !isBooked && awaitingDates.has(iso)
           const isBlocked = blockedDates.has(iso)
           const isSaving = savingDate === iso
           const isToday = iso === todayIso
@@ -299,13 +308,14 @@ export function HostAvailabilityCalendar({ lang, listingId, basePriceMinor, curr
             <button
               key={iso}
               type="button"
-              disabled={isBooked || status === 'loading'}
+              disabled={isBooked || isAwaiting || status === 'loading'}
               onClick={() => void toggleDate(date)}
-              aria-label={isBooked ? t.legendBooked : isBlocked ? t.legendBlocked : t.legendAvailable}
+              aria-label={isBooked ? t.legendBooked : isAwaiting ? t.legendAwaiting : isBlocked ? t.legendBlocked : t.legendAvailable}
               style={{
                 ...styles.dayButton,
                 ...(isBlocked ? styles.dayBlocked : {}),
                 ...(isBooked ? styles.dayBooked : {}),
+                ...(isAwaiting ? styles.dayAwaiting : {}),
                 ...(isToday ? styles.dayToday : {}),
                 ...(isSaving ? styles.daySaving : {}),
               }}
@@ -386,6 +396,7 @@ const styles: Record<string, CSSProperties> = {
   dayGrid: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 },
   dayButton: { minHeight: 52, borderRadius: 13, border: '1px solid #242b3d', background: '#0c1220', color: '#20d29b', fontWeight: 900, fontSize: 15, display: 'grid', gap: 2, placeItems: 'center', padding: '4px 2px' },
   dayBlocked: { background: 'rgba(229,184,11,.14)', borderColor: 'rgba(229,184,11,.5)', color: '#e5b80b' },
+  dayAwaiting: { background: 'rgba(167,139,250,.14)', borderColor: 'rgba(167,139,250,.5)', color: '#a78bfa' },
   dayBooked: { background: 'rgba(255,78,119,.14)', borderColor: 'rgba(255,78,119,.5)', color: '#ff4e77' },
   dayToday: { boxShadow: '0 0 0 2px rgba(82,108,255,.65) inset' },
   daySaving: { opacity: 0.55 },

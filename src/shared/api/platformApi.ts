@@ -1452,15 +1452,21 @@ export type ListingAvailabilityEntry = {
   note: string | null
 }
 
-export async function fetchListingAvailability(listingId: string, from: string, to: string) {
+export async function fetchListingAvailability(listingId: string, from: string, to: string, mode?: HostDashboardMode) {
   const params = new URLSearchParams({ from, to })
+  // From the host calendar (mode set) the owner's token is sent, so paid reservations come back
+  // marked and a not-yet-public stay's calendar still loads.
+  let token: string | undefined
+  if (mode) {
+    try { token = (await getHostDashboardSession(mode)).token } catch { token = undefined }
+  }
   try {
     return await apiRequest<{
       ok: true
       blockedDates: string[]
       priceOverrides: Array<{ date: string; priceMinor: number }>
-      bookedRanges: Array<{ checkIn: string; checkOut: string }>
-    }>(`/api/listings/${listingId}/availability?${params.toString()}`)
+      bookedRanges: Array<{ checkIn: string; checkOut: string; paid?: boolean }>
+    }>(`/api/listings/${listingId}/availability?${params.toString()}`, token ? { token } : {})
   } catch {
     return { ok: true as const, blockedDates: [], priceOverrides: [], bookedRanges: [] }
   }

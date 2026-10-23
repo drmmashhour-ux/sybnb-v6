@@ -94,6 +94,22 @@ const TEMPLATES = {
     en: (d) => ({ subject: `SYBNB: ${d.instantBook ? 'new confirmed booking' : 'new paid request to accept'} — ${d.listingTitle}`, body: `${d.checkIn} → ${d.checkOut}. ${d.instantBook ? '' : 'Open your host dashboard to accept or decline it.'}` }),
     fr: (d) => ({ subject: `SYBNB : ${d.instantBook ? 'nouvelle réservation confirmée' : 'nouvelle demande payée à accepter'} — ${d.listingTitle}`, body: `${d.checkIn} → ${d.checkOut}. ${d.instantBook ? '' : "Ouvrez votre tableau de bord hôte pour l'accepter ou la refuser."}` }),
   },
+  // Owner decision 2026-10-22: a captured card payment confirms the stay automatically; the host gets
+  // the full picture at once -- dates, guests, what was paid, their earnings and the cancellation terms.
+  host_card_booking_confirmed: {
+    ar: (d) => ({
+      subject: `SYBNB: حجز جديد مؤكد ومدفوع — ${d.listingTitle}`,
+      body: `تم تأكيد حجز جديد تلقائياً بعد نجاح الدفع بالبطاقة.\nالتواريخ: ${d.checkIn} → ${d.checkOut} (${d.nights} ${d.nights === 1 ? 'ليلة' : 'ليالٍ'}) · الضيوف: ${d.guests}\nالمبلغ المدفوع: ${d.amount}\nمستحقاتك بعد عمولة SYBNB: ${d.payout} (تُحفظ حتى إتمام الإقامة)\nسياسة الإلغاء: ${d.protection ? 'السعر المحمي — استرداد كامل للضيف (عدا رسوم الحماية) حتى يوم الدخول، بعدها 50%.' : 'السعر العادي — إلغاء مجاني حتى 3 أيام قبل الدخول، بعدها يُسترد 50%.'}\nهذه الأيام محجوزة الآن في تقويمك.`,
+    }),
+    en: (d) => ({
+      subject: `SYBNB: new confirmed, paid booking — ${d.listingTitle}`,
+      body: `A new booking was confirmed automatically after a successful card payment.\nDates: ${d.checkIn} → ${d.checkOut} (${d.nights} night${d.nights === 1 ? '' : 's'}) · Guests: ${d.guests}\nAmount paid: ${d.amount}\nYour earnings after the SYBNB commission: ${d.payout} (held until the stay is completed)\nCancellation terms: ${d.protection ? 'Protected rate — full refund to the guest (minus the protection fee) until check-in day, then 50%.' : 'Standard rate — free cancellation until 3 days before check-in, then 50% refund.'}\nThese days are now marked booked in your calendar.`,
+    }),
+    fr: (d) => ({
+      subject: `SYBNB : nouvelle réservation confirmée et payée — ${d.listingTitle}`,
+      body: `Une nouvelle réservation a été confirmée automatiquement après un paiement par carte réussi.\nDates : ${d.checkIn} → ${d.checkOut} (${d.nights} nuit${d.nights === 1 ? '' : 's'}) · Voyageurs : ${d.guests}\nMontant payé : ${d.amount}\nVos revenus après la commission SYBNB : ${d.payout} (conservés jusqu'à la fin du séjour)\nConditions d'annulation : ${d.protection ? "Tarif protégé — remboursement intégral du voyageur (hors frais de protection) jusqu'au jour d'arrivée, puis 50 %." : "Tarif standard — annulation gratuite jusqu'à 3 jours avant l'arrivée, puis 50 % remboursés."}\nCes jours sont désormais réservés dans votre calendrier.`,
+    }),
+  },
   host_booking_cancelled: {
     ar: (d) => ({ subject: `SYBNB: ألغى الضيف الحجز — ${d.listingTitle}`, body: `أُلغي الحجز (${d.checkIn} → ${d.checkOut}) والتواريخ متاحة مجدداً.` }),
     en: (d) => ({ subject: `SYBNB: the guest cancelled — ${d.listingTitle}`, body: `The booking (${d.checkIn} → ${d.checkOut}) was cancelled and the dates are available again.` }),

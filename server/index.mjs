@@ -393,7 +393,9 @@ function setCors(req, res) {
   res.setHeader('access-control-allow-origin', origin)
   res.setHeader('vary', 'origin')
   res.setHeader('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('access-control-allow-headers', 'content-type,authorization')
+  // x-bootstrap-secret: the one-time Owner bootstrap is run from the signed-in admin tab; the header is only
+  // honoured while ADMIN_BOOTSTRAP_SECRET is set and the organization's bootstrap is still REQUIRED.
+  res.setHeader('access-control-allow-headers', 'content-type,authorization,x-bootstrap-secret')
 }
 
 function setSecurityHeaders(res) {

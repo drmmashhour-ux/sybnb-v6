@@ -329,8 +329,21 @@ export function renderNotification(kind, locale, data = {}) {
 }
 
 // White-label deployments (Rezekme) set BRAND_NAME on the API; templates are written with "SYBNB".
+// Which brand this API serves. BRAND_NAME wins; otherwise a server that sends from a rezekme.com
+// address (EMAIL_FROM) or links to a rezekme.com app (PUBLIC_APP_URL) is Rezekme (2026-10-23: live
+// sign-in codes went out from no-reply@rezekme.com still titled "SYBNB verification code").
+export function serverBrand(env = process.env) {
+  const explicit = String(env.BRAND_NAME || '').trim()
+  if (explicit) return explicit
+  return /rezekme\./i.test(`${env.EMAIL_FROM || ''} ${env.PUBLIC_APP_URL || ''}`) ? 'Rezekme' : 'SYBNB'
+}
+
+export function serverSupportEmail(env = process.env) {
+  return serverBrand(env) === 'Rezekme' ? 'support@rezekme.com' : 'info@sybnb.app'
+}
+
 export function withBrand(value, env = process.env) {
-  const brand = String(env.BRAND_NAME || '').trim()
+  const brand = serverBrand(env)
   if (!brand || brand === 'SYBNB' || typeof value !== 'string') return value
   return value.replace(/SYBNB/g, brand)
 }

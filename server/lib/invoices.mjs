@@ -1,3 +1,4 @@
+import { serverBrand, serverSupportEmail } from './notifications.mjs'
 // SYBNB-generated invoices. One SYBNB Stripe account bills everything, but each platform division
 // gets its own branded invoice document with a division-prefixed, gapless number: SR-000045 (rides),
 // STR-000123 (stays), CARS-/MKT-/NC-/RENT-/BUY-. Invoices are SYBNB's own records (not Stripe's).
@@ -207,7 +208,7 @@ export function renderInvoiceHtml(invoice, { logoUrl } = {}) {
   const divisionLabel = INVOICE_DIVISIONS[invoice.division] || invoice.division
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>SYBNB Invoice ${escapeHtml(invoice.number)}</title>
+<title>${escapeHtml(serverBrand())} Invoice ${escapeHtml(invoice.number)}</title>
 <style>
   :root{--navy:#0b1220;--ink:#0b1220;--cyan:#19d7ff;--line:#e4e9f2;--dim:#6b7688;}
   *{box-sizing:border-box;} body{margin:0;background:#f4f6fb;color:var(--ink);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding:24px;}
@@ -235,8 +236,8 @@ export function renderInvoiceHtml(invoice, { logoUrl } = {}) {
 <div class="sheet">
   <div class="top">
     <div class="brand">
-      ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="SYBNB"/>` : ''}
-      <div><div class="name">SYBNB</div><div class="tag">${escapeHtml(divisionLabel)}</div></div>
+      ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(serverBrand())}"/>` : ''}
+      <div><div class="name">${escapeHtml(serverBrand())}</div><div class="tag">${escapeHtml(divisionLabel)}</div></div>
     </div>
     <div class="inv"><div class="lbl">Invoice</div><div class="no">${escapeHtml(invoice.number)}</div><div class="dt">${escapeHtml(issued)}</div></div>
   </div>
@@ -253,7 +254,7 @@ export function renderInvoiceHtml(invoice, { logoUrl } = {}) {
       <div class="grand"><span>Total</span><span>${moneyText(d.totalMinor ?? invoice.amountMinor, cur)}</span></div>
     </div></div>
   </div>
-  <div class="foot"><span>SYBNB · ${escapeHtml(divisionLabel)}</span><span>info@sybnb.app</span></div>
+  <div class="foot"><span>${escapeHtml(serverBrand())} · ${escapeHtml(divisionLabel)}</span><span>${escapeHtml(serverSupportEmail())}</span></div>
 </div>
 </body></html>`
 }

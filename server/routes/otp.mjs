@@ -3,6 +3,7 @@ import { hashPhone, hashEmail, generateOtpCode, hashOtpCode, verifyOtpCode } fro
 import { sendSms } from '../lib/sms.mjs'
 import { log } from '../lib/logger.mjs'
 import { sendEmail } from '../lib/email.mjs'
+import { withBrand } from '../lib/notifications.mjs'
 import { channelEnabled } from '../lib/country.mjs'
 import { json, methodNotAllowed, readJson } from '../lib/responses.mjs'
 import { isRateLimited, clientIp } from '../lib/rateLimit.mjs'
@@ -44,7 +45,7 @@ function fail(statusCode, code, message) {
 }
 
 function otpMessage(code) {
-  return `SYBNB verification code: ${code}. Valid for 10 minutes. Do not share this code with anyone. | رمز التحقق الخاص بك من SYBNB هو ${code}. صالح لمدة 10 دقائق. لا تشاركه مع أحد.`
+  return withBrand(`SYBNB verification code: ${code}. Valid for 10 minutes. Do not share this code with anyone. | رمز التحقق الخاص بك من SYBNB هو ${code}. صالح لمدة 10 دقائق. لا تشاركه مع أحد.`)
 }
 
 function maskPhone(phone) {
@@ -71,7 +72,7 @@ function resolveIdentifier(body) {
 
 async function deliverCode(id, code, purpose, idempotencyKey) {
   if (id.kind === 'email') {
-    return sendEmail({ to: id.value, subject: 'SYBNB verification code', text: otpMessage(code), purpose, idempotencyKey })
+    return sendEmail({ to: id.value, subject: withBrand('SYBNB verification code'), text: otpMessage(code), purpose, idempotencyKey })
   }
   // SMS delivery is reachable ONLY if the active country profile enables it (fail-closed). Under an
   // email-only country (Syria: communications.sms=false) this throws BEFORE sendSms is ever called,

@@ -1,10 +1,13 @@
 import type { Lang } from '../../engines/language/languageEngine'
+import { BRAND_NAME } from '../brand/brandName'
 // Real SYBNB support contact channels, used as an alternative ID-submission path for guests who
 // don't want to upload a document through the website. wa.me needs digits only (no +, no leading
 // zeros), so the number is stored in local dial format and converted where needed.
 export const SUPPORT_WHATSAPP_LOCAL = '00963998191422'
 export const SUPPORT_WHATSAPP_INTL = SUPPORT_WHATSAPP_LOCAL.replace(/^00/, '')
-export const SUPPORT_EMAIL = 'info@sybnb.app'
+// Rezekme builds (stay./rides.rezekme.com and the Rezekme store apps) use the rezekme.com mailbox,
+// which ImprovMX forwards to the team inbox; sybnb.app keeps info@sybnb.app.
+export const SUPPORT_EMAIL = BRAND_NAME === 'Rezekme' ? 'support@rezekme.com' : 'info@sybnb.app'
 
 export function whatsappIdSubmissionLink(email: string, lang: Lang) {
   const text = lang === 'ar'

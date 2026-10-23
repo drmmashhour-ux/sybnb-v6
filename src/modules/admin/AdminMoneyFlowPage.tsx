@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { BRAND_NAME } from '../../shared/brand/brandName'
 import type { CSSProperties, ReactNode } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { moneyText } from '../../shared/i18n/display'
@@ -117,7 +118,7 @@ export function AdminMoneyFlowPage({ lang }: Props) {
     <main dir={isAr ? 'rtl' : 'ltr'} style={styles.page}>
       <header style={styles.header}>
         <div>
-          <span style={styles.eyebrow}>SYBNB · ADMIN</span>
+          <span style={styles.eyebrow}>{BRAND_NAME.toUpperCase()} · ADMIN</span>
           <h1 style={styles.title}>{t.title}</h1>
           <p style={styles.subtitle}>{t.subtitle}</p>
         </div>

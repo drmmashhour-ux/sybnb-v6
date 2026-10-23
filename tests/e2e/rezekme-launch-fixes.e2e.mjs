@@ -40,7 +40,8 @@ await t('a typed Sham Cash reference does NOT unlock or pay a ride (prepay requi
 
 let proofId; let needed
 await t('Sham Cash top-up proof is recorded as PENDING_ADMIN_REVIEW and a duplicate reference is refused', async () => {
-  const q = await ride().then((x) => x.j?.error?.details)
+  // The server spreads error.details into the error body, so requiredMinor sits on error itself.
+  const q = await ride().then((x) => x.j?.error)
   needed = Math.max(1, q?.requiredMinor ?? 5)
   const r = await call('POST', '/api/wallet/topup-proof', rider.token, { amountMinor: needed, currency: 'USD', providerRef: `SC-${run}` })
   assert.equal(r.status, 201, JSON.stringify(r.j).slice(0, 200))

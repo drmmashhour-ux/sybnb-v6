@@ -15,6 +15,9 @@ import { isListingPubliclyVisible, publicListingVisibilityWhere } from '../lib/h
 // Owner decision 2026-10-09: automatic AI pre-check for the admin reviewer (advisory only).
 import { scheduleAiListingReview } from '../lib/ai-listing-review-runner.mjs'
 
+// Mirrors the ListingDivision enum in prisma/schema.prisma.
+const LISTING_DIVISIONS = ['STAYS', 'RENTALS', 'BUY', 'CARS', 'MARKETPLACE', 'NEW_CONSTRUCTION']
+
 // STAYS/RENTALS/BUY are commission- or contact-based (no upfront platform fee, matching how
 // Centris pays brokers on close rather than up front). CARS/MARKETPLACE/NEW_CONSTRUCTION are the
 // paid-plan divisions gated behind an admin-approved SellerProfile.
@@ -211,6 +214,14 @@ export async function handleListings(req, res, url, context) {
       // sweep: the search below also excludes rows whose expiresAt has passed.
       void expireOldListingsThrottled()
       const division = url.searchParams.get('division') || undefined
+      // An unknown division used to reach Prisma as an invalid enum value and surface as a 500.
+      if (division && !LISTING_DIVISIONS.includes(division)) {
+        const error = new Error(`Invalid division: expected one of ${LISTING_DIVISIONS.join(', ')}.`)
+        error.statusCode = 400
+        error.code = 'INVALID_DIVISION'
+        error.expose = true
+        throw error
+      }
       // Accept English, slug, Arabic or French city labels; match case-insensitively.
       const city = normalizeBrowseCity(url.searchParams.get('city'))
 

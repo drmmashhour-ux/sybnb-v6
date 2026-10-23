@@ -24,7 +24,7 @@ export function LegalDocumentPage({ lang, page }: Props) {
     ),
     fmtDate: (() => {
       try {
-        return new Date(doc.effectiveDate).toLocaleDateString(isAr ? 'ar' : lang === 'fr' ? 'fr' : 'en', { year: 'numeric', month: 'long', day: 'numeric' })
+        return new Date(doc.effectiveDate).toLocaleDateString(isAr ? 'ar' : lang === 'fr' ? 'fr' : 'en', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' })
       } catch {
         return doc.effectiveDate
       }

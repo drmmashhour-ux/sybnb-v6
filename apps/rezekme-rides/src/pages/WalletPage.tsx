@@ -88,7 +88,7 @@ export function WalletPage({ lang }: { lang: Lang }) {
       </section>
 
       <section style={S.card}>
-        <strong>{t('شراء نقاط MSH', 'Buy MSH points', 'Acheter des points MSH')}</strong>
+        <strong>{t('شحن رصيد المحفظة', 'Add funds to your wallet', 'Alimenter votre portefeuille')}</strong>
         <div style={S.chips} data-guide="topup-amount">
           {CHIPS.map((c) => (
             <button key={c} type="button" style={!custom.trim() && amount === c ? S.chipOn : S.chip} onClick={() => { setAmount(c); setCustom('') }}>${c}</button>
@@ -106,7 +106,7 @@ export function WalletPage({ lang }: { lang: Lang }) {
           <div style={S.body}>
             <span style={S.muted}>{t('ستنتقل إلى Stripe للدفع الآمن (3D Secure). يُضاف الرصيد فور تأكيد الدفع.', 'You will pay securely on Stripe (3-D Secure). The balance is added as soon as the payment is confirmed.', 'Paiement sécurisé sur Stripe (3-D Secure). Le solde est ajouté dès la confirmation.')}</span>
             <button type="button" data-guide="topup-card" style={valid && !busy ? S.primary : S.primaryOff} disabled={!valid || busy} onClick={() => void payCard()}>
-              {busy ? '…' : t(`اشترِ ${valid ? value : ''} MSH بالبطاقة ($${valid ? value : ''})`, `Buy ${valid ? value : ''} MSH by card ($${valid ? value : ''})`, `Acheter ${valid ? value : ''} MSH par carte (${valid ? value : ''} $)`)}
+              {busy ? '…' : t(`اشحن $${valid ? value : ''} بالبطاقة`, `Add $${valid ? value : ''} by card`, `Ajouter ${valid ? value : ''} $ par carte`)}
             </button>
           </div>
         ) : (

@@ -124,6 +124,9 @@ type ShamCashApprovalPayload = {
 }
 
 const SHAM_CASH_ACCOUNT_BALANCE_KEY = 'sybnb_v6_sham_cash_account_minor'
+// Sham Cash receives both SYP (stay receipts) and USD (USD stays, wallet top-ups) -- each currency is
+// a separate balance and is reconciled separately (2026-10-23: they used to be summed into one SYP figure).
+const shamCashBalanceKey = (currency: string) => (String(currency).toUpperCase() === 'USD' ? `${SHAM_CASH_ACCOUNT_BALANCE_KEY}_usd` : SHAM_CASH_ACCOUNT_BALANCE_KEY)
 // Contractual STR commission — owner-confirmed at 15%. Must match server/lib/finance-ledger.mjs's
 // STR_ADMIN_COMMISSION_RATE (this is a display-only preview computed client-side; the real charge
 // is always computed server-side, but a stale rate here would show admins the wrong preview).
@@ -384,7 +387,7 @@ function ShortRentAdminCommandDashboard({
   const [payoutDecisions, setPayoutDecisions] = useState<Record<string, 'RELEASE_STAGED' | 'HELD'>>({})
   const [heldPaymentIds, setHeldPaymentIds] = useState<Record<string, boolean>>({})
   const [adminOutbox, setAdminOutbox] = useState<Array<{ id: string; target: 'guest' | 'host'; bookingRef: string; message: string }>>([])
-  const [manualShamCashMinor, setManualShamCashMinor] = useState<number | null>(() => readStoredMinor(SHAM_CASH_ACCOUNT_BALANCE_KEY))
+  const [manualShamCashByCurrency, setManualShamCashByCurrency] = useState<Record<string, number | null>>(() => ({ SYP: readStoredMinor(shamCashBalanceKey('SYP')), USD: readStoredMinor(shamCashBalanceKey('USD')) }))
   const [proofViewError, setProofViewError] = useState('')
   const displayPayments = payments // real payment proofs only — no fabricated fallback rows
   const primaryPayment = payments.find((payment) => payment.id === selectedPaymentId) || payments[0]
@@ -412,12 +415,29 @@ function ShortRentAdminCommandDashboard({
   // unreleased COMPLETED bookings with their actual finance split and 14-day eligibility), NOT the
   // pending payment-proof queue. Held = not yet eligible; Ready = eligible now; Commission = the
   // platform's cut on those same bookings.
-  const heldTotal = payouts.filter((p) => !p.eligibleNow).reduce((sum, p) => sum + p.hostPayoutMinor, 0)
-  const readyPayout = payouts.filter((p) => p.eligibleNow).reduce((sum, p) => sum + p.hostPayoutMinor, 0)
-  const totalAdminCommission = payouts.reduce((sum, p) => sum + (p.adminCommissionMinor || 0), 0)
+  // Payouts can be SYP or USD (USD stays): totals are kept per currency and shown side by side
+  // (2026-10-23 -- they used to be added into one SYP number).
+  const sumByCurrency = (rows: typeof payouts, pick: (p: (typeof payouts)[number]) => number) => {
+    const out: Record<string, number> = {}
+    for (const row of rows) { const c = String(row.currency || 'SYP').toUpperCase(); out[c] = (out[c] || 0) + (pick(row) || 0) }
+    return out
+  }
+  const moneyMulti = (totals: Record<string, number>) => {
+    const parts = Object.entries(totals).filter(([, v]) => v).map(([c, v]) => moneyText(v, c, lang))
+    return parts.length ? parts.join(' + ') : moneyText(0, 'SYP', lang)
+  }
+  const heldTotalText = moneyMulti(sumByCurrency(payouts.filter((p) => !p.eligibleNow), (p) => p.hostPayoutMinor))
+  const readyPayoutText = moneyMulti(sumByCurrency(payouts.filter((p) => p.eligibleNow), (p) => p.hostPayoutMinor))
+  const totalAdminCommissionText = moneyMulti(sumByCurrency(payouts, (p) => p.adminCommissionMinor))
   const activeLedger = createShortRentLedger(previewPayment?.amountMinor || 0)
   const adminCommission = activeLedger.adminCommissionMinor
-  const shamCashReconciliation = createShamCashReconciliation(payments, displayPayments, lang, manualShamCashMinor)
+  const reconFor = (cur: string | null | undefined) => {
+    const code = String(cur || 'SYP').toUpperCase() === 'USD' ? 'USD' : 'SYP'
+    return createShamCashReconciliation(payments.filter((p) => String(p.currency || 'SYP').toUpperCase() === code), displayPayments.filter((p) => String(p.currency || 'SYP').toUpperCase() === code), lang, manualShamCashByCurrency[code] ?? null, code)
+  }
+  // The panel and the main approve button follow the selected payment's currency.
+  const shamCashReconciliation = reconFor(primaryPayment?.currency)
+  const canApproveShamCash = (payment: PlatformPaymentProof) => !isShamCashProvider(payment.provider) || reconFor(payment.currency).canApprove
   const bookingRef = bookingReference(previewPayment)
   const listingTitle = paymentListingTitle(previewPayment, lang)
   const hostName = paymentHostName(previewPayment, lang)
@@ -440,17 +460,21 @@ function ShortRentAdminCommandDashboard({
   }
   const reconciliationForPayment = (payment?: PlatformPaymentProof): ShamCashApprovalPayload | undefined => {
     if (!payment || !isShamCashProvider(payment.provider)) return undefined
+    const recon = reconFor(payment.currency)
     return {
-      accountMinor: shamCashReconciliation.accountMinor,
-      expectedMinor: shamCashReconciliation.expectedMinor,
-      differenceMinor: shamCashReconciliation.differenceMinor,
+      accountMinor: recon.accountMinor,
+      expectedMinor: recon.expectedMinor,
+      differenceMinor: recon.differenceMinor,
       source: 'admin-ui-manual-sham-cash-match',
     }
   }
   const updateManualShamCashAccount = () => {
+    const code = shamCashReconciliation.currency
     const value = window.prompt(
-      isAr ? 'أدخل الرصيد الحقيقي الموجود في حساب شام كاش بالليرة السورية للمطابقة.' : 'Enter the real Sham Cash account balance in SYP for reconciliation.',
-      String(Math.round(manualShamCashMinor || shamCashReconciliation.expectedMinor)),
+      code === 'USD'
+        ? (isAr ? 'أدخل الرصيد الحقيقي بالدولار في حساب شام كاش للمطابقة.' : 'Enter the real Sham Cash USD balance for reconciliation.')
+        : (isAr ? 'أدخل الرصيد الحقيقي الموجود في حساب شام كاش بالليرة السورية للمطابقة.' : 'Enter the real Sham Cash account balance in SYP for reconciliation.'),
+      String(Math.round(manualShamCashByCurrency[code] || shamCashReconciliation.expectedMinor)),
     )
     if (value == null) return
     const normalized = Number(value.replace(/[^\d.]/g, ''))
@@ -459,8 +483,8 @@ function ShortRentAdminCommandDashboard({
       return
     }
     const nextMinor = Math.round(normalized)
-    window.localStorage.setItem(SHAM_CASH_ACCOUNT_BALANCE_KEY, String(nextMinor))
-    setManualShamCashMinor(nextMinor)
+    window.localStorage.setItem(shamCashBalanceKey(code), String(nextMinor))
+    setManualShamCashByCurrency((current) => ({ ...current, [code]: nextMinor }))
     setCommandNotice(isAr ? 'تم تحديث رصيد شام كاش للمطابقة اليدوية.' : 'Sham Cash balance updated for manual reconciliation.')
   }
   const selectedBookingRef = selectedBooking ? shortBookingReference(selectedBooking) : bookingRef
@@ -548,9 +572,9 @@ function ShortRentAdminCommandDashboard({
     { label: isAr ? 'بانتظار مراجعة الدفع' : 'Payment review', value: String(pendingPayments), tone: 'gold' },
     { label: isAr ? 'حجوزات مؤكدة (المنصة)' : 'Confirmed bookings (platform-wide)', value: String(metrics?.bookingsByStatus.CONFIRMED || 0), tone: 'green' },
     { label: isAr ? 'حالات نزاع' : 'Disputes', value: String(disputeBookingRows.length), tone: 'red' },
-    { label: isAr ? 'مبالغ محجوزة' : 'Held funds', value: moneyText(heldTotal, 'SYP', lang), tone: 'gold' },
-    { label: isAr ? 'جاهز للصرف' : 'Ready payout', value: moneyText(readyPayout, 'SYP', lang), tone: 'green' },
-    { label: isAr ? 'عمولة المنصة' : 'Platform commission', value: moneyText(totalAdminCommission, 'SYP', lang), tone: 'blue' },
+    { label: isAr ? 'مبالغ محجوزة' : 'Held funds', value: heldTotalText, tone: 'gold' },
+    { label: isAr ? 'جاهز للصرف' : 'Ready payout', value: readyPayoutText, tone: 'green' },
+    { label: isAr ? 'عمولة المنصة' : 'Platform commission', value: totalAdminCommissionText, tone: 'blue' },
     { label: isAr ? 'إعلانات معتمدة (المنصة)' : 'Approved listings (platform-wide)', value: String(metrics?.listingsByStatus.APPROVED || 0), tone: 'white' },
   ]
   const adminGroups = [
@@ -788,7 +812,7 @@ function ShortRentAdminCommandDashboard({
         <section style={commandStyles.warningBanner}>
           <strong>⚠</strong>
           <span>
-            {isAr ? `تنبيه: يوجد عدم مطابقة في Sham Cash بقيمة ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'SYP', lang)} للحجز ${bookingRef}.` : `Warning: Sham Cash mismatch of ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), 'SYP', lang)} for booking ${bookingRef}.`}
+            {isAr ? `تنبيه: يوجد عدم مطابقة في Sham Cash بقيمة ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), shamCashReconciliation.currency, lang)} للحجز ${bookingRef}.` : `Warning: Sham Cash mismatch of ${moneyText(Math.abs(shamCashReconciliation.differenceMinor), shamCashReconciliation.currency, lang)} for booking ${bookingRef}.`}
           </span>
           <button style={commandStyles.outlineGold} onClick={updateManualShamCashAccount}>{isAr ? 'مراجعة الفروقات' : 'Review mismatch'}</button>
         </section>
@@ -924,7 +948,7 @@ function ShortRentAdminCommandDashboard({
                 )}
                 <small>{isAr ? 'ثقة الذكاء الاصطناعي' : 'AI confidence'} {createAiPaymentReview(payment, isAr).label}</small>
                 <div style={commandStyles.proofActions}>
-                  <button disabled={disabled || heldPaymentIds[payment.id] || (isShamCashProvider(payment.provider) && !shamCashReconciliation.canApprove)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'قبول' : 'Approve'}</button>
+                  <button disabled={disabled || heldPaymentIds[payment.id] || !canApproveShamCash(payment)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'قبول' : 'Approve'}</button>
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
@@ -956,7 +980,7 @@ function ShortRentAdminCommandDashboard({
             {payments.length === 0 ? (
               <AdminEmptyLine text={isAr ? 'لا توجد دفعات حقيقية بانتظار موافقة الإدارة.' : 'No real payment proofs are waiting for admin approval.'} />
             ) : payments.map((payment) => (
-              <AdminPaymentLine key={payment.id} disabled={disabled || heldPaymentIds[payment.id] || (isShamCashProvider(payment.provider) && !shamCashReconciliation.canApprove)} isAr={isAr} lang={lang} payment={payment} selected={payment.id === previewPayment?.id} onApprove={() => onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment))} onReject={() => onPaymentDecision(payment.id, 'REJECT')} onSelect={() => selectPayment(payment)} />
+              <AdminPaymentLine key={payment.id} disabled={disabled || heldPaymentIds[payment.id] || !canApproveShamCash(payment)} isAr={isAr} lang={lang} payment={payment} selected={payment.id === previewPayment?.id} onApprove={() => onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment))} onReject={() => onPaymentDecision(payment.id, 'REJECT')} onSelect={() => selectPayment(payment)} />
             ))}
           </div>
         )}
@@ -982,21 +1006,21 @@ function ShortRentAdminCommandDashboard({
           <div style={commandStyles.moneyCommandGrid}>
             <div style={commandStyles.moneyCommandCard}>
               <small>{isAr ? 'جاهز للصرف' : 'Ready payout'}</small>
-              <strong style={commandTone('green')}>{moneyText(readyPayout, 'SYP', lang)}</strong>
+              <strong style={commandTone('green')}>{readyPayoutText}</strong>
               <span style={commandStyles.payoutState}>{selectedPayoutState === 'RELEASE_STAGED' ? (isAr ? 'جاهز للصرف' : 'Release staged') : selectedPayoutState === 'HELD' ? (isAr ? 'معلق' : 'Held') : (isAr ? 'اختر حجزا' : 'Select booking')}</span>
               <button style={commandStyles.acceptButton} onClick={() => stagePayoutDecision('RELEASE_STAGED')}>{isAr ? 'إطلاق الدفعة للمضيف' : 'Release payout'}</button>
             </div>
             <div style={commandStyles.moneyCommandCard}>
               <small>{isAr ? 'عمولة المنصة' : 'Platform commission'}</small>
-              <strong style={commandTone('blue')}>{moneyText(totalAdminCommission, 'SYP', lang)}</strong>
+              <strong style={commandTone('blue')}>{totalAdminCommissionText}</strong>
               <button style={commandStyles.secondaryCommand} onClick={() => {
                 setActiveCommandView('finance')
-                setCommandNotice(isAr ? `سجل عمولة المنصة للحجز ${selectedBookingRef}: ${moneyText(adminCommission, 'SYP', lang)}.` : `Platform commission ledger for ${selectedBookingRef}: ${moneyText(adminCommission, 'SYP', lang)}.`)
+                setCommandNotice(isAr ? `سجل عمولة المنصة للحجز ${selectedBookingRef}: ${moneyText(adminCommission, currency, lang)}.` : `Platform commission ledger for ${selectedBookingRef}: ${moneyText(adminCommission, currency, lang)}.`)
               }}>{isAr ? 'عرض السجل المالي' : 'View ledger'}</button>
             </div>
             <div style={commandStyles.moneyCommandCard}>
               <small>{isAr ? 'مبالغ محجوزة' : 'Held funds'}</small>
-              <strong style={commandTone('gold')}>{moneyText(heldTotal, 'SYP', lang)}</strong>
+              <strong style={commandTone('gold')}>{heldTotalText}</strong>
               <button style={commandStyles.outlineGold} onClick={() => stagePayoutDecision('HELD')}>{isAr ? 'تعليق الدفعة' : 'Hold payout'}</button>
             </div>
           </div>
@@ -1180,7 +1204,7 @@ function ShortRentAdminCommandDashboard({
                   <small>{createAiPaymentReview(payment, isAr).reasons[0]}</small>
                 </div>
                 <div style={commandStyles.proofActions}>
-                  <button disabled={disabled || heldPaymentIds[payment.id] || (isShamCashProvider(payment.provider) && !shamCashReconciliation.canApprove)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'قبول' : 'Approve'}</button>
+                  <button disabled={disabled || heldPaymentIds[payment.id] || !canApproveShamCash(payment)} style={commandStyles.acceptButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'APPROVE', reconciliationForPayment(payment)) }}>{isAr ? 'قبول' : 'Approve'}</button>
                   <button disabled={disabled || heldPaymentIds[payment.id]} style={commandStyles.rejectButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); onPaymentDecision(payment.id, 'REJECT') }}>{isAr ? 'رفض' : 'Reject'}</button>
                   <button style={heldPaymentIds[payment.id] ? commandStyles.secondaryCommand : commandStyles.goldButton} onClick={(event) => { event.stopPropagation(); heldPaymentIds[payment.id] ? reopenPaymentForReview(payment) : holdPaymentForReview(payment) }}>{heldPaymentIds[payment.id] ? (isAr ? 'إعادة فتح' : 'Reopen') : (isAr ? 'تعليق' : 'Hold')}</button>
                   <button style={commandStyles.blueButton} onClick={(event) => { event.stopPropagation(); selectPayment(payment); window.location.hash = `/payment/receipt/${payment.id}` }}>{isAr ? 'تفاصيل' : 'Details'}</button>
@@ -1242,9 +1266,9 @@ function ShortRentAdminCommandDashboard({
               </span>
               <h2>{isAr ? 'مطابقة شام كاش' : 'Sham Cash match'}</h2>
             </div>
-            <FeeLine label={isAr ? `المتوقع في ${BRAND_NAME}` : `${BRAND_NAME} expected`} value={moneyText(shamCashReconciliation.expectedMinor, 'SYP', lang)} />
-            <FeeLine label={isAr ? 'حساب شام كاش' : 'Sham Cash account'} value={moneyText(shamCashReconciliation.accountMinor, 'SYP', lang)} />
-            <FeeLine label={isAr ? 'الفرق' : 'Difference'} value={moneyText(shamCashReconciliation.differenceMinor, 'SYP', lang)} strong danger={!shamCashReconciliation.isMatched} />
+            <FeeLine label={isAr ? `المتوقع في ${BRAND_NAME}` : `${BRAND_NAME} expected`} value={moneyText(shamCashReconciliation.expectedMinor, shamCashReconciliation.currency, lang)} />
+            <FeeLine label={isAr ? 'حساب شام كاش' : 'Sham Cash account'} value={moneyText(shamCashReconciliation.accountMinor, shamCashReconciliation.currency, lang)} />
+            <FeeLine label={isAr ? 'الفرق' : 'Difference'} value={moneyText(shamCashReconciliation.differenceMinor, shamCashReconciliation.currency, lang)} strong danger={!shamCashReconciliation.isMatched} />
           </article>
         </aside>
       </section>
@@ -1538,15 +1562,15 @@ function ShamCashReconciliationPanel({
       <div style={commandStyles.shamCashGrid}>
         <div style={commandStyles.moneyCommandCard}>
           <small>{isAr ? `المتوقع حسب ${BRAND_NAME}` : `Expected by ${BRAND_NAME}`}</small>
-          <strong style={commandTone('gold')}>{moneyText(data.expectedMinor, 'SYP', lang)}</strong>
+          <strong style={commandTone('gold')}>{moneyText(data.expectedMinor, data.currency, lang)}</strong>
         </div>
         <div style={commandStyles.moneyCommandCard}>
           <small>{isAr ? 'الموجود في شام كاش' : 'In Sham Cash account'}</small>
-          <strong style={commandTone(data.isMatched ? 'green' : 'red')}>{data.accountMinor == null ? (isAr ? 'غير مربوط' : 'Not linked') : moneyText(data.accountMinor, 'SYP', lang)}</strong>
+          <strong style={commandTone(data.isMatched ? 'green' : 'red')}>{data.accountMinor == null ? (isAr ? 'غير مربوط' : 'Not linked') : moneyText(data.accountMinor, data.currency, lang)}</strong>
         </div>
         <div style={commandStyles.moneyCommandCard}>
           <small>{isAr ? 'فرق المطابقة' : 'Reconciliation difference'}</small>
-          <strong style={commandTone(data.isMatched ? 'green' : 'red')}>{moneyText(data.differenceMinor, 'SYP', lang)}</strong>
+          <strong style={commandTone(data.isMatched ? 'green' : 'red')}>{moneyText(data.differenceMinor, data.currency, lang)}</strong>
         </div>
       </div>
       <button style={commandStyles.outlineGold} onClick={onUpdateAccount}>
@@ -1574,7 +1598,7 @@ function ShamCashReconciliationPanel({
                 <small>{isAr ? 'رمز شام كاش' : 'Sham Cash code'}</small>
               </div>
               <span>{item.status}</span>
-              <b>{moneyText(item.amountMinor, 'SYP', lang)}</b>
+              <b>{moneyText(item.amountMinor, data.currency, lang)}</b>
               <small>{item.note}</small>
             </div>
           ))}
@@ -1963,7 +1987,7 @@ function readStoredMinor(key: string) {
   return Number.isFinite(value) ? value : null
 }
 
-function createShamCashReconciliation(realPayments: PlatformPaymentProof[], displayPayments: PlatformPaymentProof[], lang: Lang, accountMinor: number | null) {
+function createShamCashReconciliation(realPayments: PlatformPaymentProof[], displayPayments: PlatformPaymentProof[], lang: Lang, accountMinor: number | null, currency: 'SYP' | 'USD' = 'SYP') {
   const shamCashPayments = realPayments.filter((payment) => isShamCashProvider(payment.provider))
   const sourcePayments = shamCashPayments.length ? shamCashPayments : displayPayments.filter((payment) => isShamCashProvider(payment.provider) || payment.provider === 'LOCAL_WALLET')
   const expectedMinor = sourcePayments.reduce((sum, payment) => sum + payment.amountMinor, 0)
@@ -1972,6 +1996,7 @@ function createShamCashReconciliation(realPayments: PlatformPaymentProof[], disp
   const isMatched = hasExternalAccount && differenceMinor === 0
   const isAr = lang === 'ar'
   return {
+    currency,
     accountMinor,
     canApprove: isMatched,
     controlNote: hasExternalAccount

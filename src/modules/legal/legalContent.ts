@@ -203,6 +203,23 @@ const PRIVACY: LegalDoc = {
         fr: 'Nous partageons le minimum nécessaire entre un Hôte et un Client pour réaliser une transaction, avec des prestataires de confiance (comme notre fournisseur d’e-mail pour envoyer les codes, et nos prestataires d’hébergement et de paiement) dans le cadre du service, et lorsque la loi l’exige à la demande d’une autorité compétente. Nous exigeons de nos prestataires qu’ils protègent vos données.',
       },
     ]),
+    S('providers', { ar: '3أ. مزوّدو الخدمة والميزات الخاصة', en: '3a. Service providers and specific features', fr: '3a. Prestataires et fonctionnalités particulières' }, [
+      {
+        ar: 'الدفع بالبطاقة: تتم معالجته لدى Stripe؛ لا نرى رقم بطاقتك ولا نخزّنه، ونحتفظ فقط بنوع البطاقة وآخر 4 أرقام إذا اخترت حفظها. شام كاش والتحويل البنكي: نحفظ صورة الإيصال ورقم العملية واسم وهاتف المرسل لمراجعتها. رصيد المحفظة (نقاط MSH): نحفظ سجل الشحن والدفع. البريد الإلكتروني: نرسل الرموز والإشعارات عبر مزوّد البريد Brevo.',
+        en: 'Card payments are processed by Stripe; we never see or store your card number, and keep only the card brand and last 4 digits if you choose to save a card. Sham Cash and bank transfers: we store the receipt image, transaction reference and sender name/phone to verify them. Wallet balance (MSH points): we keep the record of top-ups and payments. Email: codes and notifications are sent through our email provider, Brevo.',
+        fr: 'Les paiements par carte sont traités par Stripe ; nous ne voyons ni ne conservons votre numéro de carte, seulement la marque et les 4 derniers chiffres si vous enregistrez une carte. Sham Cash et virements : nous conservons l’image du reçu, la référence et le nom/téléphone de l’expéditeur pour vérification. Solde du portefeuille (points MSH) : historique des recharges et paiements. E-mail : codes et notifications envoyés via notre prestataire Brevo.',
+      },
+      {
+        ar: 'الموقع والخرائط (الرحلات): نستخدم موقعك أثناء طلب الرحلة وتنفيذها فقط، لعرض الخريطة وتوصيل السائق وحساب الأجرة. تُحمَّل صور الخرائط من مزوّدي خرائط مفتوحة المصدر (مثل OpenStreetMap)، ما يعني أنهم يرون عنوان IP الخاص بك عند تحميل الخريطة.',
+        en: 'Location and maps (rides): we use your location only while you request and take a ride, to show the map, dispatch the driver and calculate the fare. Map images are loaded from open map providers (such as OpenStreetMap), which therefore see your IP address when the map loads.',
+        fr: 'Position et cartes (courses) : nous utilisons votre position uniquement pendant la demande et la course, pour la carte, l’envoi du chauffeur et le calcul du prix. Les images de carte sont chargées depuis des fournisseurs ouverts (comme OpenStreetMap), qui voient donc votre adresse IP.',
+      },
+      {
+        ar: 'تسجيل الصوت أثناء الرحلة (اختياري): عند تفعيله فقط، يُحفظ التسجيل مشفّراً، ولا يصل إليه إلا فريق السلامة عند وجود بلاغ، ويُحذف تلقائياً بعد 7 أيام ما لم يرتبط ببلاغ سلامة. وثائق السائقين (الرخصة وأوراق المركبة) تُستخدم للتحقق وتُحفظ طالما تفرض قواعد النقل والسلامة ذلك.',
+        en: 'In-ride audio recording (optional): only when you turn it on, the recording is stored encrypted, is reachable only by the safety team when there is a report, and is deleted automatically after 7 days unless it is attached to a safety incident. Driver documents (licence, vehicle papers) are used for verification and kept as long as transport and safety rules require.',
+        fr: 'Enregistrement audio pendant la course (facultatif) : uniquement si vous l’activez, stocké chiffré, accessible seulement à l’équipe sécurité en cas de signalement, et supprimé automatiquement après 7 jours sauf s’il est lié à un incident. Les documents des chauffeurs (permis, papiers du véhicule) servent à la vérification et sont conservés aussi longtemps que les règles de transport et de sécurité l’exigent.',
+      },
+    ]),
     S('security', { ar: '4. الأمان', en: '4. Security', fr: '4. Sécurité' }, [
       {
         ar: 'نطبّق إجراءات أمنية تقنية وتنظيمية، منها تجزئة رقم الهاتف وكلمات المرور، والتحقق عبر رموز لمرة واحدة، وتقييد الوصول، وتشفير الاتصال. لا يمكن ضمان أمان مطلق، لكننا نعمل على حماية بياناتك باستمرار.',

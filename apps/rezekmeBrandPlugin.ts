@@ -1,3 +1,4 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Plugin } from 'vite'
 
@@ -31,6 +32,23 @@ export function rezekmeBrand(): Plugin {
         })
         .replace(/سيبنب/g, BRAND)
       return { code: out, map: null }
+    },
+    // Static pages copied from public/ (privacy.html, landing.html, admin.html) are not compiled, so
+    // they kept saying SYBNB on stay./rides.rezekme.com. Rebrand the copies in the build output only.
+    writeBundle(options) {
+      const dir = options.dir
+      if (!dir) return
+      for (const name of ['privacy.html', 'landing.html', 'admin.html']) {
+        const file = resolve(dir, name)
+        if (!existsSync(file)) continue
+        const html = readFileSync(file, 'utf8')
+        const out = html
+          .replace(/SYBNB(?![_-])/g, BRAND)
+          .replace(/سيبنب/g, BRAND)
+          .replace(/info@sybnb\.app/g, 'support@rezekme.com')
+          .replace(/https?:\/\/(www\.)?sybnb\.app/g, 'https://rezekme.com')
+        if (out !== html) writeFileSync(file, out)
+      }
     },
   }
 }

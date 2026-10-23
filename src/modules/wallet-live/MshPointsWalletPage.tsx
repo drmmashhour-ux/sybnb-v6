@@ -87,7 +87,7 @@ export function MshPointsWalletPage({ lang }: { lang: Lang }) {
         <span style={S.muted}>{t('رصيد نقاط MSH المتاح', 'Your MSH points balance', 'Votre solde de points MSH')}</span>
         <strong style={S.big}>{wallet ? `${wallet.availableMinor} MSH` : '…'}</strong>
         <span style={S.muted}>{wallet ? `= $${wallet.availableMinor}` : ''} · {t('1 نقطة MSH = 1 دولار', '1 MSH point = $1', '1 point MSH = 1 $')}</span>
-        <span style={S.muted}>{t('ادفع إقاماتك (ورحلاتك على Rezekme) من هذا الرصيد، ويتأكد الحجز فوراً.', 'Pay your stays (and Rezekme rides) from this balance — the booking is confirmed instantly.', 'Payez vos séjours (et courses Rezekme) avec ce solde — réservation confirmée immédiatement.')}</span>
+        <span style={S.muted}>{t('رصيد لدفع الإقامات والرحلات الحقيقية على Rezekme فقط (1 نقطة = 1$)، ويتأكد الحجز فوراً.', 'A balance used only to pay real stays and rides on Rezekme (1 point = $1); bookings are confirmed instantly.', 'Un solde servant uniquement à payer de vrais séjours et courses Rezekme (1 point = 1 $) ; confirmation immédiate.')}</span>
       </section>
 
       {returnBooking && (
@@ -97,7 +97,7 @@ export function MshPointsWalletPage({ lang }: { lang: Lang }) {
       )}
 
       <section style={S.card}>
-        <strong>{t('شراء نقاط MSH', 'Buy MSH points', 'Acheter des points MSH')}</strong>
+        <strong>{t('شحن رصيد المحفظة', 'Add funds to your wallet', 'Alimenter votre portefeuille')}</strong>
         <div style={S.chips}>
           {CHIPS.map((c) => (
             <button key={c} type="button" style={!custom.trim() && amount === c ? S.chipOn : S.chip} onClick={() => { setAmount(c); setCustom('') }}>${c}</button>
@@ -111,9 +111,9 @@ export function MshPointsWalletPage({ lang }: { lang: Lang }) {
         </div>
         {method === 'card' ? (
           <div style={S.body}>
-            <span style={S.muted}>{t('ستنتقل إلى Stripe للدفع الآمن. تُضاف النقاط فور تأكيد الدفع.', 'You will pay securely on Stripe. The points are added as soon as the payment is confirmed.', 'Paiement sécurisé sur Stripe. Les points sont ajoutés dès la confirmation.')}</span>
+            <span style={S.muted}>{t('ستنتقل إلى Stripe للدفع الآمن. يُضاف الرصيد فور تأكيد الدفع.', 'You will pay securely on Stripe. The funds are added as soon as the payment is confirmed.', 'Paiement sécurisé sur Stripe. Le solde est crédité dès la confirmation.')}</span>
             <button type="button" data-testid="topup-card" style={valid && !busy ? S.primary : S.primaryOff} disabled={!valid || busy} onClick={() => void payCard()}>
-              {busy ? '…' : t(`اشترِ ${valid ? value : ''} MSH بالبطاقة ($${valid ? value : ''})`, `Buy ${valid ? value : ''} MSH by card ($${valid ? value : ''})`, `Acheter ${valid ? value : ''} MSH par carte (${valid ? value : ''} $)`)}
+              {busy ? '…' : t(`اشحن $${valid ? value : ''} بالبطاقة`, `Add $${valid ? value : ''} by card`, `Ajouter ${valid ? value : ''} $ par carte`)}
             </button>
           </div>
         ) : (

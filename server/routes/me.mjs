@@ -48,7 +48,31 @@ export async function handleMe(req, res, url, context) {
               idDocumentStatus: null,
               avatarRef: null,
               avatarMimeType: null,
+              // Store-review follow-up (2026-10-23): also drop the saved-card reference, password and
+              // marketing/personal extras, not just name/email/phone.
+              passwordHash: null,
+              stripeCustomerId: null,
+              defaultCardPmId: null,
+              defaultCardBrand: null,
+              defaultCardLast4: null,
+              title: null,
             },
+          })
+          // Personal extras with no legal-retention reason: saved addresses, favourites, push devices,
+          // marketing consent. Listings come off the site (REMOVED) -- rows stay because past bookings
+          // reference them -- but a listing with an upcoming confirmed stay is left for support to
+          // handle with the guest rather than silently vanishing.
+          await tx.savedPlace.deleteMany({ where: { userId: context.user.id } })
+          await tx.favourite.deleteMany({ where: { userId: context.user.id } })
+          await tx.pushSubscription.deleteMany({ where: { userId: context.user.id } })
+          await tx.legalConsent.deleteMany({ where: { userId: context.user.id, documentKey: 'marketing-emails' } })
+          await tx.listing.updateMany({
+            where: {
+              ownerId: context.user.id,
+              status: { in: ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'PAUSED', 'REJECTED', 'EXPIRED'] },
+              bookings: { none: { status: { in: ['REQUESTED', 'CONFIRMED'] }, checkOut: { gt: new Date() } } },
+            },
+            data: { status: 'REMOVED' },
           })
           await revokeUserAccess(context.user.id, REVOCATION_REASONS.ACCOUNT_DELETED, { tx })
           await tx.adminAuditLog.create({

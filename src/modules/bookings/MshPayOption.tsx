@@ -40,7 +40,7 @@ export function MshPayOption({ lang, bookingId, totalMinor, onPaid }: { lang: La
   const ghost = { minHeight: 44, borderRadius: 10, border: '1px solid #38bdf8', background: 'transparent', color: '#7dd3fc', fontWeight: 700, cursor: 'pointer' } as const
   return (
     <div style={card} data-testid="msh-pay">
-      <strong>{t('الدفع بنقاط MSH', 'Pay with MSH points', 'Payer avec des points MSH')}</strong>
+      <strong>{t('الدفع من رصيد المحفظة', 'Pay from your wallet balance', 'Payer avec le solde du portefeuille')}</strong>
       <small style={{ color: '#9aa6ba' }}>
         {t(`المطلوب ${totalMinor} MSH · رصيدك ${balance ?? '…'} MSH (1 نقطة = 1$). يتأكد الحجز فوراً.`, `Needed ${totalMinor} MSH · your balance ${balance ?? '…'} MSH (1 point = $1). Confirmed instantly.`, `Requis ${totalMinor} MSH · votre solde ${balance ?? '…'} MSH (1 point = 1 $). Confirmé immédiatement.`)}
       </small>
@@ -50,7 +50,7 @@ export function MshPayOption({ lang, bookingId, totalMinor, onPaid }: { lang: La
         </button>
       ) : (
         <button type="button" style={ghost} data-testid="msh-buy-btn" onClick={buyPoints}>
-          {t('اشترِ نقاط MSH (بطاقة أو شام كاش)', 'Buy MSH points (card or Sham Cash)', 'Acheter des points MSH (carte ou Sham Cash)')}
+          {t('اشحن رصيد المحفظة (بطاقة أو شام كاش)', 'Add funds to your wallet (card or Sham Cash)', 'Alimenter le portefeuille (carte ou Sham Cash)')}
         </button>
       )}
       {error ? <small role="alert" style={{ color: '#fca5a5' }}>{error}</small> : null}

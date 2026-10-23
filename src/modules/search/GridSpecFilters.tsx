@@ -14,9 +14,12 @@ export function GridSpecFilters({ lang, value, onChange }: { lang: Lang; value: 
   return (
     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '10px 0', alignItems: 'center' }} aria-label="grid-spec-filters">
       {GRID_SPECS.map((spec) => (
-        <label key={spec.key} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+        <label key={spec.key} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, maxWidth: '100%', flexWrap: 'wrap' }}>
           <span>{spec.icon} {pick(lang, ...spec.title)}</span>
           <select
+            // Matches the dark search card (was the browser's default white box). colorScheme makes
+            // the open list dark too on browsers that support it.
+            style={{ minHeight: 40, maxWidth: '100%', padding: '6px 10px', borderRadius: 10, border: '1px solid #33415c', background: '#0f1526', color: '#eef1f8', colorScheme: 'dark', fontSize: 14 }}
             value={value[spec.key] || ''}
             onChange={(event) => {
               const next = { ...value }

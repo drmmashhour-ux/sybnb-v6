@@ -1246,7 +1246,8 @@ function BookingSentPanel({ booking, listing, lang }: { booking: PlatformBooking
   const paymentRoute = `/payment/local-wallet/${booking.id}/${fees.totalMinor}/${encodeURIComponent(booking.currency)}`
   // The booking page holds the one-time ID-photo step that precedes payment; when we know the
   // guest has not sent it yet, send them there instead of straight to the receipt upload.
-  const needsIdFirst = Boolean(booking.guest) && !booking.guest?.idDocumentRef
+  // Owner decision 2026-10-22: no ID photo before paying.
+  const needsIdFirst = false
   return (
     <section style={styles.sentPanel} role="status">
       <strong style={styles.sentTitle}>✓ {t.sentTitle}</strong>

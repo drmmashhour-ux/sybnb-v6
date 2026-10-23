@@ -21,7 +21,7 @@ import { listingDisplayTitle } from '../../shared/listing/displayTitle'
 import { GuestAccountPage } from '../account/GuestAccountPage'
 import { DateRangePicker, formatDateForLang, isValidDate, nightsBetween, type DateRange } from '../search/DateRangePicker'
 import { guestFeeSummary } from './guestFeeSummary'
-import { CHECKOUT_DRAFT_KEY, CHECKOUT_NOTE_KEY_PREFIX, STRIPE_PENDING_KEY_PREFIX, loadCheckoutDraft, saveCheckoutDraft } from './checkoutDraft'
+import { CHECKOUT_DRAFT_KEY, STRIPE_PENDING_KEY_PREFIX, loadCheckoutDraft, saveCheckoutDraft } from './checkoutDraft'
 
 // Airbnb-style "Confirm and pay": the listing page's Reserve button lands here with the guest's
 // choices in sessionStorage (CHECKOUT_DRAFT_KEY). Sign-in happens inline, the booking is created
@@ -220,18 +220,8 @@ export function CheckoutPage({ listingId, lang }: Props) {
     } catch {
       detailed = null
     }
-    // Owner decision 2026-10-22: a card payer goes straight to Stripe -- no ID photo, no email code.
-    // The ID step stays for Sham Cash / bank transfer, where a person reviews the receipt.
-    if (method !== 'card' && detailed?.guest && !detailed.guest.idDocumentRef) {
-      try {
-        sessionStorage.setItem(`${CHECKOUT_NOTE_KEY_PREFIX}${booking.id}`, method)
-      } catch {
-        // the booking page still shows its ID step without the note
-      }
-      sessionStorage.removeItem(CHECKOUT_DRAFT_KEY)
-      window.location.hash = `/booking/${booking.id}`
-      return
-    }
+    // Owner decision 2026-10-22 (like Airbnb): paying never needs an ID photo -- card goes straight to
+    // Stripe, Sham Cash / bank transfer straight to the receipt upload.
 
     if (method === 'card') {
       try {

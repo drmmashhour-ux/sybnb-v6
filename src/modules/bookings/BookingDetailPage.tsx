@@ -27,6 +27,9 @@ import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappI
 import { guestFeeSummary } from './guestFeeSummary'
 import { CHECKOUT_NOTE_KEY_PREFIX, STRIPE_PENDING_KEY_PREFIX, takeSessionFlag } from './checkoutDraft'
 import { OpenAccountOffer } from '../../shared/auth/OpenAccountOffer'
+
+// Owner decision 2026-10-22: guests pay without sending an ID photo first (card, Sham Cash, bank).
+const ID_BEFORE_PAYMENT = false
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { CheckinQrCard } from './CheckinQrCard'
 
@@ -427,7 +430,8 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
   }
 
   function renderPaymentOptions() {
-    if (!hasIdDocument) {
+    // Owner decision 2026-10-22 (like Airbnb): no ID photo before paying, for any method.
+    if (ID_BEFORE_PAYMENT && !hasIdDocument) {
       // Owner decision 2026-10-22: card needs no ID photo -- offered first; the ID step below is only
       // for Sham Cash / bank transfer (a person reviews those receipts).
       return (
@@ -567,7 +571,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
               </span>
             </section>
           )}
-          {checkoutNote && !hasIdDocument && (
+          {ID_BEFORE_PAYMENT && checkoutNote && !hasIdDocument && (
             <section style={styles.deadlineBanner} role="status">
               <strong>{pick(lang, 'تم إنشاء حجزك — خطوة واحدة قبل الدفع', 'Your booking was created — one step before paying', 'Votre réservation est créée — une étape avant le paiement')}</strong>
               <span>
@@ -702,11 +706,9 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
               ['REQUESTED', 'PAYMENT_PENDING', 'CONFIRMED'].includes(booking.status) && (
                 <button
                   style={styles.primaryButton}
-                  disabled={!hasIdDocument}
-                  title={hasIdDocument ? undefined : t.idGateTitle}
-                  onClick={() => hasIdDocument && (window.location.hash = paymentRoute)}
+                  onClick={() => (window.location.hash = paymentRoute)}
                 >
-                  {hasIdDocument ? t.pay : t.idGateTitle}
+                  {t.pay}
                 </button>
               )
             )}

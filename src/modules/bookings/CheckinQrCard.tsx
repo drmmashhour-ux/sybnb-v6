@@ -1,6 +1,7 @@
 import QRCode from 'qrcode'
 import { useEffect, useState } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
+import { publicWebOrigin } from '../../shared/native/nativeShell'
 
 // Shown to the guest on a paid + confirmed booking. The host scans it on arrival; the QR opens the
 // host's check-in page for this booking (#/checkin/<bookingId>). It carries only the booking id --
@@ -9,7 +10,7 @@ export function CheckinQrCard({ bookingId, lang }: { bookingId: string; lang: La
   const [src, setSrc] = useState('')
   useEffect(() => {
     let alive = true
-    const target = `${window.location.origin}/#/checkin/${bookingId}`
+    const target = `${publicWebOrigin()}/#/checkin/${bookingId}`
     QRCode.toDataURL(target, { margin: 1, width: 220 }).then((url) => { if (alive) setSrc(url) }).catch(() => { if (alive) setSrc('') })
     return () => { alive = false }
   }, [bookingId])

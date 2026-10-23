@@ -4,6 +4,7 @@ import { navigate } from '../../app/routes'
 import { BrandLogo, STAYS_ONLY } from '../brand'
 import { becomeDriver, currentAccountIsHost, deleteMyAccount, getStoredGuestSession, getStoredStaffSession, refreshStoredSessionRoles, signOutGuest as revokeGuestSession } from '../api/platformApi'
 import { Footer } from './Footer'
+import { isNativeShell } from '../native/nativeShell'
 
 type Props = {
   lang: Lang
@@ -257,7 +258,16 @@ function AccountMenu({ lang, path, displayName, signedIn, isHost, isAdmin, isDri
     try {
       await deleteMyAccount()
     } catch {
-      // Even if the call fails, drop the user to a signed-out home; they can retry.
+      // Say so: the account still exists (store reviewers check that deletion really happens).
+      window.alert(
+        pick(
+          lang,
+          'تعذّر حذف الحساب الآن. تحقق من الاتصال وحاول مرة أخرى، أو راسل الدعم.',
+          'Your account could not be deleted right now. Check your connection and try again, or contact support.',
+          'Impossible de supprimer le compte pour le moment. Vérifiez la connexion et réessayez, ou contactez le support.',
+        ),
+      )
+      return
     }
     navigate('/')
   }
@@ -882,7 +892,9 @@ function StaysQuickBar({ lang, signedIn, isHost, isAdmin }: { lang: Lang; signed
           {pick(lang, 'تسجيل الدخول / إنشاء حساب', 'Log in / Sign up', 'Connexion / Inscription')}
         </button>
       )}
-      {ADMIN_SITE_URL && (
+      {/* Not inside the store apps: staff use the admin website, and an "Admin login" button in a public
+          consumer app invites a store reviewer to ask for admin credentials. */}
+      {ADMIN_SITE_URL && !isNativeShell() && (
         <a className={isAdmin ? 'stays-quickbar-admin is-admin' : 'stays-quickbar-admin'} data-testid="quickbar-admin" href={ADMIN_SITE_URL} target="_blank" rel="noopener">
           {pick(lang, 'دخول الإدارة', 'Admin login', 'Connexion admin')}
         </a>

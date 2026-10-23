@@ -1,0 +1,8 @@
+{
+  "applinks": {
+    "details": [
+      { "appIDs": ["REPLACE_TEAMID.com.rezekme.stay"], "components": [{ "/": "/*" }] },
+      { "appIDs": ["REPLACE_TEAMID.com.rezekme.rides"], "components": [{ "/": "/*" }] }
+    ]
+  }
+}

@@ -81,6 +81,7 @@ import { RecordingControls } from './RecordingControls'
 import { PaymentPicker, type PayMethod } from './PaymentPicker'
 import { RideSignInPanel } from './RideSignInPanel'
 import { AssistantBox, ReportProblem } from './HelpTools'
+import { publicWebOrigin } from '@platform/shared/native/nativeShell'
 
 type Props = {
   lang: Lang
@@ -956,7 +957,7 @@ export function RidePage({ lang }: Props) {
     setShareStatus('sharing')
     try {
       const { rideId, exp, sig } = await sharePrototypeSrRide(ride.id)
-      const shareUrl = `${window.location.origin}${window.location.pathname}#/ride/shared/${rideId}?exp=${exp}&sig=${sig}`
+      const shareUrl = `${publicWebOrigin()}${window.location.pathname}#/ride/shared/${rideId}?exp=${exp}&sig=${sig}`
       if (navigator.share) {
         await navigator.share({ title: t.shareTitle, text: t.shareText, url: shareUrl })
         setShareStatus('idle')

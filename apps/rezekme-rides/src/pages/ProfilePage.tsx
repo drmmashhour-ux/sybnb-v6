@@ -3,6 +3,7 @@ import { pick, type Lang } from '@platform/engines/language/languageEngine'
 import {
   createSavedPlace,
   createStripeSetupSession,
+  deleteMyAccount,
   deleteSavedCard,
   deleteSavedPlace,
   fetchMyProfile,
@@ -14,6 +15,8 @@ import {
 } from '@platform/shared/api/platformApi'
 
 type Props = { lang: Lang; onSignOut: () => void }
+
+const legalLink: CSSProperties = { color: '#111', fontWeight: 700 }
 
 const card: CSSProperties = { border: '1px solid #ddd', borderRadius: 14, padding: 14, display: 'grid', gap: 8, background: '#fff' }
 const btn: CSSProperties = { padding: '8px 14px', borderRadius: 999, border: '1px solid #111', background: '#fff', cursor: 'pointer' }
@@ -44,6 +47,35 @@ export function ProfilePage({ lang, onSignOut }: Props) {
   useEffect(() => {
     void reload()
   }, [])
+
+  // Store requirement (Apple 5.1.1(v), Google Play account deletion): delete the account from inside the
+  // app. DELETE /api/me scrubs identity and revokes every session; ride/payment records are kept as the
+  // law requires (see the privacy policy).
+  async function deleteAccount() {
+    const ok = window.confirm(
+      pick(
+        lang,
+        'سيتم حذف حسابك وبياناتك الشخصية نهائياً ولن تتمكن من تسجيل الدخول بعدها. هل تريد المتابعة؟',
+        'This permanently deletes your account and personal data. You will not be able to sign in again. Continue?',
+        'Ceci supprime définitivement votre compte et vos données personnelles. Vous ne pourrez plus vous connecter. Continuer ?',
+      ),
+    )
+    if (!ok) return
+    try {
+      await deleteMyAccount()
+    } catch (e) {
+      setError(
+        pick(
+          lang,
+          'تعذّر حذف الحساب الآن. حاول مرة أخرى أو راسل الدعم.',
+          'Your account could not be deleted right now. Try again or contact support.',
+          'Impossible de supprimer le compte pour le moment. Réessayez ou contactez le support.',
+        ) + (e instanceof Error && e.message ? ` (${e.message})` : ''),
+      )
+      return
+    }
+    window.location.hash = '#/ride'
+  }
 
   const cardBad = Boolean(savedCard?.expired)
   const cardSoon = Boolean(savedCard?.expiringSoon)
@@ -110,8 +142,20 @@ export function ProfilePage({ lang, onSignOut }: Props) {
         </button>
       </section>
 
+      <section style={card}>
+        <strong>{pick(lang, 'الخصوصية والشروط', 'Privacy and terms', 'Confidentialité et conditions')}</strong>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <a href="#/privacy" style={legalLink}>{pick(lang, 'سياسة الخصوصية', 'Privacy policy', 'Politique de confidentialité')}</a>
+          <a href="#/terms" style={legalLink}>{pick(lang, 'شروط الاستخدام', 'Terms of service', 'Conditions d’utilisation')}</a>
+        </div>
+      </section>
+
       <button type="button" style={{ ...btn, borderColor: '#b00020', color: '#b00020' }} onClick={onSignOut}>
         {pick(lang, 'تسجيل الخروج', 'Log out', 'Se déconnecter')}
+      </button>
+
+      <button type="button" data-testid="delete-account" style={{ ...btn, border: 0, background: '#b00020', color: '#fff' }} onClick={() => void deleteAccount()}>
+        {pick(lang, 'حذف الحساب', 'Delete account', 'Supprimer le compte')}
       </button>
     </main>
   )

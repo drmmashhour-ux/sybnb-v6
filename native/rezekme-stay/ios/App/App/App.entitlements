@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Universal Links: https://stay.rezekme.com links (e.g. Stripe's "payment done" return) open this app.
+	     Works once https://stay.rezekme.com/.well-known/apple-app-site-association lists TEAMID.com.rezekme.stay
+	     (docs/REZEKME_STORE_READINESS.md). Xcode adds the capability to the App ID automatically. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:stay.rezekme.com</string>
+	</array>
+</dict>
+</plist>

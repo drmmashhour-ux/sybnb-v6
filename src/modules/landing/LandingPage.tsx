@@ -254,9 +254,11 @@ export function LandingPage({ lang }: Props) {
           <video
             className="about-movie-video"
             src={movieSrc}
+            poster={movieSrc.replace(/\.mp4$/, '-poster.jpg')}
             controls
             playsInline
-            preload="metadata"
+            // 'none': nothing is downloaded until the visitor presses play (was ~36 MB, fetched twice).
+            preload="none"
             onPlay={() => setMoviePlaying(true)}
             onPause={() => setMoviePlaying(false)}
             onEnded={() => setMoviePlaying(false)}

@@ -184,7 +184,8 @@ export function SellerListingWizard({ lang }: Props) {
   const [area, setArea] = useState(draft.area || 'old-city')
   const [address, setAddress] = useState(draft.address ?? '')
   const [price, setPrice] = useState(draft.price || '')
-  const [currency, setCurrency] = useState(draft.currency || 'SYP')
+  // Owner decision 2026-10-22: Rezekme stays are priced and paid in USD (the SYP rate changes daily).
+  const [currency, setCurrency] = useState(STAYS_ONLY ? 'USD' : draft.currency || 'SYP')
   const [size, setSize] = useState(draft.size || '110')
   const [bedrooms, setBedrooms] = useState(draft.bedrooms || '3')
   const [bathrooms, setBathrooms] = useState(draft.bathrooms || '2')
@@ -795,8 +796,8 @@ export function SellerListingWizard({ lang }: Props) {
               </label>
               <label>
                 <span>{pick(lang, 'العملة', 'Currency', 'Devise')}</span>
-                <select dir="ltr" value={currency} onChange={(event) => setCurrency(event.target.value)}>
-                  <option value="SYP">{pick(lang, 'ل.س — ليرة سورية', 'SYP — Syrian pound', 'SYP — livre syrienne')}</option>
+                <select dir="ltr" value={currency} disabled={STAYS_ONLY} onChange={(event) => setCurrency(event.target.value)}>
+                  <option value="SYP" disabled={STAYS_ONLY}>{pick(lang, 'ل.س — ليرة سورية', 'SYP — Syrian pound', 'SYP — livre syrienne')}</option>
                   <option value="USD">{pick(lang, '$ — دولار أمريكي', 'USD — US dollar', 'USD — dollar américain')}</option>
                 </select>
               </label>

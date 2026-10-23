@@ -443,7 +443,11 @@ export async function handlePayments(req, res, url, context) {
     }
 
     const totalMinor = expectedTotalMinor(booking)
-    const { currency, unitAmount } = stripeChargeAmount(totalMinor)
+    // A stay priced in USD is charged exactly that amount -- no SYP exchange rate involved
+    // (owner decision 2026-10-22). Money model: whole currency units, so dollars -> cents.
+    const { currency, unitAmount } = String(booking.currency).toUpperCase() === 'USD' && (process.env.STRIPE_CURRENCY || 'usd').toLowerCase() === 'usd'
+      ? { currency: 'usd', unitAmount: Math.max(50, Math.round(totalMinor * 100)) }
+      : stripeChargeAmount(totalMinor)
     const listingTitle = booking.listing?.titleEn || booking.listing?.titleAr || 'SYBNB stay'
 
     const session = await stripe.checkout.sessions.create({

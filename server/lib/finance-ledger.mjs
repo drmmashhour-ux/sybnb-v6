@@ -44,7 +44,9 @@ export function cancellationAdminFeeMinor(env = process.env) {
 export function cancellationAdminFee(currency) {
   const normalized = String(currency || CANCELLATION_ADMIN_FEE_CURRENCY).toUpperCase()
   if (normalized === 'USD') {
-    return { amountMinor: CANCELLATION_ADMIN_FEE_USD_MINOR, currency: 'USD' }
+    // Booking money is whole currency units (formatMoney/moneyText: $120 is stored as 120), so the
+    // $10 fee is 10 here -- not 1000 cents, which would have charged a USD guest $1,000 (2026-10-22).
+    return { amountMinor: Math.round(CANCELLATION_ADMIN_FEE_USD_MINOR / 100), currency: 'USD' }
   }
   return { amountMinor: cancellationAdminFeeMinor(), currency: CANCELLATION_ADMIN_FEE_CURRENCY }
 }

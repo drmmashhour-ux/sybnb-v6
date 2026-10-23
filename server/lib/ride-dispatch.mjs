@@ -135,6 +135,41 @@ export async function findNextDriverForRide(ride, excludeIds = []) {
   return null
 }
 
+// Candidates tried per dispatch when the nearest one is taken by a concurrent offer.
+const OFFER_DRIVER_ATTEMPTS = 3
+
+// Write the offer for one driver: 'won', 'busy' (the driver got another live offer first) or 'raced'
+// (this ride was offered by someone else since we read it). The advisory lock serializes offers to the
+// same driver across replicas; it is released when the transaction ends.
+async function reserveOfferForDriver(ride, driverId) {
+  return db().$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`sr-offer:${driverId}`}))`
+    const [{ busy }] = await tx.$queryRaw`
+      SELECT EXISTS (
+        SELECT 1 FROM ride_requests
+        WHERE offered_driver_id = ${driverId}::uuid
+          AND id <> ${ride.id}::uuid
+          AND driver_id IS NULL
+          AND status IN ('REQUESTED', 'MATCHING')
+          AND offer_expires_at > now()
+      ) AS busy`
+    if (busy) return 'busy'
+    // Compare-and-set on the round counter: if another dispatcher (a concurrent sweep, a decline, the
+    // create path, another replica) offered this ride since we read it, our write matches 0 rows and we
+    // back off instead of clobbering their offer -- previously two sweeps could overwrite each other's
+    // offers, so the driver who saw the first offer got "not offered to you" when accepting.
+    const won = await tx.rideRequest.updateMany({
+      where: { id: ride.id, driverId: null, status: { in: OPEN_RIDE_STATUSES }, offerSeq: ride.offerSeq },
+      data: {
+        offeredDriverId: driverId,
+        offerExpiresAt: new Date(Date.now() + OFFER_TTL_SECONDS * 1000),
+        offerSeq: { increment: 1 },
+      },
+    })
+    return won.count === 1 ? 'won' : 'raced'
+  })
+}
+
 // Offer the ride to the next eligible driver. No-op (returns {offered:false}) if the ride is already
 // claimed or no longer open; {offered:false, exhausted:true} once the escalation cap is hit. On a
 // successful offer, records the outstanding offer + expiry, bumps the round counter, and fires a
@@ -154,7 +189,21 @@ export async function offerRideToNextDriver(rideId) {
     }
     return { offered: false, exhausted: true }
   }
-  const next = await findNextDriverForRide(ride, ride.declinedByIds || [])
+  // findNextDriverForRide skips drivers holding a live offer, but that is only a read: two DIFFERENT
+  // rides dispatched at the same instant could both pick the same free driver (seen 1 run in 3 on the
+  // staging DB, 2026-10-23). So the write takes a per-driver transaction lock and re-checks under it;
+  // a driver taken in the meantime is skipped and the next-nearest one is tried.
+  const exclude = [...(ride.declinedByIds || [])]
+  let next = null
+  for (let attempt = 0; attempt < OFFER_DRIVER_ATTEMPTS; attempt += 1) {
+    next = await findNextDriverForRide(ride, exclude)
+    if (!next) break
+    const outcome = await reserveOfferForDriver(ride, next.userId)
+    if (outcome === 'won') break
+    if (outcome === 'raced') return { offered: false, raced: true }
+    exclude.push(next.userId) // 'busy': another ride just offered to this driver
+    next = null
+  }
   if (!next) {
     // Nobody eligible right now. Only write when there is something to clear: the old unconditional
     // update fired on every sweep for every unmatched ride (thousands of no-op writes per minute).
@@ -163,19 +212,6 @@ export async function offerRideToNextDriver(rideId) {
     }
     return { offered: false }
   }
-  // Compare-and-set on the round counter: if another dispatcher (a concurrent sweep, a decline, the
-  // create path, another replica) offered this ride since we read it, our write matches 0 rows and we
-  // back off instead of clobbering their offer -- previously two sweeps could overwrite each other's
-  // offers, so the driver who saw the first offer got "not offered to you" when accepting.
-  const won = await db().rideRequest.updateMany({
-    where: { id: ride.id, driverId: null, status: { in: OPEN_RIDE_STATUSES }, offerSeq: ride.offerSeq },
-    data: {
-      offeredDriverId: next.userId,
-      offerExpiresAt: new Date(Date.now() + OFFER_TTL_SECONDS * 1000),
-      offerSeq: { increment: 1 },
-    },
-  })
-  if (won.count !== 1) return { offered: false, raced: true }
   sendPushNotification(next.userId, {
     title: 'New ride nearby',
     body: 'A rider needs a driver — open Rezekme to accept.',

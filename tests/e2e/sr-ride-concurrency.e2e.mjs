@@ -5,6 +5,7 @@
 //   3. Concurrent dispatchers offering the same ride -> one offer, offerSeq advances by exactly 1.
 //   4. Concurrent sweeps -> only one runs per window; no ride is offered to two drivers.
 //   5. A driver with a live offer is not offered a second ride.
+//   6. Five different rides dispatched at once with one free driver -> that driver gets one offer.
 // Run: API_BASE=http://127.0.0.1:3051 node tests/e2e/sr-ride-concurrency.e2e.mjs (with the e2e env).
 import { db } from '../../server/lib/prisma.mjs'
 import { createSessionToken } from './_session.mjs'
@@ -85,6 +86,15 @@ async function main() {
   check('at most one concurrent sweep ran', sweeps.filter((s) => !s.skipped).length <= 1, `ran=${sweeps.filter((s) => !s.skipped).length}`)
   const dupOffers = await prisma.$queryRawUnsafe(`select offered_driver_id, count(*)::int n from ride_requests where offered_driver_id is not null and driver_id is null and status in ('REQUESTED','MATCHING') and offer_expires_at > now() group by offered_driver_id having count(*) > 1`)
   check('no driver holds two live offers', dupOffers.length === 0, JSON.stringify(dupOffers))
+
+  console.log('=== 6. different rides dispatched at once with one free driver ===')
+  // Far from BASE so only this suite's lone driver is in range (5 rides, 1 driver).
+  const lone = await makeDriver(9, 0.5)
+  const many = await Promise.all(Array.from({ length: 5 }, () => makeRide(rider.id, 0.5)))
+  const results = await Promise.all(many.map((r) => offerRideToNextDriver(r.id)))
+  const loneOffers = await prisma.rideRequest.count({ where: { offeredDriverId: lone.id, driverId: null, status: { in: ['REQUESTED', 'MATCHING'] }, offerExpiresAt: { gt: new Date() } } })
+  check('the one free driver holds exactly one live offer', loneOffers === 1, `offers=${loneOffers} results=${JSON.stringify(results.map((o) => (o.offered ? 'offered' : o.raced ? 'raced' : 'none')))}`)
+  drivers.push(lone)
 
   // cleanup
   await prisma.$executeRawUnsafe(`update ride_requests set status='CANCELLED', offered_driver_id=null, offer_expires_at=null where rider_id = $1::uuid`, rider.id)

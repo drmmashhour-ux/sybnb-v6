@@ -9,6 +9,11 @@ import { loyaltySummary, redeemPoints } from '../lib/loyalty.mjs'
 // SEC-002R round 3, item 1: the self-service half of finding G1 -- see the id-document handler below.
 import { reauthorizeAtCommit } from '../lib/commit-authorization.mjs'
 import { revokeUserAccess, REVOCATION_REASONS } from '../lib/session-store.mjs'
+import { hashPassword } from '../lib/security.mjs'
+
+// Marketing e-mail consent is stored as a versioned consent row (no schema change needed).
+const MARKETING_CONSENT_KEY = 'marketing-emails'
+const MARKETING_CONSENT_VERSION = '1'
 
 export async function handleMe(req, res, url, context) {
   // The signed-in account with its LIVE roles (getAuthContext reads user_roles on every request).
@@ -80,6 +85,64 @@ export async function handleMe(req, res, url, context) {
         idDocumentStatus: context.user.idDocumentStatus || null,
       },
     })
+  }
+
+  // Owner decision 2026-10-22: after a card booking the guest (signed in by email only, no password)
+  // is offered a full account: choose a password + opt in to offers/notices. Guest-only accounts
+  // without a password only; the email must be proven first (in-page code or the emailed link), so a
+  // stranger who typed someone else's email at checkout cannot claim that address as an account.
+  if (url.pathname === '/api/me/account-setup') {
+    requireAuth(context)
+    const guestOnly = context.roles.every((role) => role === 'GUEST')
+    const row = await db().user.findUnique({ where: { id: context.user.id }, select: { passwordHash: true, emailUnverified: true } })
+    const marketing = Boolean(await db().legalConsent.findFirst({
+      where: { userId: context.user.id, documentKey: MARKETING_CONSENT_KEY },
+      select: { id: true },
+    }))
+    if (req.method === 'GET') {
+      return json(res, 200, { ok: true, offer: guestOnly && !row?.passwordHash, emailUnverified: Boolean(row?.emailUnverified), marketing })
+    }
+    if (req.method !== 'POST') return methodNotAllowed(res, ['GET', 'POST'])
+    if (!guestOnly || row?.passwordHash) {
+      const error = new Error('This account already has a password.')
+      error.statusCode = 409
+      error.code = 'ACCOUNT_ALREADY_SET'
+      error.expose = true
+      throw error
+    }
+    if (row?.emailUnverified) {
+      const error = new Error('Confirm your email first.')
+      error.statusCode = 403
+      error.code = 'EMAIL_NOT_VERIFIED'
+      error.expose = true
+      throw error
+    }
+    const body = await readJson(req)
+    const passwordHash = hashPassword(String(body.password || ''))
+    const displayName = typeof body.displayName === 'string' ? body.displayName.trim().slice(0, 80) : ''
+    await db().$transaction(async (tx) => {
+      await reauthorizeAtCommit(tx, context, { action: 'ACCOUNT_SETUP' })
+      // Conditional on still having no password, so two tabs cannot overwrite each other.
+      const updated = await tx.user.updateMany({
+        where: { id: context.user.id, passwordHash: null },
+        data: { passwordHash, ...(displayName ? { displayName } : {}) },
+      })
+      if (updated.count !== 1) {
+        const error = new Error('This account already has a password.')
+        error.statusCode = 409
+        error.code = 'ACCOUNT_ALREADY_SET'
+        error.expose = true
+        throw error
+      }
+      if (body.marketing === true) {
+        await tx.legalConsent.upsert({
+          where: { userId_documentKey_version: { userId: context.user.id, documentKey: MARKETING_CONSENT_KEY, version: MARKETING_CONSENT_VERSION } },
+          create: { userId: context.user.id, documentKey: MARKETING_CONSENT_KEY, version: MARKETING_CONSENT_VERSION },
+          update: {},
+        })
+      }
+    })
+    return json(res, 200, { ok: true, accountCreated: true, marketing: body.marketing === true })
   }
 
   // Airbnb-style "Become a host": one account for everything. A signed-in customer adds the HOST

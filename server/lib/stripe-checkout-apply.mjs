@@ -5,7 +5,10 @@
 // webhook path can wrap it with the same attempts/dead-letter bookkeeping the payment_intent rail
 // already has (see payment-event-pipeline.mjs).
 import { approvePaymentProof, firstAdminId, isProviderRefUniqueViolation, recordCardPaymentForClosedBooking } from './finance-ledger.mjs'
-import { formatMoney, notifyAdmin } from './notifications.mjs'
+import { appLink, formatMoney, notifyAdmin, notifyBooking } from './notifications.mjs'
+import { createMagicLink } from './magic-link.mjs'
+import { db } from './prisma.mjs'
+import { log } from './logger.mjs'
 import { verifyAndLockClaim, ClaimLostError } from './payment-event-pipeline.mjs'
 import { reauthorizeAtCommit } from './commit-authorization.mjs'
 import { withTx, dbOrTx } from './tx-scope.mjs'
@@ -43,8 +46,11 @@ import { withTx, dbOrTx } from './tx-scope.mjs'
 // regression suites -- it opens a real transaction exactly as before. This function's own logic is
 // unchanged in either mode.
 export async function finalizeStripeSession(session, { verifyOwnership, beforeEffects, markSettled } = {}) {
+  // Set only when THIS call approved a booking's card payment (not a replay of an existing proof),
+  // so the confirmation emails go out exactly once per charge.
+  let confirmedBooking = null
   try {
-   return await withTx(async (tx) => {
+   const result = await withTx(async (tx) => {
     if (verifyOwnership) await verifyOwnership(tx)
     if (beforeEffects) await beforeEffects(tx)
 
@@ -167,8 +173,11 @@ export async function finalizeStripeSession(session, { verifyOwnership, beforeEf
       note: 'Auto-approved: Stripe confirmed the card charge was captured.',
     })
     if (markSettled) await markSettled(tx, { applied: true })
+    confirmedBooking = { bookingId: booking.id, amountMinor: created.amountMinor, currency: created.currency }
     return proof
    })
+   if (confirmedBooking) notifyCardBookingConfirmed(confirmedBooking)
+   return result
   } catch (err) {
     // Concurrent webhook delivery may have finalized first — the unique constraint rejects the
     // second insert; return the already-created proof so finalization stays idempotent. This is the
@@ -282,4 +291,36 @@ export async function applyStripeCheckoutEvent({ eventId, session, claimToken, b
   }
 
   return { applied: appliedOutcome, illegal: !appliedOutcome, status: proof?.status }
+}
+
+// Owner decision 2026-10-22: card paid = reservation confirmed. Tell the guest (with an optional
+// "open your account" link when they have no password yet) and the host. Fire-and-forget: a mail
+// problem never affects the payment, and it runs after the payment transaction has returned.
+export function notifyCardBookingConfirmed({ bookingId, amountMinor, currency }) {
+  Promise.resolve()
+    .then(async () => {
+      const booking = await db().booking.findUnique({
+        where: { id: bookingId },
+        select: { id: true, guestId: true, guest: { select: { passwordHash: true, roles: { select: { role: true } } } } },
+      })
+      if (!booking) return
+      let accountUrl = ''
+      const guestOnly = (booking.guest?.roles || []).every((item) => item.role === 'GUEST')
+      if (booking.guest && !booking.guest.passwordHash && guestOnly) {
+        try {
+          const token = await createMagicLink({ userId: booking.guestId, bookingId: booking.id })
+          accountUrl = appLink(`/#/open/${token}`)
+        } catch { /* the invitation is optional; the booking page offers it too */ }
+      }
+      notifyBooking('guest_payment_confirmed', booking.id, {
+        amount: formatMoney(amountMinor, currency),
+        instantBook: true,
+        ...(accountUrl ? { accountUrl } : {}),
+        idempotencySuffix: 'card',
+      })
+      notifyBooking('host_new_paid_request', booking.id, { instantBook: true, idempotencySuffix: 'card' })
+    })
+    .catch((error) => {
+      log.warn('card_booking_notify_failed', { message: error instanceof Error ? error.message : String(error) })
+    })
 }

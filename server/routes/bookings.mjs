@@ -592,6 +592,13 @@ export async function handleBookings(req, res, url, context) {
     })
   })
 
+  // Card checkout (owner decision 2026-10-22): the guest goes straight to Stripe, so nothing is
+  // emailed now -- the confirmation (with the account invitation) is sent once the card is charged
+  // (stripe-checkout-apply.mjs). A card that never completes simply lets the request expire.
+  if (body.paymentMethod === 'card') {
+    return json(res, 201, { ok: true, booking: withExpiry(booking) })
+  }
+
   // A guest who skipped the code at checkout gets a one-time link in the confirmation email that
   // opens the booking and proves the mailbox. Failure to create it never blocks the booking.
   let verifyUrl = ''

@@ -25,6 +25,7 @@ import { localeForLang } from '../../shared/country/presentation'
 import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
 import { guestFeeSummary } from './guestFeeSummary'
 import { CHECKOUT_NOTE_KEY_PREFIX, STRIPE_PENDING_KEY_PREFIX, takeSessionFlag } from './checkoutDraft'
+import { OpenAccountOffer } from '../../shared/auth/OpenAccountOffer'
 import { PaymentProofUpload } from '../payments/PaymentProofUpload'
 import { CheckinQrCard } from './CheckinQrCard'
 
@@ -426,7 +427,23 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
 
   function renderPaymentOptions() {
     if (!hasIdDocument) {
+      // Owner decision 2026-10-22: card needs no ID photo -- offered first; the ID step below is only
+      // for Sham Cash / bank transfer (a person reviews those receipts).
       return (
+        <>
+        {stripeConfigured && (
+          <div style={styles.payOptions}>
+            <button style={styles.payOptionCard} disabled={cardState === 'starting' || cardState === 'confirming'} onClick={() => void payWithCard()}>
+              <strong>{cardState === 'starting' ? t.payingByCard : t.payByCard}</strong>
+              <small>{t.stripeCardNote}</small>
+            </button>
+          </div>
+        )}
+        {stripeConfigured && (
+          <small style={{ color: '#9aa6ba' }}>
+            {pick(lang, 'أو ادفع عبر شام كاش أو التحويل البنكي — يلزم إرسال صورة الهوية أولاً:', 'Or pay by Sham Cash or bank transfer — send an ID photo first:', 'Ou payez par Sham Cash ou virement — envoyez d’abord une pièce d’identité :')}
+          </small>
+        )}
         <div style={styles.idGate}>
           <strong>{t.idGateTitle}</strong>
           <small>{t.idGateCopy}</small>
@@ -462,6 +479,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
             </small>
           )}
         </div>
+        </>
       )
     }
 
@@ -523,17 +541,18 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
           {cardState === 'error' && <section style={styles.alert}>{cardError}</section>}
           {cardResult === 'paid' && (
             <section style={styles.paidBanner} role="status">
-              <strong>✓ {pick(lang, 'تم الدفع', 'Payment received', 'Paiement reçu')}</strong>
+              <strong>✓ {pick(lang, 'تم الدفع — حجزك مؤكد', 'Payment received — your booking is confirmed', 'Paiement reçu — votre réservation est confirmée')}</strong>
               <span>
                 {pick(
                   lang,
-                  'استلمنا دفعتك بالبطاقة. تفاصيل حجزك وحالته أدناه.',
-                  'We received your card payment. Your booking details and status are below.',
-                  'Nous avons bien reçu votre paiement par carte. Le détail et le statut de votre réservation figurent ci-dessous.',
+                  'استلمنا دفعتك بالبطاقة وتم تأكيد حجزك، وأرسلنا التأكيد إلى بريدك. التفاصيل أدناه.',
+                  'We received your card payment and your booking is confirmed; the confirmation is in your email. Details below.',
+                  'Nous avons reçu votre paiement par carte et votre réservation est confirmée ; la confirmation est dans votre e-mail. Détails ci-dessous.',
                 )}
               </span>
             </section>
           )}
+          {['REQUESTED', 'CONFIRMED', 'COMPLETED'].includes(booking.status) && <OpenAccountOffer lang={lang} />}
           {cardResult === 'unfinished' && cardState !== 'confirming' && (
             <section style={styles.deadlineBanner} role="status">
               <strong>{pick(lang, 'لم يكتمل الدفع', 'Payment not completed', 'Paiement non effectué')}</strong>

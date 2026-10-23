@@ -200,6 +200,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
           cancellationProtectionFeeMinor: protection ? quote.protectionMinor : undefined,
           acceptedTerms: true,
           termsVersion: agreement.version,
+          ...(method ? { paymentMethod: method } : {}),
         })
         setCreatedBooking(booking)
       }
@@ -218,7 +219,9 @@ export function CheckoutPage({ listingId, lang }: Props) {
     } catch {
       detailed = null
     }
-    if (detailed?.guest && !detailed.guest.idDocumentRef) {
+    // Owner decision 2026-10-22: a card payer goes straight to Stripe -- no ID photo, no email code.
+    // The ID step stays for Sham Cash / bank transfer, where a person reviews the receipt.
+    if (method !== 'card' && detailed?.guest && !detailed.guest.idDocumentRef) {
       try {
         sessionStorage.setItem(`${CHECKOUT_NOTE_KEY_PREFIX}${booking.id}`, method)
       } catch {

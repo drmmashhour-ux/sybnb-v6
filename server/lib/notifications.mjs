@@ -299,9 +299,16 @@ export function renderNotification(kind, locale, data = {}) {
     fr: 'Pour confirmer votre e-mail et ouvrir votre réservation, touchez ce lien (valable 72 h, usage unique) :',
   }
   const verify = (lang) => (data.verifyUrl ? `\n\n${VERIFY[lang]}\n${data.verifyUrl}` : '')
+  // Optional account invitation after a card booking (owner decision 2026-10-22).
+  const ACCOUNT = {
+    ar: 'هل تريد فتح حساب مجاني؟ تابع حجزك، واستلم التنبيهات والعروض. افتح حسابك من هذا الرابط (اختياري، صالح 72 ساعة):',
+    en: 'Would you like a free account? Follow your booking and get notices and offers. Open your account with this link (optional, valid 72 hours):',
+    fr: 'Voulez-vous un compte gratuit ? Suivez votre réservation et recevez avis et offres. Ouvrez votre compte avec ce lien (facultatif, valable 72 h) :',
+  }
+  const account = (lang) => (data.accountUrl ? `\n\n${ACCOUNT[lang]}\n${data.accountUrl}` : '')
   return {
     subject: withBrand(parts[0].subject),
-    text: withBrand(parts.map((p, index) => `${p.body}${url}${verify(langs[index])}`).join('\n\n———\n\n')),
+    text: withBrand(parts.map((p, index) => `${p.body}${url}${verify(langs[index])}${account(langs[index])}`).join('\n\n———\n\n')),
   }
 }
 

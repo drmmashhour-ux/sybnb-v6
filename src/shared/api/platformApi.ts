@@ -735,6 +735,22 @@ export async function redeemEmailLoginLink(token: string): Promise<{ bookingId: 
   return { bookingId: response.bookingId || null }
 }
 
+// Optional account after a card booking (owner decision 2026-10-22): see /api/me/account-setup.
+export type AccountSetupState = { offer: boolean; emailUnverified: boolean; marketing: boolean }
+
+export async function fetchAccountSetup(): Promise<AccountSetupState | null> {
+  const session = getStoredGuestSession()
+  if (!session?.token) return null
+  const response = await apiRequest<{ ok: true } & AccountSetupState>('/api/me/account-setup', { token: session.token })
+  return { offer: response.offer, emailUnverified: response.emailUnverified, marketing: response.marketing }
+}
+
+export async function submitAccountSetup(input: { password: string; marketing: boolean; displayName?: string }): Promise<void> {
+  const session = getStoredGuestSession()
+  if (!session?.token) throw new Error('Sign in first.')
+  await apiRequest<{ ok: true }>('/api/me/account-setup', { method: 'POST', token: session.token, body: input })
+}
+
 export function isGuestEmailUnverified(): boolean {
   return getStoredGuestSession()?.user?.emailUnverified === true
 }
@@ -3190,6 +3206,8 @@ export async function createPrototypeBooking(input: {
   cancellationProtectionFeeMinor?: number
   acceptedTerms?: boolean
   termsVersion?: string
+  // 'card': the guest goes straight to Stripe; the server then emails nothing until the card is charged.
+  paymentMethod?: 'card' | 'shamCash' | 'bank'
 }) {
   const session = await ensurePrototypeGuestSession()
   const response = await apiRequest<{ ok: true; booking: PlatformBooking }>('/api/bookings', {

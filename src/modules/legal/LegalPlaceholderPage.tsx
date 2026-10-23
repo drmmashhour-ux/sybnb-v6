@@ -1,5 +1,5 @@
 import type { Lang } from '../../engines/language/languageEngine'
-import { SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL } from '../../shared/support/contactChannels'
+import { SUPPORT_EMAIL, SUPPORT_WHATSAPP_DISPLAY } from '../../shared/support/contactChannels'
 
 type Props = {
   lang: Lang
@@ -56,7 +56,7 @@ export function LegalPlaceholderPage({ lang, page }: Props) {
         <span style={styles.draftBadge}>{t.draftBadge}</span>
         <h1 style={styles.title}>{section.title}</h1>
         <p style={styles.body}>{section.body}</p>
-        <p style={styles.contact}>{t.contact(SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL)}</p>
+        <p style={styles.contact}>{t.contact(SUPPORT_EMAIL, SUPPORT_WHATSAPP_DISPLAY)}</p>
       </section>
     </main>
   )

@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { pick, type Lang } from '../../engines/language/languageEngine'
-import { SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL } from '../../shared/support/contactChannels'
+import { SUPPORT_EMAIL, SUPPORT_WHATSAPP_DISPLAY } from '../../shared/support/contactChannels'
 import { LEGAL_DOCS, LEGAL_META, legalText, type LegalDocKey } from './legalContent'
 
 type Props = {
@@ -18,9 +18,9 @@ export function LegalDocumentPage({ lang, page }: Props) {
     other: pick(lang, 'مستندات قانونية أخرى', 'Other legal documents', 'Autres documents juridiques'),
     contact: pick(
       lang,
-      `لأي استفسار حول هذا المستند، تواصل معنا عبر البريد ${SUPPORT_EMAIL} أو واتساب ${SUPPORT_WHATSAPP_LOCAL}.`,
-      `For any question about this document, reach us by email at ${SUPPORT_EMAIL} or WhatsApp ${SUPPORT_WHATSAPP_LOCAL}.`,
-      `Pour toute question sur ce document, écrivez-nous à ${SUPPORT_EMAIL} ou sur WhatsApp au ${SUPPORT_WHATSAPP_LOCAL}.`,
+      `لأي استفسار حول هذا المستند، تواصل معنا عبر البريد ${SUPPORT_EMAIL} أو واتساب ${SUPPORT_WHATSAPP_DISPLAY}.`,
+      `For any question about this document, reach us by email at ${SUPPORT_EMAIL} or WhatsApp ${SUPPORT_WHATSAPP_DISPLAY}.`,
+      `Pour toute question sur ce document, écrivez-nous à ${SUPPORT_EMAIL} ou sur WhatsApp au ${SUPPORT_WHATSAPP_DISPLAY}.`,
     ),
     fmtDate: (() => {
       try {

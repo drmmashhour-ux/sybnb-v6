@@ -1,6 +1,6 @@
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { navigate } from '../../app/routes'
-import { SUPPORT_EMAIL, SUPPORT_WHATSAPP_INTL, SUPPORT_WHATSAPP_LOCAL } from '../support/contactChannels'
+import { SUPPORT_EMAIL, SUPPORT_WHATSAPP_ALT_INTL, SUPPORT_WHATSAPP_ALT_LOCAL, SUPPORT_WHATSAPP_INTL, SUPPORT_WHATSAPP_LOCAL } from '../support/contactChannels'
 
 type Props = {
   lang: Lang
@@ -49,6 +49,9 @@ export function Footer({ lang }: Props) {
         <a href={`mailto:${SUPPORT_EMAIL}`}>{t.contact}</a>
         <a href={`https://wa.me/${SUPPORT_WHATSAPP_INTL}`} target="_blank" rel="noreferrer">
           WhatsApp {SUPPORT_WHATSAPP_LOCAL}
+        </a>
+        <a href={`https://wa.me/${SUPPORT_WHATSAPP_ALT_INTL}`} target="_blank" rel="noreferrer">
+          WhatsApp {SUPPORT_WHATSAPP_ALT_LOCAL}
         </a>
         <button type="button" onClick={() => navigate('/terms')}>{t.terms}</button>
         <button type="button" onClick={() => navigate('/privacy')}>{t.privacy}</button>

@@ -23,7 +23,7 @@ import {
 import { listingTitleText, moneyText, statusText } from '../../shared/i18n/display'
 import { cancellationRuleText } from '../../shared/booking/cancellationPolicy'
 import { localeForLang } from '../../shared/country/presentation'
-import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
+import { emailIdSubmissionLink, SUPPORT_EMAIL, SUPPORT_WHATSAPP_ALT_INTL, SUPPORT_WHATSAPP_ALT_LOCAL, SUPPORT_WHATSAPP_LOCAL, whatsappIdSubmissionLink } from '../../shared/support/contactChannels'
 import { guestFeeSummary } from './guestFeeSummary'
 import { CHECKOUT_NOTE_KEY_PREFIX, STRIPE_PENDING_KEY_PREFIX, takeSessionFlag } from './checkoutDraft'
 import { OpenAccountOffer } from '../../shared/auth/OpenAccountOffer'
@@ -476,6 +476,10 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
               )}
               <a href={whatsappIdSubmissionLink(booking.guest.email, lang)} target="_blank" rel="noreferrer" style={{ color: '#dce3ff' }}>
                 {pick(lang, 'واتساب', 'WhatsApp', 'WhatsApp')} ({SUPPORT_WHATSAPP_LOCAL})
+              </a>
+              {' / '}
+              <a href={whatsappIdSubmissionLink(booking.guest.email, lang, SUPPORT_WHATSAPP_ALT_INTL)} target="_blank" rel="noreferrer" style={{ color: '#dce3ff' }}>
+                {SUPPORT_WHATSAPP_ALT_LOCAL}
               </a>
               {pick(lang, ' أو ', ' or ', ' ou ')}
               <a href={emailIdSubmissionLink(booking.guest.email, lang)} style={{ color: '#dce3ff' }}>

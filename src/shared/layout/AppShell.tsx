@@ -103,7 +103,7 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
                 FR
               </button>
             </div>
-            {!guestSession && path !== '/host/join' && (
+            {!STAYS_ONLY && !guestSession && path !== '/host/join' && (
               <button type="button" className="host-text-link" onClick={() => navigate('/host/join')}>
                 {pick(lang, 'استضف على SYBNB', 'Become a host', 'Devenir hôte')}
               </button>
@@ -121,6 +121,9 @@ export function AppShell({ lang, onLanguageChange, path, gate, children }: Props
             />
           </nav>
         </header>
+      )}
+      {STAYS_ONLY && !isAdvertisingTunnel && !isAdminControlRoom && (
+        <StaysQuickBar lang={lang} signedIn={Boolean(guestSession)} isHost={isHost} isAdmin={isAdmin} />
       )}
       {showFlowNav && (
         <div className="flow-step-nav" aria-label={pick(lang, 'التنقل داخل المسار', 'Flow navigation', 'Navigation du parcours')}>
@@ -847,4 +850,38 @@ function routeContextFromReturnPath(returnPath: string, lang: Lang) {
     detailsPage: pick(lang, 'تفاصيل الإقامة', 'Stay details', 'Détails du séjour'),
     backPath: '/stays',
   }
+}
+
+// Stays-only build (Rezekme Stays): the three entry points the owner wants at the top of every page --
+// list a place (host), sign in / open an account (guest), and the admin console sign-in, which lives
+// on its own site (VITE_ADMIN_URL). Shown on phones too, unlike the header's host link.
+const ADMIN_SITE_URL = ((import.meta.env.VITE_ADMIN_URL as string | undefined) || '').trim()
+
+function StaysQuickBar({ lang, signedIn, isHost, isAdmin }: { lang: Lang; signedIn: boolean; isHost: boolean; isAdmin: boolean }) {
+  return (
+    <nav className="stays-quickbar" aria-label={pick(lang, 'روابط سريعة', 'Quick links', 'Liens rapides')}>
+      <button type="button" className="stays-quickbar-host" data-testid="quickbar-host" onClick={() => navigate(isHost ? '/sell/listing-wizard' : '/host/join')}>
+        {isHost ? pick(lang, '+ أضف مكاناً', '+ Add a place', '+ Ajouter un logement') : pick(lang, 'أصبح مضيفاً — أضف مكانك', 'Become a host — add your place', 'Devenir hôte — ajoutez votre logement')}
+      </button>
+      {isHost && (
+        <button type="button" data-testid="quickbar-host-dashboard" onClick={() => navigate('/host')}>
+          {pick(lang, 'لوحة المضيف', 'Host dashboard', 'Tableau de bord hôte')}
+        </button>
+      )}
+      {signedIn ? (
+        <button type="button" data-testid="quickbar-account" onClick={() => navigate('/dashboard')}>
+          {pick(lang, 'حجوزاتي وحسابي', 'My trips & account', 'Mes voyages et compte')}
+        </button>
+      ) : (
+        <button type="button" data-testid="quickbar-account" onClick={() => navigate('/account/open')}>
+          {pick(lang, 'تسجيل الدخول / إنشاء حساب', 'Log in / Sign up', 'Connexion / Inscription')}
+        </button>
+      )}
+      {ADMIN_SITE_URL && (
+        <a className={isAdmin ? 'stays-quickbar-admin is-admin' : 'stays-quickbar-admin'} data-testid="quickbar-admin" href={ADMIN_SITE_URL} target="_blank" rel="noopener">
+          {pick(lang, 'دخول الإدارة', 'Admin login', 'Connexion admin')}
+        </a>
+      )}
+    </nav>
+  )
 }

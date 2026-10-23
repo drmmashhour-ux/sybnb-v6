@@ -47,6 +47,8 @@ export default defineConfig({
     'import.meta.env.VITE_BRAND_NAME': JSON.stringify('Rezekme'),
     // hosts on Rezekme Stay list daily stays only (the listing wizard hides the other divisions)
     'import.meta.env.VITE_STAYS_ONLY': JSON.stringify('1'),
+    // 'Admin login' link in the stays quick bar (the admin console is its own site)
+    'import.meta.env.VITE_ADMIN_URL': JSON.stringify(process.env.VITE_ADMIN_URL || 'https://admin.rezekme.com'),
   },
   resolve: { alias: { '@platform': resolve(__dirname, '../../src') } },
   server: { host: '127.0.0.1', port: 5192 },

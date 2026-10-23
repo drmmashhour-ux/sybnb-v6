@@ -20,7 +20,7 @@ export function BrandLogo({ logo, size = 'nav', className }: BrandLogoProps) {
   // White-label builds (Rezekme) show their own wordmark instead of the SYBNB artwork.
   if (!IS_PLATFORM_BRAND) {
     return (
-      <span className={className} style={{ ...styles.wrap, ...SIZE_STYLES[size], ...styles.wordmark }}>
+      <span className={className} data-wordmark="text" style={{ ...styles.wrap, ...SIZE_STYLES[size], ...styles.wordmark }}>
         {BRAND_NAME}
       </span>
     )
@@ -39,11 +39,18 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  // A text wordmark sizes to its text: the fixed logo-box widths (made for the SYBNB artwork, and
+  // narrower on phones) cropped "Rezekme" to "ezekm" in the phone header.
   wordmark: {
     color: '#2b3bea',
-    fontSize: 26,
+    fontSize: 'clamp(20px, 5.5vw, 26px)',
     fontWeight: 800,
     letterSpacing: '-0.02em',
+    width: 'auto',
+    maxWidth: 'none',
+    overflow: 'visible',
+    whiteSpace: 'nowrap',
+    lineHeight: 1.1,
   },
   image: {
     display: 'block',

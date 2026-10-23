@@ -8813,3 +8813,16 @@ a {
 .stay-pricing-grid input, .host-payout-form input { width: 100%; box-sizing: border-box; min-width: 0; }
 .host-pricing-page .seller-secondary-button { width: auto; padding: 0 16px; min-height: 40px; }
 .stay-pricing-fields .stay-pricing-check input[type='checkbox'] { width: 18px; height: 18px; min-height: 0; padding: 0; margin: 3px 0 0; flex: 0 0 18px; }
+
+/* Rezekme Stays quick bar (stays-only build): host / account / admin entry points under the header. */
+.stays-quickbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-start; padding: 8px clamp(16px, 4vw, 48px); background: rgba(10, 15, 29, 0.92); border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.stays-quickbar button, .stays-quickbar a { min-height: 38px; display: inline-flex; align-items: center; padding: 0 14px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.06); color: #f1f5f9; font: inherit; font-size: 14px; font-weight: 700; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.stays-quickbar button:hover, .stays-quickbar a:hover { background: rgba(255, 255, 255, 0.12); }
+.stays-quickbar button:focus-visible, .stays-quickbar a:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+.stays-quickbar .stays-quickbar-host { background: #e07a52; border-color: #e07a52; color: #14261f; }
+.stays-quickbar .stays-quickbar-host:hover { background: #ea8b65; }
+.stays-quickbar .stays-quickbar-admin { margin-inline-start: auto; font-size: 13px; color: #cbd5e1; }
+.stays-quickbar .stays-quickbar-admin.is-admin { color: #f1f5f9; border-color: #e07a52; }
+@media (max-width: 520px) { .stays-quickbar .stays-quickbar-admin { margin-inline-start: 0; } .stays-quickbar button, .stays-quickbar a { font-size: 13px; padding: 0 12px; } }
+/* A text wordmark (white-label builds) sizes to its text; the phone rule above fixes the SYBNB artwork at 72px. */
+.top-nav-logo[data-wordmark="text"] { width: auto !important; height: auto !important; }

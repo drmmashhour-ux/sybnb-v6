@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
-import type { Lang } from '../../engines/language/languageEngine'
+import { pick, type Lang } from '../../engines/language/languageEngine'
 import { disputePrototypeBooking, fetchPrototypeBooking, submitGuestIdDocument, type PlatformBooking, type PlatformListing } from '../../shared/api/platformApi'
 import { listingTitleText } from '../../shared/i18n/display'
 import { CaseStatusCapsule, type CaseStatusMap, type CaseStatusOutcome, type CaseStatusStepDef } from '../../shared/capsules/CaseStatusCapsule'
@@ -201,28 +201,64 @@ function GuaranteeTiers({ lang, bookingId }: { lang: Lang; bookingId: string }) 
 
 function PaymentProofStatus({ lang, bookingId }: { lang: Lang; bookingId: string }) {
   const isAr = lang === 'ar'
-  const steps = isAr ? ['تم الإرسال', 'قيد المراجعة', 'موافقة المضيف', 'تأكيد الحجز'] : ['Submitted', 'Under review', 'Host approval', 'Booking confirmed']
+  const [booking, setBooking] = useState<(PlatformBooking & { payments?: Array<{ provider?: string; status?: string }> }) | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    fetchPrototypeBooking(bookingId)
+      .then((result) => { if (!cancelled) setBooking(result as typeof booking) })
+      .catch(() => { if (!cancelled) setBooking(null) })
+      .finally(() => { if (!cancelled) setLoaded(true) })
+    return () => { cancelled = true }
+  }, [bookingId])
+
+  // Real status from the backend (2026-10-22) -- this page used to show a fixed "under review /
+  // host approval / 1-2 hours" timeline even for a card payment that was already confirmed.
+  const payments = booking?.payments || []
+  const paidByCard = payments.some((p) => p.provider === 'stripe' && p.status === 'APPROVED')
+  const proofPending = payments.some((p) => p.status === 'PENDING_ADMIN_REVIEW')
+  const status = booking?.status || ''
+  const steps = isAr
+    ? ['الدفع', paidByCard ? 'تم التحقق من البطاقة' : 'مراجعة الإيصال', 'موافقة المضيف', 'تأكيد الحجز']
+    : ['Payment', paidByCard ? 'Card verified' : 'Receipt review', 'Host approval', 'Booking confirmed']
+  // How many steps are done: 0 nothing paid yet, 1 receipt sent, 2 payment verified (waiting for host), 4 confirmed.
+  const done = status === 'CONFIRMED' || status === 'COMPLETED' ? 4 : status === 'REQUESTED' ? 2 : proofPending ? 1 : 0
+  const cancelled = status === 'CANCELLED'
+  const note = cancelled
+    ? pick(lang, 'تم إلغاء هذا الحجز.', 'This booking was cancelled.', 'Cette réservation a été annulée.')
+    : done === 4
+      ? paidByCard
+        ? pick(lang, 'تم الدفع بالبطاقة وتأكيد حجزك تلقائياً.', 'Paid by card — your booking was confirmed automatically.', 'Payé par carte — réservation confirmée automatiquement.')
+        : pick(lang, 'تم تأكيد حجزك.', 'Your booking is confirmed.', 'Votre réservation est confirmée.')
+      : done === 2
+        ? pick(lang, 'تم التحقق من الدفع، بانتظار موافقة المضيف.', 'Payment verified, waiting for the host to accept.', 'Paiement vérifié, en attente de l’hôte.')
+        : done === 1
+          ? pick(lang, 'أرسلت إيصال الدفع، ويراجعه الفريق عادة خلال 1-2 ساعة عمل.', 'Your receipt was sent; the team usually reviews it within 1-2 business hours.', 'Reçu envoyé ; vérification en général sous 1 à 2 heures ouvrées.')
+          : pick(lang, 'لم يتم الدفع بعد.', 'Not paid yet.', 'Pas encore payé.')
   return (
     <main className="trust-phone" dir={isAr ? 'rtl' : 'ltr'}>
       <TrustHeader title={isAr ? 'حالة الدفع' : 'Payment Status'} />
       <span className="booking-code">{bookingIdLabel(bookingId)}</span>
-      <section className="payment-timeline">
-        {steps.map((step, index) => (
-          <article className={index === 0 ? 'done' : index === 1 ? 'active' : ''} key={step}>
-            <b>{index === 0 ? '✓' : '●'}</b>
-            <div>
-              <strong>{step}</strong>
-              {index === 1 && <span>{isAr ? 'يتم التحقق من صحة الدفع...' : 'Payment proof is being checked...'}</span>}
-            </div>
-          </article>
-        ))}
-      </section>
+      {!loaded ? (
+        <p className="trust-muted">{pick(lang, 'جار التحميل...', 'Loading...', 'Chargement...')}</p>
+      ) : (
+        <>
+          <section className="payment-timeline" data-testid="payment-timeline">
+            {steps.map((step, index) => (
+              <article className={!cancelled && index < done ? 'done' : !cancelled && index === done ? 'active' : ''} key={step}>
+                <b>{!cancelled && index < done ? '✓' : '●'}</b>
+                <div><strong>{step}</strong></div>
+              </article>
+            ))}
+          </section>
+          <p className="trust-note" data-testid="payment-status-note">{note}</p>
+        </>
+      )}
       <section className="safe-money-card">
         <strong>♢ {isAr ? 'ادفع عبر قنوات SYBNB المعتمدة فقط' : 'Pay only through SYBNB-approved channels'}</strong>
-        <p>{isAr ? 'لن يتحول للمضيف حتى تأكيد الحجز. أموالك في أمان تام خلال فترة المراجعة.' : 'Funds are not released to the host until booking confirmation.'}</p>
+        <p>{isAr ? 'لا يُحوَّل المبلغ للمضيف قبل إتمام الإقامة.' : 'Funds are not released to the host until the stay is completed.'}</p>
       </section>
-      <p className="trust-muted">◷ {isAr ? 'مراجعة الدفع تستغرق 1-2 ساعة عمل' : 'Payment review takes 1-2 business hours'}</p>
-      <button className="trust-primary" onClick={() => (window.location.hash = `/booking/payment-status/${bookingId}`)}>{isAr ? 'تتبع الدفع' : 'Track payment'}</button>
+      <button className="trust-primary" onClick={() => (window.location.hash = `/booking/${bookingId}`)}>{pick(lang, 'عرض الحجز', 'View booking', 'Voir la réservation')}</button>
     </main>
   )
 }

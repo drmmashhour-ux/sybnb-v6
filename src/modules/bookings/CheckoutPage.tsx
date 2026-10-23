@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { goToExternalPayment } from '../../shared/api/authStorage'
 import { pick, type Lang } from '../../engines/language/languageEngine'
 import { RiderSignInGate } from '../../shared/auth/RiderSignInGate'
 import {
@@ -161,7 +162,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [listingId, dateRange.checkIn, dateRange.checkOut, protection, hasDates])
+  }, [listingId, dateRange.checkIn, dateRange.checkOut, protection, hasDates, signedIn])
 
   useEffect(() => {
     if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -241,7 +242,7 @@ export function CheckoutPage({ listingId, lang }: Props) {
         } catch {
           // ignore
         }
-        window.location.href = session.url
+        goToExternalPayment(session.url)
       } catch (err) {
         const code = (err as { code?: string; status?: number } | null)?.code
         const status = (err as { status?: number } | null)?.status
@@ -342,7 +343,20 @@ export function CheckoutPage({ listingId, lang }: Props) {
                   />
                 </div>
               )}
-              {quoteReason === 'BOOKING_DATES_UNAVAILABLE' && <p className="checkout-warning">{t('datesTaken')}</p>}
+              {quoteReason === 'BOOKING_DATES_UNAVAILABLE' && (quote?.yourBookingId ? (
+                <div className="checkout-warning" data-testid="own-booking">
+                  <p style={{ margin: '0 0 8px' }}>
+                    {quote.yourBookingStatus === 'PAYMENT_PENDING'
+                      ? pick(lang, 'لديك حجز لهذه التواريخ بانتظار الدفع. أكمل الدفع من صفحة حجزك.', 'You already have a booking for these dates awaiting payment. Complete the payment from your booking page.', 'Vous avez déjà une réservation pour ces dates en attente de paiement. Payez depuis la page de votre réservation.')
+                      : pick(lang, 'لديك حجز لهذه التواريخ.', 'You already have a booking for these dates.', 'Vous avez déjà une réservation pour ces dates.')}
+                  </p>
+                  <button type="button" className="checkout-primary" onClick={() => (window.location.hash = `/booking/${quote.yourBookingId}`)}>
+                    {quote.yourBookingStatus === 'PAYMENT_PENDING'
+                      ? pick(lang, 'أكمل الدفع', 'Continue to payment', 'Continuer vers le paiement')
+                      : pick(lang, 'عرض حجزك', 'View your booking', 'Voir votre réservation')}
+                  </button>
+                </div>
+              ) : <p className="checkout-warning">{t('datesTaken')}</p>)}
               <div className="checkout-row">
                 <div>
                   <strong>{t('guests')}</strong>

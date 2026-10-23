@@ -1,4 +1,5 @@
 import { BRAND_NAME } from '../../shared/brand/brandName'
+import { goToExternalPayment } from '../../shared/api/authStorage'
 import { useEffect, useState } from 'react'
 import { IdPrivacyBadge } from '../../shared/trust/IdPrivacyBadge'
 import type { CSSProperties } from 'react'
@@ -297,7 +298,7 @@ export function BookingDetailPage({ bookingId, lang }: Props) {
       } catch {
         // ignore
       }
-      window.location.href = session.url
+      goToExternalPayment(session.url)
     } catch (error) {
       setCardState('error')
       setCardError(error instanceof Error ? error.message : t.stripeConfirmError)

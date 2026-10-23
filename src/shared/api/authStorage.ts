@@ -92,3 +92,30 @@ export const authStorage = {
     for (const key of AUTH_STORAGE_KEYS) authStorage.removeItem(key)
   },
 }
+
+// Card payment leaves the app for Stripe's own page, which refuses to be shown inside a frame. In the
+// split test view (#/split) each panel is a frame with its own scoped sign-in: carry that panel's
+// session to the whole tab and open the payment in the full tab, so the return from Stripe lands
+// signed in. Everywhere else this is a plain navigation.
+export function goToExternalPayment(url: string) {
+  let name = ''
+  try { name = window.name || '' } catch { name = '' }
+  let framed = false
+  try { framed = window.top !== window } catch { framed = true }
+  if (framed && name.startsWith('rzk-split-')) {
+    for (const store of [window.sessionStorage, window.localStorage]) {
+      for (const key of AUTH_STORAGE_KEYS) {
+        try {
+          const value = store.getItem(`${name}:${key}`)
+          if (value !== null) store.setItem(key, value)
+        } catch { /* storage blocked */ }
+      }
+    }
+    try {
+      if (window.top) { window.top.location.href = url; return }
+    } catch { /* fall through */ }
+    window.open(url, '_blank', 'noopener')
+    return
+  }
+  window.location.href = url
+}

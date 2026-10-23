@@ -1309,7 +1309,7 @@ function clamp(value: number, min: number, max: number) {
 }
 
 const styles: Record<string, CSSProperties> = {
-  page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '32px 16px 90px', display: 'grid', gap: 24, maxWidth: 1240, margin: '0 auto' },
+  page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '32px 16px 90px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 24, maxWidth: 1240, margin: '0 auto' },
   back: { justifySelf: 'start', minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
   topBar: { display: 'grid', gap: 14, gridTemplateColumns: 'auto minmax(0, 1fr) auto', alignItems: 'center' },
   topIcons: { display: 'flex', gap: 14 },
@@ -1330,7 +1330,7 @@ const styles: Record<string, CSSProperties> = {
   alert: { border: '1px solid rgba(255,96,96,.45)', borderRadius: 8, background: 'rgba(255,96,96,.1)', color: '#ffd1d1', padding: 14 },
   filtersPanel: { border: '1px solid #30384d', borderRadius: 8, background: '#111118', display: 'grid', gap: 12, padding: 14 },
   filtersHead: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start', color: '#d5a915' },
-  providerHealth: { border: '1px solid #242735', borderRadius: 8, background: '#121219', padding: 28, display: 'grid', gap: 22, gridTemplateColumns: '1fr 1fr 1fr 1fr', alignItems: 'center' },
+  providerHealth: { border: '1px solid #242735', borderRadius: 8, background: '#121219', padding: 'clamp(16px, 4vw, 28px)', display: 'grid', gap: 22, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))', alignItems: 'center' },
   healthHero: { border: '1px solid rgba(32,210,155,.85)', borderRadius: 999, background: 'rgba(32,210,155,.08)', padding: 18, display: 'grid', gap: 8, textAlign: 'center', color: '#20d29b' },
   hostMetric: { minHeight: 104, borderInlineStart: '1px solid #242735', paddingInlineStart: 26, display: 'grid', gap: 8, alignContent: 'center', color: '#8d92a2' },
   earningsLink: { justifySelf: 'start', border: 0, background: 'transparent', color: '#8ea0ff', fontWeight: 900, fontSize: 12, padding: 0, cursor: 'pointer' },

@@ -403,7 +403,7 @@ export function HostPayoutsPage({ lang, mode = 'host' }: Props) {
 }
 
 const styles: Record<string, CSSProperties> = {
-  page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '32px 16px 90px', display: 'grid', gap: 20, maxWidth: 1100, margin: '0 auto', alignContent: 'start' },
+  page: { minHeight: '100vh', background: '#0a0a0f', color: '#fff', padding: '32px 16px 90px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 20, maxWidth: 1100, margin: '0 auto', alignContent: 'start' },
   topLinks: { display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'space-between' },
   back: { minHeight: 42, border: '1px solid #30384d', borderRadius: 8, background: '#111827', color: '#fff', padding: '0 14px', fontWeight: 900 },
   linkButton: { minHeight: 42, border: 0, background: 'transparent', color: '#8ea0ff', fontWeight: 900, padding: '0 6px', cursor: 'pointer' },

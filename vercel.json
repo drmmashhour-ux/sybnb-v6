@@ -52,7 +52,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "frame-ancestors 'self' https://rides.rezekme.com"
+          "value": "frame-ancestors 'self' https://rides.rezekme.com https://stay.rezekme.com"
         },
         {
           "key": "Referrer-Policy",

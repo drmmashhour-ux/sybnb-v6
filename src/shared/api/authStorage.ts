@@ -43,8 +43,21 @@ export function setKeepSignedIn(value: boolean) {
   }
 }
 
+// Split test view (#/split on Rezekme Stays): the guest and host panels are this same site in one
+// tab, so they would share one sign-in. A panel named 'rzk-split-<role>' keeps its own sign-in by
+// prefixing the auth keys with that name. Outside such a panel nothing changes.
+function scoped(key: string) {
+  try {
+    const name = typeof window !== 'undefined' ? window.name : ''
+    return name && name.startsWith('rzk-split-') ? `${name}:${key}` : key
+  } catch {
+    return key
+  }
+}
+
 export const authStorage = {
-  getItem(key: string): string | null {
+  getItem(rawKey: string): string | null {
+    const key = scoped(rawKey)
     try {
       const inTab = window.sessionStorage.getItem(key)
       if (inTab !== null) return inTab
@@ -56,7 +69,8 @@ export const authStorage = {
       return null
     }
   },
-  setItem(key: string, value: string) {
+  setItem(rawKey: string, value: string) {
+    const key = scoped(rawKey)
     try {
       if (keepSignedIn()) {
         window.localStorage.setItem(key, value)
@@ -69,7 +83,8 @@ export const authStorage = {
       /* storage blocked */
     }
   },
-  removeItem(key: string) {
+  removeItem(rawKey: string) {
+    const key = scoped(rawKey)
     try { window.localStorage.removeItem(key) } catch { /* ignore */ }
     try { window.sessionStorage.removeItem(key) } catch { /* ignore */ }
   },

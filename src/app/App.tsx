@@ -56,6 +56,7 @@ const OperationsCalendarPage = lazyNamed(() => import('../modules/operations/Ope
 const PaymentReceiptPage = lazyNamed(() => import('../modules/payments/PaymentReceiptPage'), 'PaymentReceiptPage')
 const PlatformStatusPage = lazyNamed(() => import('../modules/status/PlatformStatusPage'), 'PlatformStatusPage')
 const RentalsPage = lazyNamed(() => import('../modules/rentals/RentalsPage'), 'RentalsPage')
+const StaysSplitView = lazyNamed(() => import('../modules/split/StaysSplitView'), 'StaysSplitView')
 const SearchPreviewPage = lazyNamed(() => import('../modules/search/SearchPreviewPage'), 'SearchPreviewPage')
 const SellerDivisionRoutes = lazyNamed(() => import('../modules/seller'), 'SellerDivisionRoutes')
 const SrRidePage = lazyNamed(() => import('../modules/sr/SrRidePage'), 'SrRidePage')
@@ -215,6 +216,15 @@ export function App() {
   // enough to draw the console; /api/admin2/me answers 403 for anyone without console access.
   if (staysOnlyBlocked) {
     return <RouteLoading lang={lang} />
+  }
+
+  // Rezekme Stays test view: guest, host and admin panels side by side (like rides /split).
+  if (STAYS_ONLY && path === '/split') {
+    return (
+      <Suspense fallback={<RouteLoading lang={lang} />}>
+        <StaysSplitView lang={lang} />
+      </Suspense>
+    )
   }
 
   if (isConsolePath(path.split('?')[0]) && hasStaffToken()) {

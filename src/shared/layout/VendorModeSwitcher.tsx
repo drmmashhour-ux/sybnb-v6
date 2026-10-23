@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import type { Lang } from '../../engines/language/languageEngine'
 import { text } from '../../engines/language/languageEngine'
 import { VENDOR_MODE_HOME, VENDOR_MODE_KEY, vendorModeFromPath, type VendorMode } from '../lib/vendor-mode'
+import { STAYS_ONLY } from '../brand/brandName'
 
 const LABELS: Record<VendorMode, { ar: string; en: string; fr: string; icon: string }> = {
   property: { icon: '🏠', ar: 'العقارات والإقامات', en: 'Property Portfolio', fr: 'Immobilier' },
@@ -17,7 +18,7 @@ export function VendorModeSwitcher({ lang, path }: { lang: Lang; path: string })
     if (!active) return
     try { localStorage.setItem(VENDOR_MODE_KEY, active) } catch { /* ignore */ }
   }, [active])
-  if (!active) return null
+  if (!active || STAYS_ONLY) return null
   return (
     <nav aria-label={text({ ar: 'وضع العمل', en: 'Business mode', fr: "Mode d'activité" }, lang)}
       style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '10px 16px', borderBottom: '1px solid rgba(128,128,128,.25)' }}>
